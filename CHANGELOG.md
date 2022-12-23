@@ -14,15 +14,15 @@ V 0.2.4
 
 - support for filter form updates
 
-V 0.2.3 TODO
-------------
+V 0.2.3
+-------
 
 - bug fixes
 - fix for rollup sorts
 - date helpers
 
-V 0.2.2 TODO
-------------
+V 0.2.2
+-------
 
 - bug fixes
 - update some where handlers
