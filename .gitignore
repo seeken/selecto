@@ -26,3 +26,5 @@ selecto-*.tar
 /tmp/
 
 /.vscode/
+
+.DS_Store
