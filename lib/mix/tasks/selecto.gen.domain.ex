@@ -9,6 +9,7 @@ defmodule Mix.Tasks.Selecto.Gen.Domain do
    --join table:local_key:remote_key:extender
    --umb_live app:module #same as below, for umbrella apps
    --live module #create liveview module and component (require selecto_components)
+   source
    module_name
 
 
