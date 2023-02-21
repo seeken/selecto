@@ -15,4 +15,16 @@ defmodule SelectoTest do
       Selecto.Builder.Sql.Helpers.double_wrap(~s["Hi," she said])
     end
   end
+
+  ## build configuration
+
+  ### Add selects
+  ### Add filters
+  ### Add Orders
+  ### generate SQL
+
+
+
+
+
 end
