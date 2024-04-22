@@ -45,6 +45,9 @@ defmodule Selecto.Schema.Join do
       #     _ -> acc ++ normalize_joins(config.source, config.joins, id)
       #   end
 
+      {id, %{type: :flag} = config}, acc ->
+         acc = acc ++ [configure(id, config, parent, source)]
+
       {id, config}, acc ->
         ### Todo allow this to be non-configured assoc
         association = source.__schema__(:association, id)
@@ -80,7 +83,21 @@ defmodule Selecto.Schema.Join do
   ### parent - atom that references the parent
   ### from_source - the association from the parent or the domain if parent is root
 
-  ### Dimension table join
+
+  defp configure(id, %{type: :flag} = config, parent, from_source) do
+    ### Flag table join. The 'flag type' and a 'flag value' are the interesting fields. Like a dimension table but with a value field and a 'through' table.
+    ### we need the through- table (with the values) and the flag table (with the flag name)
+    ### for efficiency we'll often filter by using a subquery vs joins
+
+    name = Map.get(config, :name, id)
+
+
+
+  end
+
+
+
+  ### Dimension table join - has reference field IN the table
   defp configure(id, %{queryable: _queryable} = association, %{type: :dimension} = config, parent, from_source) do
     #dimension table, has one 'name-ish' value to display, and then the Local reference would provide ID filtering.
     # So create a field for group-by that displays NAME and filters by ID
