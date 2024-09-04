@@ -25,13 +25,13 @@ defmodule Selecto.Builder.Sql.Where do
     {conf.requires_join, " #{build_selector_string(selecto, conf.requires_join, conf.field)} @@ websearch_to_tsquery(^SelectoParam^) ", [value]}
   end
 
-  def build(selecto, {field, {:subquery, :in, query, params}}) do
+  def build(selecto, {field, {:raw_subquery, :in, query, params}}) do
     conf = Selecto.field(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
     {List.wrap(conf.requires_join) ++ List.wrap(join), " #{sel} in #{query} ", param ++ params}
   end
 
-  def build(selecto, {field, comp, {:subquery, agg, query, params}}) when agg in [:any, :all] do
+  def build(selecto, {field, comp, {:raw_subquery, agg, query, params}}) when agg in [:any, :all] do
     conf = Selecto.field(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
     {List.wrap(conf.requires_join) ++ List.wrap(join), " #{sel} #{comp} #{agg} (#{query}) ", param ++ params}

@@ -142,6 +142,12 @@ defmodule Selecto do
     Selecto.select(selecto, [field])
   end
 
+
+  def select_subquery(selecto, fields, wheres) do
+    Selecto.select(selecto, {:subquery, fields, wheres})
+  end
+
+
   @doc """
     add a filter to selecto. Send in a tuple with field name and filter value
   """

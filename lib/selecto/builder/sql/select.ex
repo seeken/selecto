@@ -21,6 +21,7 @@ defmodule Selecto.Builder.Sql.Select do
     {:greatest, [SELECTOR, SELECTOR, ...]}
     {:least, [SELECTOR, SELECTOR, ...]}
     {:nullif, [SELECTOR, LITERAL_SELECTOR]} #LITERAL_SELECTOR means naked value treated as lit not field
+    {:raw_subquery, query-text, [params]}
     {:subquery, [SELECTOR, SELECTOR, ...], PREDICATE}
   """
 
@@ -46,8 +47,34 @@ defmodule Selecto.Builder.Sql.Select do
     prep_selector(selecto, {:count, {:literal, "*"}, filter})
   end
 
-  def prep_selector(_selecto, {:subquery, dynamic, params}) do
+  def prep_selector(_selecto, {:raw_subquery, dynamic, params}) do
     {dynamic, [], params}
+  end
+
+  def prep_selector(_selecto, {:raw_subquery, dynamic}) do
+    {dynamic, [], []}
+  end
+
+  def prep_selector(selecto, {:subquery, columns, filters}) do
+    {select, join, param} =
+      Enum.reduce(List.wrap(columns), {[], [], []}, fn f, {select, join, param} ->
+        IO.puts("F: #{f}")
+        {s, j, p} = prep_selector(selecto, f)
+        {select ++ [s], join ++ List.wrap(j), param ++ p}
+      end)
+
+    {join_w, filters, param_w} =
+      Selecto.Builder.Sql.Where.build(selecto, {:and, List.wrap(filters)})
+
+    ### we construct a subquery here against selecto_root!
+
+    cols = Enum.join(select, ", ")
+    froms = Enum.join(join, " ")
+    wheres = filters
+
+
+    {"ARRAY(select row(#{cols}) from #{froms} #{wheres})", [], param ++ param_w}
+
   end
 
   def prep_selector(selecto, {:case, pairs}) when is_list(pairs) do
@@ -151,9 +178,11 @@ defmodule Selecto.Builder.Sql.Select do
     end
   end
 
+
+
   def prep_selector(_sel, selc) do
     IO.inspect(selc)
-    raise "ERror"
+    raise "Error #{selc}"
   end
 
   ### make the builder build the dynamic so we can use same parts for SQL
@@ -192,15 +221,15 @@ defmodule Selecto.Builder.Sql.Select do
   ## TODO variant for 2 arg aggs eg string_agg, jsonb_object_agg, Grouping
   ## ^^ and mixed lit/field args - field as list?
 
-  def build(selecto, {:row, fields, as}) do
-    {select, join, param} =
-      Enum.reduce(List.wrap(fields), {[], [], []}, fn f, {select, join, param} ->
-        {s, j, p} = prep_selector(selecto, f)
-        {select ++ [s], join ++ List.wrap(j), param ++ p}
-      end)
+  # def build(selecto, {:row, fields, as}) do
+  #   {select, join, param} =
+  #     Enum.reduce(List.wrap(fields), {[], [], []}, fn f, {select, join, param} ->
+  #       {s, j, p} = prep_selector(selecto, f)
+  #       {select ++ [s], join ++ List.wrap(j), param ++ p}
+  #     end)
 
-    {"row( #{Enum.join(select, ", ")} )", join, param, as}
-  end
+  #   {"row( #{Enum.join(select, ", ")} )", join, param, as}
+  # end
 
   def build(selecto, {:field, field, as}) do
     {select, join, param} = prep_selector(selecto, field)
