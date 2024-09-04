@@ -2,19 +2,29 @@ defmodule Selecto.Builder.Sql do
 
   import Selecto.Builder.Sql.Helpers
 
+
+  ### add def build for subquery
+
+
   def build(selecto, _opts) do
-    {aliases, sel_joins, select_clause, select_params} = build_select(selecto)
-    {filter_joins, where_clause, where_params} = build_where(selecto)
-    {group_by_joins, group_by_clause, group_params} = build_group_by(selecto)
-    {order_by_joins, order_by_clause, order_params} = build_order_by(selecto)
+
+    use_selecto = selecto
+
+    ### are we making a subqquery? Alter use_selecto to be the subquery
+
+
+    {aliases, sel_joins, select_clause, select_params} = build_select(use_selecto)
+    {filter_joins, where_clause, where_params} = build_where(use_selecto)
+    {group_by_joins, group_by_clause, group_params} = build_group_by(use_selecto)
+    {order_by_joins, order_by_clause, order_params} = build_order_by(use_selecto)
 
     joins_in_order =
       Selecto.Builder.Join.get_join_order(
-        Selecto.joins(selecto),
+        Selecto.joins(use_selecto),
         List.flatten(sel_joins ++ filter_joins ++ group_by_joins ++ order_by_joins)
       )
 
-    {from_clause, from_params} = build_from(selecto, joins_in_order)
+    {from_clause, from_params} = build_from(use_selecto, joins_in_order)
 
     sql = "
         select #{select_clause}
@@ -72,9 +82,9 @@ defmodule Selecto.Builder.Sql do
   end
 
   #rework to allow parameterized joins, CTEs etc TODO
-  defp build_from(selecto, joins) do
+  defp build_from(selecto, joins, root \\ :selecto_root) do
     Enum.reduce(joins, {[], []}, fn
-      :selecto_root, {fc, p} ->
+      ^root, {fc, p} ->
         {fc ++ [~s[#{Selecto.source_table(selecto)} #{build_join_string(selecto, "selecto_root")}]], p}
 
       join, {fc, p} ->
