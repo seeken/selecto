@@ -4,7 +4,16 @@ defmodule Selecto.Builder.Sql do
 
 
   ### add def build for subquery
+  ### base_table is the last table outside the subquery. Usually this will be selecto_root!
 
+  def build(selecto, %{use_base: base_table} = opts) do
+    use_selecto = selecto
+
+    ##we will return SQL and Params which will be rolled into the parent query
+    ### Selects will need to be downstream of the subquery
+
+
+  end
 
   def build(selecto, _opts) do
 
