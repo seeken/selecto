@@ -1,6 +1,6 @@
 defmodule Selecto do
   @derive {Inspect, only: [:repo, :set]}
-  defstruct [:repo, :domain, :config, :set]
+  defstruct [:type, :repo, :domain, :config, :set]
 
   @moduledoc """
 
@@ -9,11 +9,30 @@ defmodule Selecto do
   """
 
   @doc """
+    Configure a Selecto structure from a Postgrex process and a Domain map
+  """
+  def configure(postgrex_pid,  domain) when is_pid(postgrex_pid) do
+    %Selecto{
+      type: :postgrex,
+      repo: postgrex_pid,
+      domain: domain,
+      config: configure_domain(domain),
+      set: %{
+        selected: Map.get(domain, :required_selected, []),
+        filtered: [],
+        order_by: Map.get(domain, :required_order_by, []),
+        group_by: Map.get(domain, :required_group_by, [])
+      }
+    }  end
+
+
+  @doc """
     Generate a selecto structure from this Repo following
     the instructions in Domain map
   """
   def configure(repo, domain) do
     %Selecto{
+      type: :ecto,
       repo: repo,
       domain: domain,
       config: configure_domain(domain),
@@ -26,9 +45,23 @@ defmodule Selecto do
     }
   end
 
+  defp configure_domain(%{source_table: table} = domain) do
+    fields = %{}
+    joins = %{}
+    filters = %{}
+    %{
+      source: table,
+      source_table: table,
+      columns: fields,
+      joins: joins,
+      filters: filters,
+      domain_data: Map.get(domain, :domain_data)
+    }
+
+  end
+
   # generate the selecto configuration
   defp configure_domain(%{source: source} = domain) do
-    primary_key = source.__schema__(:primary_key)
 
     fields =
       Selecto.Schema.Column.configure_columns(
@@ -62,7 +95,6 @@ defmodule Selecto do
     %{
       source: source,
       source_table: source.__schema__(:source),
-      primary_key: primary_key,
       columns: fields,
       joins: joins,
       filters: filters,
@@ -182,13 +214,13 @@ defmodule Selecto do
   @doc """
     Generate and run the query, returning list of lists, db produces column headers, and provides aliases
   """
-  def execute(selecto, opts \\ []) do
+  def execute(%{repo: repo} = selecto, opts \\ []) do
     # IO.puts("Execute Query")
 
     {query, aliases, params} = gen_sql(selecto, opts)
     # IO.inspect(query, label: "Exe")
 
-    {:ok, result} = Ecto.Adapters.SQL.query(selecto.repo, query, params)
+    {:ok, result} = Ecto.Adapters.SQL.query(repo, query, params)
     # |> IO.inspect(label: "Results")
 
     {result.rows, result.columns, aliases}
