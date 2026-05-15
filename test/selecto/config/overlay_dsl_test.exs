@@ -174,6 +174,12 @@ defmodule Selecto.Config.OverlayDSLTest do
         defaction :approve do
           type(:transition)
           capability("work_item.approve")
+
+          inputs(%{
+            note: %{type: :textarea, label: "Approval note", required: false},
+            notify_requestor: %{type: :boolean, default: false}
+          })
+
           transition(%{field: :state, from: :open, to: :approved})
           execution(%{kind: :updato, operation: :update, set: %{state: :approved}})
         end
@@ -227,6 +233,11 @@ defmodule Selecto.Config.OverlayDSLTest do
                kind: :updato,
                operation: :update,
                set: %{state: :approved}
+             }
+
+      assert overlay.actions.approve.inputs == %{
+               note: %{type: :textarea, label: "Approval note", required: false},
+               notify_requestor: %{type: :boolean, default: false}
              }
 
       assert overlay.capabilities["work_item.approve"] == %{

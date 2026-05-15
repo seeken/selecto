@@ -1365,6 +1365,11 @@ defmodule Selecto.Config.OverlayDSL do
   defmacro execution(_value), do: quote(do: nil)
 
   @doc """
+  Sets declared input metadata for a domain action.
+  """
+  defmacro inputs(_value), do: quote(do: nil)
+
+  @doc """
   Sets a default provider for a write field.
   """
   defmacro default_provider(_value), do: quote(do: nil)
