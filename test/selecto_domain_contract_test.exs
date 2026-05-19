@@ -37,6 +37,26 @@ defmodule Selecto.DomainContractTest do
       assert {:ok, _normalized, _diagnostics} = Domain.validate(domain)
     end
 
+    test "accepts canonical ecosystem examples" do
+      for {name, domain} <- canonical_examples() do
+        assert {:ok, normalized, diagnostics} = Domain.validate(domain), Atom.to_string(name)
+        assert diagnostics.errors == []
+        assert Contract.validate(normalized) == :ok
+
+        query_contract = Domain.project(normalized, :query_contract)
+        write_projection = Domain.project(normalized, :write)
+
+        assert query_contract.projection == :query_contract
+        assert query_contract.capability_ids != []
+        assert query_contract.choice_sources != []
+        assert query_contract.published_views != []
+
+        assert map_size(write_projection.writes) > 0
+        assert map_size(write_projection.actions) > 0
+        assert map_size(write_projection.capabilities) > 0
+      end
+    end
+
     test "reports missing required sections as structured diagnostics" do
       assert {:error, diagnostics} = Domain.validate(%{source: valid_source()})
 
@@ -2411,6 +2431,13 @@ defmodule Selecto.DomainContractTest do
       },
       required_filters: [{"status", "open"}]
     }
+  end
+
+  defp canonical_examples do
+    [
+      work_items: Selecto.Domain.Examples.work_items(),
+      camp_registrations: Selecto.Domain.Examples.camp_registrations()
+    ]
   end
 
   defp valid_source do
