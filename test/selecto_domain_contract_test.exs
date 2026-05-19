@@ -57,6 +57,30 @@ defmodule Selecto.DomainContractTest do
       end
     end
 
+    test "builds stable canonical compatibility artifacts" do
+      assert {:ok, artifacts} =
+               Selecto.Domain.Examples.Compatibility.query_contract_artifacts(
+                 generated_at: "2026-05-18T00:00:00Z"
+               )
+
+      expectations = Selecto.Domain.Examples.Compatibility.expectations()
+
+      for {domain_id, artifact} <- artifacts do
+        expected = Map.fetch!(expectations, domain_id)
+        summary = Selecto.Domain.Examples.Compatibility.query_summary(artifact)
+
+        assert artifact["domain_id"] == Atom.to_string(domain_id)
+        assert artifact["generated_at"] == "2026-05-18T00:00:00Z"
+        assert summary.capability_ids == expected.capability_ids
+        assert summary.field_ids == expected.field_ids
+        assert summary.filter_ids == expected.filter_ids
+        assert summary.choice_source_ids == expected.choice_source_ids
+        assert summary.published_view_ids == expected.published_view_ids
+      end
+
+      assert :ok = Selecto.Domain.Examples.Compatibility.check()
+    end
+
     test "reports missing required sections as structured diagnostics" do
       assert {:error, diagnostics} = Domain.validate(%{source: valid_source()})
 
