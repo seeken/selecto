@@ -1,6 +1,20 @@
 
 # Selecto Library Changelog
 
+## V 0.4.9 - Elixir Anti-pattern Hardening
+---------------------------------------------------------
+
+#### Security
+- Added a VM-lifetime bounded identifier interner for adapters and tooling that
+  must preserve Selecto's atom-keyed domain contracts.
+
+#### Changed
+- Query complexity limits are now explicit per-call options with library
+  defaults instead of global application-environment configuration.
+- Replaced the SQL formatter's eight-argument parser recursion with an explicit
+  parser-state map.
+- Bump package version to `0.4.9`.
+
 ## V 0.4.8 - Bounded Formal Verification
 ---------------------------------------------------------
 

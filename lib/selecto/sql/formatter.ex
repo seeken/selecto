@@ -167,40 +167,63 @@ defmodule Selecto.SQL.Formatter do
     delimiter_chars = String.graphemes(delimiter)
     delimiter_len = length(delimiter_chars)
 
-    do_split(chars, delimiter_chars, delimiter_len, 0, false, false, "", [])
+    state = %{depth: 0, in_single: false, in_double: false, current: "", parts: []}
+
+    do_split(chars, delimiter_chars, delimiter_len, state)
     |> Enum.reverse()
   end
 
-  defp do_split([], _delim, _delim_len, _depth, _in_single, _in_double, current, acc) do
-    [current | acc]
+  defp do_split([], _delimiter, _delimiter_len, state) do
+    [state.current | state.parts]
   end
 
-  defp do_split(chars, delim, delim_len, depth, in_single, in_double, current, acc) do
+  defp do_split(chars, delimiter, delimiter_len, state) do
     [char | rest] = chars
 
     cond do
-      char == "'" and not in_double ->
-        do_split(rest, delim, delim_len, depth, not in_single, in_double, current <> char, acc)
+      char == "'" and not state.in_double ->
+        do_split(
+          rest,
+          delimiter,
+          delimiter_len,
+          append_char(state, char, in_single: not state.in_single)
+        )
 
-      char == "\"" and not in_single ->
-        do_split(rest, delim, delim_len, depth, in_single, not in_double, current <> char, acc)
+      char == "\"" and not state.in_single ->
+        do_split(
+          rest,
+          delimiter,
+          delimiter_len,
+          append_char(state, char, in_double: not state.in_double)
+        )
 
-      in_single or in_double ->
-        do_split(rest, delim, delim_len, depth, in_single, in_double, current <> char, acc)
+      state.in_single or state.in_double ->
+        do_split(rest, delimiter, delimiter_len, append_char(state, char))
 
       char == "(" ->
-        do_split(rest, delim, delim_len, depth + 1, in_single, in_double, current <> char, acc)
+        do_split(rest, delimiter, delimiter_len, append_char(state, char, depth: state.depth + 1))
 
-      char == ")" and depth > 0 ->
-        do_split(rest, delim, delim_len, depth - 1, in_single, in_double, current <> char, acc)
+      char == ")" and state.depth > 0 ->
+        do_split(rest, delimiter, delimiter_len, append_char(state, char, depth: state.depth - 1))
 
-      depth == 0 and starts_with_chars?(chars, delim, delim_len) ->
-        remaining = Enum.drop(chars, delim_len)
-        do_split(remaining, delim, delim_len, depth, in_single, in_double, "", [current | acc])
+      state.depth == 0 and starts_with_chars?(chars, delimiter, delimiter_len) ->
+        remaining = Enum.drop(chars, delimiter_len)
+
+        do_split(remaining, delimiter, delimiter_len, %{
+          state
+          | current: "",
+            parts: [state.current | state.parts]
+        })
 
       true ->
-        do_split(rest, delim, delim_len, depth, in_single, in_double, current <> char, acc)
+        do_split(rest, delimiter, delimiter_len, append_char(state, char))
     end
+  end
+
+  defp append_char(state, char, updates \\ []) do
+    state
+    |> Map.put(:current, state.current <> char)
+    |> Map.merge(Map.new(updates))
   end
 
   defp starts_with_chars?(chars, delim, delim_len) do

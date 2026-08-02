@@ -75,15 +75,9 @@ defmodule Selecto.Performance.ComplexityAnalyzer do
   """
   @spec analyze(Selecto.t(), keyword()) :: analysis_result()
   def analyze(selecto, opts \\ []) do
-    max_score =
-      opts[:max_complexity] ||
-        Application.get_env(:selecto, :max_complexity, @max_complexity_score)
-
-    max_joins = opts[:max_joins] || Application.get_env(:selecto, :max_joins, @max_joins)
-
-    max_in_size =
-      opts[:max_in_clause_size] ||
-        Application.get_env(:selecto, :max_in_clause_size, @max_in_clause_size)
+    max_score = Keyword.get(opts, :max_complexity, @max_complexity_score)
+    max_joins = Keyword.get(opts, :max_joins, @max_joins)
+    max_in_size = Keyword.get(opts, :max_in_clause_size, @max_in_clause_size)
 
     analysis = %__MODULE__{
       score: 0,
