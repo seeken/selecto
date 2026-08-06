@@ -1185,6 +1185,17 @@ defmodule Selecto.DomainContractTest do
       assert {:ok, _normalized, _diagnostics} = Domain.validate(domain)
     end
 
+    test "requires explicit cardinality and ownership for writable relationships" do
+      domain =
+        valid_domain()
+        |> Map.put(:writes, %{relationships: %{items: %{writable: true, cardinality: :many}}})
+
+      assert {:error, diagnostics} = Domain.validate(domain)
+
+      assert %{code: :missing_write_relationship_policy, option: :ownership} =
+               error_for(diagnostics, :missing_write_relationship_policy)
+    end
+
     test "validates write transition fields and state graph shape" do
       domain =
         valid_domain()
