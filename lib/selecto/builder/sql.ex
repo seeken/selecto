@@ -643,10 +643,16 @@ defmodule Selecto.Builder.Sql do
     {set_op_iodata, _set_op_params} = Selecto.Builder.SetOperations.build_set_operations(selecto)
 
     # Check if we need to add ORDER BY to the entire set operation result
-    {order_by_iodata, order_by_params} =
+    {order_by_iodata, _order_by_params} =
       if Selecto.Builder.SetOperations.should_apply_outer_order_by?(selecto) do
+        outer_order_selecto =
+          put_in(
+            selecto.set.order_by,
+            Selecto.Builder.SetOperations.outer_order_by(selecto)
+          )
+
         {_order_by_joins, order_by_iodata_result, order_by_params_result} =
-          build_order_by(selecto)
+          build_order_by(outer_order_selecto)
 
         order_iodata =
           if order_by_iodata_result != [], do: ["\nORDER BY ", order_by_iodata_result], else: []
@@ -661,7 +667,6 @@ defmodule Selecto.Builder.Sql do
 
     # Combine set operations with any outer ORDER BY/LIMIT/OFFSET
     final_iodata = [set_op_iodata] ++ order_by_iodata ++ limit_iodata ++ offset_iodata
-    _all_params = order_by_params
 
     # Finalize the SQL
     {sql, final_params} =

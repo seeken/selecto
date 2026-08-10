@@ -1,6 +1,17 @@
 
 # Selecto Library Changelog
 
+## Unreleased
+---------------------------------------------------------
+
+#### Fixed
+- Preserved and globally renumbered bind parameters across UNION, INTERSECT,
+  and EXCEPT operands for PostgreSQL-, SQL Server-, and question-mark-style
+  adapters.
+- Compiled outer set-operation ordering against selected output positions so
+  composed `order_by`, limit, and offset clauses do not reference an
+  operand table alias that is out of scope.
+
 ## V 0.4.9 - Elixir Anti-pattern Hardening
 ---------------------------------------------------------
 

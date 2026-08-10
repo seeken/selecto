@@ -51,16 +51,59 @@ defmodule SetOperationsTest do
 
   test "generates SQL for union", %{q1: q1, q2: q2} do
     result = Selecto.union(q1, q2)
-    {sql, _params} = Selecto.to_sql(result)
+    {sql, params} = Selecto.to_sql(result)
     assert sql =~ "UNION"
     assert sql =~ ~r/select/i
+    assert sql =~ "selecto_root.rating = $1"
+    assert sql =~ "selecto_root.rating = $2"
+    assert params == ["PG", "G"]
+  end
+
+  test "renumbers parameters across chained operands", %{q1: q1, q2: q2, domain: domain} do
+    q3 =
+      Selecto.configure(domain, [], validate: false)
+      |> Selecto.select(["title", "rental_rate"])
+      |> Selecto.filter([{"rating", "R"}])
+
+    {sql, params} = q1 |> Selecto.union(q2) |> Selecto.intersect(q3) |> Selecto.to_sql()
+
+    assert sql =~ "selecto_root.rating = $1"
+    assert sql =~ "selecto_root.rating = $2"
+    assert sql =~ "selecto_root.rating = $3"
+    assert params == ["PG", "G", "R"]
+  end
+
+  test "preserves parameter order for question-mark adapters", %{domain: domain} do
+    left =
+      Selecto.configure(domain, [], adapter: SelectoDBSQLite.Adapter, validate: false)
+      |> Selecto.select(["title"])
+      |> Selecto.filter({"rating", "PG"})
+
+    right =
+      Selecto.configure(domain, [], adapter: SelectoDBSQLite.Adapter, validate: false)
+      |> Selecto.select(["title"])
+      |> Selecto.filter({"rating", "G"})
+
+    {sql, params} = Selecto.union(left, right) |> Selecto.to_sql()
+
+    assert Regex.scan(~r/\?/, sql) |> length() == 2
+    assert params == ["PG", "G"]
   end
 
   test "order by works with set operations", %{q1: q1, q2: q2} do
     result = q1 |> Selecto.union(q2) |> Selecto.order_by([{"title", :asc}])
     {sql, _params} = Selecto.to_sql(result)
     assert sql =~ "ORDER BY"
-    assert sql =~ "selecto_root.title"
+    assert sql =~ "ORDER BY 1 asc"
+    refute sql =~ "ORDER BY selecto_root.title"
+  end
+
+  test "outer order by rejects fields that are absent from the set projection", %{q1: q1, q2: q2} do
+    result = q1 |> Selecto.union(q2) |> Selecto.order_by([{"film_id", :asc}])
+
+    assert_raise ArgumentError, ~r/must reference a selected output column/, fn ->
+      Selecto.to_sql(result)
+    end
   end
 
   test "outer limit/offset apply to set operation result", %{q1: q1, q2: q2} do

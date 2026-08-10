@@ -1293,6 +1293,8 @@ defmodule Selecto do
 
   Combines results from multiple queries using UNION or UNION ALL.
   All queries must have compatible column counts and types.
+  The combined query remains composable with `order_by/2`, `limit/2`, and
+  `offset/2`; outer ordering must reference a selected output column.
 
   ## Options
 
@@ -1323,6 +1325,8 @@ defmodule Selecto do
   Create an INTERSECT set operation between two queries.
 
   Returns only rows that appear in both queries.
+  The combined query remains composable with `order_by/2`, `limit/2`, and
+  `offset/2`; outer ordering must reference a selected output column.
 
   ## Options
 
@@ -1345,6 +1349,8 @@ defmodule Selecto do
   Create an EXCEPT set operation between two queries.
 
   Returns rows from the first query that don't appear in the second query.
+  The combined query remains composable with `order_by/2`, `limit/2`, and
+  `offset/2`; outer ordering must reference a selected output column.
 
   ## Options
 

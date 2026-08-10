@@ -31,8 +31,8 @@ defmodule Selecto.Builder.SetOperations do
 
   # Build SQL for a single set operation
   defp build_single_set_operation(spec) do
-    {left_sql, left_params} = query_to_sql_with_params(spec.left_query)
-    {right_sql, right_params} = query_to_sql_with_params(spec.right_query)
+    {left_sql, left_params} = query_to_iodata_with_params(spec.left_query)
+    {right_sql, right_params} = query_to_iodata_with_params(spec.right_query)
 
     operation_sql = build_operation_sql(spec.operation, spec.options.all)
 
@@ -61,7 +61,7 @@ defmodule Selecto.Builder.SetOperations do
     # Chain additional operations
     {final_sql, final_params} =
       Enum.reduce(rest_ops, {base_sql, base_params}, fn op, {acc_sql, acc_params} ->
-        {right_sql, right_params} = query_to_sql_with_params(op.right_query)
+        {right_sql, right_params} = query_to_iodata_with_params(op.right_query)
         operation_sql = build_operation_sql(op.operation, op.options.all)
 
         chained_sql = [
@@ -84,13 +84,69 @@ defmodule Selecto.Builder.SetOperations do
   end
 
   # Convert a Selecto query to SQL with parameters
-  defp query_to_sql_with_params(selecto) do
+  defp query_to_iodata_with_params(selecto) do
     # Create a copy of the query without set operations to avoid recursion
     clean_selecto = %{selecto | set: Map.delete(selecto.set, :set_operations)}
 
-    # Generate SQL for the individual query
+    # Generate SQL for the individual query, then restore its parameter markers.
+    # Each operand is finalized independently and therefore starts numbering at
+    # one. Restoring markers lets the outer builder finalize the complete set
+    # expression once with globally coordinated placeholder numbers.
     {sql, _aliases, params} = Sql.build(clean_selecto, [])
-    {sql, params}
+    {restore_param_markers(sql, params), params}
+  end
+
+  defp restore_param_markers(sql, params) do
+    values_by_index =
+      params
+      |> Enum.with_index(1)
+      |> Map.new(fn {value, index} -> {index, value} end)
+
+    cond do
+      Regex.match?(~r/\$\d+/, sql) ->
+        restore_numbered_markers(sql, values_by_index, ~r/(\$\d+)/, ~r/^\$(\d+)$/)
+
+      Regex.match?(~r/@p\d+/i, sql) ->
+        restore_numbered_markers(sql, values_by_index, ~r/(@p\d+)/i, ~r/^@p(\d+)$/i)
+
+      String.contains?(sql, "?") ->
+        restore_qmark_markers(sql, params)
+
+      true ->
+        sql
+    end
+  end
+
+  defp restore_numbered_markers(sql, values_by_index, split_regex, capture_regex) do
+    Regex.split(split_regex, sql, include_captures: true, trim: false)
+    |> Enum.map(fn part ->
+      case Regex.run(capture_regex, part, capture: :all_but_first) do
+        [index] ->
+          case Map.fetch(values_by_index, String.to_integer(index)) do
+            {:ok, value} -> {:param, value}
+            :error -> part
+          end
+
+        _ ->
+          part
+      end
+    end)
+  end
+
+  defp restore_qmark_markers(sql, params) do
+    case String.split(sql, "?", trim: false) do
+      segments when length(segments) == length(params) + 1 ->
+        [first | rest] = segments
+
+        rest
+        |> Enum.zip(params)
+        |> Enum.reduce([first], fn {segment, value}, acc ->
+          acc ++ [{:param, value}, segment]
+        end)
+
+      _segments ->
+        sql
+    end
   end
 
   # Build the operation SQL keyword
@@ -132,8 +188,8 @@ defmodule Selecto.Builder.SetOperations do
     set_operations = Map.get(selecto.set, :set_operations, [])
 
     Enum.flat_map(set_operations, fn spec ->
-      {_left_sql, left_params} = query_to_sql_with_params(spec.left_query)
-      {_right_sql, right_params} = query_to_sql_with_params(spec.right_query)
+      {_left_sql, left_params} = query_to_iodata_with_params(spec.left_query)
+      {_right_sql, right_params} = query_to_iodata_with_params(spec.right_query)
       left_params ++ right_params
     end)
   end
@@ -146,6 +202,77 @@ defmodule Selecto.Builder.SetOperations do
   def should_apply_outer_order_by?(selecto) do
     has_set_operations?(selecto) and has_order_by?(selecto)
   end
+
+  @doc """
+  Resolve set-operation ordering to projected column positions.
+
+  A set result no longer has either operand's table aliases in scope. Ordering
+  by the projected position is valid across supported adapters and remains
+  unambiguous when multiple selected paths share the same final column name.
+  """
+  def outer_order_by(selecto) do
+    selected = Map.get(selecto.set, :selected, [])
+
+    selecto.set
+    |> Map.get(:order_by, [])
+    |> Enum.map(&order_spec_to_position(&1, selected))
+  end
+
+  @directions [
+    :asc,
+    :desc,
+    :asc_nulls_first,
+    :asc_nulls_last,
+    :desc_nulls_first,
+    :desc_nulls_last
+  ]
+
+  defp order_spec_to_position({selector, direction}, selected) when direction in @directions do
+    {selector_to_position(selector, selected), direction}
+  end
+
+  defp order_spec_to_position({direction, selector}, selected) when direction in @directions do
+    {direction, selector_to_position(selector, selected)}
+  end
+
+  defp order_spec_to_position(selector, selected) do
+    selector_to_position(selector, selected)
+  end
+
+  defp selector_to_position({:literal_position, position} = selector, _selected)
+       when is_integer(position),
+       do: selector
+
+  defp selector_to_position({:raw_sql, _sql} = selector, _selected), do: selector
+
+  defp selector_to_position(selector, selected) do
+    case Enum.find_index(selected, &selected_output?(&1, selector)) do
+      nil ->
+        raise ArgumentError,
+              "Set-operation ORDER BY selector #{inspect(selector)} must reference a selected output column"
+
+      index ->
+        {:literal_position, index + 1}
+    end
+  end
+
+  defp selected_output?(selection, selector) when selection == selector, do: true
+
+  defp selected_output?({:as, _expression, alias_name}, selector),
+    do: same_name?(alias_name, selector)
+
+  defp selected_output?({:field, field}, selector), do: same_name?(field, selector)
+
+  defp selected_output?({:field, _field, alias_name}, selector),
+    do: same_name?(alias_name, selector)
+
+  defp selected_output?(selection, selector), do: same_name?(selection, selector)
+
+  defp same_name?(left, right) when is_atom(left) or is_binary(left) do
+    if is_atom(right) or is_binary(right), do: to_string(left) == to_string(right), else: false
+  end
+
+  defp same_name?(_left, _right), do: false
 
   # Check if query has ORDER BY clauses
   defp has_order_by?(selecto) do

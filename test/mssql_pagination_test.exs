@@ -35,13 +35,15 @@ defmodule Selecto.MSSQLPaginationTest do
       domain()
       |> Selecto.configure(:mock_connection, adapter: SelectoDBMSSQL.Adapter, validate: false)
       |> Selecto.select(["name"])
+      |> Selecto.filter({"id", 10})
 
     right_query =
       domain()
       |> Selecto.configure(:mock_connection, adapter: SelectoDBMSSQL.Adapter, validate: false)
       |> Selecto.select(["name"])
+      |> Selecto.filter({"id", 20})
 
-    {sql, _params} =
+    {sql, params} =
       left_query
       |> Selecto.union(right_query, all: true)
       |> Selecto.order_by([{"name", :asc}])
@@ -52,9 +54,12 @@ defmodule Selecto.MSSQLPaginationTest do
     normalized_sql = normalize_sql(sql)
 
     assert normalized_sql =~ "union all"
-    assert normalized_sql =~ "order by selecto_root.name asc"
+    assert normalized_sql =~ "where (( selecto_root.id = @p1 ))"
+    assert normalized_sql =~ "where (( selecto_root.id = @p2 ))"
+    assert normalized_sql =~ "order by 1 asc"
     assert normalized_sql =~ "offset 2 rows fetch next 5 rows only"
     refute normalized_sql =~ " limit "
+    assert params == [10, 20]
   end
 
   test "datetime formatting compiles to SQL Server compatible expressions" do
