@@ -367,7 +367,8 @@ defmodule Selecto.Types do
           config: processed_config(),
           set: query_set(),
           extensions: [{module(), keyword()}],
-          tenant: tenant_context() | nil
+          tenant: tenant_context() | nil,
+          policy: Selecto.Policy.t() | nil
         }
 
   # Processed configuration (internal)

@@ -13,6 +13,14 @@ defmodule Selecto.CteQuery do
     {member_name, raw_spec} = QueryMembers.fetch!(selecto, :ctes, member_id)
     spec = QueryMembers.normalize_spec(raw_spec)
 
+    :ok =
+      Selecto.Policy.ensure_named_member_allowed!(
+        selecto,
+        :ctes,
+        member_name,
+        normalized_overrides
+      )
+
     join_opts =
       QueryMembers.merge_join_opts(
         Map.get(spec, :join),
@@ -92,11 +100,17 @@ defmodule Selecto.CteQuery do
     join_opts = if join_opts == :__missing__, do: nil, else: join_opts
 
     selecto
+    |> Selecto.Policy.record_named_member(:ctes, member_name)
     |> upsert_cte_spec(cte_spec)
-    |> maybe_join_cte_spec(cte_spec, join_opts)
+    |> maybe_join_cte_spec(
+      cte_spec,
+      join_opts,
+      Selecto.Policy.member_origin(:ctes, member_name)
+    )
   end
 
   def with_cte(selecto, name, query_builder, opts \\ []) do
+    :ok = Selecto.Policy.ensure_ad_hoc_source_allowed!(selecto, :cte)
     join_opts = Keyword.get(opts, :join)
     cte_opts = Keyword.delete(opts, :join)
 
@@ -104,7 +118,7 @@ defmodule Selecto.CteQuery do
 
     selecto
     |> append_cte_spec(cte_spec)
-    |> maybe_join_cte_spec(cte_spec, join_opts)
+    |> maybe_join_cte_spec(cte_spec, join_opts, nil)
   end
 
   @doc """
@@ -167,6 +181,8 @@ defmodule Selecto.CteQuery do
   # 1. (selecto, cte_name, base_fn, recursive_fn, opts) - original inline format
   # 2. (selecto, name, opts) - newer format using Advanced.CTE
   def with_recursive_cte(selecto, arg2, arg3, arg4 \\ nil, arg5 \\ []) do
+    :ok = Selecto.Policy.ensure_ad_hoc_source_allowed!(selecto, :recursive_cte)
+
     {cte_spec, join_opts} =
       case {arg2, arg3, arg4, arg5} do
         # Format 1: (selecto, cte_name, base_fn, recursive_fn, opts)
@@ -199,7 +215,7 @@ defmodule Selecto.CteQuery do
 
     selecto
     |> append_cte_spec(cte_spec)
-    |> maybe_join_cte_spec(cte_spec, join_opts)
+    |> maybe_join_cte_spec(cte_spec, join_opts, nil)
   end
 
   @doc """
@@ -247,6 +263,7 @@ defmodule Selecto.CteQuery do
       |> Selecto.select(["film.title", "high_value_customers.total_spent"])
   """
   def with_ctes(selecto, cte_specs, opts \\ []) when is_list(cte_specs) do
+    :ok = Selecto.Policy.ensure_ad_hoc_source_allowed!(selecto, :cte)
     selecto_with_ctes = append_cte_specs(selecto, cte_specs)
     apply_with_ctes_joins(selecto_with_ctes, cte_specs, Keyword.get(opts, :joins))
   end
@@ -272,11 +289,22 @@ defmodule Selecto.CteQuery do
     put_in(selecto.set[:ctes], updated_ctes)
   end
 
-  defp maybe_join_cte_spec(selecto, _cte_spec, join_opts) when join_opts in [nil, false],
-    do: selecto
+  defp maybe_join_cte_spec(selecto, _cte_spec, join_opts, _origin)
+       when join_opts in [nil, false],
+       do: selecto
 
-  defp maybe_join_cte_spec(selecto, cte_spec, join_opts) do
+  defp maybe_join_cte_spec(selecto, cte_spec, join_opts, origin) do
     {join_id, join_options} = build_cte_join_options(cte_spec, join_opts)
+
+    join_options =
+      case origin do
+        {:domain_member, kind, member_name} ->
+          Selecto.Policy.put_member_origin(join_options, kind, member_name)
+
+        _ ->
+          join_options
+      end
+
     Selecto.join(selecto, join_id, join_options)
   end
 
@@ -411,14 +439,14 @@ defmodule Selecto.CteQuery do
 
   defp apply_with_ctes_joins(selecto, cte_specs, true) do
     Enum.reduce(cte_specs, selecto, fn cte_spec, acc ->
-      maybe_join_cte_spec(acc, cte_spec, true)
+      maybe_join_cte_spec(acc, cte_spec, true, nil)
     end)
   end
 
   defp apply_with_ctes_joins(selecto, cte_specs, joins) when is_list(joins) do
     Enum.reduce(joins, selecto, fn join_entry, acc ->
       {cte_spec, join_opts} = resolve_with_ctes_join_entry(cte_specs, join_entry)
-      maybe_join_cte_spec(acc, cte_spec, join_opts)
+      maybe_join_cte_spec(acc, cte_spec, join_opts, nil)
     end)
   end
 

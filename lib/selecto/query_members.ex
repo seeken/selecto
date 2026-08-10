@@ -128,13 +128,26 @@ defmodule Selecto.QueryMembers do
         source
 
       %Selecto{} = query ->
-        fn _base_query -> query end
+        fn _base_query ->
+          :ok =
+            Selecto.Policy.ensure_nested_query_allowed!(selecto, query, :laterals, member_name)
+
+          query
+        end
 
       query_builder when is_function(query_builder, 0) ->
         fn _base_query ->
           result = query_builder.()
 
           if match?(%Selecto{}, result) do
+            :ok =
+              Selecto.Policy.ensure_nested_query_allowed!(
+                selecto,
+                result,
+                :laterals,
+                member_name
+              )
+
             result
           else
             raise ArgumentError,
@@ -147,6 +160,14 @@ defmodule Selecto.QueryMembers do
           result = query_builder.(base_query)
 
           if match?(%Selecto{}, result) do
+            :ok =
+              Selecto.Policy.ensure_nested_query_allowed!(
+                selecto,
+                result,
+                :laterals,
+                member_name
+              )
+
             result
           else
             raise ArgumentError,
@@ -159,6 +180,14 @@ defmodule Selecto.QueryMembers do
           result = query_builder.(selecto, base_query)
 
           if match?(%Selecto{}, result) do
+            :ok =
+              Selecto.Policy.ensure_nested_query_allowed!(
+                selecto,
+                result,
+                :laterals,
+                member_name
+              )
+
             result
           else
             raise ArgumentError,
@@ -220,6 +249,7 @@ defmodule Selecto.QueryMembers do
       end
 
     if match?(%Selecto{}, query) do
+      :ok = Selecto.Policy.ensure_nested_query_allowed!(selecto, query, kind, member_name)
       query
     else
       raise ArgumentError,
@@ -231,13 +261,17 @@ defmodule Selecto.QueryMembers do
   def wrap_query_builder!(query_source, selecto, kind, member_name) do
     case query_source do
       %Selecto{} = query ->
-        fn -> query end
+        fn ->
+          :ok = Selecto.Policy.ensure_nested_query_allowed!(selecto, query, kind, member_name)
+          query
+        end
 
       query_builder when is_function(query_builder, 0) ->
         fn ->
           result = query_builder.()
 
           if match?(%Selecto{}, result) do
+            :ok = Selecto.Policy.ensure_nested_query_allowed!(selecto, result, kind, member_name)
             result
           else
             raise ArgumentError,
@@ -250,6 +284,7 @@ defmodule Selecto.QueryMembers do
           result = query_builder.(selecto)
 
           if match?(%Selecto{}, result) do
+            :ok = Selecto.Policy.ensure_nested_query_allowed!(selecto, result, kind, member_name)
             result
           else
             raise ArgumentError,
@@ -275,6 +310,9 @@ defmodule Selecto.QueryMembers do
           result = query_builder.()
 
           if match?(%Selecto{}, result) do
+            :ok =
+              Selecto.Policy.ensure_nested_query_allowed!(selecto, result, :ctes, member_name)
+
             result
           else
             raise ArgumentError,
@@ -287,6 +325,9 @@ defmodule Selecto.QueryMembers do
           result = query_builder.(selecto)
 
           if match?(%Selecto{}, result) do
+            :ok =
+              Selecto.Policy.ensure_nested_query_allowed!(selecto, result, :ctes, member_name)
+
             result
           else
             raise ArgumentError,
@@ -308,6 +349,9 @@ defmodule Selecto.QueryMembers do
           result = query_builder.(cte_ref)
 
           if match?(%Selecto{}, result) do
+            :ok =
+              Selecto.Policy.ensure_nested_query_allowed!(selecto, result, :ctes, member_name)
+
             result
           else
             raise ArgumentError,
@@ -320,6 +364,9 @@ defmodule Selecto.QueryMembers do
           result = query_builder.(selecto, cte_ref)
 
           if match?(%Selecto{}, result) do
+            :ok =
+              Selecto.Policy.ensure_nested_query_allowed!(selecto, result, :ctes, member_name)
+
             result
           else
             raise ArgumentError,

@@ -65,7 +65,7 @@ defmodule Selecto.EctoAdapter do
     domain = schema_to_domain(schema, opts)
     db_conn = get_db_connection(repo)
 
-    Selecto.configure(domain, db_conn, Keyword.take(opts, [:validate]))
+    Selecto.configure(domain, db_conn, Keyword.take(opts, [:validate, :mode, :domain_sql]))
   end
 
   @doc """

@@ -23,6 +23,8 @@ defmodule Selecto.Builder.Sql do
   @spec build(Selecto.Types.t(), Selecto.Types.sql_generation_options()) ::
           {String.t(), [%{String.t() => String.t()}], [any()]}
   def build(selecto, opts) do
+    :ok = Selecto.Policy.validate_query!(selecto)
+
     # Check for Set Operations first as they completely override query structure
     cond do
       Selecto.Builder.SetOperations.has_set_operations?(selecto) ->

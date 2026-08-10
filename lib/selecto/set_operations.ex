@@ -472,6 +472,8 @@ defmodule Selecto.SetOperations do
 
   # Create a set operation specification
   defp create_set_operation(operation, left_query, right_query, opts) do
+    :ok = Selecto.Policy.ensure_set_operation_compatible!(left_query, right_query)
+
     options = %{
       all: Keyword.get(opts, :all, false),
       column_mapping: Keyword.get(opts, :column_mapping)

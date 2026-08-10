@@ -1,13 +1,23 @@
 defmodule Selecto.OptionsValidator do
   @moduledoc false
 
-  @configure_option_keys [:validate, :pool, :pool_options, :adapter, :rollup_sort_fix]
+  @configure_option_keys [
+    :validate,
+    :pool,
+    :pool_options,
+    :adapter,
+    :rollup_sort_fix,
+    :mode,
+    :domain_sql
+  ]
   @configure_schema [
     validate: [type: :boolean],
     pool: [type: :boolean],
     pool_options: [type: :keyword_list],
     adapter: [type: :atom],
-    rollup_sort_fix: [type: {:in, [true, false, :auto]}]
+    rollup_sort_fix: [type: {:in, [true, false, :auto]}],
+    mode: [type: {:in, [:permissive, :strict]}],
+    domain_sql: [type: {:in, [:declared, :forbid]}]
   ]
 
   @execute_option_keys [

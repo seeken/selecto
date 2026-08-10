@@ -64,17 +64,21 @@ defmodule Selecto.DynamicJoin do
   """
   @spec join(Selecto.t(), atom() | String.t(), keyword()) :: Selecto.t()
   def join(selecto, join_id, options \\ []) do
+    :ok = Selecto.Policy.ensure_join_allowed!(selecto, join_id, options)
+    public_options = Selecto.Policy.strip_internal_options(options)
+
     # Check if this join already exists in the domain
     existing_join = get_in(selecto.config, [:joins, join_id])
 
     join_config =
       if existing_join do
         # Merge options into existing join config
-        merge_join_options(existing_join, options)
+        merge_join_options(existing_join, public_options)
       else
         # Create a new custom join config
-        build_custom_join(selecto, join_id, options)
+        build_custom_join(selecto, join_id, public_options)
       end
+      |> Selecto.Policy.annotate_origin(options)
 
     validate_cte_source!(selecto, join_id, join_config)
     join_config = maybe_enrich_cte_join(join_config, selecto)
@@ -150,6 +154,7 @@ defmodule Selecto.DynamicJoin do
 
     # Extract filter options vs regular options
     {filters, join_opts} = split_filter_options(options, base_join)
+    :ok = Selecto.Policy.ensure_parameterized_join_allowed!(selecto, join_id, join_opts)
 
     # Build parameterized join config
     param_config =
@@ -209,8 +214,10 @@ defmodule Selecto.DynamicJoin do
   """
   @spec join_subquery(Selecto.t(), atom(), Selecto.t(), keyword()) :: Selecto.t()
   def join_subquery(selecto, join_id, join_selecto, options \\ []) do
-    join_type = Keyword.get(options, :type, :left)
-    on_conditions = Keyword.get(options, :on, [])
+    :ok = Selecto.Policy.ensure_subquery_join_allowed!(selecto, join_id, options)
+    public_options = Selecto.Policy.strip_internal_options(options)
+    join_type = Keyword.get(public_options, :type, :left)
+    on_conditions = Keyword.get(public_options, :on, [])
 
     # Generate SQL for the subquery
     {subquery_sql, _aliases, subquery_params} = Selecto.gen_sql(join_selecto, [])
@@ -219,19 +226,21 @@ defmodule Selecto.DynamicJoin do
     rewritten_subquery_sql = rewrite_subquery_root_alias(subquery_sql, subquery_root_alias)
 
     # Build subquery join config
-    subquery_config = %{
-      id: join_id,
-      name: to_string(join_id),
-      join_type: :subquery,
-      subquery: rewritten_subquery_sql,
-      subquery_params: subquery_params,
-      subquery_root_alias: subquery_root_alias,
-      on: on_conditions,
-      type: join_type,
-      requires_join: :selecto_root,
-      # Extract field info from the subquery's selected aliases
-      fields: extract_subquery_fields(join_selecto, join_id)
-    }
+    subquery_config =
+      %{
+        id: join_id,
+        name: to_string(join_id),
+        join_type: :subquery,
+        subquery: rewritten_subquery_sql,
+        subquery_params: subquery_params,
+        subquery_root_alias: subquery_root_alias,
+        on: on_conditions,
+        type: join_type,
+        requires_join: :selecto_root,
+        # Extract field info from the subquery's selected aliases
+        fields: extract_subquery_fields(join_selecto, join_id)
+      }
+      |> Selecto.Policy.annotate_origin(options)
 
     # Add to dynamic joins
     current_joins = Map.get(selecto.set, :active_joins, [])

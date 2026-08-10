@@ -42,6 +42,7 @@ defmodule Selecto.Configuration do
   @spec configure(Selecto.Types.domain(), term(), keyword()) :: Selecto.Types.t()
   def configure(domain, connection_input, opts \\ []) do
     Selecto.OptionsValidator.validate_configure_opts!(opts)
+    :ok = Selecto.Policy.ensure_configuration_options!(opts)
 
     validate? = Keyword.get(opts, :validate, true)
     use_pool? = Keyword.get(opts, :pool, false)
@@ -97,15 +98,21 @@ defmodule Selecto.Configuration do
 
     rollup_sort_fix = resolve_rollup_sort_fix(adapter, connection, opts)
 
+    config =
+      configure_domain(domain, extension_specs)
+      |> Map.put(:rollup_sort_fix, rollup_sort_fix)
+
+    policy = Selecto.Policy.new!(domain, config, opts)
+
     %Selecto{
       # Historical struct field; adapter-neutral rename is tracked as a separate cleanup.
       postgrex_opts: final_connection_input,
       adapter: adapter,
       connection: connection,
       domain: domain,
-      config:
-        configure_domain(domain, extension_specs) |> Map.put(:rollup_sort_fix, rollup_sort_fix),
+      config: config,
       extensions: extension_specs,
+      policy: policy,
       set: %{
         selected: Map.get(domain, :required_selected, []),
         filtered: [],

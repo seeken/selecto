@@ -1,6 +1,16 @@
 defmodule Selecto do
-  @derive {Inspect, only: [:postgrex_opts, :adapter, :connection, :set, :tenant]}
-  defstruct [:postgrex_opts, :adapter, :connection, :domain, :config, :set, :extensions, :tenant]
+  @derive {Inspect, only: [:postgrex_opts, :adapter, :connection, :set, :tenant, :policy]}
+  defstruct [
+    :postgrex_opts,
+    :adapter,
+    :connection,
+    :domain,
+    :config,
+    :set,
+    :extensions,
+    :tenant,
+    :policy
+  ]
 
   alias Selecto.QueryMembers
 
@@ -171,6 +181,12 @@ defmodule Selecto do
     - `:pool` - (boolean, default: false) Whether to enable connection pooling
     - `:pool_options` - Connection pool configuration options
     - `:adapter` - (module, default: `SelectoDBPostgreSQL.Adapter`) Database adapter module
+    - `:mode` - (`:permissive | :strict`, default: `:permissive`) governance mode.
+      Strict mode seals the configured domain, requires validation, rejects
+      query-authored SQL, and limits runtime joins and row sources to declared
+      domain capabilities.
+    - `:domain_sql` - (`:declared | :forbid`, default: `:declared`) whether strict
+      mode may use trusted SQL declared by the domain.
 
     ## Validation
 
@@ -500,6 +516,14 @@ defmodule Selecto do
     {member_name, raw_spec} = QueryMembers.fetch!(selecto, :subqueries, member_id)
     spec = QueryMembers.normalize_spec(raw_spec)
 
+    :ok =
+      Selecto.Policy.ensure_named_member_allowed!(
+        selecto,
+        :subqueries,
+        member_name,
+        normalized_overrides
+      )
+
     kind = Map.get(spec, :kind, :join)
 
     if kind != :join do
@@ -552,8 +576,11 @@ defmodule Selecto do
     final_options =
       default_options
       |> Keyword.merge(override_options)
+      |> Selecto.Policy.put_member_origin(:subqueries, member_name)
 
-    Selecto.join_subquery(selecto, join_id, join_selecto, final_options)
+    selecto
+    |> Selecto.Policy.record_named_member(:subqueries, member_name)
+    |> Selecto.join_subquery(join_id, join_selecto, final_options)
   end
 
   @doc """
@@ -1051,10 +1078,12 @@ defmodule Selecto do
       |> Selecto.unnest("categories", as: "category")
   """
   def unnest(selecto, array_field, opts \\ []) do
+    :ok = Selecto.Policy.ensure_source_origin_allowed!(selecto, :unnest, opts)
+    public_opts = Selecto.Policy.strip_internal_options(opts)
     Selecto.QueryValidator.validate_unnest_source!(selecto, array_field)
 
-    alias_name = Keyword.get(opts, :as, "unnested_#{array_field}")
-    ordinality = Keyword.get(opts, :ordinality)
+    alias_name = Keyword.get(public_opts, :as, "unnested_#{array_field}")
+    ordinality = Keyword.get(public_opts, :ordinality)
 
     unnest_spec = %{
       field: array_field,
@@ -1208,6 +1237,14 @@ defmodule Selecto do
     {member_name, raw_spec} = QueryMembers.fetch!(selecto, :unnests, member_id)
     spec = QueryMembers.normalize_spec(raw_spec)
 
+    :ok =
+      Selecto.Policy.ensure_named_member_allowed!(
+        selecto,
+        :unnests,
+        member_name,
+        normalized_overrides
+      )
+
     array_field =
       Keyword.get(
         normalized_overrides,
@@ -1261,8 +1298,10 @@ defmodule Selecto do
       |> QueryMembers.maybe_put_keyword(:ordinality, ordinality)
       |> Keyword.merge(override_options)
       |> Keyword.merge(override_nested_options)
+      |> Selecto.Policy.put_member_origin(:unnests, member_name)
 
     selecto
+    |> Selecto.Policy.record_named_member(:unnests, member_name)
     |> Selecto.unnest(array_field, unnest_opts)
     |> upsert_unnest_by_alias(to_string(alias_name))
   end
@@ -1431,6 +1470,9 @@ defmodule Selecto do
           {join_type, subquery_builder_or_function, alias_name, opts}
       end
 
+    :ok = Selecto.Policy.ensure_source_origin_allowed!(selecto, :lateral, opts)
+    public_opts = Selecto.Policy.strip_internal_options(opts)
+
     # Handle different lateral source types
     lateral_spec =
       case subquery_builder_or_function do
@@ -1465,7 +1507,7 @@ defmodule Selecto do
                 join_type,
                 udf_table,
                 alias_name,
-                opts
+                public_opts
               )
 
             :error ->
@@ -1478,7 +1520,7 @@ defmodule Selecto do
             join_type,
             subquery_builder_or_function,
             alias_name,
-            opts
+            public_opts
           )
       end
 
@@ -1490,7 +1532,7 @@ defmodule Selecto do
             selecto,
             subquery_builder_or_function,
             to_string(alias_name),
-            opts
+            public_opts
           )
 
         # Add to selecto set
@@ -1527,12 +1569,14 @@ defmodule Selecto do
 
   def with_lateral(selecto, %Selecto{} = lateral_source, opts)
       when is_list(opts) or is_map(opts) do
+    :ok = Selecto.Policy.ensure_ad_hoc_source_allowed!(selecto, :lateral)
     apply_direct_lateral(selecto, lateral_source, opts)
   end
 
   def with_lateral(selecto, lateral_source, opts)
       when (is_tuple(lateral_source) or is_function(lateral_source)) and
              (is_list(opts) or is_map(opts)) do
+    :ok = Selecto.Policy.ensure_ad_hoc_source_allowed!(selecto, :lateral)
     apply_direct_lateral(selecto, lateral_source, opts)
   end
 
@@ -1541,6 +1585,14 @@ defmodule Selecto do
     normalized_overrides = QueryMembers.normalize_opts(opts)
     {member_name, raw_spec} = QueryMembers.fetch!(selecto, :laterals, member_id)
     spec = QueryMembers.normalize_spec(raw_spec)
+
+    :ok =
+      Selecto.Policy.ensure_named_member_allowed!(
+        selecto,
+        :laterals,
+        member_name,
+        normalized_overrides
+      )
 
     lateral_source =
       Keyword.get(
@@ -1592,8 +1644,10 @@ defmodule Selecto do
     lateral_opts =
       default_options
       |> Keyword.merge(override_options)
+      |> Selecto.Policy.put_member_origin(:laterals, member_name)
 
     selecto
+    |> Selecto.Policy.record_named_member(:laterals, member_name)
     |> Selecto.lateral_join(join_type, lateral_source, to_string(alias_name), lateral_opts)
     |> maybe_register_lateral_source_columns(lateral_source, to_string(alias_name), lateral_opts)
     |> upsert_lateral_by_alias(to_string(alias_name))
@@ -1852,6 +1906,15 @@ defmodule Selecto do
     {member_name, raw_spec} = QueryMembers.fetch!(selecto, :values, member_id)
     spec = QueryMembers.normalize_spec(raw_spec)
 
+    :ok =
+      Selecto.Policy.ensure_named_member_allowed!(
+        selecto,
+        :values,
+        member_name,
+        normalized_overrides,
+        [:rows, :data]
+      )
+
     rows_override =
       Keyword.get(
         normalized_overrides,
@@ -1902,10 +1965,16 @@ defmodule Selecto do
         Keyword.put(values_opts, :join, join_opts)
       end
 
-    apply_values_clause(selecto, rows, values_opts, upsert: true)
+    selecto
+    |> Selecto.Policy.record_named_member(:values, member_name)
+    |> apply_values_clause(rows, values_opts,
+      upsert: true,
+      policy_origin: Selecto.Policy.member_origin(:values, member_name)
+    )
   end
 
   def with_values(selecto, data, opts) do
+    :ok = Selecto.Policy.ensure_ad_hoc_source_allowed!(selecto, :values)
     apply_values_clause(selecto, data, opts, upsert: false)
   end
 
@@ -1919,7 +1988,12 @@ defmodule Selecto do
         append_values_clause(selecto, values_spec)
       end
 
-    maybe_join_values_clause(selecto, values_spec, Keyword.get(opts, :join))
+    maybe_join_values_clause(
+      selecto,
+      values_spec,
+      Keyword.get(opts, :join),
+      Keyword.get(apply_opts, :policy_origin)
+    )
   end
 
   defp append_values_clause(selecto, values_spec) do
@@ -1939,12 +2013,22 @@ defmodule Selecto do
     put_in(selecto, [Access.key(:set), :values_clauses], updated_values_clauses)
   end
 
-  defp maybe_join_values_clause(selecto, _values_spec, join_opts)
+  defp maybe_join_values_clause(selecto, _values_spec, join_opts, _origin)
        when join_opts in [nil, false],
        do: selecto
 
-  defp maybe_join_values_clause(selecto, values_spec, join_opts) do
+  defp maybe_join_values_clause(selecto, values_spec, join_opts, origin) do
     {join_id, join_options} = build_values_join_options(values_spec, join_opts)
+
+    join_options =
+      case origin do
+        {:domain_member, kind, member_name} ->
+          Selecto.Policy.put_member_origin(join_options, kind, member_name)
+
+        _ ->
+          join_options
+      end
+
     Selecto.join(selecto, join_id, join_options)
   end
 

@@ -23,34 +23,42 @@ defmodule Selecto.QueryValidator do
         ) ::
           :ok
   def validate_selectors!(selecto, selectors) when is_list(selectors) do
+    Selecto.Policy.ensure_query_term_allowed!(selecto, selectors, [:select])
     Enum.each(selectors, &validate_selector!(selecto, &1))
   end
 
   def validate_selectors!(selecto, selector) do
+    Selecto.Policy.ensure_query_term_allowed!(selecto, selector, [:select])
     validate_selector!(selecto, selector)
   end
 
   @spec validate_filters!(Selecto.Types.t(), [Selecto.Types.filter()] | Selecto.Types.filter()) ::
           :ok
   def validate_filters!(selecto, filters) when is_list(filters) do
+    Selecto.Policy.ensure_query_term_allowed!(selecto, filters, [:filter])
     Enum.each(filters, &validate_filter!(selecto, &1))
   end
 
   def validate_filters!(selecto, filter) do
+    Selecto.Policy.ensure_query_term_allowed!(selecto, filter, [:filter])
     validate_filter!(selecto, filter)
   end
 
   @spec validate_order_specs!(Selecto.Types.t(), [term()] | term()) :: :ok
   def validate_order_specs!(selecto, order_specs) when is_list(order_specs) do
+    Selecto.Policy.ensure_query_term_allowed!(selecto, order_specs, [:order_by])
     Enum.each(order_specs, &validate_order_spec!(selecto, &1))
   end
 
   def validate_order_specs!(selecto, order_spec) do
+    Selecto.Policy.ensure_query_term_allowed!(selecto, order_spec, [:order_by])
     validate_order_spec!(selecto, order_spec)
   end
 
   @spec validate_group_specs!(Selecto.Types.t(), [term()] | term()) :: :ok
   def validate_group_specs!(selecto, group_specs) when is_list(group_specs) do
+    Selecto.Policy.ensure_query_term_allowed!(selecto, group_specs, [:group_by])
+
     if keyword_group_specs?(group_specs) do
       Enum.each(group_specs, fn
         {:rollup, groups} -> validate_group_specs!(selecto, groups)
@@ -62,6 +70,7 @@ defmodule Selecto.QueryValidator do
   end
 
   def validate_group_specs!(selecto, group_spec) do
+    Selecto.Policy.ensure_query_term_allowed!(selecto, group_spec, [:group_by])
     validate_group_spec!(selecto, group_spec)
   end
 

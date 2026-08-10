@@ -91,6 +91,32 @@ selecto = Selecto.configure(domain, Repo)
   |> Selecto.execute()
 ```
 
+## Strict Mode
+
+Use strict mode when query callers—including UI builders, saved queries, APIs,
+and AI tooling—must stay inside a governed domain:
+
+```elixir
+selecto = Selecto.configure(domain, Repo, mode: :strict)
+
+selecto
+|> Selecto.select(["id", "total", "customer.name"])
+|> Selecto.filter({"total", {:gt, 100}})
+|> Selecto.execute()
+```
+
+Strict mode requires domain validation, seals the fully composed domain and its
+compiled authority, rejects query-authored raw SQL, and prohibits structural or
+ad-hoc joins. Domain joins may be enabled without overrides, and advanced row
+sources must be applied through named `domain.query_members` definitions.
+
+Trusted SQL declared by the domain remains available by default, which lets a
+governed domain hide brownfield compatibility expressions behind stable field
+names. Pass `domain_sql: :forbid` to reject declared SQL as well. Strict mode is
+a Selecto governance boundary, not a substitute for database roles or row-level
+security. See [`docs/strict_mode.md`](docs/strict_mode.md) for the complete
+contract.
+
 ## Expression Helpers
 
 Use `Selecto.Expr` when query structure is assembled dynamically in Elixir:
@@ -182,6 +208,7 @@ Current `0.4.x` scope:
   choice sources, published views, writes, and domain actions.
 - `docs/domain_schema_v1.md` for the normalized domain schema contract.
 - `docs/expression_dsl.md` for dynamic expression helpers, macros, and sigils.
+- `docs/strict_mode.md` for sealed domains and governed query construction.
 
 ## Related Repos
 
