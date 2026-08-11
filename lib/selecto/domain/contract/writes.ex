@@ -33,16 +33,7 @@ defmodule Selecto.Domain.Contract.Writes do
     ]
   end
 
-  @known_operations [
-    :insert,
-    :update,
-    :delete,
-    :upsert,
-    :insert_all,
-    :upsert_all,
-    :insert_from_query,
-    :soft_delete
-  ]
+  @known_operations [:insert, :update, :delete, :upsert]
 
   @known_field_flags [:insertable, :updatable, :immutable, :write_once, :server_managed]
   @known_relationship_cardinality [:one, :many]

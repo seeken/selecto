@@ -152,8 +152,7 @@ defmodule Selecto.Domain.Examples do
       },
       writes: %{
         operations: %{
-          update: %{enabled: true, require_filter: true},
-          soft_delete: %{enabled: true, require_filter: true}
+          update: %{enabled: true, require_filter: true}
         },
         fields: %{
           state: %{updatable: true},

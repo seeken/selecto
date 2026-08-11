@@ -2,7 +2,7 @@ defmodule Selecto.WriteProtocolTest do
   use ExUnit.Case, async: true
 
   alias Selecto.Write
-  alias Selecto.Write.{Batch, Command, Error, Preview, Result}
+  alias Selecto.Write.{AdapterConformance, Batch, Command, Error, Preview, Result}
   alias Selecto.Domain.WriteContract
 
   defmodule WriteAdapter do
@@ -16,7 +16,15 @@ defmodule Selecto.WriteProtocolTest do
     def quote_identifier(identifier), do: ~s("#{identifier}")
     def supports?(_feature), do: false
 
-    def write_capabilities(_connection), do: %{insert: true, update: true, atomic_batch: true}
+    def write_capabilities(_connection),
+      do: %{
+        insert: true,
+        update: true,
+        upsert: true,
+        delete: true,
+        atomic_batch: true,
+        transactions: true
+      }
 
     def preview_write(_connection, command, _opts) do
       {:ok, %Preview{statements: [%{text: "adapter-owned preview", params: [command]}]}}
@@ -74,6 +82,25 @@ defmodule Selecto.WriteProtocolTest do
 
     assert {:ok, %Batch{atomic?: true}} = Batch.new([command])
     assert {:error, %Error{type: :invalid_command}} = Batch.new([command], atomic?: false)
+  end
+
+  test "provides reusable non-mutating adapter conformance checks" do
+    selecto = %Selecto{adapter: WriteAdapter, connection: :connection}
+
+    assert {:ok, report} = AdapterConformance.check(selecto)
+    assert report.operations == [:insert, :update, :upsert, :delete]
+    assert Map.keys(report.previews) |> Enum.sort() == [:delete, :insert, :update, :upsert]
+    assert %Preview{} = report.batch_preview
+  end
+
+  test "rejects retired operations at both domain and command boundaries" do
+    for operation <- [:insert_all, :upsert_all, :insert_from_query, :soft_delete] do
+      assert {:error, %Error{type: :invalid_command}} =
+               Command.new(%{operation: operation, relation: :items})
+
+      invalid = put_in(write_domain(), [:writes, :operations], %{operation => %{enabled: true}})
+      assert {:error, %Error{type: :invalid_domain}} = WriteContract.compile(invalid)
+    end
   end
 
   test "fails before execution when the configured adapter has no write behavior" do

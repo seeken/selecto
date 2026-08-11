@@ -9,7 +9,7 @@ defmodule Selecto.Write.Command do
 
   alias Selecto.Write.Error
 
-  @operations [:insert, :update, :delete, :upsert, :insert_from_query]
+  @operations [:insert, :update, :delete, :upsert]
 
   @type expected_cardinality ::
           {:exactly, pos_integer()}

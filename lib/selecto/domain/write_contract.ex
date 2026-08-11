@@ -15,11 +15,7 @@ defmodule Selecto.Domain.WriteContract do
     "insert" => :insert,
     "update" => :update,
     "delete" => :delete,
-    "upsert" => :upsert,
-    "insert_all" => :insert_all,
-    "upsert_all" => :upsert_all,
-    "insert_from_query" => :insert_from_query,
-    "soft_delete" => :soft_delete
+    "upsert" => :upsert
   }
 
   @type t :: %__MODULE__{
@@ -79,8 +75,7 @@ defmodule Selecto.Domain.WriteContract do
     match?(%{insertable: true}, field_spec(contract, field))
   end
 
-  def writable?(%__MODULE__{} = contract, operation, field)
-      when operation in [:update, :soft_delete] do
+  def writable?(%__MODULE__{} = contract, :update, field) do
     match?(%{updatable: true}, field_spec(contract, field))
   end
 

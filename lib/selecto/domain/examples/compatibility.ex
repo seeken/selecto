@@ -57,7 +57,7 @@ defmodule Selecto.Domain.Examples.Compatibility do
         filter_ids: ["owner", "private_metric", "state"],
         choice_source_ids: ["owner_choices", "state_choices"],
         published_view_ids: ["manager_rollup"],
-        write_operation_ids: ["soft_delete", "update"],
+        write_operation_ids: ["update"],
         write_field_ids: ["archived_at", "owner_id", "priority", "state"],
         action_ids: ["archive"],
         action_inputs: %{"archive" => ["reason"]},
