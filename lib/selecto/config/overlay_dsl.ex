@@ -1146,6 +1146,23 @@ defmodule Selecto.Config.OverlayDSL do
   defmacro aggregate_functions(_value), do: quote(do: nil)
 
   @doc """
+  Sets the preferred grouping for analytical views when no explicit domain-level
+  grouping is configured.
+
+  Temporal examples include `:month`, `:week`, and `:year`; categorical fields
+  normally use `:default`.
+  """
+  defmacro default_grouping(_value), do: quote(do: nil)
+
+  @doc """
+  Sets the preferred aggregate function for analytical views when no explicit
+  domain-level aggregate is configured.
+
+  Common values are `:count`, `:sum`, `:avg`, `:min`, and `:max`.
+  """
+  defmacro default_aggregate(_value), do: quote(do: nil)
+
+  @doc """
   Sets the numeric precision for decimal columns.
   """
   defmacro precision(_value), do: quote(do: nil)

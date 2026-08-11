@@ -43,6 +43,8 @@ defmodule Selecto.Types do
           optional(:icon) => atom() | String.t(),
           optional(:icon_family) => atom() | String.t(),
           optional(:presentation_type) => :date | :datetime | :utc_datetime | :naive_datetime,
+          optional(:default_grouping) => atom() | String.t() | map(),
+          optional(:default_aggregate) => atom() | String.t() | map(),
           optional(:presentation) => %{
             optional(:semantic_type) => :measurement | :temporal | :number,
             optional(:quantity) => atom() | String.t(),

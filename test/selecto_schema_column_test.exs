@@ -81,4 +81,26 @@ defmodule Selecto.Schema.ColumnTest do
 
     assert columns["load_det.co_name"].name == "Payload: Co name"
   end
+
+  test "configured columns retain intrinsic analytical defaults" do
+    source = %{
+      columns: %{
+        booked_at: %{type: :utc_datetime},
+        hours: %{type: :integer}
+      }
+    }
+
+    domain = %{
+      name: "Booking",
+      columns: %{
+        booked_at: %{default_grouping: :month},
+        hours: %{default_aggregate: :sum}
+      }
+    }
+
+    columns = Column.configure_columns(:selecto_root, [:booked_at, :hours], source, domain)
+
+    assert columns["booked_at"].default_grouping == :month
+    assert columns["hours"].default_aggregate == :sum
+  end
 end

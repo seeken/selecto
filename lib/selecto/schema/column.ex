@@ -144,6 +144,10 @@ defmodule Selecto.Schema.Column do
       type: source_col.type,
       requires_join: join,
       format: Map.get(config, :format),
+      default_grouping:
+        Map.get(config, :default_grouping, Map.get(source_col, :default_grouping)),
+      default_aggregate:
+        Map.get(config, :default_aggregate, Map.get(source_col, :default_aggregate)),
       icon: Map.get(config, :icon, Map.get(source_col, :icon)),
       icon_family: Map.get(config, :icon_family, Map.get(source_col, :icon_family)),
       presentation: merge_presentation(config, source_col),

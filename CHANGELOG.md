@@ -1,8 +1,17 @@
 
 # Selecto Library Changelog
 
-## Unreleased
+## V 0.4.10 - Analytic Column Defaults
 ---------------------------------------------------------
+
+#### Added
+- Added column-local `default_grouping` and `default_aggregate` hints and
+  preserved them through compiled columns and query-contract projection, so
+  analytic clients can derive shared Aggregate and Graph defaults without
+  adding metric or visualization registries to the Domain.
+
+#### Changed
+- Bump package version to `0.4.10`.
 
 #### Fixed
 - Preserved and globally renumbered bind parameters across UNION, INTERSECT,

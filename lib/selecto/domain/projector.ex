@@ -383,9 +383,17 @@ defmodule Selecto.Domain.Projector do
       groupable: query_contract_groupable?(column, type_id, detail_selectable?),
       aggregatable: aggregatable?,
       comparators: query_contract_comparators(column, type_id, filterable?),
-      aggregate_functions: query_contract_aggregate_functions(column, type_id, aggregatable?)
+      aggregate_functions: query_contract_aggregate_functions(column, type_id, aggregatable?),
+      default_grouping: query_contract_default(column, :default_grouping),
+      default_aggregate: query_contract_default(column, :default_aggregate)
     }
   end
+
+  defp query_contract_default(column, key) when is_map(column) do
+    Map.get(column, key, Map.get(column, Atom.to_string(key)))
+  end
+
+  defp query_contract_default(_column, _key), do: nil
 
   def query_contract_detail_selectable?(column) do
     query_contract_bool(

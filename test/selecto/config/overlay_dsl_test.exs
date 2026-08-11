@@ -277,6 +277,27 @@ defmodule Selecto.Config.OverlayDSLTest do
              ]
     end
 
+    test "analytical default directives stay on the column" do
+      defmodule TestColumnAnalyticalDefaults do
+        use Selecto.Config.OverlayDSL
+
+        defcolumn :booked_at do
+          default_grouping(:month)
+        end
+
+        defcolumn :hours do
+          default_aggregate(:sum)
+        end
+      end
+
+      overlay = TestColumnAnalyticalDefaults.overlay()
+
+      assert overlay.columns[:booked_at].default_grouping == :month
+      assert overlay.columns[:hours].default_aggregate == :sum
+      refute Map.has_key?(overlay, :metrics)
+      refute Map.has_key?(overlay, :visualizations)
+    end
+
     test "precision directive" do
       defmodule TestColumnPrecision do
         use Selecto.Config.OverlayDSL

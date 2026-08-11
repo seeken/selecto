@@ -883,6 +883,9 @@ defmodule Selecto.DomainTest do
 
       assert :between in customer_id_field.comparators
 
+      assert %{id: "total", default_aggregate: :sum} =
+               Enum.find(projection.fields, &(&1.id == "total"))
+
       assert %{
                id: "customers.name",
                capability: "customer.view",
@@ -912,7 +915,8 @@ defmodule Selecto.DomainTest do
                sortable: true,
                groupable: true,
                aggregatable: false,
-               aggregate_functions: []
+               aggregate_functions: [],
+               default_grouping: :month
              } = inserted_at_field = Enum.find(projection.fields, &(&1.id == "inserted_at"))
 
       assert :between in inserted_at_field.comparators
@@ -1259,7 +1263,12 @@ defmodule Selecto.DomainTest do
       choice_source: :customer_choices,
       capability_target: %{resource: :orders, action: :read}
     })
-    |> put_in([:source, :columns, :inserted_at], %{type: :utc_datetime, label: "Inserted At"})
+    |> put_in([:source, :columns, :total, :default_aggregate], :sum)
+    |> put_in([:source, :columns, :inserted_at], %{
+      type: :utc_datetime,
+      label: "Inserted At",
+      default_grouping: :month
+    })
     |> put_in([:source, :associations, :customer], %{
       queryable: :customers,
       owner_key: :customer_id,
