@@ -18,6 +18,9 @@
 - Extended write-relationship contract validation for allowed operations,
   child domains, parent and child keys, identity fields, sync strategy, and
   delete-missing policy.
+- Made portable command and graph validation fail closed for deeply nested
+  raw-SQL markers and malformed graph structs instead of raising from the
+  validator boundary.
 - Bump package version to `0.4.11`.
 
 ## V 0.4.10 - Portable Query and Write Contracts

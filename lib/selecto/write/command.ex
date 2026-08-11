@@ -74,6 +74,11 @@ defmodule Selecto.Write.Command do
     end
   end
 
+  def validate(other) do
+    {:error,
+     Error.new(:invalid_command, "expected Selecto.Write.Command", details: %{actual: other})}
+  end
+
   defp validate_operation(operation) when operation in @operations, do: :ok
 
   defp validate_operation(operation) do
@@ -138,25 +143,23 @@ defmodule Selecto.Write.Command do
 
   # Value expressions are portable data. Raw SQL fragments are deliberately not
   # part of this representation.
-  defp validate_value({:unsafe_sql, _}),
-    do: {:error, Error.new(:invalid_command, "raw SQL is not allowed in portable write values")}
-
-  defp validate_value({:unsafe_fragment, _}),
-    do: {:error, Error.new(:invalid_command, "raw SQL is not allowed in portable write values")}
-
-  defp validate_value(_value), do: :ok
+  defp validate_value(value) do
+    if contains_unsafe_sql?(value) do
+      {:error, Error.new(:invalid_command, "raw SQL is not allowed in portable write values")}
+    else
+      :ok
+    end
+  end
 
   defp validate_predicate(nil), do: :ok
 
-  defp validate_predicate({:unsafe_sql, _}),
-    do:
+  defp validate_predicate(predicate) do
+    if contains_unsafe_sql?(predicate) do
       {:error, Error.new(:invalid_command, "raw SQL is not allowed in portable write predicates")}
-
-  defp validate_predicate({:unsafe_fragment, _}),
-    do:
-      {:error, Error.new(:invalid_command, "raw SQL is not allowed in portable write predicates")}
-
-  defp validate_predicate(_predicate), do: :ok
+    else
+      :ok
+    end
+  end
 
   defp validate_cardinality({:exactly, value}) when is_integer(value) and value > 0, do: :ok
   defp validate_cardinality({:at_most, value}) when is_integer(value) and value >= 0, do: :ok
@@ -223,6 +226,10 @@ defmodule Selecto.Write.Command do
 
   defp contains_unsafe_sql?({:unsafe_sql, _}), do: true
   defp contains_unsafe_sql?({:unsafe_fragment, _}), do: true
+
+  defp contains_unsafe_sql?(%_{} = struct) do
+    struct |> Map.from_struct() |> contains_unsafe_sql?()
+  end
 
   defp contains_unsafe_sql?(map) when is_map(map) do
     Enum.any?(map, fn {key, value} -> contains_unsafe_sql?(key) or contains_unsafe_sql?(value) end)

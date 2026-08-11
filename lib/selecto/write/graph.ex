@@ -40,7 +40,8 @@ defmodule Selecto.Write.Graph do
   @spec validate(t()) :: :ok | {:error, Error.t()}
   def validate(%__MODULE__{nodes: nodes, root: root, atomic?: true, metadata: metadata})
       when is_list(nodes) and nodes != [] and is_map(metadata) do
-    with :ok <- validate_unique_node_ids(nodes),
+    with :ok <- validate_graph_metadata(metadata),
+         :ok <- validate_unique_node_ids(nodes),
          :ok <- validate_nodes(nodes),
          :ok <- validate_root(nodes, root),
          :ok <- validate_topology(nodes) do
@@ -56,12 +57,16 @@ defmodule Selecto.Write.Graph do
   end
 
   defp validate_unique_node_ids(nodes) do
-    ids = Enum.map(nodes, & &1.id)
+    if Enum.all?(nodes, &match?(%Node{}, &1)) do
+      ids = Enum.map(nodes, & &1.id)
 
-    if Enum.all?(ids, &valid_id?/1) and length(ids) == MapSet.size(MapSet.new(ids)) do
-      :ok
+      if Enum.all?(ids, &valid_id?/1) and length(ids) == MapSet.size(MapSet.new(ids)) do
+        :ok
+      else
+        invalid_graph("graph node ids must be unique non-empty strings", %{node_ids: ids})
+      end
     else
-      invalid_graph("graph node ids must be unique non-empty strings", %{node_ids: ids})
+      invalid_graph("graph nodes must use Selecto.Write.Graph.Node", %{nodes: nodes})
     end
   end
 
@@ -80,8 +85,6 @@ defmodule Selecto.Write.Graph do
   end
 
   defp validate_node(%Node{} = node) do
-    row_ids = Enum.map(node.rows, & &1.id)
-
     cond do
       not valid_path?(node.path) ->
         invalid_graph("graph node path must be a list of portable path segments", %{node: node.id})
@@ -98,10 +101,13 @@ defmodule Selecto.Write.Graph do
       not is_list(node.rows) ->
         invalid_graph("graph node rows must be a list", %{node: node.id})
 
-      length(row_ids) != MapSet.size(MapSet.new(row_ids)) or not Enum.all?(row_ids, &valid_id?/1) ->
+      not Enum.all?(node.rows, &match?(%Row{}, &1)) ->
+        invalid_graph("graph node rows must use Selecto.Write.Graph.Row", %{node: node.id})
+
+      duplicate_or_invalid_row_ids?(node.rows) ->
         invalid_graph("graph row ids must be unique within a node", %{
           node: node.id,
-          row_ids: row_ids
+          row_ids: Enum.map(node.rows, & &1.id)
         })
 
       node.strategy == :sync and node.identity_fields == [] ->
@@ -125,7 +131,8 @@ defmodule Selecto.Write.Graph do
       contains_unsafe_sql?(node.sync_predicate) ->
         invalid_graph("raw SQL is not allowed in graph ownership predicates", %{node: node.id})
 
-      not is_boolean(node.delete_missing?) or not is_map(node.metadata) ->
+      not is_boolean(node.delete_missing?) or not is_map(node.metadata) or
+          contains_unsafe_sql?(node.metadata) ->
         invalid_graph("graph node flags and metadata are invalid", %{node: node.id})
 
       true ->
@@ -145,37 +152,59 @@ defmodule Selecto.Write.Graph do
     end)
   end
 
-  defp validate_row(%Row{} = row, node) do
+  defp validate_row(%Row{command: %Command{} = command} = row, node) do
     cond do
       not valid_path?(row.path) ->
         invalid_graph("graph row path is invalid", %{node: node.id, row: row.id})
 
-      row.command.relation != node.relation ->
+      command.relation != node.relation ->
         invalid_graph("every graph row must target its node relation", %{
           node: node.id,
           row: row.id
         })
 
-      not is_list(row.bindings) or not is_map(row.metadata) ->
+      not is_list(row.bindings) or not is_map(row.metadata) or
+          contains_unsafe_sql?(row.metadata) ->
         invalid_graph("graph row bindings and metadata are invalid", %{node: node.id, row: row.id})
 
-      contains_generated_reference?(row.command) ->
+      contains_generated_reference?(command) ->
         invalid_graph("generated values must use explicit graph bindings", %{
           node: node.id,
           row: row.id
         })
 
       true ->
-        with :ok <- Command.validate(row.command),
+        with :ok <- Command.validate(command),
              :ok <- validate_bindings(row.bindings, row) do
           :ok
         end
     end
   end
 
+  defp validate_row(%Row{} = row, node),
+    do:
+      invalid_graph("graph row command must use Selecto.Write.Command", %{
+        node: node.id,
+        row: row.id,
+        actual: row.command
+      })
+
   defp validate_row(other, node),
     do:
       invalid_graph("graph rows must use Selecto.Write.Graph.Row", %{node: node.id, actual: other})
+
+  defp validate_graph_metadata(metadata) do
+    if contains_unsafe_sql?(metadata) do
+      invalid_graph("raw SQL is not allowed in graph metadata", %{})
+    else
+      :ok
+    end
+  end
+
+  defp duplicate_or_invalid_row_ids?(rows) do
+    ids = Enum.map(rows, & &1.id)
+    length(ids) != MapSet.size(MapSet.new(ids)) or not Enum.all?(ids, &valid_id?/1)
+  end
 
   defp validate_bindings(bindings, row) do
     assigned = MapSet.new(row.command.assignments, &normalize_identifier(&1.field))
@@ -330,6 +359,10 @@ defmodule Selecto.Write.Graph do
 
   defp contains_unsafe_sql?({:unsafe_sql, _}), do: true
   defp contains_unsafe_sql?({:unsafe_fragment, _}), do: true
+
+  defp contains_unsafe_sql?(%_{} = struct) do
+    struct |> Map.from_struct() |> contains_unsafe_sql?()
+  end
 
   defp contains_unsafe_sql?(map) when is_map(map) do
     Enum.any?(map, fn {key, value} -> contains_unsafe_sql?(key) or contains_unsafe_sql?(value) end)

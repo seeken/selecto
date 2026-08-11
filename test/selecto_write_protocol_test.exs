@@ -77,6 +77,72 @@ defmodule Selecto.WriteProtocolTest do
                relation: :items,
                metadata: %{conflict_target: {:unsafe_sql, "id"}}
              })
+
+    assert {:error, %Error{type: :invalid_command}} =
+             Command.new(%{
+               operation: :update,
+               relation: :items,
+               predicate: {:and, [{:eq, {:field, :id}, {:literal, 1}}, {:unsafe_sql, "TRUE"}]}
+             })
+
+    assert {:error, %Error{type: :invalid_command}} =
+             Command.new(%{
+               operation: :insert,
+               relation: :items,
+               assignments: [
+                 %{field: :name, value: {:coalesce, [{:literal, "safe"}, {:unsafe_sql, "x"}]}}
+               ]
+             })
+  end
+
+  test "recursive safety validation preserves ordinary typed struct values" do
+    assert {:ok, %Command{}} =
+             Command.new(%{
+               operation: :insert,
+               relation: :items,
+               assignments: [%{field: :due_on, value: {:literal, ~D[2026-10-01]}}],
+               metadata: %{requested_on: ~D[2026-08-11]}
+             })
+  end
+
+  test "malformed graph structs fail closed without raising" do
+    assert {:error, %Error{type: :invalid_graph}} = Graph.new([:not_a_node], {"root", "root"})
+
+    invalid_rows = %Node{
+      id: "root",
+      path: [],
+      relation: :items,
+      strategy: :ordered,
+      rows: :not_a_list
+    }
+
+    assert {:error, %Error{type: :invalid_graph}} =
+             Graph.new([invalid_rows], {"root", "root"})
+
+    invalid_command = %Node{
+      id: "root",
+      path: [],
+      relation: :items,
+      strategy: :ordered,
+      rows: [%Row{id: "root", path: [], command: nil}]
+    }
+
+    assert {:error, %Error{type: :invalid_graph}} =
+             Graph.new([invalid_command], {"root", "root"})
+
+    valid_row = %Row{id: "root", path: [], command: command!(:insert)}
+
+    unsafe_metadata = %Node{
+      id: "root",
+      path: [],
+      relation: :items,
+      strategy: :ordered,
+      rows: [valid_row],
+      metadata: %{hint: {:unsafe_sql, "LOCK TABLE items"}}
+    }
+
+    assert {:error, %Error{type: :invalid_graph}} =
+             Graph.new([unsafe_metadata], {"root", "root"})
   end
 
   test "requires atomic batches" do
