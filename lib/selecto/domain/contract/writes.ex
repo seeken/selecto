@@ -402,6 +402,13 @@ defmodule Selecto.Domain.Contract.Writes do
         |> validate_relationship_enum(relationship, spec, path, :ownership, @known_ownership)
         |> validate_boolean_option(relationship, spec, path, :enabled)
         |> validate_boolean_option(relationship, spec, path, :writable)
+        |> validate_boolean_option(relationship, spec, path, :delete_missing)
+        |> validate_relationship_operations(relationship, spec, path)
+        |> validate_relationship_strategy(relationship, spec, path)
+        |> validate_relationship_field_list(relationship, spec, path, :identity_fields)
+        |> validate_relationship_field_ref(relationship, spec, path, :child_key)
+        |> validate_relationship_field_ref(relationship, spec, path, :parent_key)
+        |> validate_relationship_domain(relationship, spec, path)
         |> require_relationship_write_policy(relationship, spec, path)
         |> reject_unsafe_terms(spec, path)
       else
@@ -478,6 +485,145 @@ defmodule Selecto.Domain.Contract.Writes do
             relationship: relationship,
             option: key,
             value: value
+          )
+          | errors
+        ]
+    end
+  end
+
+  defp validate_relationship_operations(errors, relationship, spec, path) do
+    case Core.map_value(spec, :allowed_ops) do
+      nil ->
+        errors
+
+      operations when is_list(operations) ->
+        Enum.reduce(operations, errors, fn operation, acc ->
+          if Core.enum_value?(operation, @known_operations) do
+            acc
+          else
+            [
+              Core.error(
+                :invalid_write_relationship_operation,
+                path ++ [:allowed_ops],
+                "write relationship #{inspect(relationship)} has an invalid allowed operation",
+                relationship: relationship,
+                operation: operation
+              )
+              | acc
+            ]
+          end
+        end)
+
+      operations ->
+        [
+          Core.error(
+            :invalid_write_relationship_option,
+            path ++ [:allowed_ops],
+            "write relationship #{inspect(relationship)} allowed_ops must be a list",
+            relationship: relationship,
+            actual: Core.value_type(operations)
+          )
+          | errors
+        ]
+    end
+  end
+
+  defp validate_relationship_strategy(errors, relationship, spec, path) do
+    case Core.map_value(spec, :strategy) do
+      nil ->
+        errors
+
+      strategy when strategy in [:sync, "sync"] ->
+        errors
+
+      strategy ->
+        [
+          Core.error(
+            :invalid_write_relationship_option,
+            path ++ [:strategy],
+            "write relationship #{inspect(relationship)} strategy must be :sync",
+            relationship: relationship,
+            value: strategy
+          )
+          | errors
+        ]
+    end
+  end
+
+  defp validate_relationship_field_list(errors, relationship, spec, path, key) do
+    case Core.map_value(spec, key) do
+      nil ->
+        errors
+
+      fields when is_list(fields) ->
+        if fields != [] and Enum.all?(fields, &Core.field_ref?/1) do
+          errors
+        else
+          [
+            Core.error(
+              :invalid_write_relationship_option,
+              path ++ [key],
+              "write relationship #{inspect(relationship)} #{key} must be a non-empty field list",
+              relationship: relationship,
+              value: fields
+            )
+            | errors
+          ]
+        end
+
+      fields ->
+        [
+          Core.error(
+            :invalid_write_relationship_option,
+            path ++ [key],
+            "write relationship #{inspect(relationship)} #{key} must be a field list",
+            relationship: relationship,
+            actual: Core.value_type(fields)
+          )
+          | errors
+        ]
+    end
+  end
+
+  defp validate_relationship_field_ref(errors, relationship, spec, path, key) do
+    case Core.map_value(spec, key) do
+      nil ->
+        errors
+
+      field ->
+        if Core.field_ref?(field) do
+          errors
+        else
+          [
+            Core.error(
+              :invalid_write_relationship_option,
+              path ++ [key],
+              "write relationship #{inspect(relationship)} #{key} must be a field reference",
+              relationship: relationship,
+              value: field
+            )
+            | errors
+          ]
+        end
+    end
+  end
+
+  defp validate_relationship_domain(errors, relationship, spec, path) do
+    case Core.map_value(spec, :domain) do
+      nil ->
+        errors
+
+      domain when is_map(domain) ->
+        errors
+
+      domain ->
+        [
+          Core.error(
+            :invalid_write_relationship_option,
+            path ++ [:domain],
+            "write relationship #{inspect(relationship)} domain must be a map",
+            relationship: relationship,
+            actual: Core.value_type(domain)
           )
           | errors
         ]

@@ -2,7 +2,8 @@ defmodule Selecto.WriteProtocolTest do
   use ExUnit.Case, async: true
 
   alias Selecto.Write
-  alias Selecto.Write.{AdapterConformance, Batch, Command, Error, Preview, Result}
+  alias Selecto.Write.{AdapterConformance, Batch, Command, Error, Graph, Preview, Result}
+  alias Selecto.Write.Graph.{Binding, Node, Row}
   alias Selecto.Domain.WriteContract
 
   defmodule WriteAdapter do
@@ -36,6 +37,7 @@ defmodule Selecto.WriteProtocolTest do
 
     defp operation(%Command{operation: operation}), do: operation
     defp operation(%Batch{commands: [%Command{operation: operation} | _]}), do: operation
+    defp operation(%Graph{}), do: :graph
   end
 
   defmodule ReadOnlyAdapter do
@@ -82,6 +84,112 @@ defmodule Selecto.WriteProtocolTest do
 
     assert {:ok, %Batch{atomic?: true}} = Batch.new([command])
     assert {:error, %Error{type: :invalid_command}} = Batch.new([command], atomic?: false)
+  end
+
+  test "validates topologically ordered generated-key write graphs" do
+    root = %{command!(:insert) | returning: [:id]}
+
+    child =
+      command!(:insert)
+      |> Map.put(:relation, :children)
+      |> Map.update!(:assignments, &[%{field: :name, value: {:literal, "child"}} | &1])
+
+    nodes = [
+      %Node{
+        id: "root",
+        path: [],
+        relation: :items,
+        strategy: :ordered,
+        rows: [%Row{id: "root", path: [], command: root}]
+      },
+      %Node{
+        id: "children",
+        path: [:children],
+        relation: :children,
+        strategy: :ordered,
+        rows: [
+          %Row{
+            id: "0",
+            path: [:children, 0],
+            command: child,
+            bindings: [
+              %Binding{
+                field: :item_id,
+                from_node: "root",
+                from_row: "root",
+                from_field: :id
+              }
+            ]
+          }
+        ]
+      }
+    ]
+
+    assert {:ok, graph} = Graph.new(nodes, {"root", "root"})
+
+    assert {:ok, %Result{operation: :graph}} =
+             Write.execute(%Selecto{adapter: WriteAdapter, connection: :connection}, graph)
+  end
+
+  test "rejects forward references and caller overrides of generated bindings" do
+    command = command!(:insert)
+
+    forward =
+      %Node{
+        id: "child",
+        path: [:child],
+        relation: :items,
+        strategy: :ordered,
+        rows: [
+          %Row{
+            id: "child",
+            path: [:child],
+            command: command,
+            bindings: [
+              %Binding{
+                field: :parent_id,
+                from_node: "later",
+                from_row: "later",
+                from_field: :id
+              }
+            ]
+          }
+        ]
+      }
+
+    later = %Node{
+      id: "later",
+      path: [],
+      relation: :items,
+      strategy: :ordered,
+      rows: [%Row{id: "later", path: [], command: command}]
+    }
+
+    assert {:error, %Error{type: :invalid_graph}} =
+             Graph.new([forward, later], {"later", "later"})
+
+    overridden =
+      %{
+        forward
+        | rows: [
+            %Row{
+              id: "child",
+              path: [:child],
+              command: command,
+              bindings: [
+                %Binding{
+                  field: :name,
+                  from_node: "later",
+                  from_row: "later",
+                  from_field: :id
+                }
+              ]
+            }
+          ]
+      }
+
+    assert {:error, %Error{type: :invalid_graph}} =
+             Graph.new([later, overridden], {"later", "later"})
   end
 
   test "provides reusable non-mutating adapter conformance checks" do

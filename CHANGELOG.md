@@ -1,6 +1,25 @@
 
 # Selecto Library Changelog
 
+## V 0.4.11 - Portable Atomic Write Graphs
+---------------------------------------------------------
+
+#### Added
+- Added adapter-neutral `Selecto.Write.Graph`, relation nodes, path-addressed
+  rows, and generated-value bindings for atomic nested writes.
+- Added graph validation for topology, required returning fields, generated-key
+  override prevention, portable field types, sync identity, ownership
+  predicates, and raw-SQL rejection.
+- Extended the database write-adapter contract and `Selecto.Write` dispatcher
+  to accept validated atomic graphs without adding a database dependency to
+  core Selecto.
+
+#### Changed
+- Extended write-relationship contract validation for allowed operations,
+  child domains, parent and child keys, identity fields, sync strategy, and
+  delete-missing policy.
+- Bump package version to `0.4.11`.
+
 ## V 0.4.10 - Portable Query and Write Contracts
 ---------------------------------------------------------
 

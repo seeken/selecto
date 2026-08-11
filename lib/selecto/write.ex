@@ -9,7 +9,7 @@ defmodule Selecto.Write do
 
   alias Selecto.Write.{Command, Error, Preview}
 
-  @type command :: Command.t() | Selecto.Write.Batch.t()
+  @type command :: Command.t() | Selecto.Write.Batch.t() | Selecto.Write.Graph.t()
 
   @spec execute(Selecto.t(), command(), keyword()) ::
           {:ok, Selecto.Write.Result.t()} | {:error, Error.t()}
@@ -37,10 +37,11 @@ defmodule Selecto.Write do
 
   defp validate_command(%Command{} = command), do: Command.validate(command)
   defp validate_command(%Selecto.Write.Batch{} = batch), do: Selecto.Write.Batch.validate(batch)
+  defp validate_command(%Selecto.Write.Graph{} = graph), do: Selecto.Write.Graph.validate(graph)
 
   defp validate_command(other) do
     {:error,
-     Error.new(:invalid_command, "expected a portable Selecto write command or batch",
+     Error.new(:invalid_command, "expected a portable Selecto write command, batch, or graph",
        details: %{actual: other}
      )}
   end

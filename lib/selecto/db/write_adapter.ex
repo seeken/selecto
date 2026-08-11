@@ -4,11 +4,12 @@ defmodule Selecto.DB.WriteAdapter do
 
   Implementing this behavior means the adapter can preserve the complete
   semantics of a portable `Selecto.Write.Command` or atomic
-  `Selecto.Write.Batch`. Read-only adapters simply omit it.
+  `Selecto.Write.Batch`/`Selecto.Write.Graph`. Read-only adapters simply omit it.
   """
 
   @type connection :: term()
-  @type command :: Selecto.Write.Command.t() | Selecto.Write.Batch.t()
+  @type command ::
+          Selecto.Write.Command.t() | Selecto.Write.Batch.t() | Selecto.Write.Graph.t()
 
   @callback write_capabilities(connection()) :: map()
 
