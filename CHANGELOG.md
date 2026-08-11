@@ -1,7 +1,7 @@
 
 # Selecto Library Changelog
 
-## V 0.4.10 - Analytic Column Defaults
+## V 0.4.10 - Portable Query and Write Contracts
 ---------------------------------------------------------
 
 #### Added
@@ -9,6 +9,12 @@
   preserved them through compiled columns and query-contract projection, so
   analytic clients can derive shared Aggregate and Graph defaults without
   adding metric or visualization registries to the Domain.
+
+#### Security
+- Restricted portable write commands and domain operation declarations to
+  insert, update, upsert, and delete; retired operation ids now fail closed.
+- Added reusable, non-mutating write-adapter conformance fixtures for all four
+  operations plus atomic batch previews.
 
 #### Changed
 - Bump package version to `0.4.10`.
