@@ -256,6 +256,148 @@ defmodule Selecto.DomainTest do
       assert {:ok, _normalized, _diagnostics} = Domain.validate(domain)
     end
 
+    test "normalizes colocated source column write policy into writes.fields" do
+      domain =
+        minimal_query_domain()
+        |> put_in([:source, :columns, :status, :write], %{
+          insertable: true,
+          updatable: true,
+          required_on: [:insert]
+        })
+        |> put_in([:source, :columns, :total, :write], %{updatable: true})
+        |> Map.put(:writes, %{
+          operations: %{
+            insert: %{enabled: true},
+            update: %{enabled: true, require_filter: true}
+          }
+        })
+
+      assert {:ok, normalized, diagnostics} = Domain.normalize(domain)
+      assert diagnostics.errors == []
+
+      refute Map.has_key?(normalized.source.columns.status, :write)
+      refute Map.has_key?(normalized.source.columns.total, :write)
+
+      assert normalized.writes.fields == %{
+               status: %{insertable: true, updatable: true, required_on: [:insert]},
+               total: %{updatable: true}
+             }
+
+      assert {:ok, contract} = Selecto.Domain.WriteContract.compile(domain)
+      assert Selecto.Domain.WriteContract.writable?(contract, :insert, :status)
+      assert Selecto.Domain.WriteContract.writable?(contract, :update, :total)
+      refute Selecto.Domain.WriteContract.writable?(contract, :insert, :id)
+    end
+
+    test "normalizes colocated source association write policy into writes.relationships" do
+      child_domain =
+        minimal_query_domain()
+        |> put_in([:source, :source_table], "order_items")
+        |> put_in([:source, :fields], [:id, :order_id, :status])
+        |> put_in([:source, :columns], %{
+          id: %{type: :integer},
+          order_id: %{type: :integer},
+          status: %{type: :string, write: %{insertable: true, updatable: true}}
+        })
+        |> Map.put(:writes, %{operations: %{insert: %{enabled: true}}})
+
+      domain =
+        minimal_query_domain()
+        |> put_in([:source, :associations, :items], %{
+          queryable: :items,
+          field: :items,
+          owner_key: :id,
+          related_key: :order_id,
+          cardinality: :many,
+          write: %{
+            enabled: true,
+            ownership: :owned,
+            allowed_ops: [:insert],
+            domain: child_domain,
+            identity_fields: [:id],
+            strategy: :sync,
+            delete_missing: true
+          }
+        })
+        |> Map.put(:writes, %{operations: %{insert: %{enabled: true}}})
+
+      assert {:ok, normalized, diagnostics} = Domain.normalize(domain)
+      assert diagnostics.errors == []
+      refute Map.has_key?(normalized.source.associations.items, :write)
+
+      assert normalized.writes.relationships.items.cardinality == :many
+      assert normalized.writes.relationships.items.parent_key == :id
+      assert normalized.writes.relationships.items.child_key == :order_id
+      assert normalized.writes.relationships.items.ownership == :owned
+      assert normalized.writes.relationships.items.domain == child_domain
+    end
+
+    test "duplicate colocated and canonical write policy fails closed" do
+      domain =
+        minimal_query_domain()
+        |> put_in([:source, :columns, :status, :write], %{updatable: true})
+        |> put_in([:source, :associations, :items], %{
+          queryable: :items,
+          write: %{enabled: true, cardinality: :many, ownership: :owned}
+        })
+        |> Map.put(:writes, %{
+          operations: %{update: %{enabled: true}},
+          fields: %{"status" => %{updatable: true}},
+          relationships: %{"items" => %{enabled: true, cardinality: :many, ownership: :owned}}
+        })
+
+      assert {:ok, normalized, diagnostics} = Domain.normalize(domain)
+      assert Enum.count(diagnostics.errors, &(&1.code == :duplicate_write_authoring)) == 2
+      refute Map.has_key?(normalized.writes.fields, :status)
+      refute Map.has_key?(normalized.writes.fields, "status")
+      refute Map.has_key?(normalized.writes.relationships, :items)
+      refute Map.has_key?(normalized.writes.relationships, "items")
+
+      assert {:error, diagnostics} = Domain.validate(domain)
+      assert Enum.count(diagnostics.errors, &(&1.code == :duplicate_write_authoring)) == 2
+
+      assert {:error, %Selecto.Write.Error{type: :invalid_domain}} =
+               Selecto.Domain.WriteContract.compile(domain)
+    end
+
+    test "read-only columns and associations do not grant write authority" do
+      domain =
+        minimal_query_domain()
+        |> put_in([:source, :associations, :items], %{
+          queryable: :items,
+          owner_key: :id,
+          related_key: :order_id,
+          cardinality: :many
+        })
+        |> Map.put(:writes, %{operations: %{update: %{enabled: true}}})
+
+      assert {:ok, normalized, diagnostics} = Domain.normalize(domain)
+      assert diagnostics.errors == []
+      refute Map.has_key?(normalized.writes, :fields)
+      refute Map.has_key?(normalized.writes, :relationships)
+
+      assert {:error, %Selecto.Write.Error{type: :write_not_declared}} =
+               Selecto.Domain.WriteContract.compile(domain)
+    end
+
+    test "merges colocated policy with non-overlapping canonical write fields" do
+      domain =
+        minimal_query_domain()
+        |> put_in([:source, :columns, :status, :write], %{updatable: true})
+        |> Map.put(:writes, %{
+          operations: %{update: %{enabled: true}},
+          fields: %{total: %{updatable: true}}
+        })
+
+      assert {:ok, normalized, diagnostics} = Domain.normalize(domain)
+      assert diagnostics.errors == []
+
+      assert normalized.writes.fields == %{
+               status: %{updatable: true},
+               total: %{updatable: true}
+             }
+    end
+
     test "returns diagnostics for non-map input" do
       assert {:error, diagnostics} = Domain.normalize(:not_a_domain)
 
@@ -433,6 +575,23 @@ defmodule Selecto.DomainTest do
                  code: :invalid_domain_overlay,
                  overlay_index: 0,
                  actual: :atom
+               }
+             ] = diagnostics.errors
+    end
+
+    test "rejects duplicate colocated and canonical policy in an overlay" do
+      overlay = %{
+        source: %{columns: %{status: %{write: %{updatable: true}}}},
+        writes: %{fields: %{status: %{updatable: true}}}
+      }
+
+      assert {:error, diagnostics} = Domain.compose(minimal_query_domain(), overlay)
+
+      assert [
+               %{
+                 code: :duplicate_write_authoring,
+                 overlay_index: 0,
+                 path: [:source, :columns, :status, :write]
                }
              ] = diagnostics.errors
     end

@@ -53,7 +53,8 @@ defmodule Selecto.Domain.Compose do
   @spec compose(map(), list(), (map() -> {:ok, map(), map()} | {:error, map()})) ::
           {:ok, map(), map()} | {:error, map()}
   def compose(domain, overlays, normalize_fun) do
-    with {:ok, normalized, _diagnostics} <- normalize_fun.(domain),
+    with {:ok, normalized, diagnostics} <- normalize_fun.(domain),
+         :ok <- ensure_no_authoring_errors(diagnostics),
          {:ok, overlays} <- domain_overlays(overlays) do
       {composed_domain, composition_warnings} =
         overlays
@@ -69,24 +70,37 @@ defmodule Selecto.Domain.Compose do
 
       composed_domain = apply_composed_extensions(composed_domain)
 
-      with {:ok, normalized, diagnostics} <- normalize_fun.(composed_domain) do
+      with {:ok, normalized, diagnostics} <- normalize_fun.(composed_domain),
+           :ok <- ensure_no_authoring_errors(diagnostics) do
         {:ok, normalized, %{diagnostics | warnings: composition_warnings ++ diagnostics.warnings}}
       end
     end
   end
 
+  defp ensure_no_authoring_errors(%{errors: []}), do: :ok
+  defp ensure_no_authoring_errors(diagnostics), do: {:error, diagnostics}
+
   def domain_overlays(nil), do: {:ok, []}
   def domain_overlays([]), do: {:ok, []}
-  def domain_overlays(%{} = overlay), do: {:ok, [overlay]}
+  def domain_overlays(%{} = overlay), do: domain_overlays([overlay])
 
   def domain_overlays(overlays) when is_list(overlays) do
     overlays
     |> Enum.with_index()
     |> Enum.reduce_while({:ok, []}, fn {overlay, index}, {:ok, acc} ->
-      if is_map(overlay) do
-        {:cont, {:ok, [overlay | acc]}}
-      else
-        {:halt, {:error, invalid_domain_overlay_diagnostics(overlay, index)}}
+      errors = if is_map(overlay), do: Shorthand.authoring_errors(overlay), else: []
+
+      cond do
+        not is_map(overlay) ->
+          {:halt, {:error, invalid_domain_overlay_diagnostics(overlay, index)}}
+
+        errors != [] ->
+          {:halt,
+           {:error,
+            Diagnostics.new(errors: Enum.map(errors, &Map.put(&1, :overlay_index, index)))}}
+
+        true ->
+          {:cont, {:ok, [overlay | acc]}}
       end
     end)
     |> case do

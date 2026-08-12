@@ -63,6 +63,11 @@ defmodule Selecto.Domain do
     content identity label
   - expands supported field-level choice-source shorthand into canonical
     `source_relationships`, `choice_sources`, and field reference bindings
+  - expands `source.columns.*.write` and `source.associations.*.write`
+    authoring shorthand into canonical `writes.fields` and
+    `writes.relationships` registries
+  - reports duplicate colocated/canonical write declarations as fail-closed
+    authoring errors rather than choosing precedence
   - classifies authored top-level sections as canonical, projection, proposed,
     or unknown
   - exposes current query, write, action, capability, relationship, and choice
@@ -80,6 +85,7 @@ defmodule Selecto.Domain do
 
     diagnostics =
       Diagnostics.new(
+        errors: Shorthand.authoring_errors(domain),
         warnings: schema_version_warnings ++ section_shape_warnings(domain),
         sections: sections,
         schema_version: schema_version,
@@ -130,7 +136,11 @@ defmodule Selecto.Domain do
     with {:ok, normalized, diagnostics} <- normalize(domain) do
       case Selecto.Domain.Contract.errors(normalized) do
         [] ->
-          {:ok, normalized, diagnostics}
+          if diagnostics.errors == [] do
+            {:ok, normalized, diagnostics}
+          else
+            {:error, diagnostics}
+          end
 
         errors ->
           {:error, %{diagnostics | errors: diagnostics.errors ++ errors}}

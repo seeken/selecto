@@ -1,6 +1,19 @@
 
 # Selecto Library Changelog
 
+## Unreleased
+---------------------------------------------------------
+
+#### Added
+- Added colocated domain write authoring through `source.columns.*.write` and
+  `source.associations.*.write`, normalized into the existing canonical
+  `writes.fields` and `writes.relationships` contract.
+
+#### Security
+- Kept missing colocated `write` metadata read-only and made duplicate
+  colocated/canonical write declarations fail closed instead of resolving by
+  precedence.
+
 ## V 0.4.11 - Portable Atomic Write Graphs
 ---------------------------------------------------------
 

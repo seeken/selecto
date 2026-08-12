@@ -373,6 +373,77 @@ Validation checks:
 This validation does not execute writes and does not make `Selecto.configure/3`
 depend on the write contract.
 
+## Colocated Write Authoring
+
+Fields and relationships may colocate write policy with their structural domain
+definitions. This is authoring shorthand; normalization still produces the
+canonical `writes.fields` and `writes.relationships` registries consumed by
+Updato and database adapters.
+
+```elixir
+%{
+  source: %{
+    columns: %{
+      id: %{type: :integer, write: %{server_managed: true}},
+      tenant_id: %{
+        type: :integer,
+        write: %{insertable: true, immutable: true}
+      },
+      status: %{
+        type: :string,
+        write: %{insertable: true, updatable: true, required_on: [:insert]}
+      }
+    },
+    associations: %{
+      items: %{
+        queryable: :items,
+        field: :items,
+        cardinality: :many,
+        owner_key: :id,
+        related_key: :order_id,
+        write: %{
+          enabled: true,
+          ownership: :owned,
+          allowed_ops: [:insert, :update],
+          domain: item_domain,
+          identity_fields: [:id],
+          strategy: :sync,
+          delete_missing: true
+        }
+      }
+    }
+  },
+  writes: %{
+    operations: %{
+      insert: %{enabled: true},
+      update: %{enabled: true, require_filter: true}
+    },
+    scope: %{
+      tenant: %{required: true, field: :tenant_id}
+    }
+  }
+}
+```
+
+For association shorthand, `cardinality`, `owner_key`, and `related_key` become
+the canonical relationship `cardinality`, `parent_key`, and `child_key` unless
+the `write` map declares them explicitly.
+
+Safety rules:
+
+- missing `write` means read-only; queryability never grants writability;
+- only source columns and source associations grant shorthand write policy;
+  projection columns do not;
+- database introspection may verify structural metadata but cannot add write
+  permissions;
+- declaring the same field or relationship both beside its definition and in
+  `writes.fields` or `writes.relationships` produces
+  `:duplicate_write_authoring` and removes that grant from the normalized
+  contract;
+- operation, tenant scope, transitions, and cross-field constraints remain in
+  the top-level `writes` section because they are not properties of one field or
+  relationship.
+
 ## Capability Catalog
 
 `capabilities` declares the stable capability names a domain can reference. It

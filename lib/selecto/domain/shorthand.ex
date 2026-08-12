@@ -4,6 +4,42 @@ defmodule Selecto.Domain.Shorthand do
   alias Selecto.Domain.Shared.Map, as: MapHelpers
 
   def normalize_authoring_shorthand(domain) do
+    domain
+    |> normalize_choice_source_shorthand()
+    |> normalize_write_authoring_shorthand()
+  end
+
+  @doc false
+  def authoring_errors(domain) when is_map(domain) do
+    writes = MapHelpers.section(domain, :writes, %{})
+    source = MapHelpers.section(domain, :source, %{})
+
+    if is_map(writes) and is_map(source) do
+      field_errors =
+        duplicate_write_errors(
+          MapHelpers.map_value(source, :columns),
+          MapHelpers.map_value(writes, :fields),
+          :fields,
+          [:source, :columns]
+        )
+
+      relationship_errors =
+        duplicate_write_errors(
+          MapHelpers.map_value(source, :associations),
+          MapHelpers.map_value(writes, :relationships),
+          :relationships,
+          [:source, :associations]
+        )
+
+      field_errors ++ relationship_errors
+    else
+      []
+    end
+  end
+
+  def authoring_errors(_domain), do: []
+
+  defp normalize_choice_source_shorthand(domain) do
     choice_sources = MapHelpers.section(domain, :choice_sources, %{})
     source_relationships = MapHelpers.section(domain, :source_relationships, %{})
 
@@ -30,6 +66,134 @@ defmodule Selecto.Domain.Shorthand do
     else
       domain
     end
+  end
+
+  defp normalize_write_authoring_shorthand(domain) do
+    source = MapHelpers.section(domain, :source)
+    writes = MapHelpers.section(domain, :writes, %{})
+
+    if is_map(source) and is_map(writes) do
+      {source, field_writes} = extract_column_write_shorthand(source)
+      {source, relationship_writes} = extract_association_write_shorthand(source)
+
+      writes =
+        writes
+        |> merge_write_registry(:fields, field_writes)
+        |> merge_write_registry(:relationships, relationship_writes)
+
+      domain
+      |> MapHelpers.put_section(:source, source)
+      |> MapHelpers.put_section(:writes, writes)
+    else
+      domain
+    end
+  end
+
+  defp extract_column_write_shorthand(source) do
+    case MapHelpers.map_value(source, :columns) do
+      columns when is_map(columns) ->
+        {columns, entries} =
+          extract_write_entries(columns, fn write_spec, _column -> write_spec end)
+
+        {MapHelpers.put_map_value(source, :columns, columns), entries}
+
+      _columns ->
+        {source, []}
+    end
+  end
+
+  defp extract_association_write_shorthand(source) do
+    case MapHelpers.map_value(source, :associations) do
+      associations when is_map(associations) ->
+        {associations, entries} =
+          extract_write_entries(associations, &relationship_write_spec/2)
+
+        {MapHelpers.put_map_value(source, :associations, associations), entries}
+
+      _associations ->
+        {source, []}
+    end
+  end
+
+  defp extract_write_entries(registry, normalize_spec) do
+    {registry, entries} =
+      Enum.reduce(registry, {%{}, []}, fn {id, entry}, {registry_acc, entries} ->
+        case entry do
+          entry when is_map(entry) ->
+            if MapHelpers.has_key_variant?(entry, :write) do
+              write_spec = normalize_spec.(MapHelpers.map_value(entry, :write), entry)
+              entry = MapHelpers.delete_key_variants(entry, :write)
+              {Map.put(registry_acc, id, entry), [{id, write_spec} | entries]}
+            else
+              {Map.put(registry_acc, id, entry), entries}
+            end
+
+          _entry ->
+            {Map.put(registry_acc, id, entry), entries}
+        end
+      end)
+
+    {registry, Enum.reverse(entries)}
+  end
+
+  defp relationship_write_spec(write_spec, association) when is_map(write_spec) do
+    write_spec
+    |> MapHelpers.maybe_put_default(:cardinality, MapHelpers.map_value(association, :cardinality))
+    |> MapHelpers.maybe_put_default(:parent_key, MapHelpers.map_value(association, :owner_key))
+    |> MapHelpers.maybe_put_default(:child_key, MapHelpers.map_value(association, :related_key))
+  end
+
+  defp relationship_write_spec(write_spec, _association), do: write_spec
+
+  defp merge_write_registry(writes, _section, []), do: writes
+
+  defp merge_write_registry(writes, section, entries) do
+    existing =
+      case MapHelpers.fetch_key(writes, section) do
+        {:ok, value} -> value
+        :error -> %{}
+      end
+
+    if is_map(existing) do
+      merged =
+        Enum.reduce(entries, existing, fn {id, spec}, registry ->
+          case equivalent_registry_key(registry, id) do
+            nil -> Map.put(registry, id, spec)
+            duplicate -> Map.delete(registry, duplicate)
+          end
+        end)
+
+      MapHelpers.put_map_value(writes, section, merged)
+    else
+      writes
+    end
+  end
+
+  defp duplicate_write_errors(authored_registry, canonical_registry, section, path)
+       when is_map(authored_registry) and is_map(canonical_registry) do
+    authored_registry
+    |> Enum.flat_map(fn {id, entry} ->
+      if is_map(entry) and MapHelpers.has_key_variant?(entry, :write) and
+           registry_has_key?(canonical_registry, id) do
+        [
+          %{
+            code: :duplicate_write_authoring,
+            path: path ++ [id, :write],
+            canonical_path: [:writes, section, id],
+            message:
+              "write policy for #{inspect(id)} is declared both beside its domain definition and in writes.#{section}"
+          }
+        ]
+      else
+        []
+      end
+    end)
+  end
+
+  defp duplicate_write_errors(_authored_registry, _canonical_registry, _section, _path), do: []
+
+  defp equivalent_registry_key(registry, id) do
+    Enum.find(Map.keys(registry), &(MapHelpers.field_id(&1) == MapHelpers.field_id(id)))
   end
 
   def normalize_source_choice_shorthand(domain, acc) do
