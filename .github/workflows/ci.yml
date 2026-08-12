@@ -37,7 +37,7 @@ jobs:
             ${{ runner.os }}-mix-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
 
       - name: Install dependencies
-        run: mix deps.get
+        run: mix deps.get --locked
 
       - name: Run precommit checks
         run: mix precommit
@@ -46,11 +46,13 @@ jobs:
         run: mix test test/performance_test.exs --include performance:true
 
       - name: Generate docs
-        run: mix docs
+        run: mix docs --warnings-as-errors
+
+      - name: Verify Hex package contents
+        run: mix hex.build
 
   dialyzer:
     name: Dialyzer Analysis
-    continue-on-error: true
     runs-on: ubuntu-latest
 
     steps:
@@ -70,10 +72,10 @@ jobs:
           key: v3-${{ runner.os }}-plt-elixir-${{ env.ELIXIR_VERSION }}-otp-${{ env.OTP_VERSION }}-${{ hashFiles('**/mix.lock') }}
 
       - name: Install dependencies
-        run: mix deps.get
+        run: mix deps.get --locked
 
       - name: Build PLT
         run: mix dialyzer --plt
 
       - name: Run Dialyzer
-        run: mix dialyzer
+        run: mix dialyzer --list-unused-filters

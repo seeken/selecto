@@ -11,7 +11,30 @@ defmodule Selecto.Policy do
 
   @modes [:permissive, :strict]
   @domain_sql_modes [:declared, :forbid]
-  @raw_sql_heads [:raw_sql, :raw_sql_filter, :custom_sql]
+  @raw_sql_heads [
+    :raw_sql,
+    :raw_sql_filter,
+    :custom_sql,
+    "raw_sql",
+    "raw_sql_filter",
+    "custom_sql"
+  ]
+  @domain_sql_keys [
+    :select,
+    :sql,
+    :on,
+    :join_condition,
+    :raw_sql,
+    :raw_sql_filter,
+    :custom_sql,
+    "select",
+    "sql",
+    "on",
+    "join_condition",
+    "raw_sql",
+    "raw_sql_filter",
+    "custom_sql"
+  ]
   @member_groups [:ctes, :laterals, :subqueries, :values, :unnests]
   @internal_origin_key :__selecto_policy_origin__
 
@@ -438,8 +461,7 @@ defmodule Selecto.Policy do
   defp find_domain_sql(map, path) when is_map(map) do
     Enum.find_value(map, fn
       {key, value}
-      when key in [:select, :sql, :on, :join_condition] and
-             (is_binary(value) or is_list(value)) ->
+      when key in @domain_sql_keys and (is_binary(value) or is_list(value)) ->
         path ++ [key]
 
       {key, value} ->
@@ -465,6 +487,8 @@ defmodule Selecto.Policy do
     |> Base.encode16(case: :lower)
   end
 
+  @spec violation!(atom(), String.t()) :: no_return()
+  @spec violation!(atom(), String.t(), list()) :: no_return()
   defp violation!(type, message, path \\ []) do
     raise PolicyViolation, type: type, message: message, path: path
   end

@@ -37,7 +37,8 @@ defmodule Selecto.Extension do
   @callback overlay_dsl_modules(opts :: extension_opts()) :: [module()]
 
   @doc """
-  Compile-time hook called from `Selecto.Config.OverlayDSL.__using__/1`.
+  Compile-time hook used when `Selecto.Config.OverlayDSL` initializes an
+  extension-enabled overlay module.
 
   Use this to register extension-specific module attributes for overlay DSL
   directives.

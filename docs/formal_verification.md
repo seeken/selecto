@@ -1,6 +1,6 @@
 # Selecto Formal Verification
 
-Selecto ships a deterministic bounded model checker and two built-in proof
+Selecto ships a deterministic bounded model checker and three built-in proof
 suites. They provide stronger evidence than sampled tests: every invariant is
 checked against every state in an explicitly defined finite model.
 
@@ -51,6 +51,20 @@ For all 32 states it proves:
 
 This complements stable contract snapshots and breaking-change classification
 in `Selecto.Domain.ContractVerification`.
+
+### Write-registry identifier safety
+
+`selecto.write_registry_identifier_safety.v1` exhaustively crosses:
+
+- canonical write-operation and write-field registries;
+- atom, string, and mixed atom/string identifier spellings;
+- conflicting enabled and writable authority values.
+
+For all 24 states it proves:
+
+- atom/string aliases that normalize to one authority identifier fail closed;
+- authored and already-normalized contract compilation both reject collisions;
+- unambiguous atom-only and string-only registries remain accepted.
 
 ## Proof Meaning
 

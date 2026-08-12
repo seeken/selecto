@@ -46,7 +46,8 @@ defmodule Selecto.ConnectionPool do
     checkout_timeout: 5000
   ]
 
-  @type pool_ref :: pid() | atom()
+  @type pool_name :: atom() | {:via, module(), term()}
+  @type pool_ref :: pid() | pool_name() | map()
   @type connection_config :: Keyword.t() | map()
   @type pool_options :: Keyword.t()
 
@@ -177,12 +178,13 @@ defmodule Selecto.ConnectionPool do
   """
   @spec stop_pool(pool_ref()) :: :ok
   def stop_pool(%{pool: pool_pid, manager: manager_pid}) do
-    GenServer.stop(manager_pid)
-    GenServer.stop(pool_pid)
+    stop_manager(manager_pid)
+    maybe_stop_connection(pool_pid)
+    :ok
   end
 
   def stop_pool(%{manager: manager_pid, connection: connection}) do
-    GenServer.stop(manager_pid)
+    stop_manager(manager_pid)
     maybe_stop_connection(connection)
     :ok
   end
@@ -505,15 +507,10 @@ defmodule Selecto.ConnectionPool do
   end
 
   defp validate_pool_health(%{adapter: adapter, connection: connection}) do
-    cond do
-      is_nil(connection) ->
-        {:error, "Adapter connection not available"}
-
-      Selecto.AdapterSupport.callback_available?(adapter, :supports?, 1) ->
-        :ok
-
-      true ->
-        {:error, "Adapter does not implement health capabilities"}
+    if managed_resource_alive?(%{adapter: adapter, connection: connection}) do
+      :ok
+    else
+      {:error, "Adapter connection not available"}
     end
   end
 
@@ -528,14 +525,14 @@ defmodule Selecto.ConnectionPool do
 
   def get_manager_pid(%{manager: manager_pid}), do: {:ok, manager_pid}
 
-  def get_manager_pid(%{name: pool_name}) when is_atom(pool_name) do
+  def get_manager_pid(%{name: pool_name}) when is_atom(pool_name) or is_tuple(pool_name) do
     case get_manager_pid_by_name(pool_name) do
       {:ok, manager_pid} -> {:ok, manager_pid}
       :error -> {:error, "Invalid pool reference"}
     end
   end
 
-  def get_manager_pid(pool_name) when is_atom(pool_name) do
+  def get_manager_pid(pool_name) when is_atom(pool_name) or is_tuple(pool_name) do
     case get_manager_pid_by_name(pool_name) do
       {:ok, manager_pid} -> {:ok, manager_pid}
       :error -> {:error, "Invalid pool reference"}
@@ -551,19 +548,19 @@ defmodule Selecto.ConnectionPool do
     end
   end
 
-  defp via_manager(pool_name) when is_atom(pool_name) do
+  defp via_manager(pool_name) do
     {:via, Registry, {@registry, {:manager, pool_name}}}
   end
 
   @doc false
-  def get_manager_pid_by_name(pool_name) when is_atom(pool_name) do
+  def get_manager_pid_by_name(pool_name) when is_atom(pool_name) or is_tuple(pool_name) do
     case Process.whereis(@registry) do
       nil ->
         :error
 
       _pid ->
         case Registry.lookup(@registry, {:manager, pool_name}) do
-          [{pid, _value}] -> {:ok, pid}
+          [{pid, _value}] -> reusable_manager(pid)
           [] -> :error
         end
     end
@@ -593,7 +590,32 @@ defmodule Selecto.ConnectionPool do
 
   @doc false
   def build_pool_ref_from_manager(manager_pid) when is_pid(manager_pid) do
-    case GenServer.call(manager_pid, :pool_reference) do
+    case manager_pool_reference(manager_pid) do
+      {:ok, reference} ->
+        if managed_resource_alive?(reference) do
+          {:ok, reference}
+        else
+          {:error, :managed_resource_not_alive}
+        end
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp reusable_manager(manager_pid) do
+    case build_pool_ref_from_manager(manager_pid) do
+      {:ok, _reference} ->
+        {:ok, manager_pid}
+
+      {:error, _reason} ->
+        stop_manager(manager_pid)
+        :error
+    end
+  end
+
+  defp manager_pool_reference(manager_pid) do
+    case GenServer.call(manager_pid, :pool_reference, 1_000) do
       %{} = reference -> {:ok, reference}
       other -> {:error, {:invalid_pool_reference, other}}
     end
@@ -601,9 +623,67 @@ defmodule Selecto.ConnectionPool do
     :exit, reason -> {:error, {:manager_unavailable, reason}}
   end
 
+  # Pool references are process-owned by contract, regardless of which adapter
+  # started them. Generic adapters may also use opaque connection handles, so
+  # only process-shaped handles are checked here unless the adapter exposes its
+  # optional validation callback.
+  defp managed_resource_alive?(%{pool: pool_ref}), do: process_reference_alive?(pool_ref)
+
+  defp managed_resource_alive?(%{adapter: adapter, connection: connection}) do
+    cond do
+      is_nil(connection) ->
+        false
+
+      is_pid(connection) ->
+        Process.alive?(connection)
+
+      match?({:via, _, _}, connection) or match?({:global, _}, connection) ->
+        process_reference_alive?(connection)
+
+      Selecto.AdapterSupport.callback_available?(adapter, :validate_connection, 1) ->
+        adapter_connection_alive?(adapter, connection)
+
+      true ->
+        true
+    end
+  end
+
+  defp managed_resource_alive?(_reference), do: false
+
+  defp process_reference_alive?(pid) when is_pid(pid), do: Process.alive?(pid)
+
+  defp process_reference_alive?(name) when is_atom(name) and not is_nil(name) do
+    is_pid(Process.whereis(name))
+  end
+
+  defp process_reference_alive?(name) when is_tuple(name) do
+    try do
+      is_pid(GenServer.whereis(name))
+    rescue
+      _exception -> false
+    catch
+      :exit, _reason -> false
+    end
+  end
+
+  defp process_reference_alive?(_reference), do: false
+
+  defp adapter_connection_alive?(adapter, connection) do
+    adapter.validate_connection(connection) == :ok
+  rescue
+    _exception -> false
+  catch
+    _kind, _reason -> false
+  end
+
   defp maybe_stop_connection(connection) when is_pid(connection) do
     if Process.alive?(connection) do
-      Process.exit(connection, :normal)
+      # Pool and adapter connections are normally OTP processes. A normal stop
+      # is deliberately used here so linked owners are not taken down when a
+      # different process releases the managed pool. If the handle is stale or
+      # is not a responsive OTP server, the bounded stop exits and cleanup
+      # fails closed without sending a non-normal exit into its link graph.
+      safe_stop_connection(connection)
     else
       :ok
     end
@@ -611,18 +691,48 @@ defmodule Selecto.ConnectionPool do
 
   defp maybe_stop_connection(_), do: :ok
 
+  defp safe_stop_connection(connection) do
+    GenServer.stop(connection, :normal, 1_000)
+  catch
+    :exit, _reason -> :ok
+  end
+
+  defp stop_manager(manager_pid) when is_pid(manager_pid) do
+    if Process.alive?(manager_pid) do
+      case Process.whereis(@manager_supervisor) do
+        supervisor when is_pid(supervisor) ->
+          case DynamicSupervisor.terminate_child(supervisor, manager_pid) do
+            :ok -> :ok
+            {:error, _reason} -> safe_stop_manager(manager_pid)
+          end
+
+        nil ->
+          safe_stop_manager(manager_pid)
+      end
+    end
+
+    :ok
+  end
+
+  defp safe_stop_manager(manager_pid) do
+    GenServer.stop(manager_pid)
+  catch
+    :exit, _reason -> :ok
+  end
+
   # Expose for testing
   def generate_pool_name(connection_config) do
-    # Create a unique pool name based on connection parameters
     hash =
-      :crypto.hash(:md5, inspect(connection_config))
+      connection_config
+      |> :erlang.term_to_binary([:deterministic])
+      |> then(&:crypto.hash(:sha256, &1))
       |> Base.encode16(case: :lower)
-      |> String.slice(0, 8)
+      |> String.slice(0, 32)
 
-    # Pool names are bounded by configured database identities and Postgrex requires
-    # registered names to be atoms or via tuples.
-    # credo:disable-for-next-line Credo.Check.Warning.UnsafeToAtom
-    :"selecto_pool_#{hash}"
+    # Postgrex accepts GenServer-compatible `:via` names. Registry keys are
+    # ordinary garbage-collected terms, so distinct runtime connection configs
+    # cannot consume atoms for the lifetime of the VM.
+    {:via, Registry, {@registry, {:pool, hash}}}
   end
 
   def generate_cache_key(query) do

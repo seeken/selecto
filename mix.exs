@@ -4,7 +4,7 @@ defmodule Selecto.MixProject do
   def project do
     [
       app: :selecto,
-      version: "0.4.11",
+      version: "0.4.12",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -22,8 +22,7 @@ defmodule Selecto.MixProject do
       dialyzer: [
         plt_core_path: "priv/plts",
         plt_file: {:no_warn, "priv/plts/dialyzer.plt"},
-        plt_add_apps: [:jason, :timex],
-        flags: [:error_handling, :underspecs],
+        plt_add_apps: [:jason, :timex, :mix],
         ignore_warnings: ".dialyzer_ignore.exs",
         list_unused_filters: true
       ],
@@ -35,6 +34,7 @@ defmodule Selecto.MixProject do
           "README.md",
           "docs/domain_schema_v1.md",
           "docs/formal_verification.md",
+          "docs/strict_mode.md",
           "guides/complex_join_patterns.md",
           "guides/olap_and_hierarchical_patterns.md",
           "guides/advanced_usage.md"
@@ -126,7 +126,9 @@ defmodule Selecto.MixProject do
         "format --check-formatted",
         "credo",
         "credo.atom_audit",
-        "test"
+        "test",
+        "selecto.verify",
+        "xref graph --format cycles --label compile-connected --fail-above 0"
       ]
     ]
   end
@@ -141,6 +143,7 @@ defmodule Selecto.MixProject do
         "CHANGELOG.md",
         "docs/domain_schema_v1.md",
         "docs/formal_verification.md",
+        "docs/strict_mode.md",
         "guides",
         ".formatter.exs"
       ],

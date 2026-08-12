@@ -33,7 +33,7 @@ defmodule Selecto.Capabilities do
 
   - a one-arity function receiving the request
   - a two-arity function receiving the request and resolver context
-  - a module implementing `Selecto.Capabilities.Resolver.decide/2`
+  - a module implementing the `Selecto.Capabilities.Resolver` behaviour
   - `{module, function}` where the function has arity 2
 
   Resolver return values are normalized to `Selecto.Capabilities.Decision`.

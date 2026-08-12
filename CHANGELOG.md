@@ -1,7 +1,7 @@
 
 # Selecto Library Changelog
 
-## Unreleased
+## V 0.4.12 - Fail-Closed Write and Publication Boundaries
 ---------------------------------------------------------
 
 #### Added
@@ -13,6 +13,32 @@
 - Kept missing colocated `write` metadata read-only and made duplicate
   colocated/canonical write declarations fail closed instead of resolving by
   precedence.
+- Rejected atom/string aliases within canonical write-operation and write-field
+  registries, and rejected duplicate normalized assignment and returning
+  identifiers at the portable command boundary.
+- Validated and quoted every qualified relation, generated index, and column
+  identifier used by view publication and materialized-view refresh.
+- Extended strict domain SQL rejection to string-keyed raw and custom SQL
+  metadata.
+- Tightened UDF authorization so a declaration permits calls only at its exact
+  `allowed_in` query site.
+
+#### Fixed
+- Replaced per-configuration pool atoms with deterministic Registry `:via`
+  names, validated managed-resource liveness before reuse, retired stale
+  managers, and stopped pools without supervisor restarts or linked-owner
+  shutdowns.
+- Repaired the PostgreSQL test harness to honor `SELECTO_POSTGRES_*` settings
+  and the current structured execution result.
+- Made Dialyzer blocking in CI with a location-specific, unused-filter-checked
+  baseline for legacy findings; new warnings and obsolete filters now fail CI.
+
+#### Changed
+- Extended bounded verification with normalized write-registry collision states.
+- Made CI install locked dependencies, reject documentation warnings, verify
+  Hex package contents, and run bounded verification plus compile-cycle checks
+  through `mix precommit`.
+- Bumped the package version to `0.4.12`.
 
 ## V 0.4.11 - Portable Atomic Write Graphs
 ---------------------------------------------------------

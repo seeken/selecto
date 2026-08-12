@@ -42,12 +42,21 @@ defmodule Selecto.Domain.Contract.Writes do
   defp validate_operations(errors, nil, _field_index), do: errors
 
   defp validate_operations(errors, operations, field_index) when is_map(operations) do
-    Enum.reduce(operations, errors, fn {operation, spec}, acc ->
-      path = [:writes, :operations, operation]
+    errors
+    |> reject_normalized_registry_duplicates(
+      operations,
+      [:writes, :operations],
+      :duplicate_write_operation_id,
+      "write operation"
+    )
+    |> then(fn errors ->
+      Enum.reduce(operations, errors, fn {operation, spec}, acc ->
+        path = [:writes, :operations, operation]
 
-      acc
-      |> validate_operation_id(operation, path)
-      |> validate_operation_spec(operation, spec, path, field_index)
+        acc
+        |> validate_operation_id(operation, path)
+        |> validate_operation_spec(operation, spec, path, field_index)
+      end)
     end)
   end
 
@@ -223,12 +232,21 @@ defmodule Selecto.Domain.Contract.Writes do
   defp validate_fields(errors, nil, _field_index), do: errors
 
   defp validate_fields(errors, fields, field_index) when is_map(fields) do
-    Enum.reduce(fields, errors, fn {field, spec}, acc ->
-      path = [:writes, :fields, field]
+    errors
+    |> reject_normalized_registry_duplicates(
+      fields,
+      [:writes, :fields],
+      :duplicate_write_field_id,
+      "write field"
+    )
+    |> then(fn errors ->
+      Enum.reduce(fields, errors, fn {field, spec}, acc ->
+        path = [:writes, :fields, field]
 
-      acc
-      |> validate_write_field_id(field, path, field_index)
-      |> validate_write_field_spec(field, spec, path)
+        acc
+        |> validate_write_field_id(field, path, field_index)
+        |> validate_write_field_spec(field, spec, path)
+      end)
     end)
   end
 
@@ -299,6 +317,28 @@ defmodule Selecto.Domain.Contract.Writes do
       end
     end)
     |> reject_unsafe_terms(spec, path)
+  end
+
+  defp reject_normalized_registry_duplicates(errors, registry, path, code, label) do
+    registry
+    |> Enum.filter(fn {id, _spec} -> Core.field_ref?(id) end)
+    |> Enum.group_by(fn {id, _spec} -> Core.field_id(id) end, fn {id, _spec} -> id end)
+    |> Enum.filter(fn {_normalized_id, authored_ids} -> length(authored_ids) > 1 end)
+    |> Enum.sort_by(fn {normalized_id, _authored_ids} -> normalized_id end)
+    |> Enum.reduce(errors, fn {normalized_id, authored_ids}, acc ->
+      authored_ids = Enum.sort_by(authored_ids, &inspect/1)
+
+      [
+        Core.error(
+          code,
+          path,
+          "#{label} ids #{inspect(authored_ids)} normalize to the same identifier #{inspect(normalized_id)}",
+          normalized_id: normalized_id,
+          authored_ids: authored_ids
+        )
+        | acc
+      ]
+    end)
   end
 
   defp validate_scope(errors, nil, _field_index), do: errors

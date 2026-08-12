@@ -20,27 +20,34 @@ defmodule Selecto.Builder.Sql.Select do
   Process field selectors with various formats:
 
   Custom SQL support:
-    {:custom_sql, sql_template, field_mappings} - safely handle custom column SQL with field validation
+
+  ```elixir
+  {:custom_sql, sql_template, field_mappings}
+  ```
+
+  This safely handles custom column SQL with field validation.
 
   Standard formats:
 
-    "field" # - plain old field from one of the tables
-    {:field, field } #- same as above disamg for predicate second+ position
-    {:literal, "value"} #- for literal values
-    {:literal, 1.0}
-    {:literal, 1}
-    {:literal, datetime} etc
-    {:func, SELECTOR}
-    {:count, *} (for count(*))
-    {:func, SELECTOR, SELECTOR}
-    {:func, SELECTOR, SELECTOR, SELECTOR} #...
-    {:extract, part, SELECTOR}
-    {:case, [PREDICATE, SELECTOR, ..., :else, SELECTOR]}
-    {:coalese, [SELECTOR, SELECTOR, ...]}
-    {:greatest, [SELECTOR, SELECTOR, ...]}
-    {:least, [SELECTOR, SELECTOR, ...]}
-    {:nullif, [SELECTOR, LITERAL_SELECTOR]} #LITERAL_SELECTOR means naked value treated as lit not field
-    {:subquery, [SELECTOR, SELECTOR, ...], PREDICATE}
+  ```elixir
+  "field"
+  {:field, field}
+  {:literal, "value"}
+  {:literal, 1.0}
+  {:literal, 1}
+  {:literal, datetime}
+  {:func, selector}
+  {:count, "*"}
+  {:func, selector, selector}
+  {:func, selector, selector, selector}
+  {:extract, part, selector}
+  {:case, [predicate, selector, :else, selector]}
+  {:coalese, [selector, selector]}
+  {:greatest, [selector, selector]}
+  {:least, [selector, selector]}
+  {:nullif, [selector, literal_selector]}
+  {:subquery, [selector, selector], predicate}
+  ```
   """
 
   ### TODO ability to select distinct on count( field )...
@@ -1070,8 +1077,6 @@ defmodule Selecto.Builder.Sql.Select do
       ArgumentError -> nil
     end
   end
-
-  defp safe_existing_atom(_selector), do: nil
 
   defp build_missing_field_error(selecto, selector, dynamic_columns) do
     selector_str = to_string(selector)

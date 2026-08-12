@@ -95,6 +95,66 @@ defmodule Selecto.WriteProtocolTest do
              })
   end
 
+  test "rejects exact and normalized duplicate assignment and returning fields" do
+    for assignments <- [
+          [
+            %{field: :name, value: {:literal, "first"}},
+            %{field: :name, value: {:literal, "second"}}
+          ],
+          [
+            %{field: :name, value: {:literal, "first"}},
+            %{field: "name", value: {:literal, "second"}}
+          ]
+        ] do
+      assert {:error,
+              %Error{
+                type: :invalid_command,
+                details: %{
+                  code: :duplicate_assignment_identifier,
+                  identifier_kind: :assignment,
+                  fields: ["name"]
+                }
+              }} =
+               Command.new(%{
+                 operation: :update,
+                 relation: :items,
+                 assignments: assignments
+               })
+    end
+
+    for returning <- [[:id, :id], [:id, "id"]] do
+      assert {:error,
+              %Error{
+                type: :invalid_command,
+                details: %{
+                  code: :duplicate_returning_identifier,
+                  identifier_kind: :returning,
+                  fields: ["id"]
+                }
+              }} =
+               Command.new(%{
+                 operation: :update,
+                 relation: :items,
+                 returning: returning
+               })
+    end
+  end
+
+  test "allows repeated fields in generic predicates" do
+    assert {:ok, %Command{}} =
+             Command.new(%{
+               operation: :update,
+               relation: :items,
+               predicate: {
+                 :and,
+                 [
+                   {:eq, {:field, :status}, {:literal, "open"}},
+                   {:neq, {:field, "status"}, {:literal, "closed"}}
+                 ]
+               }
+             })
+  end
+
   test "recursive safety validation preserves ordinary typed struct values" do
     assert {:ok, %Command{}} =
              Command.new(%{
@@ -158,7 +218,7 @@ defmodule Selecto.WriteProtocolTest do
     child =
       command!(:insert)
       |> Map.put(:relation, :children)
-      |> Map.update!(:assignments, &[%{field: :name, value: {:literal, "child"}} | &1])
+      |> Map.update!(:assignments, &[%{field: :child_name, value: {:literal, "child"}} | &1])
 
     nodes = [
       %Node{
@@ -294,6 +354,53 @@ defmodule Selecto.WriteProtocolTest do
     assert WriteContract.writable?(contract, :insert, :name)
     refute WriteContract.writable?(contract, :update, :tenant_id)
     assert contract.scope.tenant.field == :tenant_id
+  end
+
+  test "compiler rejects normalized registry collisions even for already-normalized domains" do
+    operation_collision =
+      put_in(write_domain(), [:writes, :operations], %{
+        "update" => %{enabled: true, require_filter: false},
+        insert: %{enabled: true},
+        update: %{enabled: false}
+      })
+
+    {:ok, normalized_operation_collision, _diagnostics} =
+      Selecto.Domain.normalize(operation_collision)
+
+    assert {:error,
+            %Error{
+              type: :invalid_domain,
+              details: %{
+                code: :duplicate_write_operation_id,
+                path: [:writes, :operations],
+                normalized_id: "update",
+                authored_ids: authored_operation_ids
+              }
+            }} = WriteContract.compile(normalized_operation_collision)
+
+    assert Enum.sort_by(authored_operation_ids, &inspect/1) == ["update", :update]
+
+    field_collision =
+      put_in(write_domain(), [:writes, :fields], %{
+        "name" => %{updatable: true},
+        name: %{updatable: false},
+        tenant_id: %{immutable: true}
+      })
+
+    {:ok, normalized_field_collision, _diagnostics} = Selecto.Domain.normalize(field_collision)
+
+    assert {:error,
+            %Error{
+              type: :invalid_domain,
+              details: %{
+                code: :duplicate_write_field_id,
+                path: [:writes, :fields],
+                normalized_id: "name",
+                authored_ids: authored_field_ids
+              }
+            }} = WriteContract.compile(normalized_field_collision)
+
+    assert Enum.sort_by(authored_field_ids, &inspect/1) == ["name", :name]
   end
 
   test "permits a write domain without tenant policy but compiles tenant policy fail-closed when present" do

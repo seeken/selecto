@@ -414,11 +414,7 @@ defmodule Selecto.QueryValidator do
     kind = Map.get(spec, :kind) || Map.get(spec, "kind")
     spec_args = Map.get(spec, :args) || Map.get(spec, "args") || []
 
-    allowed_for_call_site? =
-      case call_site do
-        :lateral -> :lateral in allowed_in or :query_member in allowed_in
-        other -> other in allowed_in
-      end
+    allowed_for_call_site? = call_site in allowed_in
 
     if not allowed_for_call_site? do
       raise ArgumentError,
@@ -428,11 +424,6 @@ defmodule Selecto.QueryValidator do
     if call_site == :filter and kind != :predicate do
       raise ArgumentError,
             "UDF '#{Selecto.UDF.normalize_id(function_id)}' must be kind :predicate to be used in filters"
-    end
-
-    if call_site == :lateral and kind != :table do
-      raise ArgumentError,
-            "UDF '#{Selecto.UDF.normalize_id(function_id)}' must be kind :table to be used in lateral joins"
     end
 
     if length(args) != length(spec_args) do

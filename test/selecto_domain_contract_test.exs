@@ -971,7 +971,17 @@ defmodule Selecto.DomainContractTest do
             database_name: "reporting.bad_columns",
             kind: :view,
             query: fn selecto -> selecto end,
-            columns: %{"" => %{type: :integer}, status: :not_a_map}
+            columns: %{
+              "" => %{type: :integer},
+              "status); DROP TABLE users; --" => %{type: :string},
+              status: :not_a_map
+            }
+          },
+          "malicious_name" => %{
+            database_name: "reporting.safe; DROP VIEW reporting.safe; --",
+            kind: :view,
+            query: fn selecto -> selecto end,
+            columns: %{order_id: %{type: :integer}}
           },
           "bad_indexes" => %{
             database_name: "reporting.bad_indexes",
@@ -981,7 +991,8 @@ defmodule Selecto.DomainContractTest do
             indexes: [
               :not_a_map,
               %{columns: [], unique: :yes, concurrently: :no},
-              %{columns: ["status", 123]}
+              %{columns: ["status", 123]},
+              %{columns: ["status); DROP TABLE users; --"]}
             ]
           }
         })
@@ -999,6 +1010,14 @@ defmodule Selecto.DomainContractTest do
 
       assert %{code: :invalid_published_view_database_name, view: "bad_metadata"} =
                error_for(diagnostics, :invalid_published_view_database_name)
+
+      assert Enum.any?(
+               errors_for(diagnostics, :invalid_published_view_database_name),
+               &match?(
+                 %{view: "malicious_name", identifier_error: %{reason: :invalid_characters}},
+                 &1
+               )
+             )
 
       assert %{code: :invalid_published_view_kind, view: "bad_metadata", kind: :report} =
                error_for(diagnostics, :invalid_published_view_kind)
@@ -1025,6 +1044,18 @@ defmodule Selecto.DomainContractTest do
                &match?(%{view: "bad_columns", column: :status}, &1)
              )
 
+      assert Enum.any?(
+               errors_for(diagnostics, :invalid_published_view_column),
+               &match?(
+                 %{
+                   view: "bad_columns",
+                   column: "status); DROP TABLE users; --",
+                   identifier_error: %{reason: :invalid_characters}
+                 },
+                 &1
+               )
+             )
+
       assert %{code: :invalid_published_view_index, view: "bad_indexes"} =
                error_for(diagnostics, :invalid_published_view_index)
 
@@ -1036,6 +1067,11 @@ defmodule Selecto.DomainContractTest do
       assert Enum.any?(
                errors_for(diagnostics, :invalid_published_view_index_columns),
                &match?(%{view: "bad_indexes", columns: ["status", 123]}, &1)
+             )
+
+      assert Enum.any?(
+               errors_for(diagnostics, :invalid_published_view_index_columns),
+               &match?(%{view: "bad_indexes", columns: ["status); DROP TABLE users; --"]}, &1)
              )
 
       assert Enum.any?(
@@ -1183,6 +1219,41 @@ defmodule Selecto.DomainContractTest do
         })
 
       assert {:ok, _normalized, _diagnostics} = Domain.validate(domain)
+    end
+
+    test "rejects atom and string aliases in canonical write authority registries" do
+      domain =
+        valid_domain()
+        |> Map.put(:writes, %{
+          operations: %{
+            "update" => %{enabled: true, require_filter: false},
+            update: %{enabled: false}
+          },
+          fields: %{
+            "status" => %{updatable: true},
+            status: %{updatable: false}
+          }
+        })
+
+      assert {:error, diagnostics} = Domain.validate(domain)
+
+      assert %{
+               code: :duplicate_write_operation_id,
+               path: [:writes, :operations],
+               normalized_id: "update",
+               authored_ids: authored_operation_ids
+             } = error_for(diagnostics, :duplicate_write_operation_id)
+
+      assert Enum.sort_by(authored_operation_ids, &inspect/1) == ["update", :update]
+
+      assert %{
+               code: :duplicate_write_field_id,
+               path: [:writes, :fields],
+               normalized_id: "status",
+               authored_ids: authored_field_ids
+             } = error_for(diagnostics, :duplicate_write_field_id)
+
+      assert Enum.sort_by(authored_field_ids, &inspect/1) == ["status", :status]
     end
 
     test "requires explicit cardinality and ownership for writable relationships" do

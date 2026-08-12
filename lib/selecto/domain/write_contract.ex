@@ -148,30 +148,37 @@ defmodule Selecto.Domain.WriteContract do
   end
 
   defp compile_operations(writes) do
-    writes
-    |> map_section(:operations)
-    |> Enum.reduce_while({:ok, %{}}, fn {operation_id, spec}, {:ok, acc} ->
-      with {:ok, operation} <- normalize_operation(operation_id),
-           true <- is_map(spec) do
-        normalized = normalize_map_keys(spec)
+    operations = map_section(writes, :operations)
 
-        if Map.get(normalized, :enabled) == true do
-          {:cont, {:ok, Map.put(acc, operation, normalized)}}
+    with :ok <-
+           ensure_unique_registry_ids(
+             operations,
+             :duplicate_write_operation_id,
+             [:writes, :operations]
+           ) do
+      Enum.reduce_while(operations, {:ok, %{}}, fn {operation_id, spec}, {:ok, acc} ->
+        with {:ok, operation} <- normalize_operation(operation_id),
+             true <- is_map(spec) do
+          normalized = normalize_map_keys(spec)
+
+          if Map.get(normalized, :enabled) == true do
+            {:cont, {:ok, Map.put(acc, operation, normalized)}}
+          else
+            {:cont, {:ok, acc}}
+          end
         else
-          {:cont, {:ok, acc}}
-        end
-      else
-        false ->
-          {:halt,
-           {:error,
-            Error.new(:invalid_domain, "write operation configuration must be a map",
-              details: %{operation: operation_id, spec: spec}
-            )}}
+          false ->
+            {:halt,
+             {:error,
+              Error.new(:invalid_domain, "write operation configuration must be a map",
+                details: %{operation: operation_id, spec: spec}
+              )}}
 
-        {:error, _} = error ->
-          {:halt, error}
-      end
-    end)
+          {:error, _} = error ->
+            {:halt, error}
+        end
+      end)
+    end
     |> case do
       {:ok, operations} when map_size(operations) > 0 ->
         {:ok, operations}
@@ -197,29 +204,60 @@ defmodule Selecto.Domain.WriteContract do
         {:error, Error.new(:write_not_declared, "domain must explicitly declare writable fields")}
 
       true ->
-        fields
-        |> Enum.reduce_while({:ok, %{}}, fn {field, spec}, {:ok, acc} ->
-          field_id = Core.field_id(field)
+        with :ok <-
+               ensure_unique_registry_ids(
+                 fields,
+                 :duplicate_write_field_id,
+                 [:writes, :fields]
+               ) do
+          Enum.reduce_while(fields, {:ok, %{}}, fn {field, spec}, {:ok, acc} ->
+            field_id = Core.field_id(field)
 
-          cond do
-            not MapSet.member?(source_fields, field_id) ->
-              {:halt,
-               {:error,
-                Error.new(:invalid_domain, "write field is not defined on the source relation",
-                  details: %{field: field}
-                )}}
+            cond do
+              not MapSet.member?(source_fields, field_id) ->
+                {:halt,
+                 {:error,
+                  Error.new(:invalid_domain, "write field is not defined on the source relation",
+                    details: %{field: field}
+                  )}}
 
-            not is_map(spec) ->
-              {:halt,
-               {:error,
-                Error.new(:invalid_domain, "write field specification must be a map",
-                  details: %{field: field, spec: spec}
-                )}}
+              not is_map(spec) ->
+                {:halt,
+                 {:error,
+                  Error.new(:invalid_domain, "write field specification must be a map",
+                    details: %{field: field, spec: spec}
+                  )}}
 
-            true ->
-              {:cont, {:ok, Map.put(acc, field_id, normalize_map_keys(spec))}}
-          end
-        end)
+              true ->
+                {:cont, {:ok, Map.put(acc, field_id, normalize_map_keys(spec))}}
+            end
+          end)
+        end
+    end
+  end
+
+  defp ensure_unique_registry_ids(registry, code, path) when is_map(registry) do
+    duplicates =
+      registry
+      |> Enum.filter(fn {id, _spec} -> Core.field_ref?(id) end)
+      |> Enum.group_by(fn {id, _spec} -> Core.field_id(id) end, fn {id, _spec} -> id end)
+      |> Enum.filter(fn {_normalized_id, authored_ids} -> length(authored_ids) > 1 end)
+      |> Enum.sort_by(fn {normalized_id, _authored_ids} -> normalized_id end)
+
+    case duplicates do
+      [] ->
+        :ok
+
+      [{normalized_id, authored_ids} | _rest] ->
+        {:error,
+         Error.new(:invalid_domain, "write registry contains ambiguous normalized identifiers",
+           details: %{
+             code: code,
+             path: path,
+             normalized_id: normalized_id,
+             authored_ids: Enum.sort_by(authored_ids, &inspect/1)
+           }
+         )}
     end
   end
 

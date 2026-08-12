@@ -107,17 +107,10 @@ defmodule Selecto.Write.Command do
   end
 
   defp validate_assignments(assignments) when is_list(assignments) do
-    assignments
-    |> Enum.with_index()
-    |> Enum.reduce_while(:ok, fn {assignment, index}, :ok ->
-      case validate_assignment(assignment) do
-        :ok ->
-          {:cont, :ok}
-
-        {:error, %Error{} = error} ->
-          {:halt, {:error, %{error | details: Map.put(error.details, :assignment_index, index)}}}
-      end
-    end)
+    with :ok <- validate_assignment_entries(assignments),
+         :ok <- validate_unique_identifiers(Enum.map(assignments, & &1.field), :assignment) do
+      :ok
+    end
   end
 
   defp validate_assignments(assignments) do
@@ -139,6 +132,20 @@ defmodule Selecto.Write.Command do
      Error.new(:invalid_command, "each assignment must include :field and :value",
        details: %{assignment: assignment}
      )}
+  end
+
+  defp validate_assignment_entries(assignments) do
+    assignments
+    |> Enum.with_index()
+    |> Enum.reduce_while(:ok, fn {assignment, index}, :ok ->
+      case validate_assignment(assignment) do
+        :ok ->
+          {:cont, :ok}
+
+        {:error, %Error{} = error} ->
+          {:halt, {:error, %{error | details: Map.put(error.details, :assignment_index, index)}}}
+      end
+    end)
   end
 
   # Value expressions are portable data. Raw SQL fragments are deliberately not
@@ -181,10 +188,16 @@ defmodule Selecto.Write.Command do
   defp validate_returning(value) when value in [:none, :all], do: :ok
 
   defp validate_returning(fields) when is_list(fields) do
-    if Enum.all?(fields, &(is_atom(&1) or (is_binary(&1) and String.trim(&1) != ""))) do
-      :ok
-    else
-      {:error, Error.new(:invalid_command, "returning fields must be non-empty atoms or strings")}
+    cond do
+      not Enum.all?(
+        fields,
+        &((is_atom(&1) and not is_nil(&1)) or (is_binary(&1) and String.trim(&1) != ""))
+      ) ->
+        {:error,
+         Error.new(:invalid_command, "returning fields must be non-empty atoms or strings")}
+
+      true ->
+        validate_unique_identifiers(fields, :returning)
     end
   end
 
@@ -223,6 +236,39 @@ defmodule Selecto.Write.Command do
     {:error,
      Error.new(:invalid_command, "command metadata must be a map", details: %{metadata: metadata})}
   end
+
+  defp validate_unique_identifiers(fields, kind) do
+    duplicates =
+      fields
+      |> Enum.map(&identifier_id/1)
+      |> Enum.frequencies()
+      |> Enum.flat_map(fn
+        {field, count} when count > 1 -> [field]
+        _entry -> []
+      end)
+      |> Enum.sort()
+
+    case duplicates do
+      [] ->
+        :ok
+
+      fields ->
+        {:error,
+         Error.new(:invalid_command, "normalized write identifiers must be unique",
+           details: %{
+             code: duplicate_identifier_code(kind),
+             identifier_kind: kind,
+             fields: fields
+           }
+         )}
+    end
+  end
+
+  defp duplicate_identifier_code(:assignment), do: :duplicate_assignment_identifier
+  defp duplicate_identifier_code(:returning), do: :duplicate_returning_identifier
+
+  defp identifier_id(field) when is_atom(field), do: Atom.to_string(field)
+  defp identifier_id(field), do: field
 
   defp contains_unsafe_sql?({:unsafe_sql, _}), do: true
   defp contains_unsafe_sql?({:unsafe_fragment, _}), do: true

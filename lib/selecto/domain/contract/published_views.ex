@@ -2,6 +2,7 @@ defmodule Selecto.Domain.Contract.PublishedViews do
   @moduledoc false
 
   alias Selecto.Domain.Contract.Shared.Core
+  alias Selecto.SQL.QualifiedIdentifier
 
   def validate(errors, query) do
     validate_published_views(errors, query)
@@ -78,21 +79,24 @@ defmodule Selecto.Domain.Contract.PublishedViews do
   def validate_published_view_database_name(errors, view_id, view_spec) do
     database_name = Core.map_value(view_spec, :database_name)
 
-    if is_binary(database_name) and String.trim(database_name) != "" do
-      errors
-    else
-      [
-        Core.error(
-          :invalid_published_view_database_name,
-          [:published_views, view_id, :database_name],
-          "published view #{inspect(view_id)} database_name must be a non-empty string",
-          expected: "non-empty string",
-          actual: Core.value_type(database_name),
-          view: view_id,
-          database_name: database_name
-        )
-        | errors
-      ]
+    case is_binary(database_name) && QualifiedIdentifier.validate(database_name) do
+      :ok ->
+        errors
+
+      identifier_result ->
+        [
+          Core.error(
+            :invalid_published_view_database_name,
+            [:published_views, view_id, :database_name],
+            "published view #{inspect(view_id)} database_name must be a safe qualified SQL identifier",
+            expected: "safe qualified SQL identifier",
+            actual: Core.value_type(database_name),
+            view: view_id,
+            database_name: database_name,
+            identifier_error: identifier_error(identifier_result)
+          )
+          | errors
+        ]
     end
   end
 
@@ -166,21 +170,24 @@ defmodule Selecto.Domain.Contract.PublishedViews do
   end
 
   def validate_published_view_column_id(errors, view_id, column_id) do
-    if Core.non_empty_atom_or_string?(column_id) do
-      errors
-    else
-      [
-        Core.error(
-          :invalid_published_view_column,
-          [:published_views, view_id, :columns, column_id],
-          "published view #{inspect(view_id)} column ids must be non-empty atoms or strings",
-          expected: "non-empty atom or string",
-          actual: Core.value_type(column_id),
-          view: view_id,
-          column: column_id
-        )
-        | errors
-      ]
+    case QualifiedIdentifier.validate_part(column_id) do
+      :ok ->
+        errors
+
+      {:error, identifier_error} ->
+        [
+          Core.error(
+            :invalid_published_view_column,
+            [:published_views, view_id, :columns, column_id],
+            "published view #{inspect(view_id)} column ids must be safe unqualified SQL identifiers",
+            expected: "safe unqualified SQL identifier",
+            actual: Core.value_type(column_id),
+            view: view_id,
+            column: column_id,
+            identifier_error: identifier_error
+          )
+          | errors
+        ]
     end
   end
 
@@ -259,7 +266,7 @@ defmodule Selecto.Domain.Contract.PublishedViews do
     columns = Core.map_value(index_spec, :columns)
 
     if is_list(columns) and columns != [] and
-         Enum.all?(columns, &Core.non_empty_atom_or_string?/1) do
+         Enum.all?(columns, &(QualifiedIdentifier.validate_part(&1) == :ok)) do
       errors
     else
       [
@@ -329,4 +336,7 @@ defmodule Selecto.Domain.Contract.PublishedViews do
         ]
     end
   end
+
+  defp identifier_error({:error, error}), do: error
+  defp identifier_error(_result), do: nil
 end

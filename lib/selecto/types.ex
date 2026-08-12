@@ -361,17 +361,7 @@ defmodule Selecto.Types do
         }
 
   # Main Selecto struct
-  @type t :: %Selecto{
-          postgrex_opts: term() | nil,
-          adapter: module() | nil,
-          connection: term() | nil,
-          domain: domain(),
-          config: processed_config(),
-          set: query_set(),
-          extensions: [{module(), keyword()}],
-          tenant: tenant_context() | nil,
-          policy: Selecto.Policy.t() | nil
-        }
+  @type t :: %Selecto{}
 
   # Processed configuration (internal)
   @type processed_config :: %{
@@ -428,6 +418,8 @@ defmodule Selecto.Types do
           columns :: [String.t()],
           aliases :: %{String.t() => String.t()}
         }
+
+  @type execute_result :: query_result()
 
   # Safe execute/2 results (tagged tuples with structured errors)
   @type execute_result_ok :: {:ok, query_result()}

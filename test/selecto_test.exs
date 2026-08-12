@@ -100,11 +100,11 @@ defmodule SelectoTest do
     Process.sleep(5000)
 
     postgrex_opts = [
-      hostname: "localhost",
-      port: 5432,
-      username: "postgres",
-      password: "password",
-      database: "selecto_test"
+      hostname: System.get_env("SELECTO_POSTGRES_HOST", "localhost"),
+      port: env_integer("SELECTO_POSTGRES_PORT", 5432),
+      username: System.get_env("SELECTO_POSTGRES_USER", "postgres"),
+      password: System.get_env("SELECTO_POSTGRES_PASSWORD", "password"),
+      database: System.get_env("SELECTO_POSTGRES_DATABASE", "selecto_test")
     ]
 
     {:ok, pid} = Postgrex.start_link(postgrex_opts)
@@ -158,20 +158,37 @@ defmodule SelectoTest do
     assert %Selecto{} = selecto
   end
 
+  test "generated pool names register and release real Postgrex pools", %{
+    postgrex_opts: postgrex_opts
+  } do
+    pool_name =
+      Selecto.ConnectionPool.generate_pool_name(%{
+        adapter: SelectoDBPostgreSQL.Adapter,
+        connection_config: postgrex_opts ++ [verification_identity: make_ref()]
+      })
+
+    assert {:ok, pool_pid} = Postgrex.start_link(Keyword.put(postgrex_opts, :name, pool_name))
+    assert GenServer.whereis(pool_name) == pool_pid
+    assert {:ok, %Postgrex.Result{rows: [[1]]}} = Postgrex.query(pool_pid, "SELECT 1", [])
+
+    GenServer.stop(pool_pid)
+    assert eventually(fn -> GenServer.whereis(pool_name) == nil end)
+  end
+
   test "simple select", %{selecto: selecto} do
-    {rows, _, _} = Selecto.select(selecto, ["name", "email"]) |> Selecto.execute()
+    {:ok, {rows, _, _}} = Selecto.select(selecto, ["name", "email"]) |> Selecto.execute()
     assert length(rows) == 1
     assert List.first(rows) == ["John Doe", "john.doe@example.com"]
   end
 
   test "select with join", %{selecto: selecto} do
-    {rows, _, _} = Selecto.select(selecto, ["name", "posts.title"]) |> Selecto.execute()
+    {:ok, {rows, _, _}} = Selecto.select(selecto, ["name", "posts.title"]) |> Selecto.execute()
     assert length(rows) == 1
     assert List.first(rows) == ["John Doe", "My first post"]
   end
 
   test "select with filter", %{selecto: selecto} do
-    {rows, _, _} =
+    {:ok, {rows, _, _}} =
       Selecto.select(selecto, ["name", "email"])
       |> Selecto.filter([{"name", "John Doe"}])
       |> Selecto.execute()
@@ -179,4 +196,24 @@ defmodule SelectoTest do
     assert length(rows) == 1
     assert List.first(rows) == ["John Doe", "john.doe@example.com"]
   end
+
+  defp env_integer(name, default) do
+    case System.get_env(name) do
+      nil -> default
+      value -> String.to_integer(value)
+    end
+  end
+
+  defp eventually(fun, attempts \\ 50)
+
+  defp eventually(fun, attempts) when attempts > 0 do
+    if fun.() do
+      true
+    else
+      Process.sleep(10)
+      eventually(fun, attempts - 1)
+    end
+  end
+
+  defp eventually(_fun, 0), do: false
 end

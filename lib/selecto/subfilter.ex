@@ -40,8 +40,8 @@ defmodule Selecto.Subfilter do
     @type strategy :: :exists | :in | :any | :all
 
     @type t :: %__MODULE__{
-            relationship_path: RelationshipPath.t(),
-            filter_spec: FilterSpec.t(),
+            relationship_path: Selecto.Subfilter.RelationshipPath.t(),
+            filter_spec: Selecto.Subfilter.FilterSpec.t(),
             strategy: strategy(),
             negate: boolean(),
             opts: keyword()
@@ -125,7 +125,7 @@ defmodule Selecto.Subfilter do
 
     @type t :: %__MODULE__{
             type: compound_type(),
-            subfilters: [Spec.t()]
+            subfilters: [Selecto.Subfilter.Spec.t()]
           }
   end
 
@@ -136,6 +136,12 @@ defmodule Selecto.Subfilter do
     defexception [:message, :type, :details]
 
     @type error_type :: :invalid_relationship_path | :join_path_not_found | :invalid_filter_spec
+
+    @type t :: %__MODULE__{
+            message: String.t(),
+            type: error_type() | :subfilter_error | atom(),
+            details: map()
+          }
 
     def exception(opts) do
       type = Keyword.get(opts, :type, :subfilter_error)

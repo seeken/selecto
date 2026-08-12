@@ -989,12 +989,12 @@ defmodule Selecto.DomainValidatorTest do
       assert result.kind == :view
       assert result.database_name == "reporting.order_rollup"
       assert String.match?(result.sql, ~r/(?i)select/)
-      assert String.contains?(result.ddl, "CREATE VIEW reporting.order_rollup AS")
+      assert String.contains?(result.ddl, ~s(CREATE VIEW "reporting"."order_rollup" AS))
     end
 
     test "build_sql/2 returns CREATE MATERIALIZED VIEW DDL" do
       assert ViewPublisher.ddl_for(:materialized_view, "reporting.daily_rollup", "select 1") ==
-               "CREATE MATERIALIZED VIEW reporting.daily_rollup AS\nselect 1;"
+               ~s(CREATE MATERIALIZED VIEW "reporting"."daily_rollup" AS\nselect 1;)
     end
 
     test "build_sql/2 returns suggested index statements when declared" do
@@ -1028,16 +1028,65 @@ defmodule Selecto.DomainValidatorTest do
       assert {:ok, result} = ViewPublisher.build_sql(domain, spec)
 
       assert result.index_statements == [
-               "CREATE UNIQUE INDEX CONCURRENTLY daily_rollup_order_id_idx ON reporting.daily_rollup (order_id);"
+               ~s|CREATE UNIQUE INDEX CONCURRENTLY "daily_rollup_order_id_idx" ON "reporting"."daily_rollup" ("order_id");|
              ]
     end
 
     test "refresh_sql/2 supports concurrent refresh statements" do
       assert ViewPublisher.refresh_sql("reporting.daily_rollup") ==
-               "REFRESH MATERIALIZED VIEW reporting.daily_rollup;"
+               ~s(REFRESH MATERIALIZED VIEW "reporting"."daily_rollup";)
 
       assert ViewPublisher.refresh_sql("reporting.daily_rollup", concurrently: true) ==
-               "REFRESH MATERIALIZED VIEW CONCURRENTLY reporting.daily_rollup;"
+               ~s(REFRESH MATERIALIZED VIEW CONCURRENTLY "reporting"."daily_rollup";)
+    end
+
+    test "rejects malicious view and index identifiers before DDL generation" do
+      domain = %{
+        source: %{
+          source_table: "orders",
+          primary_key: :id,
+          fields: [:id],
+          redact_fields: [],
+          columns: %{id: %{type: :integer}},
+          associations: %{}
+        },
+        schemas: %{},
+        joins: %{}
+      }
+
+      base_spec = %{
+        database_name: "reporting.order_rollup",
+        kind: :materialized_view,
+        query: fn selecto -> Selecto.select(selecto, [{:field, "id", "order_id"}]) end,
+        columns: %{order_id: %{type: :integer}}
+      }
+
+      for malicious_name <- [
+            "reporting.order_rollup; DROP TABLE users; --",
+            "reporting..order_rollup",
+            ~s(reporting."order_rollup")
+          ] do
+        assert {:error, errors} =
+                 ViewPublisher.build_sql(domain, %{base_spec | database_name: malicious_name})
+
+        assert Enum.any?(errors, &String.contains?(&1, "invalid SQL identifier"))
+      end
+
+      malicious_index =
+        Map.put(base_spec, :indexes, [
+          %{columns: ["order_id); DROP TABLE users; --"]}
+        ])
+
+      assert {:error, errors} = ViewPublisher.build_sql(domain, malicious_index)
+      assert Enum.any?(errors, &String.contains?(&1, ":indexes[0].columns"))
+
+      assert_raise ArgumentError, ~r/invalid SQL identifier/, fn ->
+        ViewPublisher.ddl_for(:view, "safe; DROP VIEW safe", "select 1")
+      end
+
+      assert_raise ArgumentError, ~r/invalid SQL identifier/, fn ->
+        ViewPublisher.refresh_sql("safe --")
+      end
     end
 
     test "refresh/5 rejects non-materialized published views" do

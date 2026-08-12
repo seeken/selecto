@@ -50,7 +50,8 @@ defmodule Selecto.DB.Adapter do
   @callback transaction(term(), (term() -> term()), keyword()) :: {:ok, term()} | {:error, term()}
   @callback execute_repo_fallback(module(), query(), params()) ::
               {:ok, result()} | {:error, term()}
-  @callback start_pool(keyword(), keyword(), atom()) :: {:ok, term()} | {:error, term()}
+  @callback start_pool(keyword(), keyword(), GenServer.name()) ::
+              {:ok, term()} | {:error, term()}
 
   @callback list_tables(connection(), introspection_options()) ::
               {:ok, [String.t()]} | {:error, term()}

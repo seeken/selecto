@@ -6,6 +6,8 @@ defmodule Selecto.ViewPublisher do
   validation so domains can register stable SQL view contracts explicitly.
   """
 
+  alias Selecto.SQL.QualifiedIdentifier
+
   @type validation_result :: :ok | {:error, [String.t()]}
   @type publish_result ::
           {:ok,
@@ -21,16 +23,22 @@ defmodule Selecto.ViewPublisher do
 
   @spec validate(Selecto.Types.domain(), map()) :: validation_result()
   def validate(domain, spec) when is_map(domain) and is_map(spec) do
-    with {:ok, query} <- build_query(domain, spec) do
-      errors =
-        []
-        |> validate_selected_columns(query, spec)
-        |> validate_runtime_params(query)
+    identifier_errors = identifier_errors(spec)
 
-      case errors do
-        [] -> :ok
-        _ -> {:error, errors}
-      end
+    case build_query(domain, spec) do
+      {:ok, query} ->
+        errors =
+          identifier_errors
+          |> validate_selected_columns(query, spec)
+          |> validate_runtime_params(query)
+
+        case errors do
+          [] -> :ok
+          _ -> {:error, errors}
+        end
+
+      {:error, query_errors} ->
+        {:error, identifier_errors ++ query_errors}
     end
   end
 
@@ -41,7 +49,7 @@ defmodule Selecto.ViewPublisher do
   def build_sql(domain, spec) when is_map(domain) and is_map(spec) do
     with :ok <- validate(domain, spec),
          {:ok, query} <- build_query(domain, spec) do
-      {sql, _params} = Selecto.to_sql(query)
+      {sql, _aliases, _params} = Selecto.Builder.Sql.build(query, [])
       database_name = spec[:database_name] || spec["database_name"]
       kind = spec[:kind] || spec["kind"]
 
@@ -81,17 +89,18 @@ defmodule Selecto.ViewPublisher do
 
   @spec ddl_for(atom(), String.t(), String.t()) :: String.t()
   def ddl_for(:view, database_name, sql) when is_binary(database_name) and is_binary(sql) do
-    "CREATE VIEW #{database_name} AS\n#{sql};"
+    "CREATE VIEW #{QualifiedIdentifier.quote!(database_name)} AS\n#{sql};"
   end
 
   def ddl_for(:materialized_view, database_name, sql)
       when is_binary(database_name) and is_binary(sql) do
-    "CREATE MATERIALIZED VIEW #{database_name} AS\n#{sql};"
+    "CREATE MATERIALIZED VIEW #{QualifiedIdentifier.quote!(database_name)} AS\n#{sql};"
   end
 
   @spec refresh_sql(String.t(), keyword()) :: String.t()
   def refresh_sql(database_name, opts \\ []) when is_binary(database_name) do
     concurrently = Keyword.get(opts, :concurrently, false)
+    database_name = QualifiedIdentifier.quote!(database_name)
 
     if concurrently do
       "REFRESH MATERIALIZED VIEW CONCURRENTLY #{database_name};"
@@ -111,10 +120,83 @@ defmodule Selecto.ViewPublisher do
     query_builder = spec[:query] || spec["query"]
     selecto = Selecto.configure(domain, :view_publisher, validate: false)
 
-    case query_builder.(selecto) do
-      %Selecto{} = query -> {:ok, query}
-      other -> {:error, [":query must return a Selecto struct, got: #{inspect(other)}"]}
+    if is_function(query_builder, 1) do
+      case query_builder.(selecto) do
+        %Selecto{} = query -> {:ok, query}
+        other -> {:error, [":query must return a Selecto struct, got: #{inspect(other)}"]}
+      end
+    else
+      {:error, [":query must be a function with arity 1"]}
     end
+  end
+
+  defp validate_identifiers(spec) do
+    errors =
+      []
+      |> validate_qualified_identifier(database_name(spec), ":database_name")
+      |> validate_column_identifiers(published_columns(spec), ":columns")
+      |> validate_index_identifiers(spec)
+
+    case errors do
+      [] -> :ok
+      _ -> {:error, Enum.reverse(errors)}
+    end
+  end
+
+  defp identifier_errors(spec) do
+    case validate_identifiers(spec) do
+      :ok -> []
+      {:error, errors} -> errors
+    end
+  end
+
+  defp validate_qualified_identifier(errors, identifier, label) do
+    case QualifiedIdentifier.validate(identifier) do
+      :ok -> errors
+      {:error, error} -> ["#{label} #{QualifiedIdentifier.error_message(error)}" | errors]
+    end
+  end
+
+  defp validate_column_identifiers(errors, columns, label) when is_map(columns) do
+    Enum.reduce(columns, errors, fn {column, _spec}, acc ->
+      validate_identifier_part(acc, column, label)
+    end)
+  end
+
+  defp validate_column_identifiers(errors, _columns, _label), do: errors
+
+  defp validate_identifier_part(errors, identifier, label) do
+    case QualifiedIdentifier.validate_part(identifier) do
+      :ok -> errors
+      {:error, error} -> ["#{label} #{QualifiedIdentifier.error_message(error)}" | errors]
+    end
+  end
+
+  defp validate_index_identifiers(errors, spec) do
+    spec
+    |> published_indexes()
+    |> List.wrap()
+    |> Enum.with_index()
+    |> Enum.reduce(errors, fn
+      {index_spec, index}, acc when is_map(index_spec) ->
+        columns = index_spec[:columns] || index_spec["columns"] || []
+
+        acc =
+          Enum.reduce(List.wrap(columns), acc, fn column, column_errors ->
+            validate_identifier_part(column_errors, column, ":indexes[#{index}].columns")
+          end)
+
+        case columns do
+          columns when is_list(columns) and columns != [] ->
+            validate_identifier_part(acc, index_name(spec, columns), ":indexes[#{index}].name")
+
+          _ ->
+            acc
+        end
+
+      {_index_spec, _index}, acc ->
+        acc
+    end)
   end
 
   defp validate_selected_columns(errors, query, spec) do
@@ -137,7 +219,7 @@ defmodule Selecto.ViewPublisher do
   end
 
   defp validate_runtime_params(errors, query) do
-    {_sql, params} = Selecto.to_sql(query)
+    {_sql, _aliases, params} = Selecto.Builder.Sql.build(query, [])
 
     if params == [] do
       errors
@@ -168,10 +250,16 @@ defmodule Selecto.ViewPublisher do
 
     create = if unique, do: "CREATE UNIQUE INDEX", else: "CREATE INDEX"
     concurrently_sql = if concurrently, do: " CONCURRENTLY", else: ""
-    index_name = index_name(spec, columns)
-    column_sql = columns |> Enum.map(&to_string/1) |> Enum.join(", ")
+    index_name = spec |> index_name(columns) |> QualifiedIdentifier.quote_part!()
 
-    "#{create}#{concurrently_sql} #{index_name} ON #{database_name(spec)} (#{column_sql});"
+    column_sql =
+      columns
+      |> Enum.map(&QualifiedIdentifier.quote_part!/1)
+      |> Enum.join(", ")
+
+    relation_name = spec |> database_name() |> QualifiedIdentifier.quote!()
+
+    "#{create}#{concurrently_sql} #{index_name} ON #{relation_name} (#{column_sql});"
   end
 
   defp index_name(spec, columns) do
@@ -186,7 +274,7 @@ defmodule Selecto.ViewPublisher do
   end
 
   defp query_aliases(query) do
-    {_sql, aliases, _params} = Selecto.gen_sql(query, [])
+    {_sql, aliases, _params} = Selecto.Builder.Sql.build(query, [])
 
     aliases
     |> List.wrap()

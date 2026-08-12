@@ -54,7 +54,9 @@ defmodule Selecto.Subfilter.JoinPathResolver do
 
   ## Returns
 
-  {:ok, JoinResolution.t()} | {:error, Subfilter.Error.t()}
+  ```elixir
+  {:ok, JoinResolution.t()} | {:error, Selecto.Subfilter.Error.t()}
+  ```
   """
   @spec resolve(RelationshipPath.t(), atom() | map(), atom() | nil) ::
           {:ok, JoinResolution.t()} | {:error, Error.t()}

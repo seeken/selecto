@@ -1,5 +1,6 @@
 defmodule Selecto.ConnectionPoolTest do
-  use ExUnit.Case, async: true
+  # Atom count is VM-global, so the no-growth assertion must not overlap module loading.
+  use ExUnit.Case, async: false
 
   alias Selecto.ConnectionPool
 
@@ -24,8 +25,10 @@ defmodule Selecto.ConnectionPoolTest do
       name1 = ConnectionPool.generate_pool_name(config1)
       name2 = ConnectionPool.generate_pool_name(config2)
 
-      assert is_atom(name1)
-      assert is_atom(name2)
+      assert {:via, Registry, {Selecto.ConnectionPool.Registry, {:pool, hash1}}} = name1
+      assert {:via, Registry, {Selecto.ConnectionPool.Registry, {:pool, hash2}}} = name2
+      assert byte_size(hash1) == 32
+      assert byte_size(hash2) == 32
 
       # Names should be different for different configs
       assert name1 != name2
@@ -47,9 +50,28 @@ defmodule Selecto.ConnectionPoolTest do
           connection_config: [database: "db"]
         })
 
-      assert is_atom(pg_name)
-      assert is_atom(fake_name)
+      assert match?({:via, Registry, _registry_key}, pg_name)
+      assert match?({:via, Registry, _registry_key}, fake_name)
       assert pg_name != fake_name
+    end
+
+    test "generating unbounded configuration identities does not grow the atom table" do
+      _warm_up = ConnectionPool.generate_pool_name(database: "warm_up")
+      before_count = :erlang.system_info(:atom_count)
+
+      names =
+        for index <- 1..2_000 do
+          ConnectionPool.generate_pool_name(
+            hostname: "db-#{index}.example.test",
+            database: "tenant_#{index}"
+          )
+        end
+
+      after_count = :erlang.system_info(:atom_count)
+
+      assert after_count == before_count
+      assert length(Enum.uniq(names)) == length(names)
+      assert Enum.all?(names, &match?({:via, Registry, _registry_key}, &1))
     end
 
     test "generates cache keys" do

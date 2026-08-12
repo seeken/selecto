@@ -190,6 +190,33 @@ defmodule Selecto.PolicyTest do
              )
   end
 
+  test "domain_sql forbid treats string-keyed SQL metadata like atom-keyed metadata" do
+    domain_without_sql = Map.delete(domain(), :custom_columns)
+
+    for key <- [
+          :select,
+          "select",
+          :sql,
+          "sql",
+          :on,
+          "on",
+          :join_condition,
+          "join_condition",
+          :raw_sql,
+          "raw_sql",
+          :raw_sql_filter,
+          "raw_sql_filter",
+          :custom_sql,
+          "custom_sql"
+        ] do
+      declared_sql = Map.put(domain_without_sql, :extension_metadata, %{key => "TRUE"})
+
+      assert_raise PolicyViolation, ~r/domain_sql: :forbid/, fn ->
+        Selecto.Policy.new!(declared_sql, %{}, mode: :strict, domain_sql: :forbid)
+      end
+    end
+  end
+
   test "set operations cannot mix strict and permissive queries" do
     left = strict_query() |> Selecto.select(["status"])
     strict_right = strict_query() |> Selecto.select(["status"])
