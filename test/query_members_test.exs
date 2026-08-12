@@ -262,6 +262,47 @@ defmodule Selecto.QueryMembersTest do
     assert sql =~ ") high_value_delivered on selecto_root.id = high_value_delivered.customer_id"
   end
 
+  test "named inner subquery joins render with root-only selects and preserve both scopes" do
+    nested_domain = Map.put(order_domain(), :required_filters, [{"status", "delivered"}])
+
+    domain =
+      customer_domain()
+      |> Map.put(:required_filters, [{"tier", "gold"}])
+      |> Map.put(:query_members, %{
+        ctes: %{},
+        values: %{},
+        subqueries: %{
+          scoped_orders: %{
+            query: fn _selecto ->
+              nested_domain
+              |> Selecto.configure(:mock_connection, validate: false)
+              |> Selecto.select(["customer_id"])
+            end,
+            type: :inner,
+            on: [%{left: "id", right: "customer_id"}]
+          }
+        },
+        laterals: %{},
+        unnests: %{}
+      })
+
+    query =
+      domain
+      |> Selecto.configure(:mock_connection, validate: false)
+      |> Selecto.select(["name"])
+      |> Selecto.with_subquery(:scoped_orders)
+
+    {sql, aliases, params} = Selecto.gen_sql(query, [])
+    sql = normalize_sql(sql)
+
+    assert aliases == ["name"]
+    assert params == ["delivered", "gold"]
+    assert sql =~ "from customers selecto_root inner join ("
+    assert sql =~ "subq_root_orders_scoped_orders.status = $1"
+    assert sql =~ ") scoped_orders on selecto_root.id = scoped_orders.customer_id"
+    assert sql =~ "selecto_root.tier = $2"
+  end
+
   test "with_lateral/2 resolves named lateral member" do
     query =
       Selecto.configure(order_domain_with_query_members(), :mock_connection, validate: false)

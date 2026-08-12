@@ -123,6 +123,36 @@ defmodule Selecto.ConnectionPoolAdditionalTest do
     assert :ok = ConnectionPool.stop_pool(second_ref)
   end
 
+  test "stopping pools releases prepared statement cache entries" do
+    pool_name = ConnectionPool.generate_pool_name(database: "prepared_cleanup")
+    assert {:ok, pool_pid} = RegisteredPool.start_link(pool_name)
+
+    assert {:ok, manager_pid, :started} =
+             ConnectionPool.start_manager(
+               adapter: Selecto.DB.PostgreSQL,
+               pool_pid: pool_pid,
+               pool_name: pool_name,
+               pool_config: [pool_size: 1],
+               connection_config: [database: "prepared_cleanup"]
+             )
+
+    cache_key = ConnectionPool.generate_cache_key("SELECT managed")
+    assert :ok = ConnectionPool.mark_prepared_statement(pool_pid, cache_key)
+    assert ConnectionPool.prepared_statement_cached?(pool_pid, cache_key)
+
+    assert :ok = ConnectionPool.stop_pool(%{pool: pool_pid, manager: manager_pid})
+    refute ConnectionPool.prepared_statement_cached?(pool_pid, cache_key)
+
+    direct_name = ConnectionPool.generate_pool_name(database: "prepared_cleanup_direct")
+    assert {:ok, direct_pid} = RegisteredPool.start_link(direct_name)
+    direct_key = ConnectionPool.generate_cache_key("SELECT direct")
+    assert :ok = ConnectionPool.mark_prepared_statement(direct_pid, direct_key)
+    assert ConnectionPool.prepared_statement_cached?(direct_pid, direct_key)
+
+    assert :ok = ConnectionPool.stop_pool(direct_pid)
+    refute ConnectionPool.prepared_statement_cached?(direct_pid, direct_key)
+  end
+
   test "starting the same generic pool replaces a stale managed connection" do
     assert {:ok, first_ref} =
              ConnectionPool.start_pool([database: "stale_generic"], adapter: GenericAdapter)

@@ -25,7 +25,9 @@ defmodule Mix.Tasks.Selecto.Verify do
     reports = [
       Selecto.Verification.QuerySafety.verify(),
       Selecto.Verification.ContractSafety.verify(),
-      Selecto.Verification.WriteRegistrySafety.verify()
+      Selecto.Verification.WriteRegistrySafety.verify(),
+      Selecto.Verification.GovernedQueryComposition.verify(),
+      Selecto.Verification.WriteAuthorityNonEscalation.verify()
     ]
 
     artifact = artifact(reports)

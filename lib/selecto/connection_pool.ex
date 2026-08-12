@@ -178,6 +178,7 @@ defmodule Selecto.ConnectionPool do
   """
   @spec stop_pool(pool_ref()) :: :ok
   def stop_pool(%{pool: pool_pid, manager: manager_pid}) do
+    clear_prepared_flags(pool_pid)
     stop_manager(manager_pid)
     maybe_stop_connection(pool_pid)
     :ok
@@ -190,6 +191,7 @@ defmodule Selecto.ConnectionPool do
   end
 
   def stop_pool(pool_pid) when is_pid(pool_pid) do
+    clear_prepared_flags(pool_pid)
     GenServer.stop(pool_pid)
   end
 
@@ -370,7 +372,10 @@ defmodule Selecto.ConnectionPool do
   end
 
   @impl GenServer
-  def terminate(_reason, _state), do: :ok
+  def terminate(_reason, state) do
+    clear_prepared_flags(state.pool_pid)
+    :ok
+  end
 
   # Private Functions
 

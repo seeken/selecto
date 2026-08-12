@@ -30,6 +30,11 @@ defmodule Selecto.SetOperations do
         |> Selecto.union(query2)
         |> Selecto.intersect(query3)
         |> Selecto.except(query4)
+
+  A set result is terminal for structural query composition. It may be chained
+  with another set operation or receive outer `order_by`, `limit`, and `offset`
+  clauses; joins, filters, selections, grouping, CTEs, and other structural
+  mutations must be applied to operands before the first set operation.
   """
 
   alias Selecto.SetOperations.{Spec, Validation}
@@ -412,6 +417,18 @@ defmodule Selecto.SetOperations do
 
     # Default: incompatible
     defp types_compatible?(_, _), do: false
+  end
+
+  @doc false
+  @spec ensure_query_mutation_allowed!(Selecto.t(), atom() | String.t()) :: :ok
+  def ensure_query_mutation_allowed!(%Selecto{} = selecto, operation) do
+    if Map.get(selecto.set, :set_operations, []) == [] do
+      :ok
+    else
+      raise ArgumentError,
+            "#{operation} cannot be applied after a set operation; " <>
+              "set results only support UNION/INTERSECT/EXCEPT chaining and outer ORDER BY, LIMIT, or OFFSET"
+    end
   end
 
   @doc """

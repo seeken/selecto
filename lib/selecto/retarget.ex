@@ -52,6 +52,8 @@ defmodule Selecto.Retarget do
   """
   @spec retarget(Types.t(), atom(), keyword()) :: Types.t()
   def retarget(selecto, target_schema, opts \\ []) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :retarget)
+
     with {:ok, join_path} <- calculate_join_path(selecto, target_schema),
          :ok <- validate_retarget_path(selecto, join_path) do
       retarget_config = %{
@@ -118,6 +120,7 @@ defmodule Selecto.Retarget do
   """
   @spec reset_retarget(Types.t()) :: Types.t()
   def reset_retarget(selecto) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :reset_retarget)
     updated_set = Map.delete(selecto.set, :retarget_state)
     %{selecto | set: updated_set}
   end

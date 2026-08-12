@@ -22,6 +22,7 @@ defmodule Selecto.SelectionShape do
   """
   @spec select_shape(Selecto.t(), shape_input()) :: Selecto.t()
   def select_shape(selecto, shape) when is_list(shape) or is_tuple(shape) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :select_shape)
     initial_state = %{selected: [], subselects: [], alias_counter: 1}
 
     {root_node, state} = parse_node(selecto, shape, initial_state, false)

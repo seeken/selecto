@@ -64,6 +64,7 @@ defmodule Selecto.DynamicJoin do
   """
   @spec join(Selecto.t(), atom() | String.t(), keyword()) :: Selecto.t()
   def join(selecto, join_id, options \\ []) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :join)
     :ok = Selecto.Policy.ensure_join_allowed!(selecto, join_id, options)
     public_options = Selecto.Policy.strip_internal_options(options)
 
@@ -141,6 +142,7 @@ defmodule Selecto.DynamicJoin do
   """
   @spec join_parameterize(Selecto.t(), atom(), String.t() | atom(), keyword()) :: Selecto.t()
   def join_parameterize(selecto, join_id, parameter, options \\ []) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :join_parameterize)
     # Create a unique identifier for this parameterized join
     param_join_id = "#{join_id}:#{parameter}"
 
@@ -214,6 +216,7 @@ defmodule Selecto.DynamicJoin do
   """
   @spec join_subquery(Selecto.t(), atom(), Selecto.t(), keyword()) :: Selecto.t()
   def join_subquery(selecto, join_id, join_selecto, options \\ []) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :join_subquery)
     :ok = Selecto.Policy.ensure_subquery_join_allowed!(selecto, join_id, options)
     public_options = Selecto.Policy.strip_internal_options(options)
     join_type = Keyword.get(public_options, :type, :left)

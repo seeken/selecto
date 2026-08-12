@@ -5,6 +5,7 @@ defmodule Selecto.ArrayQuery do
   def select(selecto, array_operations, opts \\ [])
 
   def select(selecto, array_operations, _opts) when is_list(array_operations) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :array_select)
     array_specs = Enum.map(array_operations, &build_select_spec/1)
     append_specs(selecto, :array_operations, array_specs)
   end
@@ -17,6 +18,8 @@ defmodule Selecto.ArrayQuery do
   def filter(selecto, array_filters, opts \\ [])
 
   def filter(selecto, array_filters, _opts) when is_list(array_filters) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :array_filter)
+
     array_specs =
       Enum.map(array_filters, fn
         {operation, column, value} ->
@@ -39,6 +42,7 @@ defmodule Selecto.ArrayQuery do
   def manipulate(selecto, array_operations, opts \\ [])
 
   def manipulate(selecto, array_operations, _opts) when is_list(array_operations) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :array_manipulate)
     array_specs = Enum.map(array_operations, &build_manipulation_spec/1)
 
     selecto

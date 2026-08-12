@@ -287,6 +287,16 @@ defmodule Selecto.Policy do
       )
     end
 
+    left_scope = Selecto.Tenant.set_operation_scope(left)
+    right_scope = Selecto.Tenant.set_operation_scope(right)
+
+    if left_scope != right_scope do
+      violation!(
+        :mixed_tenant_scopes,
+        "set operations cannot mix tenant scopes: left=#{inspect(left_scope)}, right=#{inspect(right_scope)}"
+      )
+    end
+
     :ok
   end
 

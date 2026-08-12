@@ -61,6 +61,34 @@ defmodule Selecto.TenantTest do
     assert Selecto.required_filters(query) == [{"active", true}, {"tenant_id", "acme"}]
   end
 
+  test "apply_tenant_scope supports an explicit tenant id without prior context" do
+    query =
+      tenant_required_domain()
+      |> selecto()
+      |> Selecto.apply_tenant_scope(tenant_id: "acme")
+
+    assert Selecto.tenant(query).tenant_id == "acme"
+    assert {"tenant_id", "acme"} in Selecto.required_filters(query)
+    assert :ok = Selecto.validate_tenant_scope(query)
+  end
+
+  test "compatible partial tenant overrides preserve required scope metadata" do
+    query =
+      tenant_required_domain()
+      |> selecto()
+      |> Selecto.with_tenant(%{
+        tenant_id: "acme",
+        prefix: "tenant_acme",
+        required: true,
+        required_filters: [{"active", true}]
+      })
+      |> Selecto.apply_tenant_scope(tenant: %{tenant_id: "acme"})
+
+    assert %{tenant_id: "acme", prefix: "tenant_acme", required: true} = Selecto.tenant(query)
+    assert {"active", true} in Selecto.required_filters(query)
+    assert {"tenant_id", "acme"} in Selecto.required_filters(query)
+  end
+
   test "query_filters includes runtime required tenant filters" do
     query =
       domain()
@@ -79,8 +107,12 @@ defmodule Selecto.TenantTest do
     assert Selecto.Tenant.merge_execution_opts(query, timeout: 1000) ==
              [prefix: "tenant_acme", timeout: 1000]
 
-    assert Selecto.Tenant.merge_execution_opts(query, prefix: "explicit") ==
-             [prefix: "explicit"]
+    assert Selecto.Tenant.merge_execution_opts(query, prefix: "tenant_acme") ==
+             [prefix: "tenant_acme"]
+
+    assert_raise ArgumentError, ~r/execution prefix conflicts/, fn ->
+      Selecto.Tenant.merge_execution_opts(query, prefix: "tenant_other")
+    end
   end
 
   test "tenant required filters appear in generated sql" do
@@ -121,6 +153,78 @@ defmodule Selecto.TenantTest do
              query
              |> Selecto.apply_tenant_scope()
              |> Selecto.validate_tenant_scope()
+  end
+
+  test "tenant validation rejects mismatched and ambiguous required row scope" do
+    base =
+      tenant_required_domain()
+      |> selecto()
+      |> Selecto.with_tenant(%{tenant_id: "acme", required: true})
+
+    mismatched = Selecto.require_tenant_filter(base, "tenant_id", "other")
+
+    assert {:error,
+            %Selecto.Error{
+              details: %{code: :tenant_scope_mismatch, expected_tenant_id: "acme"}
+            }} = Selecto.validate_tenant_scope(mismatched)
+
+    ambiguous =
+      base
+      |> Selecto.require_tenant_filter("tenant_id", "acme")
+      |> Selecto.require_tenant_filter("tenant_id", "other")
+
+    assert {:error, %Selecto.Error{details: %{code: :tenant_scope_ambiguous}}} =
+             Selecto.validate_tenant_scope(ambiguous)
+  end
+
+  test "compound prefix and row scope requires an applied matching row identity" do
+    compound =
+      tenant_required_domain()
+      |> selecto()
+      |> Selecto.with_tenant(%{
+        prefix: "tenant_acme",
+        tenant_id: "acme",
+        required: true
+      })
+
+    assert {:error, %Selecto.Error{details: %{code: :tenant_scope_missing}}} =
+             Selecto.validate_tenant_scope(compound)
+
+    assert :ok =
+             compound
+             |> Selecto.apply_tenant_scope()
+             |> Selecto.validate_tenant_scope()
+
+    assert {:error, %Selecto.Error{details: %{code: :tenant_scope_mismatch}}} =
+             compound
+             |> Selecto.require_tenant_filter("tenant_id", "other")
+             |> Selecto.validate_tenant_scope()
+  end
+
+  test "tenant context aliases and scope overrides fail closed on conflicts" do
+    query = domain() |> selecto()
+
+    assert_raise ArgumentError, ~r/conflicting tenant context aliases/, fn ->
+      Selecto.with_tenant(query, %{"tenant_id" => "other", tenant_id: "acme"})
+    end
+
+    assert_raise ArgumentError, ~r/conflicting tenant context keys :tenant_id and :id/, fn ->
+      Selecto.with_tenant(query, %{tenant_id: "acme", id: "other"})
+    end
+
+    attached = Selecto.with_tenant(query, %{tenant_id: "acme", tenant_field: "tenant_id"})
+
+    assert_raise ArgumentError, ~r/tenant_id override conflicts/, fn ->
+      Selecto.apply_tenant_scope(attached, tenant_id: "other")
+    end
+
+    assert_raise ArgumentError, ~r/tenant_field override conflicts/, fn ->
+      Selecto.apply_tenant_scope(attached, tenant_field: "account_id")
+    end
+
+    assert_raise ArgumentError, ~r/tenant override conflicts/, fn ->
+      Selecto.apply_tenant_scope(attached, tenant: %{tenant_id: "other"})
+    end
   end
 
   test "query_filters raises when tenant is required and missing" do

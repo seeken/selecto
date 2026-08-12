@@ -9,6 +9,7 @@ defmodule Selecto.CteQuery do
 
   def with_cte(selecto, member_id, opts)
       when (is_atom(member_id) or is_binary(member_id)) and (is_list(opts) or is_map(opts)) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :with_cte)
     normalized_overrides = QueryMembers.normalize_opts(opts)
     {member_name, raw_spec} = QueryMembers.fetch!(selecto, :ctes, member_id)
     spec = QueryMembers.normalize_spec(raw_spec)
@@ -110,6 +111,7 @@ defmodule Selecto.CteQuery do
   end
 
   def with_cte(selecto, name, query_builder, opts \\ []) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :with_cte)
     :ok = Selecto.Policy.ensure_ad_hoc_source_allowed!(selecto, :cte)
     join_opts = Keyword.get(opts, :join)
     cte_opts = Keyword.delete(opts, :join)
@@ -181,6 +183,7 @@ defmodule Selecto.CteQuery do
   # 1. (selecto, cte_name, base_fn, recursive_fn, opts) - original inline format
   # 2. (selecto, name, opts) - newer format using Advanced.CTE
   def with_recursive_cte(selecto, arg2, arg3, arg4 \\ nil, arg5 \\ []) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :with_recursive_cte)
     :ok = Selecto.Policy.ensure_ad_hoc_source_allowed!(selecto, :recursive_cte)
 
     {cte_spec, join_opts} =
@@ -263,6 +266,7 @@ defmodule Selecto.CteQuery do
       |> Selecto.select(["film.title", "high_value_customers.total_spent"])
   """
   def with_ctes(selecto, cte_specs, opts \\ []) when is_list(cte_specs) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :with_ctes)
     :ok = Selecto.Policy.ensure_ad_hoc_source_allowed!(selecto, :cte)
     selecto_with_ctes = append_cte_specs(selecto, cte_specs)
     apply_with_ctes_joins(selecto_with_ctes, cte_specs, Keyword.get(opts, :joins))

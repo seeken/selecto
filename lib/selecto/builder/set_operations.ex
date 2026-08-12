@@ -295,11 +295,16 @@ defmodule Selecto.Builder.SetOperations do
       not all_operations_validated?(set_operations) ->
         {:error, "Set operations contain unvalidated schemas"}
 
-      has_conflicting_clauses?(selecto) ->
-        {:error, "Set operations cannot be combined with certain query clauses"}
-
       true ->
-        :ok
+        case unsupported_post_set_changes(selecto) do
+          [] ->
+            :ok
+
+          changes ->
+            {:error,
+             "Set result contains unsupported post-set mutations in #{Enum.join(changes, ", ")}; " <>
+               "only UNION/INTERSECT/EXCEPT chaining and outer ORDER BY, LIMIT, or OFFSET are supported"}
+        end
     end
   end
 
@@ -308,15 +313,65 @@ defmodule Selecto.Builder.SetOperations do
     Enum.all?(set_operations, & &1.validated)
   end
 
-  # Check for query clauses that conflict with set operations
-  defp has_conflicting_clauses?(selecto) do
-    # Set operations cannot be combined with certain clauses at the individual query level
-    has_group_by = not Enum.empty?(Map.get(selecto.set, :group_by, []))
+  @set_result_metadata_fields [
+    :postgrex_opts,
+    :adapter,
+    :connection,
+    :domain,
+    :config,
+    :extensions,
+    :tenant,
+    :policy
+  ]
 
-    has_retarget = Map.has_key?(selecto.set, :retarget_state)
+  # A set result is represented by the latest left operand plus its appended
+  # `set_operations` entry and optional outer ordering/pagination. Compare that
+  # retained state at build time so a missed or future covered mutator cannot be
+  # silently ignored.
+  defp unsupported_post_set_changes(selecto) do
+    set_operations = Map.fetch!(selecto.set, :set_operations)
+    latest_operation = List.last(set_operations)
+    expected_set = comparable_set(latest_operation.left_query.set)
+    actual_set = comparable_set(selecto.set)
 
-    has_subselects = not Enum.empty?(Map.get(selecto.set, :subselected, []))
+    set_changes = changed_map_keys(expected_set, actual_set, "set.")
 
-    has_group_by or has_retarget or has_subselects
+    metadata_changes =
+      @set_result_metadata_fields
+      |> Enum.filter(&(Map.get(selecto, &1) != Map.get(latest_operation.left_query, &1)))
+      |> Enum.map(&to_string/1)
+
+    chain_changes =
+      set_operations
+      |> Enum.drop(1)
+      |> Enum.with_index(1)
+      |> Enum.flat_map(fn {operation, index} ->
+        expected_prefix = Enum.take(set_operations, index)
+
+        if Map.get(operation.left_query.set, :set_operations, []) == expected_prefix do
+          []
+        else
+          ["set_operations[#{index}].left_query"]
+        end
+      end)
+
+    Enum.sort(set_changes ++ metadata_changes ++ chain_changes)
+  end
+
+  defp comparable_set(set) do
+    set
+    |> Map.delete(:set_operations)
+    |> Map.put(:order_by, [])
+    |> Map.delete(:limit)
+    |> Map.delete(:offset)
+  end
+
+  defp changed_map_keys(expected, actual, prefix) do
+    expected
+    |> Map.keys()
+    |> Kernel.++(Map.keys(actual))
+    |> Enum.uniq()
+    |> Enum.filter(&(Map.get(expected, &1, :__missing__) != Map.get(actual, &1, :__missing__)))
+    |> Enum.map(&(prefix <> to_string(&1)))
   end
 end

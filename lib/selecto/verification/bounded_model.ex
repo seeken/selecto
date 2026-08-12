@@ -11,6 +11,8 @@ defmodule Selecto.Verification.BoundedModel do
   the exact model size and never presents the result as an unbounded theorem.
   """
 
+  alias Selecto.Verification.PortableTerm
+
   @type invariant ::
           {String.t() | atom(), (term() -> :ok | true | {:error, term()} | false)}
 
@@ -105,37 +107,8 @@ defmodule Selecto.Verification.BoundedModel do
       invariant: to_string(name),
       invariant_index: invariant_index,
       state_index: state_index,
-      state: portable(state),
-      reason: portable(reason)
+      state: PortableTerm.encode(state),
+      reason: PortableTerm.encode(reason)
     }
   end
-
-  # Proof artifacts must remain serializable even when a model uses structs,
-  # tuples, functions, pids, or exceptions internally.
-  defp portable(value)
-       when is_nil(value) or is_boolean(value) or is_binary(value) or is_number(value) or
-              is_atom(value),
-       do: value
-
-  defp portable(value) when is_list(value), do: Enum.map(value, &portable/1)
-
-  defp portable(value) when is_tuple(value) do
-    %{tuple: value |> Tuple.to_list() |> Enum.map(&portable/1)}
-  end
-
-  defp portable(%module{} = value) do
-    value
-    |> Map.from_struct()
-    |> portable()
-    |> Map.put(:struct, inspect(module))
-  end
-
-  defp portable(value) when is_map(value) do
-    Map.new(value, fn {key, item} -> {portable_key(key), portable(item)} end)
-  end
-
-  defp portable(value), do: inspect(value)
-
-  defp portable_key(key) when is_atom(key) or is_binary(key), do: key
-  defp portable_key(key), do: inspect(key)
 end

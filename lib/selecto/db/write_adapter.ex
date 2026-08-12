@@ -10,6 +10,7 @@ defmodule Selecto.DB.WriteAdapter do
   @type connection :: term()
   @type command ::
           Selecto.Write.Command.t() | Selecto.Write.Batch.t() | Selecto.Write.Graph.t()
+  @type execution_result :: Selecto.Write.Result.t() | [Selecto.Write.Result.t()]
 
   @callback write_capabilities(connection()) :: map()
 
@@ -17,5 +18,5 @@ defmodule Selecto.DB.WriteAdapter do
               {:ok, Selecto.Write.Preview.t()} | {:error, Selecto.Write.Error.t()}
 
   @callback execute_write(connection(), command(), keyword()) ::
-              {:ok, Selecto.Write.Result.t()} | {:error, Selecto.Write.Error.t()}
+              {:ok, execution_result()} | {:error, Selecto.Write.Error.t()}
 end

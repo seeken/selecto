@@ -10,6 +10,8 @@ defmodule Selecto.TextSearch do
   end
 
   def text_search_rank(selecto, fields, opts) when is_list(opts) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :text_search_rank)
+
     case Selecto.AdapterSupport.adapter_name(Map.get(selecto, :adapter)) do
       :mysql ->
         mysql_text_search_rank(selecto, fields, opts)
@@ -28,6 +30,7 @@ defmodule Selecto.TextSearch do
 
   @doc false
   def mysql_text_search_rank(selecto, fields, opts) when is_list(opts) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :text_search_rank)
     normalized_fields = Enum.map(List.wrap(fields), &to_string/1)
 
     if normalized_fields == [] do
@@ -68,6 +71,7 @@ defmodule Selecto.TextSearch do
 
   @doc false
   def postgresql_text_search_rank(selecto, fields, opts) when is_list(opts) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :text_search_rank)
     normalized_fields = List.wrap(fields)
 
     if length(normalized_fields) != 1 do
@@ -118,6 +122,7 @@ defmodule Selecto.TextSearch do
   end
 
   def sqlite_fts_rank(selecto, fields, opts) when is_list(opts) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :text_search_rank)
     adapter = Map.get(selecto, :adapter)
 
     if Selecto.AdapterSupport.adapter_name(adapter) != :sqlite do

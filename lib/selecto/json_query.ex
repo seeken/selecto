@@ -5,6 +5,7 @@ defmodule Selecto.JsonQuery do
   def select(selecto, json_operations, opts \\ [])
 
   def select(selecto, json_operations, _opts) when is_list(json_operations) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :json_select)
     json_specs = Enum.map(json_operations, &build_select_spec/1)
 
     selecto
@@ -20,6 +21,7 @@ defmodule Selecto.JsonQuery do
   def filter(selecto, json_filters, opts \\ [])
 
   def filter(selecto, json_filters, _opts) when is_list(json_filters) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :json_filter)
     json_specs = Enum.map(json_filters, &build_filter_spec/1)
 
     selecto
@@ -35,6 +37,8 @@ defmodule Selecto.JsonQuery do
   def order_by(selecto, json_sorts, opts \\ [])
 
   def order_by(selecto, json_sorts, _opts) when is_list(json_sorts) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :json_order_by)
+
     json_specs =
       Enum.map(json_sorts, fn
         {operation, column, path, direction} when is_binary(path) ->

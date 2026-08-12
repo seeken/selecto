@@ -21,19 +21,19 @@ defmodule Selecto.Builder.Sql do
   alias Selecto.Builder.ValuesClause
 
   @spec build(Selecto.Types.t(), Selecto.Types.sql_generation_options()) ::
-          {String.t(), [%{String.t() => String.t()}], [any()]}
+          {String.t(), list(), [any()]}
   def build(selecto, opts) do
-    :ok = Selecto.Policy.validate_query!(selecto)
-
     # Check for Set Operations first as they completely override query structure
     cond do
       Selecto.Builder.SetOperations.has_set_operations?(selecto) ->
         build_set_operation_query(selecto, opts)
 
       Selecto.Retarget.has_retarget?(selecto) ->
+        :ok = Selecto.Policy.validate_query!(selecto)
         build_retarget_query(selecto, opts)
 
       true ->
+        :ok = Selecto.Policy.validate_query!(selecto)
         build_standard_query(selecto, opts)
     end
   end
@@ -50,7 +50,13 @@ defmodule Selecto.Builder.Sql do
     {order_by_joins, order_by_iodata, _order_by_params} = build_order_by(selecto)
 
     requested_joins =
-      List.flatten(sel_joins ++ window_joins ++ filter_joins ++ group_by_joins ++ order_by_joins)
+      collect_requested_joins(selecto, [
+        sel_joins,
+        window_joins,
+        filter_joins,
+        group_by_joins,
+        order_by_joins
+      ])
 
     joins_in_order = Selecto.Builder.Join.get_join_order(Selecto.joins(selecto), requested_joins)
     {from_iodata, from_params, required_ctes} = build_from_with_ctes(selecto, joins_in_order)
@@ -192,9 +198,13 @@ defmodule Selecto.Builder.Sql do
     joins_in_order =
       Selecto.Builder.Join.get_join_order(
         Selecto.joins(selecto),
-        List.flatten(
-          sel_joins ++ window_joins ++ filter_joins ++ group_by_joins ++ order_by_joins
-        )
+        collect_requested_joins(selecto, [
+          sel_joins,
+          window_joins,
+          filter_joins,
+          group_by_joins,
+          order_by_joins
+        ])
       )
 
     # Phase 1: Enhanced FROM builder with CTE detection
@@ -492,7 +502,12 @@ defmodule Selecto.Builder.Sql do
       end
 
     # Build joins from the retarget target to other tables needed for selected columns.
-    {join_iodata, join_params} = build_retarget_joins(selecto, sel_joins, retarget_config)
+    {join_iodata, join_params} =
+      build_retarget_joins(
+        selecto,
+        collect_requested_joins(selecto, [sel_joins]),
+        retarget_config
+      )
 
     # Assemble final query
     base_iodata =
@@ -549,6 +564,15 @@ defmodule Selecto.Builder.Sql do
 
       {Enum.join(join_clauses, "\n        "), []}
     end
+  end
+
+  defp collect_requested_joins(selecto, inferred_join_groups) do
+    explicit_joins = selecto.set |> Map.get(:active_joins, []) |> List.wrap()
+
+    inferred_join_groups
+    |> List.flatten()
+    |> Kernel.++(explicit_joins)
+    |> Enum.uniq()
   end
 
   defp build_retarget_join_clause(selecto, from_schema, to_schema) do
@@ -641,6 +665,16 @@ defmodule Selecto.Builder.Sql do
   end
 
   defp build_set_operation_query(selecto, _opts) do
+    case Selecto.Builder.SetOperations.validate_set_operations_for_sql(selecto) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        raise ArgumentError, reason
+    end
+
+    :ok = Selecto.Policy.validate_query!(selecto)
+
     # Build set operations using the dedicated builder
     {set_op_iodata, _set_op_params} = Selecto.Builder.SetOperations.build_set_operations(selecto)
 
@@ -678,7 +712,7 @@ defmodule Selecto.Builder.Sql do
 
     # For set operations, we don't return field aliases since the result schema
     # depends on the left query's structure
-    aliases = %{}
+    aliases = []
 
     {sql, aliases, final_params}
   end

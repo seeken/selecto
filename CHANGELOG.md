@@ -8,6 +8,9 @@
 - Added colocated domain write authoring through `source.columns.*.write` and
   `source.associations.*.write`, normalized into the existing canonical
   `writes.fields` and `writes.relationships` contract.
+- Added deterministic bounded event-trace checking with reproducible portable
+  counterexamples, plus governed query-composition and write-authority
+  non-escalation proof suites.
 
 #### Security
 - Kept missing colocated `write` metadata read-only and made duplicate
@@ -22,12 +25,30 @@
   metadata.
 - Tightened UDF authorization so a declaration permits calls only at its exact
   `allowed_in` query site.
+- Made set results fail closed for structural query mutations after `UNION`,
+  `INTERSECT`, or `EXCEPT`; only further set chaining and outer ordering or
+  pagination remain supported, with an independent SQL-build integrity check.
+- Rejected mismatched or ambiguous row-tenant filters, conflicting tenant
+  context aliases and overrides, execution-prefix substitution, and set
+  operations whose operands carry different row identities or schema prefixes.
 
 #### Fixed
 - Replaced per-configuration pool atoms with deterministic Registry `:via`
   names, validated managed-resource liveness before reuse, retired stale
   managers, and stopped pools without supervisor restarts or linked-owner
   shutdowns.
+- Cleared prepared-statement cache entries when a pool manager or direct pool
+  stops, preventing dead pool PIDs from retaining stale preparation flags.
+- Made set-operation SQL generation return the same list-shaped alias metadata
+  as standard queries and corrected the public `gen_sql/2` contract.
+- Corrected portable write execution contracts to include the ordered result
+  list returned for atomic batches as well as single command/graph results.
+- Preserved colliding atom/string map keys, real `struct` fields, improper
+  lists, and invalid UTF-8 binaries in bounded proof artifacts through one
+  shared JSON-portable encoder.
+- Preserved explicitly activated dynamic joins even when no selected, filtered,
+  grouped, or ordered field references them, so root-only queries cannot
+  silently omit semantically significant inner or governed subquery joins.
 - Repaired the PostgreSQL test harness to honor `SELECTO_POSTGRES_*` settings
   and the current structured execution result.
 - Made Dialyzer blocking in CI with a location-specific, unused-filter-checked

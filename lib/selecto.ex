@@ -512,6 +512,7 @@ defmodule Selecto do
 
   def with_subquery(selecto, member_id, opts)
       when (is_atom(member_id) or is_binary(member_id)) and (is_list(opts) or is_map(opts)) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :with_subquery)
     normalized_overrides = QueryMembers.normalize_opts(opts)
     {member_name, raw_spec} = QueryMembers.fetch!(selecto, :subqueries, member_id)
     spec = QueryMembers.normalize_spec(raw_spec)
@@ -862,7 +863,7 @@ defmodule Selecto do
     Selecto.Subselect.subselect(selecto, field_specs, opts)
   end
 
-  @spec gen_sql(t(), keyword()) :: {String.t(), map(), list()}
+  @spec gen_sql(t(), keyword()) :: {String.t(), list(), list()}
   def gen_sql(selecto, opts) do
     Selecto.Builder.Sql.build(selecto, opts)
   end
@@ -1078,6 +1079,7 @@ defmodule Selecto do
       |> Selecto.unnest("categories", as: "category")
   """
   def unnest(selecto, array_field, opts \\ []) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :unnest)
     :ok = Selecto.Policy.ensure_source_origin_allowed!(selecto, :unnest, opts)
     public_opts = Selecto.Policy.strip_internal_options(opts)
     Selecto.QueryValidator.validate_unnest_source!(selecto, array_field)
@@ -1141,6 +1143,7 @@ defmodule Selecto do
   end
 
   def json_table(selecto, source_field, opts) when is_list(opts) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :json_table)
     Selecto.QueryValidator.validate_table_source!(selecto, source_field)
 
     alias_name = opts |> Keyword.fetch!(:as) |> to_string()
@@ -1174,6 +1177,7 @@ defmodule Selecto do
   end
 
   def json_rowset(selecto, source_field, opts) when is_list(opts) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :json_rowset)
     Selecto.QueryValidator.validate_table_source!(selecto, source_field)
 
     alias_name = opts |> Keyword.fetch!(:as) |> to_string()
@@ -1233,6 +1237,7 @@ defmodule Selecto do
 
   def with_unnest(selecto, member_id, opts)
       when (is_atom(member_id) or is_binary(member_id)) and (is_list(opts) or is_map(opts)) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :with_unnest)
     normalized_overrides = QueryMembers.normalize_opts(opts)
     {member_name, raw_spec} = QueryMembers.fetch!(selecto, :unnests, member_id)
     spec = QueryMembers.normalize_spec(raw_spec)
@@ -1333,7 +1338,9 @@ defmodule Selecto do
   Combines results from multiple queries using UNION or UNION ALL.
   All queries must have compatible column counts and types.
   The combined query remains composable with `order_by/2`, `limit/2`, and
-  `offset/2`; outer ordering must reference a selected output column.
+  `offset/2`, and with further set operations. Other query mutations are
+  rejected because a set result is a terminal structural query; outer ordering
+  must reference a selected output column.
 
   ## Options
 
@@ -1365,7 +1372,9 @@ defmodule Selecto do
 
   Returns only rows that appear in both queries.
   The combined query remains composable with `order_by/2`, `limit/2`, and
-  `offset/2`; outer ordering must reference a selected output column.
+  `offset/2`, and with further set operations. Other query mutations are
+  rejected because a set result is a terminal structural query; outer ordering
+  must reference a selected output column.
 
   ## Options
 
@@ -1389,7 +1398,9 @@ defmodule Selecto do
 
   Returns rows from the first query that don't appear in the second query.
   The combined query remains composable with `order_by/2`, `limit/2`, and
-  `offset/2`; outer ordering must reference a selected output column.
+  `offset/2`, and with further set operations. Other query mutations are
+  rejected because a set result is a terminal structural query; outer ordering
+  must reference a selected output column.
 
   ## Options
 
@@ -1456,6 +1467,8 @@ defmodule Selecto do
   # 1. (selecto, lateral_source, opts) - where opts contains :as and :type
   # 2. (selecto, join_type, subquery_builder_or_function, alias_name, opts)
   def lateral_join(selecto, arg2, arg3 \\ [], arg4 \\ nil, arg5 \\ []) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :lateral_join)
+
     # Determine which parameter format is being used
     {join_type, subquery_builder_or_function, alias_name, opts} =
       case {arg2, arg3, arg4, arg5} do
@@ -1569,6 +1582,7 @@ defmodule Selecto do
 
   def with_lateral(selecto, %Selecto{} = lateral_source, opts)
       when is_list(opts) or is_map(opts) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :with_lateral)
     :ok = Selecto.Policy.ensure_ad_hoc_source_allowed!(selecto, :lateral)
     apply_direct_lateral(selecto, lateral_source, opts)
   end
@@ -1576,12 +1590,14 @@ defmodule Selecto do
   def with_lateral(selecto, lateral_source, opts)
       when (is_tuple(lateral_source) or is_function(lateral_source)) and
              (is_list(opts) or is_map(opts)) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :with_lateral)
     :ok = Selecto.Policy.ensure_ad_hoc_source_allowed!(selecto, :lateral)
     apply_direct_lateral(selecto, lateral_source, opts)
   end
 
   def with_lateral(selecto, member_id, opts)
       when (is_atom(member_id) or is_binary(member_id)) and (is_list(opts) or is_map(opts)) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :with_lateral)
     normalized_overrides = QueryMembers.normalize_opts(opts)
     {member_name, raw_spec} = QueryMembers.fetch!(selecto, :laterals, member_id)
     spec = QueryMembers.normalize_spec(raw_spec)
@@ -1902,6 +1918,7 @@ defmodule Selecto do
 
   def with_values(selecto, member_id, opts)
       when (is_atom(member_id) or is_binary(member_id)) and (is_list(opts) or is_map(opts)) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :with_values)
     normalized_overrides = QueryMembers.normalize_opts(opts)
     {member_name, raw_spec} = QueryMembers.fetch!(selecto, :values, member_id)
     spec = QueryMembers.normalize_spec(raw_spec)
@@ -1974,6 +1991,7 @@ defmodule Selecto do
   end
 
   def with_values(selecto, data, opts) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :with_values)
     :ok = Selecto.Policy.ensure_ad_hoc_source_allowed!(selecto, :values)
     apply_values_clause(selecto, data, opts, upsert: false)
   end

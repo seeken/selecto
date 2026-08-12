@@ -148,6 +148,7 @@ defmodule Selecto.Window do
         as: "prev_month")
   """
   def add_window_function(selecto, function, arguments \\ [], options) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :window_function)
     window_spec = build_window_spec(function, arguments, options)
     Selecto.QueryValidator.validate_window_spec!(selecto, window_spec)
 

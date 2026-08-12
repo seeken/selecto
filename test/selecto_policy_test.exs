@@ -228,4 +228,64 @@ defmodule Selecto.PolicyTest do
       Selecto.union(left, right)
     end
   end
+
+  test "set operations cannot cross row-tenant or schema-prefix boundaries" do
+    row_a =
+      strict_query()
+      |> Selecto.select(["status"])
+      |> Selecto.with_tenant(%{tenant_id: "tenant-a", required: true})
+      |> Selecto.apply_tenant_scope()
+
+    row_b =
+      strict_query()
+      |> Selecto.select(["status"])
+      |> Selecto.with_tenant(%{tenant_id: "tenant-b", required: true})
+      |> Selecto.apply_tenant_scope()
+
+    assert_raise PolicyViolation, ~r/cannot mix tenant scopes/, fn ->
+      Selecto.union(row_a, row_b)
+    end
+
+    prefix_a =
+      strict_query()
+      |> Selecto.select(["status"])
+      |> Selecto.with_tenant(%{prefix: "tenant_a", required: true})
+
+    prefix_b =
+      strict_query()
+      |> Selecto.select(["status"])
+      |> Selecto.with_tenant(%{prefix: "tenant_b", required: true})
+
+    assert_raise PolicyViolation, ~r/cannot mix tenant scopes/, fn ->
+      Selecto.union(prefix_a, prefix_b)
+    end
+
+    compound_a =
+      prefix_a
+      |> Selecto.with_tenant(%{prefix: "tenant_a", tenant_id: "tenant-a", required: true})
+      |> Selecto.apply_tenant_scope()
+
+    compound_b =
+      prefix_a
+      |> Selecto.with_tenant(%{prefix: "tenant_a", tenant_id: "tenant-b", required: true})
+      |> Selecto.apply_tenant_scope()
+
+    assert_raise PolicyViolation, ~r/cannot mix tenant scopes/, fn ->
+      Selecto.union(compound_a, compound_b)
+    end
+
+    attached_a =
+      strict_query()
+      |> Selecto.select(["status"])
+      |> Selecto.with_tenant(%{tenant_id: "tenant-a", required: false})
+
+    attached_b =
+      strict_query()
+      |> Selecto.select(["status"])
+      |> Selecto.with_tenant(%{tenant_id: "tenant-b", required: false})
+
+    assert_raise PolicyViolation, ~r/cannot mix tenant scopes/, fn ->
+      Selecto.union(attached_a, attached_b)
+    end
+  end
 end

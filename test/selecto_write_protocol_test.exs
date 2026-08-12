@@ -31,6 +31,13 @@ defmodule Selecto.WriteProtocolTest do
       {:ok, %Preview{statements: [%{text: "adapter-owned preview", params: [command]}]}}
     end
 
+    def execute_write(_connection, %Batch{commands: commands}, _opts) do
+      {:ok,
+       Enum.map(commands, fn command ->
+         %Result{operation: operation(command), affected_rows: 1, rows: [%{id: 1}]}
+       end)}
+    end
+
     def execute_write(_connection, command, _opts) do
       {:ok, %Result{operation: operation(command), affected_rows: 1, rows: [%{id: 1}]}}
     end
@@ -210,6 +217,17 @@ defmodule Selecto.WriteProtocolTest do
 
     assert {:ok, %Batch{atomic?: true}} = Batch.new([command])
     assert {:error, %Error{type: :invalid_command}} = Batch.new([command], atomic?: false)
+  end
+
+  test "dispatches batch execution results as an ordered result list" do
+    {:ok, batch} = Batch.new([command!(:insert), command!(:delete)])
+    selecto = %Selecto{adapter: WriteAdapter, connection: :connection}
+
+    assert {:ok,
+            [
+              %Result{operation: :insert, affected_rows: 1},
+              %Result{operation: :delete, affected_rows: 1}
+            ]} = Write.execute(selecto, batch)
   end
 
   test "validates topologically ordered generated-key write graphs" do

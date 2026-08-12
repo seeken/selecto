@@ -72,6 +72,7 @@ defmodule Selecto.Subselect do
   """
   @spec subselect(Types.t(), [String.t() | Types.subselect_selector()], keyword()) :: Types.t()
   def subselect(selecto, field_specs, opts \\ []) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :subselect)
     subselect_configs = normalize_field_specs(field_specs, opts)
 
     # Validate all subselect configurations
@@ -133,6 +134,7 @@ defmodule Selecto.Subselect do
   """
   @spec clear_subselects(Types.t()) :: Types.t()
   def clear_subselects(selecto) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :clear_subselects)
     updated_set = Map.delete(selecto.set, :subselected)
     %{selecto | set: updated_set}
   end

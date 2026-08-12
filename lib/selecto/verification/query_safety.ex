@@ -13,7 +13,14 @@ defmodule Selecto.Verification.QuerySafety do
 
   alias Selecto.Verification.BoundedModel
 
-  @contexts [:none, :tenant_id, :prefix]
+  @contexts [
+    :none,
+    :tenant_id,
+    :mismatched_tenant_id,
+    :ambiguous_tenant_id,
+    :prefix,
+    :compound_tenant
+  ]
 
   @doc """
   Runs the built-in read-path safety model.
@@ -38,6 +45,7 @@ defmodule Selecto.Verification.QuerySafety do
       {"required_scope_fails_closed", &required_scope_fails_closed/1},
       {"required_filters_are_preserved", &required_filters_are_preserved/1},
       {"row_scope_is_parameterized", &row_scope_is_parameterized/1},
+      {"attached_prefix_cannot_be_substituted", &attached_prefix_cannot_be_substituted/1},
       {"user_filters_cannot_replace_required_scope",
        &user_filters_cannot_replace_required_scope/1}
     ]
@@ -103,6 +111,25 @@ defmodule Selecto.Verification.QuerySafety do
 
   defp row_scope_is_parameterized(_state), do: :ok
 
+  defp attached_prefix_cannot_be_substituted(%{context: :prefix} = state) do
+    exact = Selecto.Tenant.merge_execution_opts(state.query, prefix: "tenant_a")
+
+    try do
+      Selecto.Tenant.merge_execution_opts(state.query, prefix: "tenant_b")
+      {:error, :conflicting_execution_prefix_was_accepted}
+    rescue
+      error in ArgumentError ->
+        if exact[:prefix] == "tenant_a" and
+             String.contains?(Exception.message(error), "execution prefix conflicts") do
+          :ok
+        else
+          {:error, %{exact_opts: exact, unexpected_error: Exception.message(error)}}
+        end
+    end
+  end
+
+  defp attached_prefix_cannot_be_substituted(_state), do: :ok
+
   defp user_filters_cannot_replace_required_scope(
          %{
            tenant_required?: true,
@@ -118,8 +145,18 @@ defmodule Selecto.Verification.QuerySafety do
 
   defp user_filters_cannot_replace_required_scope(_state), do: :ok
 
+  defp expected_valid?(%{context: context})
+       when context in [:mismatched_tenant_id, :ambiguous_tenant_id],
+       do: false
+
+  defp expected_valid?(%{context: context, apply_scope?: false})
+       when context in [:tenant_id, :compound_tenant],
+       do: false
+
   defp expected_valid?(%{tenant_required?: false}), do: true
+
   defp expected_valid?(%{context: :prefix}), do: true
+  defp expected_valid?(%{context: :compound_tenant, apply_scope?: true}), do: true
   defp expected_valid?(%{context: :tenant_id, apply_scope?: true}), do: true
   defp expected_valid?(_state), do: false
 
@@ -129,11 +166,42 @@ defmodule Selecto.Verification.QuerySafety do
     Selecto.with_tenant(query, %{tenant_id: "tenant-a", required: tenant_required?})
   end
 
+  defp attach_context(query, :mismatched_tenant_id, tenant_required?) do
+    query
+    |> Selecto.with_tenant(%{tenant_id: "tenant-a", required: tenant_required?})
+    |> Selecto.require_tenant_filter("tenant_id", "tenant-b")
+  end
+
+  defp attach_context(query, :ambiguous_tenant_id, tenant_required?) do
+    query
+    |> Selecto.with_tenant(%{tenant_id: "tenant-a", required: tenant_required?})
+    |> Selecto.require_tenant_filter("tenant_id", "tenant-a")
+    |> Selecto.require_tenant_filter("tenant_id", "tenant-b")
+  end
+
   defp attach_context(query, :prefix, tenant_required?) do
     Selecto.with_tenant(query, %{prefix: "tenant_a", required: tenant_required?})
   end
 
-  defp maybe_apply_scope(query, true), do: Selecto.apply_tenant_scope(query)
+  defp attach_context(query, :compound_tenant, tenant_required?) do
+    Selecto.with_tenant(query, %{
+      prefix: "tenant_a",
+      tenant_id: "tenant-a",
+      required: tenant_required?
+    })
+  end
+
+  defp maybe_apply_scope(query, true) do
+    case Selecto.validate_tenant_scope(query) do
+      {:error, %Selecto.Error{details: %{code: code}}}
+      when code in [:tenant_scope_mismatch, :tenant_scope_ambiguous] ->
+        query
+
+      _ ->
+        Selecto.apply_tenant_scope(query)
+    end
+  end
+
   defp maybe_apply_scope(query, false), do: query
 
   defp maybe_add_user_filter(query, true), do: Selecto.filter(query, {"name", "Ada"})

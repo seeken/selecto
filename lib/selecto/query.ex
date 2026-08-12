@@ -22,6 +22,7 @@ defmodule Selecto.Query do
   """
   @spec select(Selecto.Types.t(), [Selecto.Types.selector()]) :: Selecto.Types.t()
   def select(selecto, fields) when is_list(fields) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :select)
     normalized_fields = Selecto.Expr.normalize(fields)
     Selecto.QueryValidator.validate_selectors!(selecto, normalized_fields)
     put_in(selecto.set.selected, Enum.uniq(selecto.set.selected ++ normalized_fields))
@@ -48,6 +49,7 @@ defmodule Selecto.Query do
   """
   @spec filter(Selecto.Types.t(), [Selecto.Types.filter()]) :: Selecto.Types.t()
   def filter(selecto, filters) when is_list(filters) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :filter)
     normalized_filters = Selecto.Expr.normalize(filters)
 
     # Track whether this filter is applied before or after retargeting.
@@ -90,6 +92,7 @@ defmodule Selecto.Query do
   """
   @spec pre_retarget_filter(Selecto.Types.t(), [Selecto.Types.filter()]) :: Selecto.Types.t()
   def pre_retarget_filter(selecto, filters) when is_list(filters) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :pre_retarget_filter)
     normalized_filters = Selecto.Expr.normalize(filters)
     Selecto.QueryValidator.validate_filters!(selecto, normalized_filters)
     current_required = required_filters(selecto)
@@ -112,6 +115,7 @@ defmodule Selecto.Query do
   """
   @spec post_retarget_filter(Selecto.Types.t(), [Selecto.Types.filter()]) :: Selecto.Types.t()
   def post_retarget_filter(selecto, filters) when is_list(filters) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :post_retarget_filter)
     normalized_filters = Selecto.Expr.normalize(filters)
     validate_post_retarget_filters!(selecto, normalized_filters)
 
@@ -363,6 +367,7 @@ defmodule Selecto.Query do
   """
   @spec group_by(Selecto.Types.t(), [Selecto.Types.field_name()]) :: Selecto.Types.t()
   def group_by(selecto, groups) when is_list(groups) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :group_by)
     normalized_groups = Selecto.Expr.normalize(groups)
     Selecto.QueryValidator.validate_group_specs!(selecto, normalized_groups)
     put_in(selecto.set.group_by, selecto.set.group_by ++ normalized_groups)
@@ -370,6 +375,7 @@ defmodule Selecto.Query do
 
   @spec group_by(Selecto.Types.t(), Selecto.Types.field_name()) :: Selecto.Types.t()
   def group_by(selecto, groups) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :group_by)
     normalized_group = Selecto.Expr.normalize(groups)
     Selecto.QueryValidator.validate_group_specs!(selecto, normalized_group)
     put_in(selecto.set.group_by, selecto.set.group_by ++ [normalized_group])

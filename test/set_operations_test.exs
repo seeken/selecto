@@ -59,6 +59,14 @@ defmodule SetOperationsTest do
     assert params == ["PG", "G"]
   end
 
+  test "gen_sql returns list-shaped alias metadata for set operations", %{q1: q1, q2: q2} do
+    {_sql, aliases, params} = q1 |> Selecto.union(q2) |> Selecto.gen_sql([])
+
+    assert aliases == []
+    assert is_list(aliases)
+    assert params == ["PG", "G"]
+  end
+
   test "renumbers parameters across chained operands", %{q1: q1, q2: q2, domain: domain} do
     q3 =
       Selecto.configure(domain, [], validate: false)
@@ -119,6 +127,87 @@ defmodule SetOperationsTest do
     assert sql =~ ~r/ORDER BY/i
     assert sql =~ ~r/LIMIT\s+5/i
     assert sql =~ ~r/OFFSET\s+10/i
+  end
+
+  test "structural query mutations fail closed after a set operation", %{q1: q1, q2: q2} do
+    set_result = Selecto.union(q1, q2)
+
+    mutations = [
+      select: &Selecto.select(&1, "film_id"),
+      filter: &Selecto.filter(&1, {"rating", "R"}),
+      pre_retarget_filter: &Selecto.pre_retarget_filter(&1, {"rating", "R"}),
+      post_retarget_filter: &Selecto.post_retarget_filter(&1, {"rating", "R"}),
+      group_by: &Selecto.group_by(&1, "title"),
+      select_shape: &Selecto.select_shape(&1, ["title"]),
+      join: &Selecto.join(&1, :missing_join),
+      join_parameterize: &Selecto.join_parameterize(&1, :missing_join, :variant),
+      join_subquery: &Selecto.join_subquery(&1, :nested, q2),
+      with_cte: &Selecto.with_cte(&1, :missing_cte),
+      with_recursive_cte: &Selecto.with_recursive_cte(&1, "tree", []),
+      with_ctes: &Selecto.with_ctes(&1, []),
+      with_subquery: &Selecto.with_subquery(&1, :missing_subquery),
+      retarget: &Selecto.retarget(&1, :missing_schema),
+      reset_retarget: &Selecto.Retarget.reset_retarget/1,
+      subselect: &Selecto.subselect(&1, ["title"]),
+      clear_subselects: &Selecto.Subselect.clear_subselects/1,
+      with_tenant: &Selecto.with_tenant(&1, %{tenant_id: "tenant-a"}),
+      apply_tenant_scope: &Selecto.apply_tenant_scope(&1, tenant_id: "tenant-a"),
+      require_tenant_filter: &Selecto.require_tenant_filter(&1, "tenant_id", "tenant-a"),
+      unnest: &Selecto.unnest(&1, "tags"),
+      with_unnest: &Selecto.with_unnest(&1, :missing_unnest),
+      lateral_join:
+        &Selecto.lateral_join(&1, :inner, {:function, :generate_series, [1, 2]}, "series"),
+      with_lateral:
+        &Selecto.with_lateral(&1, {:function, :generate_series, [1, 2]}, as: "series"),
+      with_values: &Selecto.with_values(&1, [["PG"]], columns: ["rating"], as: "ratings"),
+      json_table: &Selecto.json_table(&1, "metadata", as: "items", columns: []),
+      json_rowset: &Selecto.json_rowset(&1, "metadata", as: "items"),
+      window_function: &Selecto.window_function(&1, :row_number, [], over: []),
+      text_search_rank: &Selecto.text_search_rank(&1, ["title"], query: "film"),
+      json_select: &Selecto.json_select(&1, {:json_extract, "metadata", "$.name"}),
+      json_filter: &Selecto.json_filter(&1, {:json_exists, "metadata", "$.name"}),
+      json_order_by: &Selecto.json_order_by(&1, {:json_extract, "metadata", "$.name", :asc}),
+      array_select: &Selecto.array_select(&1, {:array_agg, "title", []}),
+      array_filter: &Selecto.array_filter(&1, {:array_contains, "tags", ["featured"]}),
+      array_manipulate: &Selecto.array_manipulate(&1, {:array_append, "tags", "new", []})
+    ]
+
+    for {operation, mutate} <- mutations do
+      assert_raise ArgumentError,
+                   ~r/^#{operation} cannot be applied after a set operation/,
+                   fn -> mutate.(set_result) end
+    end
+  end
+
+  test "SQL generation rejects unsupported set-result mutation even if an API guard is bypassed",
+       %{
+         q1: q1,
+         q2: q2
+       } do
+    set_result = Selecto.union(q1, q2)
+    tampered_set = put_in(set_result.set.selected, set_result.set.selected ++ ["film_id"])
+
+    assert_raise ArgumentError, ~r/unsupported post-set mutations in set.selected/, fn ->
+      Selecto.to_sql(tampered_set)
+    end
+
+    tampered_tenant = %{set_result | tenant: %{tenant_id: "tenant-a"}}
+
+    assert_raise ArgumentError, ~r/unsupported post-set mutations in tenant/, fn ->
+      Selecto.to_sql(tampered_tenant)
+    end
+
+    tampered_config = %{set_result | config: Map.put(set_result.config, :source_table, "other")}
+
+    assert_raise ArgumentError, ~r/unsupported post-set mutations in config/, fn ->
+      Selecto.to_sql(tampered_config)
+    end
+
+    tampered_policy = %{set_result | policy: %{set_result.policy | mode: :strict}}
+
+    assert_raise ArgumentError, ~r/unsupported post-set mutations in policy/, fn ->
+      Selecto.to_sql(tampered_policy)
+    end
   end
 
   test "set operation does not inherit left query order by as outer order by", %{q1: q1, q2: q2} do

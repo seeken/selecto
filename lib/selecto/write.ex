@@ -10,9 +10,10 @@ defmodule Selecto.Write do
   alias Selecto.Write.{Command, Error, Preview}
 
   @type command :: Command.t() | Selecto.Write.Batch.t() | Selecto.Write.Graph.t()
+  @type execution_result :: Selecto.Write.Result.t() | [Selecto.Write.Result.t()]
 
   @spec execute(Selecto.t(), command(), keyword()) ::
-          {:ok, Selecto.Write.Result.t()} | {:error, Error.t()}
+          {:ok, execution_result()} | {:error, Error.t()}
   def execute(%Selecto{adapter: adapter, connection: connection}, command, opts \\ []) do
     with :ok <- validate_command(command),
          :ok <- ensure_callback(adapter, :execute_write, 3) do
