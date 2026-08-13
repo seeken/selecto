@@ -1,5 +1,12 @@
 defmodule Selecto.Write.Result do
-  @moduledoc "Normalized result of a successful portable write."
+  @moduledoc """
+  Normalized result of a successful portable write.
+
+  `affected_rows` is the number of rows logically matched and authorized by the
+  portable mutation. It is not necessarily the database driver's physical
+  changed-row count. Adapters must normalize dialect-specific values before
+  enforcing `Command.expected_cardinality` or constructing this result.
+  """
 
   @type t :: %__MODULE__{
           operation: atom(),

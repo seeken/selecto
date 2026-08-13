@@ -35,8 +35,8 @@ Add `selecto` and the adapter package your app uses:
 ```elixir
 def deps do
   [
-    {:selecto, ">= 0.4.12 and < 0.6.0"},
-    {:selecto_db_postgresql, ">= 0.4.9 and < 0.6.0"}
+    {:selecto, ">= 0.4.13 and < 0.6.0"},
+    {:selecto_db_postgresql, ">= 0.4.11 and < 0.6.0"}
   ]
 end
 ```
@@ -206,6 +206,8 @@ Current `0.4.x` scope:
 
 - `docs/developer_contracts.md` for authored domain contracts, capabilities,
   choice sources, published views, writes, and domain actions.
+- `docs/write_adapter_protocol.md` for portable write ownership, versioned
+  capability preflight, and the adapter support matrix.
 - `docs/domain_schema_v1.md` for the normalized domain schema contract.
 - `docs/expression_dsl.md` for dynamic expression helpers, macros, and sigils.
 - `docs/strict_mode.md` for sealed domains and governed query construction.

@@ -26,6 +26,7 @@ defmodule Mix.Tasks.Selecto.Verify do
       Selecto.Verification.QuerySafety.verify(),
       Selecto.Verification.ContractSafety.verify(),
       Selecto.Verification.WriteRegistrySafety.verify(),
+      Selecto.Verification.WriteCapabilitySafety.verify(),
       Selecto.Verification.GovernedQueryComposition.verify(),
       Selecto.Verification.WriteAuthorityNonEscalation.verify()
     ]

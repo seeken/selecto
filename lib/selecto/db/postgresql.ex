@@ -114,12 +114,16 @@ defmodule Selecto.DB.PostgreSQL do
 
   @impl true
   def server_version_major(connection) do
-    with {:ok, %{rows: [[version_num]]}} <-
-           execute_raw(connection, "show server_version_num", []),
-         {parsed, _} <- Integer.parse(to_string(version_num)) do
-      {:ok, div(parsed, 10_000)}
-    else
-      _ -> {:error, :invalid_server_version_num}
+    try do
+      with {:ok, %{rows: [[version_num]]}} <-
+             execute_raw(connection, "show server_version_num", []),
+           {parsed, _} <- Integer.parse(to_string(version_num)) do
+        {:ok, div(parsed, 10_000)}
+      else
+        _ -> {:error, :invalid_server_version_num}
+      end
+    catch
+      :exit, _reason -> {:error, :invalid_server_version_num}
     end
   end
 

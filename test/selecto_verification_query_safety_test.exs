@@ -12,4 +12,11 @@ defmodule Selecto.Verification.QuerySafetyTest do
     assert report.check_count == 240
     assert report.proved?, inspect(report.counterexamples, pretty: true)
   end
+
+  test "the finite model never opens a database connection" do
+    assert Enum.all?(QuerySafety.states(), fn state ->
+             state.query.adapter == Selecto.DB.PostgreSQL and
+               state.query.connection == :verification
+           end)
+  end
 end

@@ -1,6 +1,27 @@
 
 # Selecto Library Changelog
 
+## V 0.4.13 - Versioned Portable Write Adapter Contract
+------------------------------------------------------
+
+#### Added
+- Added protocol-versioned write capability validation and command-derived
+  preflight for operations, atomic batches, generated keys, graphs, and
+  operation-specific returning support.
+- Added dialect-neutral graph materialization, delete-missing command, and root
+  result helpers for use by every database adapter.
+
+#### Fixed
+- Defined `affected_rows` as logical matched and authorized rows rather than
+  database-specific physical changed-byte counts.
+- Reject missing, incompatible, or overstated adapter capabilities before any
+  preview or execution callback can mutate data.
+- Kept the bounded query-safety model explicitly connection-free, including
+  PostgreSQL rollup-version detection, so proof runs cannot dispatch network I/O.
+- Sanitized adapter failure details into portable adapter/reason categories so
+  driver structs, connections, SQL, and bound values cannot leak through the
+  Updato error boundary.
+
 ## V 0.4.12 - Fail-Closed Write and Publication Boundaries
 ---------------------------------------------------------
 

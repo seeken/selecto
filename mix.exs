@@ -4,7 +4,7 @@ defmodule Selecto.MixProject do
   def project do
     [
       app: :selecto,
-      version: "0.4.12",
+      version: "0.4.13",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -35,6 +35,7 @@ defmodule Selecto.MixProject do
           "docs/domain_schema_v1.md",
           "docs/formal_verification.md",
           "docs/strict_mode.md",
+          "docs/write_adapter_protocol.md",
           "guides/complex_join_patterns.md",
           "guides/olap_and_hierarchical_patterns.md",
           "guides/advanced_usage.md"
@@ -144,6 +145,7 @@ defmodule Selecto.MixProject do
         "docs/domain_schema_v1.md",
         "docs/formal_verification.md",
         "docs/strict_mode.md",
+        "docs/write_adapter_protocol.md",
         "guides",
         ".formatter.exs"
       ],

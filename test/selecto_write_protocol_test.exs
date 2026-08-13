@@ -2,7 +2,18 @@ defmodule Selecto.WriteProtocolTest do
   use ExUnit.Case, async: true
 
   alias Selecto.Write
-  alias Selecto.Write.{AdapterConformance, Batch, Command, Error, Graph, Preview, Result}
+
+  alias Selecto.Write.{
+    AdapterConformance,
+    Batch,
+    Capabilities,
+    Command,
+    Error,
+    Graph,
+    Preview,
+    Result
+  }
+
   alias Selecto.Write.Graph.{Binding, Node, Row}
   alias Selecto.Domain.WriteContract
 
@@ -19,10 +30,14 @@ defmodule Selecto.WriteProtocolTest do
 
     def write_capabilities(_connection),
       do: %{
+        protocol_version: 1,
         insert: true,
         update: true,
         upsert: true,
         delete: true,
+        write_graph: true,
+        returning: true,
+        generated_keys: :returning,
         atomic_batch: true,
         transactions: true
       }
@@ -58,6 +73,56 @@ defmodule Selecto.WriteProtocolTest do
     def supports?(_feature), do: false
   end
 
+  defmodule MissingProtocolAdapter do
+    @behaviour Selecto.DB.Adapter
+    @behaviour Selecto.DB.WriteAdapter
+
+    def name, do: :missing_protocol
+    def connect(connection), do: {:ok, connection}
+    def execute(_connection, _query, _params, _opts), do: {:ok, %{rows: [], columns: []}}
+    def placeholder(index), do: ["$", Integer.to_string(index)]
+    def quote_identifier(identifier), do: ~s("#{identifier}")
+    def supports?(_feature), do: false
+    def write_capabilities(_connection), do: %{insert: true}
+    def preview_write(agent, _write, _opts), do: Agent.update(agent, &(&1 + 1))
+    def execute_write(agent, _write, _opts), do: Agent.update(agent, &(&1 + 1))
+  end
+
+  defmodule OperationReturningAdapter do
+    @behaviour Selecto.DB.Adapter
+    @behaviour Selecto.DB.WriteAdapter
+
+    def name, do: :operation_returning
+    def connect(connection), do: {:ok, connection}
+    def execute(_connection, _query, _params, _opts), do: {:ok, %{rows: [], columns: []}}
+    def placeholder(index), do: ["$", Integer.to_string(index)]
+    def quote_identifier(identifier), do: ~s("#{identifier}")
+    def supports?(_feature), do: false
+
+    def write_capabilities(_connection),
+      do: %{protocol_version: 1, insert: true, update: true, returning: %{insert: true}}
+
+    def preview_write(_connection, _write, _opts), do: {:ok, %Preview{statements: []}}
+
+    def execute_write(_connection, command, _opts),
+      do: {:ok, %Result{operation: command.operation, affected_rows: 1}}
+  end
+
+  defmodule RaisingCapabilitiesAdapter do
+    @behaviour Selecto.DB.Adapter
+    @behaviour Selecto.DB.WriteAdapter
+
+    def name, do: :raising_capabilities
+    def connect(connection), do: {:ok, connection}
+    def execute(_connection, _query, _params, _opts), do: {:ok, %{rows: [], columns: []}}
+    def placeholder(index), do: ["$", Integer.to_string(index)]
+    def quote_identifier(identifier), do: ~s("#{identifier}")
+    def supports?(_feature), do: false
+    def write_capabilities(_connection), do: raise("capability probe secret")
+    def preview_write(agent, _write, _opts), do: Agent.update(agent, &(&1 + 1))
+    def execute_write(agent, _write, _opts), do: Agent.update(agent, &(&1 + 1))
+  end
+
   test "dispatches a validated portable command to the configured write adapter" do
     command = command!(:insert)
     selecto = %Selecto{adapter: WriteAdapter, connection: :connection}
@@ -68,6 +133,98 @@ defmodule Selecto.WriteProtocolTest do
              Write.preview(selecto, command)
 
     assert {:ok, %{atomic_batch: true}} = Write.capabilities(selecto)
+  end
+
+  test "fails before dispatch when the adapter omits or cannot preserve protocol capabilities" do
+    {:ok, agent} = Agent.start_link(fn -> 0 end)
+    selecto = %Selecto{adapter: MissingProtocolAdapter, connection: agent}
+
+    assert {:error, %Error{type: :invalid_write_capabilities}} =
+             Write.execute(selecto, command!(:insert))
+
+    assert {:error, %Error{type: :invalid_write_capabilities}} =
+             Write.preview(selecto, command!(:insert))
+
+    assert Agent.get(agent, & &1) == 0
+  end
+
+  test "capability callback crashes fail closed without dispatch or leaked exception text" do
+    {:ok, agent} = Agent.start_link(fn -> 0 end)
+    selecto = %Selecto{adapter: RaisingCapabilitiesAdapter, connection: agent}
+
+    assert {:error,
+            %Error{
+              type: :invalid_write_capabilities,
+              details: %{adapter: RaisingCapabilitiesAdapter}
+            } = error} = Write.execute(selecto, command!(:insert))
+
+    refute inspect(error) =~ "capability probe secret"
+    assert Agent.get(agent, & &1) == 0
+  end
+
+  test "adapter failures never retain driver structs or sensitive reason text" do
+    error =
+      Error.adapter_failure(
+        :execution_failed,
+        :example,
+        %RuntimeError{message: "secret bound value"},
+        "example write failed"
+      )
+
+    assert error.details == %{adapter: :example, reason: "RuntimeError"}
+    refute inspect(error) =~ "secret bound value"
+    assert {:ok, _json} = Jason.encode(error.details)
+  end
+
+  test "supports operation-specific returning without overclaiming other mutations" do
+    selecto = %Selecto{adapter: OperationReturningAdapter, connection: :connection}
+
+    assert {:ok, %Result{operation: :insert}} =
+             Write.execute(selecto, %{command!(:insert) | returning: [:id]})
+
+    assert {:error,
+            %Error{
+              type: :write_capability_missing,
+              details: %{missing: [{:returning, :update}]}
+            }} = Write.execute(selecto, %{command!(:update) | returning: [:id]})
+  end
+
+  test "graph preflight requires returning only for the root operation" do
+    root = %{command!(:insert) | returning: [:id]}
+    child = %{command!(:update) | relation: :children, returning: [:id]}
+
+    nodes = [
+      %Node{
+        id: "root",
+        path: [],
+        relation: :items,
+        strategy: :ordered,
+        rows: [%Row{id: "root", path: [], command: root}]
+      },
+      %Node{
+        id: "children",
+        path: [:children],
+        relation: :children,
+        strategy: :ordered,
+        rows: [%Row{id: "child", path: [:children, 0], command: child}]
+      }
+    ]
+
+    assert {:ok, graph} = Graph.new(nodes, {"root", "root"})
+
+    capabilities = %{
+      protocol_version: 1,
+      insert: true,
+      update: true,
+      transactions: true,
+      write_graph: true,
+      returning: %{insert: true},
+      generated_keys: false
+    }
+
+    assert :ok = Capabilities.require(capabilities, graph)
+    refute {:returning, :update} in Capabilities.requirements(graph)
+    refute :generated_keys in Capabilities.requirements(graph)
   end
 
   test "rejects raw SQL from a portable command" do

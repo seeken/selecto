@@ -55,7 +55,11 @@ defmodule Selecto.Verification.QuerySafety do
     query =
       tenant_required?
       |> domain()
-      |> Selecto.configure([hostname: "verification.invalid"], validate: false)
+      |> Selecto.configure(:verification,
+        adapter: Selecto.DB.PostgreSQL,
+        rollup_sort_fix: false,
+        validate: false
+      )
       |> Selecto.select(["name"])
       |> attach_context(context, tenant_required?)
       |> maybe_apply_scope(apply_scope?)

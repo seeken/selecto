@@ -7,7 +7,7 @@ defmodule Selecto.Write do
   commands; a configured database adapter previews or executes them.
   """
 
-  alias Selecto.Write.{Command, Error, Preview}
+  alias Selecto.Write.{Capabilities, Command, Error, Preview}
 
   @type command :: Command.t() | Selecto.Write.Batch.t() | Selecto.Write.Graph.t()
   @type execution_result :: Selecto.Write.Result.t() | [Selecto.Write.Result.t()]
@@ -16,7 +16,9 @@ defmodule Selecto.Write do
           {:ok, execution_result()} | {:error, Error.t()}
   def execute(%Selecto{adapter: adapter, connection: connection}, command, opts \\ []) do
     with :ok <- validate_command(command),
-         :ok <- ensure_callback(adapter, :execute_write, 3) do
+         :ok <- ensure_callback(adapter, :execute_write, 3),
+         {:ok, capabilities} <- adapter_capabilities(adapter, connection),
+         :ok <- Capabilities.require(capabilities, command) do
       adapter.execute_write(connection, command, opts)
     end
   end
@@ -24,16 +26,41 @@ defmodule Selecto.Write do
   @spec preview(Selecto.t(), command(), keyword()) :: {:ok, Preview.t()} | {:error, Error.t()}
   def preview(%Selecto{adapter: adapter, connection: connection}, command, opts \\ []) do
     with :ok <- validate_command(command),
-         :ok <- ensure_callback(adapter, :preview_write, 3) do
+         :ok <- ensure_callback(adapter, :preview_write, 3),
+         {:ok, capabilities} <- adapter_capabilities(adapter, connection),
+         :ok <- Capabilities.require(capabilities, command) do
       adapter.preview_write(connection, command, opts)
     end
   end
 
   @spec capabilities(Selecto.t()) :: {:ok, map()} | {:error, Error.t()}
   def capabilities(%Selecto{adapter: adapter, connection: connection}) do
-    with :ok <- ensure_callback(adapter, :write_capabilities, 1) do
-      {:ok, adapter.write_capabilities(connection)}
+    adapter_capabilities(adapter, connection)
+  end
+
+  defp adapter_capabilities(adapter, connection) do
+    with :ok <- ensure_callback(adapter, :write_capabilities, 1),
+         {:ok, capabilities} <- safe_capabilities(adapter, connection),
+         :ok <- Capabilities.validate(capabilities) do
+      {:ok, capabilities}
     end
+  end
+
+  defp safe_capabilities(adapter, connection) do
+    {:ok, adapter.write_capabilities(connection)}
+  rescue
+    _exception -> capability_callback_error(adapter)
+  catch
+    _kind, _reason -> capability_callback_error(adapter)
+  end
+
+  defp capability_callback_error(adapter) do
+    {:error,
+     Error.new(
+       :invalid_write_capabilities,
+       "write adapter capability discovery failed",
+       details: %{adapter: adapter}
+     )}
   end
 
   defp validate_command(%Command{} = command), do: Command.validate(command)
