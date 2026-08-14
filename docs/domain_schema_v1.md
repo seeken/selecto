@@ -1167,6 +1167,59 @@ mode. Strict mode is a query-construction governance boundary. It MUST be paired
 with database privileges, tenant controls, parameterized execution, and any
 required row-level security.
 
+### Named Domain Resolution
+
+Systems that select a domain at an HTTP, LiveView, API, job, or tool boundary
+SHOULD exchange an opaque atom or string id rather than accept an authored
+domain map from that caller. A server-owned registry implements:
+
+```elixir
+@behaviour Selecto.Domain.Registry
+
+@impl true
+def fetch("orders", %{actor: actor, tenant: tenant}) do
+  if authorized?(actor, tenant) do
+    {:ok, OrdersDomain.domain(), %{version: "2026-08-14"}}
+  else
+    {:error, :forbidden}
+  end
+end
+
+def fetch(_id, _context), do: {:error, :not_found}
+```
+
+The only accepted callback forms are `{:ok, domain}`,
+`{:ok, domain, metadata}`, and `{:error, reason}`. A bare map is invalid.
+Resolution does not convert caller-supplied strings to atoms. The registry
+result MUST pass both schema-v1 validation and runtime domain validation before
+it can become query authority.
+
+```elixir
+selecto =
+  Selecto.configure_registered("orders", connection_input,
+    registry: MyApp.SelectoDomains.Registry,
+    domain_context: %{actor: current_actor, tenant: current_tenant},
+    adapter: MyApp.SelectoAdapter,
+    mode: :strict
+  )
+```
+
+`config :selecto, :domain_registry` may supply the default registry.
+`validate: false` is invalid for registered configuration. Extension callbacks
+run as usual, and the fully composed domain is validated again afterward.
+`Selecto.domain_ref/1` returns a `%Selecto.Domain.Ref{}` containing the id,
+registry, version/fingerprint, and registry metadata, but never the authored
+domain map. A ref may be passed to another server-owned Selecto consumer and
+resolved again.
+
+Generated single-domain modules may use
+`use Selecto.Domain.Registry, id: "orders"`. Larger applications can implement
+one aggregate registry with route-, actor-, tenant-, or capability-aware
+`fetch/2` clauses. The registry and its context MUST be supplied by trusted
+server code. A caller being allowed to request `"orders"` does not imply that
+the registry should return it, and missing and forbidden ids SHOULD have the
+same public response when revealing existence would leak information.
+
 Capabilities follow the same separation of concerns: the domain declares stable
 names and where they apply; the host supplies an actor/tenant-aware resolver and
 acts on an `allow`, `deny`, `conditional`, or `not_applicable` decision. A

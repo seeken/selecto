@@ -5,6 +5,7 @@ defmodule Selecto do
     :adapter,
     :connection,
     :domain,
+    :domain_ref,
     :config,
     :set,
     :extensions,
@@ -236,6 +237,71 @@ defmodule Selecto do
   end
 
   @doc """
+  Configures Selecto from a server-owned domain registry.
+
+  Unlike `configure/3`, this boundary never accepts an authored map from the
+  caller. It resolves an opaque domain id through `:registry`, validates the
+  portable and runtime contracts, revalidates after extension composition, and
+  records a `%Selecto.Domain.Ref{}` on the configured value.
+
+  The registry may be supplied explicitly or configured with
+  `config :selecto, :domain_registry, MyApp.SelectoDomains.Registry`.
+
+      Selecto.configure_registered("orders", MyApp.Repo,
+        registry: MyApp.SelectoDomains.Registry,
+        mode: :strict
+      )
+
+  `:domain_context` must be a server-owned map. Registered configuration always
+  validates and rejects `validate: false`.
+  """
+  @spec configure_registered(
+          Selecto.Domain.Registry.id() | Selecto.Domain.Ref.t(),
+          term(),
+          keyword()
+        ) :: t()
+  def configure_registered(domain_id_or_ref, connection_input, opts \\ []) do
+    if Keyword.get(opts, :validate, true) == false do
+      raise ArgumentError, "registered Selecto domains require validation; remove validate: false"
+    end
+
+    {registry, domain_id} = registered_domain_target(domain_id_or_ref, opts)
+    context = Keyword.get(opts, :domain_context, %{})
+    configure_opts = Keyword.drop(opts, [:registry, :domain_context])
+
+    Selecto.OptionsValidator.validate_configure_opts!(configure_opts)
+    {domain, ref} = Selecto.Domain.Registry.resolve!(registry, domain_id, context)
+
+    Selecto.Configuration.configure_registered(domain, ref, connection_input, configure_opts)
+  end
+
+  defp registered_domain_target(%Selecto.Domain.Ref{} = ref, opts) do
+    case Keyword.get(opts, :registry) do
+      nil ->
+        {ref.registry, ref.id}
+
+      registry when registry == ref.registry ->
+        {registry, ref.id}
+
+      _registry ->
+        raise ArgumentError, "registry option does not match the supplied domain reference"
+    end
+  end
+
+  defp registered_domain_target(domain_id, opts) do
+    registry =
+      Keyword.get(opts, :registry) ||
+        Application.get_env(:selecto, :domain_registry)
+
+    if is_nil(registry) do
+      raise ArgumentError,
+            "configure_registered/3 requires :registry or config :selecto, :domain_registry"
+    end
+
+    {registry, domain_id}
+  end
+
+  @doc """
   Releases a Selecto connection through its configured adapter.
 
   Call this only when the caller owns the connection. Borrowed pids, named
@@ -305,6 +371,10 @@ defmodule Selecto do
 
   @spec domain(t()) :: Selecto.Types.domain()
   defdelegate domain(selecto), to: Selecto.Fields
+
+  @doc "Returns registry provenance for a registered domain, or `nil` for a raw-map domain."
+  @spec domain_ref(t()) :: Selecto.Domain.Ref.t() | nil
+  def domain_ref(%__MODULE__{domain_ref: ref}), do: ref
 
   @spec domain_data(t()) :: term()
   defdelegate domain_data(selecto), to: Selecto.Fields

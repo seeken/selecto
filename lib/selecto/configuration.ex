@@ -53,6 +53,21 @@ defmodule Selecto.Configuration do
   """
   @spec configure(Selecto.Types.domain(), term(), keyword()) :: Selecto.Types.t()
   def configure(domain, connection_input, opts \\ []) do
+    configure_input(domain, nil, connection_input, opts)
+  end
+
+  @doc false
+  @spec configure_registered(
+          Selecto.Types.domain(),
+          Selecto.Domain.Ref.t(),
+          term(),
+          keyword()
+        ) :: Selecto.Types.t()
+  def configure_registered(domain, %Selecto.Domain.Ref{} = ref, connection_input, opts) do
+    configure_input(domain, ref, connection_input, opts)
+  end
+
+  defp configure_input(domain, domain_ref, connection_input, opts) do
     Selecto.OptionsValidator.validate_configure_opts!(opts)
     :ok = Selecto.Policy.ensure_configuration_options!(opts)
 
@@ -63,6 +78,10 @@ defmodule Selecto.Configuration do
 
     extension_specs = Selecto.Extensions.from_domain(domain)
     domain = Selecto.Extensions.merge_domain_extensions(domain, extension_specs)
+
+    if domain_ref do
+      :ok = Selecto.Domain.Registry.validate_domain!(domain, domain_ref)
+    end
 
     if validate? do
       Selecto.DomainValidator.validate_domain!(domain)
@@ -103,6 +122,7 @@ defmodule Selecto.Configuration do
       adapter: adapter,
       connection: connection,
       domain: domain,
+      domain_ref: domain_ref,
       config: config,
       extensions: extension_specs,
       policy: policy,

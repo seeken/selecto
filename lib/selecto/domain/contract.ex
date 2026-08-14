@@ -60,7 +60,7 @@ defmodule Selecto.Domain.Contract do
     source_relationships = Map.get(normalized_domain, :source_relationships, %{})
     choice_sources = Map.get(normalized_domain, :choice_sources, %{})
     detail_actions = Map.get(normalized_domain, :detail_actions, %{})
-    field_index = Core.field_index(source, schemas, projection)
+    field_index = Core.field_index(source, schemas, projection, joins)
 
     []
     |> validate_required_sections(authored_domain)

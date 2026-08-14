@@ -117,6 +117,32 @@ a Selecto governance boundary, not a substitute for database roles or row-level
 security. See [`docs/strict_mode.md`](docs/strict_mode.md) for the complete
 contract.
 
+## Named Domain Registry
+
+At HTTP, LiveView, API, or other trust boundaries, pass an opaque domain name
+and resolve the authored map from a server-owned registry:
+
+```elixir
+defmodule MyApp.SelectoDomains.OrdersDomain do
+  use Selecto.Domain.Registry, id: "orders"
+
+  def domain, do: %{...}
+end
+
+selecto =
+  Selecto.configure_registered("orders", Repo,
+    registry: MyApp.SelectoDomains.OrdersDomain,
+    domain_context: %{actor: current_actor, tenant: current_tenant},
+    mode: :strict
+  )
+```
+
+A registry may instead implement `Selecto.Domain.Registry.fetch/2` for multiple
+domains. Registry results are validated, `validate: false` is rejected, and
+`Selecto.domain_ref/1` returns provenance without embedding the authored map.
+The registry must authorize each name using server-owned context; choosing a
+name is not itself authorization.
+
 ## Expression Helpers
 
 Use `Selecto.Expr` when query structure is assembled dynamically in Elixir:
