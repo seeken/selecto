@@ -31,6 +31,7 @@ defmodule Selecto.DB.Adapter do
           | {:ok, Enumerable.t(), [String.t()]}
           | {:error, term()}
   @type server_version_result :: {:ok, pos_integer()} | {:error, term()}
+  @type function_verification_result :: {:ok, map()} | {:error, Selecto.Error.t()}
 
   @callback name() :: atom()
   @callback connect(connection_options()) :: {:ok, connection()} | {:error, term()}
@@ -65,6 +66,12 @@ defmodule Selecto.DB.Adapter do
   @callback refresh_materialized_view(connection(), String.t(), keyword()) ::
               {:ok, term()} | {:error, term()}
 
+  @callback verify_function(
+              connection(),
+              Selecto.FunctionVerification.Request.t(),
+              keyword()
+            ) :: function_verification_result()
+
   @callback placeholder(pos_integer()) :: iodata()
   @callback quote_identifier(String.t()) :: String.t()
   @callback format_datetime(iodata(), String.t()) :: iodata()
@@ -87,6 +94,7 @@ defmodule Selecto.DB.Adapter do
                       list_relations: 2,
                       introspect_table: 3,
                       refresh_materialized_view: 3,
+                      verify_function: 3,
                       format_datetime: 2,
                       rollup_sql: 1,
                       rollup_literal_order: 1,

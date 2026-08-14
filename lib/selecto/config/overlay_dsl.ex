@@ -1227,6 +1227,19 @@ defmodule Selecto.Config.OverlayDSL do
   defmacro returns(_value), do: quote(do: nil)
 
   @doc """
+  Sets explicit signatures for an overloaded UDF registration.
+  """
+  defmacro overloads(_value), do: quote(do: nil)
+
+  @doc """
+  Sets connected database-verification requirements for a UDF registration.
+
+  Supported request metadata includes `:adapters`, `:requires`, `:volatility`,
+  and `:minimum_version`.
+  """
+  defmacro database(_value), do: quote(do: nil)
+
+  @doc """
   Sets the capability required by a query-facing overlay entry.
   """
   defmacro capability(_value), do: quote(do: nil)

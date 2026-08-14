@@ -1,6 +1,29 @@
 
 # Selecto Library Changelog
 
+## Unreleased
+-------------
+
+#### Added
+- Added normalized registered-function signatures with optional overloads,
+  overload-specific SQL names and return types, known Selecto type validation,
+  non-null argument declarations, and deterministic structured resolution
+  evidence.
+- Added protocol-versioned function-verification requests and normalized
+  reports, an optional adapter `verify_function/3` callback gated by the
+  `:function_verification` capability, and explicit `:off`, `:warn`, and
+  fail-closed `:strict` policies. Verification requests never include runtime
+  argument values.
+- Added `mix selecto.functions.verify --domain MODULE` with optional `--strict`
+  policy and byte-stable timestamp-free JSON output. The task reports every
+  registered overload in deterministic order and embeds the connected-proof
+  boundary in both text and JSON evidence.
+
+#### Fixed
+- Registered function calls now reject known argument type mismatches and
+  ambiguous overloads before SQL generation while preserving permissive
+  handling for expressions whose type cannot yet be inferred.
+
 ## V 0.4.14 - SQL Construction and Tenant Derivation Hardening
 --------------------------------------------------------------
 

@@ -357,6 +357,21 @@ defmodule Selecto do
   end
 
   @doc """
+  Verify one registered function signature through the configured adapter.
+
+  The adapter receives normalized signature metadata but never the supplied
+  runtime argument values. `:mode` may be `:off`, `:warn` (default), or
+  `:strict`. Connected database verification is adapter-specific and does not
+  execute the function.
+  """
+  @spec verify_function(t(), atom() | String.t(), [term()], keyword()) ::
+          {:ok, Selecto.FunctionVerification.Report.t()} | {:error, Selecto.Error.t()}
+  def verify_function(selecto, function_id, args \\ [], opts \\ []) do
+    call_site = Keyword.get(opts, :call_site, :select)
+    Selecto.FunctionVerification.verify(selecto, function_id, args, call_site, opts)
+  end
+
+  @doc """
   Check if two SQL types are compatible for comparisons or assignments.
 
   ## Examples

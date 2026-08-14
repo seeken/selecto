@@ -404,39 +404,15 @@ defmodule Selecto.QueryValidator do
   defp validate_function_arg!(_selecto, _arg), do: :ok
 
   defp validate_udf_call!(selecto, function_id, args, call_site) do
-    spec =
-      case Selecto.UDF.fetch(selecto, function_id) do
-        {:ok, spec} -> spec
-        :error -> raise ArgumentError, "Unknown UDF '#{Selecto.UDF.normalize_id(function_id)}'"
-      end
-
-    allowed_in = Map.get(spec, :allowed_in) || Map.get(spec, "allowed_in") || []
-    kind = Map.get(spec, :kind) || Map.get(spec, "kind")
-    spec_args = Map.get(spec, :args) || Map.get(spec, "args") || []
-
-    allowed_for_call_site? = call_site in allowed_in
-
-    if not allowed_for_call_site? do
-      raise ArgumentError,
-            "UDF '#{Selecto.UDF.normalize_id(function_id)}' is not allowed in :#{call_site}. Allowed: #{inspect(allowed_in)}"
-    end
-
-    if call_site == :filter and kind != :predicate do
-      raise ArgumentError,
-            "UDF '#{Selecto.UDF.normalize_id(function_id)}' must be kind :predicate to be used in filters"
-    end
-
-    if length(args) != length(spec_args) do
-      raise ArgumentError,
-            "UDF '#{Selecto.UDF.normalize_id(function_id)}' expects #{length(spec_args)} argument(s), got #{length(args)}"
-    end
+    spec = Selecto.FunctionSpec.resolve!(selecto, function_id, args, call_site)
+    spec_args = Map.get(spec, :args, [])
 
     Enum.zip(args, spec_args)
     |> Enum.each(fn {arg, arg_spec} -> validate_udf_arg!(selecto, arg, arg_spec) end)
   end
 
   defp validate_udf_arg!(selecto, arg, arg_spec) do
-    case Map.get(arg_spec, :source) || Map.get(arg_spec, "source") do
+    case Map.get(arg_spec, :source) do
       :selector ->
         validate_selector!(selecto, arg)
 

@@ -230,6 +230,11 @@ the current UDF metadata contract:
 - optional `allowed_in` must be a list of supported call sites.
 - optional `args` must be a list of arg maps with non-empty `name`, declared
   `type`, and `source` set to `:selector`, `:value`, or `:literal`.
+- optional `overloads` must be a non-empty list of signature maps. Each
+  signature declares its own `args` and `returns` and inherits common metadata
+  such as `kind`, `sql_name`, and `allowed_in`. An overload may override
+  `sql_name` when the database uses distinct implementation names. Duplicate
+  argument signatures are rejected.
 - predicate functions must return `:boolean`.
 - table functions must return `%{columns: %{...}}`.
 - scalar function returns may be omitted or declared as an atom or
@@ -239,6 +244,49 @@ Invalid function metadata produces diagnostics such as `:invalid_function_id`,
 `:invalid_function_spec`, `:invalid_function_kind`,
 `:invalid_function_sql_name`, `:invalid_function_call_site`,
 `:invalid_function_arg_source`, or `:invalid_function_returns`.
+
+At query construction time, registered calls resolve exactly one signature.
+Selecto infers selector and literal/value types, accepts compatible types within
+the existing type categories, and rejects known mismatches, non-null violations,
+and ambiguous overloads before SQL generation. An unknown inferred type remains
+permissive because database-connected signature resolution is a separate
+verification layer; it must not be reported as proof that the database accepts
+the call.
+
+Function specs may include optional `database` verification metadata. The
+adapter-neutral request currently forwards only `adapters`, `requires`,
+`volatility`, and `minimum_version`; other domain metadata is not exposed to
+verification callbacks. The request contains no runtime argument values.
+
+`Selecto.verify_function/4` recognizes three explicit modes:
+
+- `:off` produces `:unverified` evidence and does not call the adapter.
+- `:warn` returns normalized unsupported, failure, or resolution evidence.
+- `:strict` succeeds only for `:database_resolved` and otherwise returns a
+  structured validation error.
+
+An adapter must advertise `:function_verification` and implement the optional
+`verify_function/3` callback. Callback exceptions and invalid reports are
+sanitized and cannot be promoted to connected-resolution evidence. This layer
+proves only current connected signature resolution when an adapter implements
+it; it does not prove function semantics or execute the function.
+
+### Registry verification artifact
+
+`mix selecto.functions.verify --domain MODULE` verifies every normalized
+signature in deterministic function-ID and overload order. The provider module
+must return a configured `%Selecto{}` from `selecto/0` (an `{:ok, selecto}`
+tuple is also accepted). As an alternative, it may expose `domain/0` and
+`connection/0`, plus optional `configure_options/0` keyword options.
+
+Use `--output path.json` to write a timestamp-free deterministic artifact and
+`--strict` to fail after writing unless every signature has
+`:database_resolved` status. Without `--strict`, missing, mismatched,
+unsupported, or indeterminate results remain visible evidence but do not change
+the task exit status. The artifact includes a proof boundary: current connected
+resolution and adapter-reported requirements do not prove function semantics,
+arbitrary inputs, performance, determinism, concurrency, callbacks, external
+effects, or future database state.
 
 ## Query Members
 

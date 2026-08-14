@@ -330,16 +330,16 @@ defmodule Selecto.TypeSystem do
   defp do_infer_type(_selecto, {:count, _field, _filter}), do: :bigint
   defp do_infer_type(_selecto, {:count_distinct, _field}), do: :bigint
 
-  defp do_infer_type(selecto, {:udf, function_id, _args}) do
-    case Selecto.UDF.fetch(selecto, function_id) do
+  defp do_infer_type(selecto, {:udf, function_id, args}) do
+    case Selecto.FunctionSpec.resolve(selecto, function_id, args) do
       {:ok, spec} ->
-        case Map.get(spec, :returns) || Map.get(spec, "returns") do
+        case Map.get(spec, :returns) do
           type when is_atom(type) -> normalize_type(type)
           {:array, inner} -> {:array, normalize_type(inner)}
           _ -> :unknown
         end
 
-      :error ->
+      {:error, _error} ->
         :unknown
     end
   end
@@ -633,6 +633,22 @@ defmodule Selecto.TypeSystem do
   def normalize_type(:naive_datetime_usec), do: :naive_datetime
   def normalize_type({:array, inner}), do: {:array, normalize_type(inner)}
   def normalize_type(type), do: type
+
+  @doc "Returns whether a declaration is a known Selecto SQL type."
+  @spec valid_type?(term()) :: boolean()
+  def valid_type?({:array, inner}), do: valid_type?(inner)
+
+  def valid_type?(type) when is_atom(type),
+    do:
+      normalize_type(type) in (@numeric_types ++
+                                 @string_types ++
+                                 @datetime_types ++
+                                 @json_types ++
+                                 @binary_types ++
+                                 @uuid_types ++
+                                 @spatial_types ++ [:unknown, :boolean, :interval, :record])
+
+  def valid_type?(_type), do: false
 
   @doc """
   Parse a SQL type string into an atom type.

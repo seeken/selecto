@@ -745,16 +745,89 @@ defmodule Selecto.DomainValidator do
   end
 
   defp validate_function_spec(errors, function_id, spec) when is_map(spec) do
-    errors
-    |> validate_function_kind(spec, function_id)
-    |> validate_function_sql_name(spec, function_id)
-    |> validate_function_allowed_in(spec, function_id)
-    |> validate_function_args(spec, function_id)
-    |> validate_function_returns(spec, function_id)
+    errors =
+      errors
+      |> validate_function_kind(spec, function_id)
+      |> validate_function_sql_name(spec, function_id)
+      |> validate_function_allowed_in(spec, function_id)
+
+    case map_value(spec, :overloads) do
+      nil ->
+        errors
+        |> validate_function_args(spec, function_id)
+        |> validate_function_returns(spec, function_id)
+
+      overloads when is_list(overloads) and overloads != [] ->
+        errors
+        |> validate_function_overloads(spec, function_id, overloads)
+        |> validate_duplicate_function_overloads(function_id, overloads)
+
+      _invalid ->
+        errors ++
+          [
+            {:functions_invalid,
+             {function_id, ":overloads must be a non-empty list when provided"}}
+          ]
+    end
   end
 
   defp validate_function_spec(errors, function_id, _invalid_spec) do
     errors ++ [{:functions_invalid, {function_id, "function spec must be a map"}}]
+  end
+
+  defp validate_function_overload(errors, parent_spec, function_id, overload, index)
+       when is_map(overload) do
+    effective =
+      parent_spec
+      |> Map.drop([:overloads, "overloads", :args, "args", :returns, "returns"])
+      |> Map.merge(overload)
+
+    overload_id = "#{function_id} overload #{index}"
+
+    errors
+    |> validate_function_args(effective, overload_id)
+    |> validate_function_returns(effective, overload_id)
+  end
+
+  defp validate_function_overload(errors, _parent_spec, function_id, _overload, index) do
+    errors ++
+      [{:functions_invalid, {"#{function_id} overload #{index}", "overload must be a map"}}]
+  end
+
+  defp validate_function_overloads(errors, parent_spec, function_id, overloads) do
+    overloads
+    |> Enum.with_index()
+    |> Enum.reduce(errors, fn {overload, index}, acc ->
+      validate_function_overload(acc, parent_spec, function_id, overload, index)
+    end)
+  end
+
+  defp validate_duplicate_function_overloads(errors, function_id, overloads) do
+    duplicate_signatures =
+      overloads
+      |> Enum.filter(&is_map/1)
+      |> Enum.map(fn overload ->
+        overload
+        |> map_value(:args)
+        |> List.wrap()
+        |> Enum.map(fn arg ->
+          if is_map(arg), do: {map_value(arg, :source), map_value(arg, :type)}, else: :invalid
+        end)
+      end)
+      |> Enum.frequencies()
+      |> Enum.filter(fn {_signature, count} -> count > 1 end)
+      |> Enum.map(&elem(&1, 0))
+
+    if duplicate_signatures == [] do
+      errors
+    else
+      errors ++
+        [
+          {:functions_invalid,
+           {function_id,
+            ":overloads contains duplicate argument signatures: #{inspect(duplicate_signatures)}"}}
+        ]
+    end
   end
 
   defp validate_function_kind(errors, spec, function_id) do
@@ -832,10 +905,16 @@ defmodule Selecto.DomainValidator do
       end
 
     errors =
-      if type == :__missing__ do
-        errors ++ [{:functions_invalid, {function_id, "each arg must declare :type"}}]
-      else
-        errors
+      cond do
+        type == :__missing__ ->
+          errors ++ [{:functions_invalid, {function_id, "each arg must declare :type"}}]
+
+        not Selecto.TypeSystem.valid_type?(type) ->
+          errors ++
+            [{:functions_invalid, {function_id, "each arg :type must be a known Selecto type"}}]
+
+        true ->
+          errors
       end
 
     if Selecto.UDF.valid_arg_source?(source) do
@@ -890,7 +969,7 @@ defmodule Selecto.DomainValidator do
         end
 
       :scalar ->
-        if is_nil(returns) or is_atom(returns) or match?({:array, _}, returns) do
+        if is_nil(returns) or Selecto.TypeSystem.valid_type?(returns) do
           errors
         else
           errors ++

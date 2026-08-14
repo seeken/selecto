@@ -308,6 +308,89 @@ defmodule Selecto.DomainValidatorTest do
              end)
     end
 
+    test "validates function overload signatures and known argument types" do
+      domain = %{
+        source: %{
+          source_table: "products",
+          primary_key: :id,
+          fields: [:id],
+          redact_fields: [],
+          columns: %{id: %{type: :integer}},
+          associations: %{}
+        },
+        schemas: %{},
+        joins: %{},
+        functions: %{
+          "bad_overloads" => %{
+            kind: :scalar,
+            sql_name: "public.bad_overloads",
+            allowed_in: [:select],
+            overloads: [
+              %{
+                args: [%{name: :value, type: :not_a_selecto_type, source: :selector}],
+                returns: :string
+              },
+              :not_a_map
+            ]
+          }
+        }
+      }
+
+      assert {:error, errors} = DomainValidator.validate_domain(domain)
+
+      assert Enum.any?(errors, fn
+               {:functions_invalid, {"bad_overloads overload 0", message}} ->
+                 message =~ "known Selecto type"
+
+               _ ->
+                 false
+             end)
+
+      assert {:functions_invalid, {"bad_overloads overload 1", "overload must be a map"}} in errors
+    end
+
+    test "rejects duplicate function overload signatures" do
+      domain = %{
+        source: %{
+          source_table: "products",
+          primary_key: :id,
+          fields: [:id],
+          redact_fields: [],
+          columns: %{id: %{type: :integer}},
+          associations: %{}
+        },
+        schemas: %{},
+        joins: %{},
+        functions: %{
+          "duplicate" => %{
+            kind: :scalar,
+            sql_name: "public.duplicate",
+            allowed_in: [:select],
+            overloads: [
+              %{
+                args: [%{name: :left, type: :integer, source: :selector}],
+                returns: :integer
+              },
+              %{
+                args: [%{name: :right, type: :integer, source: :selector}],
+                returns: :integer
+              }
+            ]
+          }
+        }
+      }
+
+      assert {:error, errors} = DomainValidator.validate_domain(domain)
+
+      assert Enum.any?(errors, fn
+               {:functions_invalid, {"duplicate", message}} ->
+                 message =~ "duplicate argument signatures"
+
+               _ ->
+                 false
+             end)
+    end
+
     test "accepts valid published_views configuration" do
       domain = %{
         source: %{

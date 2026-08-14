@@ -33,6 +33,7 @@ defmodule Selecto.MixProject do
         extras: [
           "README.md",
           "docs/domain_schema_v1.md",
+          "docs/function_verification.md",
           "docs/formal_verification.md",
           "docs/strict_mode.md",
           "docs/write_adapter_protocol.md",

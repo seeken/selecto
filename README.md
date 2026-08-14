@@ -172,6 +172,62 @@ query =
 
 UDF-backed custom columns are also supported through `custom_columns[*].select`.
 
+Registered function arguments are type-checked when Selecto can infer their
+types. Functions with database overloads can declare an `overloads` list; each
+entry supplies `args` and `returns` and may override `sql_name`. Selecto rejects
+known type mismatches and ambiguous overloads before generating SQL. This is a
+Selecto contract check, not proof that the connected database provides the
+declared function or overload.
+
+Adapters can optionally verify a resolved signature against a connected
+database without executing the function:
+
+```elixir
+Selecto.verify_function(selecto, "similarity", ["name", "Acme"],
+  call_site: :select,
+  mode: :strict
+)
+```
+
+The adapter must both advertise `supports?(:function_verification)` and
+implement `verify_function/3`. It receives a protocol-versioned signature
+request without the runtime argument values. `:warn` returns explicit
+unsupported or indeterminate evidence; `:strict` fails unless the adapter
+reports `:database_resolved`. Core ships the contract and dispatcher, but a
+connected implementation remains adapter-owned;
+`selecto_db_postgresql` implements catalog plus non-executing parse/describe
+verification.
+
+To verify every registered signature and optionally archive deterministic JSON,
+provide a module that returns a configured Selecto value:
+
+```elixir
+defmodule MyApp.SelectoDomain do
+  def selecto do
+    Selecto.configure(MyApp.Domain.domain(), MyApp.Repo,
+      adapter: SelectoDBPostgreSQL.Adapter
+    )
+  end
+end
+```
+
+```sh
+mix selecto.functions.verify --domain MyApp.SelectoDomain
+mix selecto.functions.verify --domain MyApp.SelectoDomain \
+  --strict --output tmp/selecto-functions.json
+```
+
+The task reports every overload in stable function-ID/signature order and
+omits timestamps from the JSON artifact. Warn mode collects finite failure or
+unsupported evidence without failing the command. `--strict` writes the
+artifact first, then fails unless every signature is `:database_resolved`.
+Both text and JSON state that connected resolution does not prove function
+semantics or arbitrary database behavior.
+
+See [`docs/function_verification.md`](docs/function_verification.md) for the
+complete registry, PostgreSQL type-mapping, diagnostics, CLI-provider, and
+evidence-boundary guide.
+
 ## Extensions
 
 Selecto supports extension packages through the `:extensions` key on domains.

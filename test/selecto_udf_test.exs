@@ -80,6 +80,32 @@ defmodule Selecto.UDFTest do
             }
           },
           allowed_in: [:lateral, :query_member]
+        },
+        "display_value" => %{
+          kind: :scalar,
+          sql_name: "public.display_value",
+          allowed_in: [:select],
+          overloads: [
+            %{
+              sql_name: "public.display_text",
+              args: [%{name: :value, type: :string, source: :selector}],
+              returns: :string
+            },
+            %{
+              sql_name: "public.display_integer",
+              args: [%{name: :value, type: :integer, source: :selector}],
+              returns: :integer
+            }
+          ]
+        },
+        "strict_prefix" => %{
+          kind: :scalar,
+          sql_name: "public.strict_prefix",
+          args: [
+            %{name: :value, type: :string, source: :value, null?: false}
+          ],
+          returns: :string,
+          allowed_in: [:select]
         }
       }
     }
@@ -148,6 +174,79 @@ defmodule Selecto.UDFTest do
 
     assert {:ok, :boolean} =
              TypeSystem.infer_type(selecto(), X.udf("matches_name", ["name", "Acme%"]))
+  end
+
+  test "selects registered overloads from inferred selector types" do
+    text_query =
+      selecto()
+      |> Selecto.select([X.as(Selecto.udf("display_value", ["name"]), "display_name")])
+
+    integer_query =
+      selecto()
+      |> Selecto.select([X.as(Selecto.udf("display_value", ["id"]), "display_id")])
+
+    {text_sql, []} = Selecto.to_sql(text_query)
+    {integer_sql, []} = Selecto.to_sql(integer_query)
+
+    assert text_sql =~ ~r/public\.display_text\s*\(/i
+    assert integer_sql =~ ~r/public\.display_integer\s*\(/i
+    assert {:ok, :string} = TypeSystem.infer_type(selecto(), X.udf("display_value", ["name"]))
+    assert {:ok, :integer} = TypeSystem.infer_type(selecto(), X.udf("display_value", ["id"]))
+  end
+
+  test "rejects known argument type mismatches with structured resolution evidence" do
+    assert {:error, error} =
+             Selecto.FunctionSpec.resolve(selecto(), "name_lower", ["id"], :select)
+
+    assert error.code == :argument_type_mismatch
+    assert error.function_id == "name_lower"
+
+    assert [%{arguments: [%{index: 0, expected: :string, actual: :integer}]}] =
+             error.details.candidates
+
+    assert_raise ArgumentError, ~r/argument 1 expected :string, got :integer/, fn ->
+      selecto()
+      |> Selecto.select([Selecto.udf("name_lower", ["id"])])
+    end
+  end
+
+  test "rejects null for non-null registered arguments" do
+    assert {:error, error} =
+             Selecto.FunctionSpec.resolve(selecto(), "strict_prefix", [nil], :select)
+
+    assert error.code == :argument_type_mismatch
+
+    assert_raise ArgumentError, ~r/expected :string, got :null/, fn ->
+      selecto()
+      |> Selecto.select([Selecto.udf("strict_prefix", [nil])])
+    end
+  end
+
+  test "reports ambiguous compatible overloads" do
+    selecto =
+      domain()
+      |> put_in([:functions, "numeric_value"], %{
+        kind: :scalar,
+        sql_name: "public.numeric_value",
+        allowed_in: [:select],
+        overloads: [
+          %{
+            args: [%{name: :value, type: :decimal, source: :selector}],
+            returns: :decimal
+          },
+          %{
+            args: [%{name: :value, type: :float, source: :selector}],
+            returns: :float
+          }
+        ]
+      })
+      |> Selecto.configure(:mock_connection)
+
+    assert {:error, error} =
+             Selecto.FunctionSpec.resolve(selecto, "numeric_value", ["id"], :select)
+
+    assert error.code == :ambiguous_overload
+    assert length(error.details.signatures) == 2
   end
 
   test "compiles table UDF lateral joins and registers returned columns" do

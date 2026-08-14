@@ -466,6 +466,14 @@ defmodule Selecto.Config.OverlayDSLTest do
           returns(:float)
           allowed_in([:select, :order_by])
           capability("search.similarity")
+
+          database(%{
+            adapters: [:postgresql],
+            requires: [extension: "pg_trgm"],
+            volatility: :stable,
+            minimum_version: 14
+          })
+
           arg(:left, :string, source: :selector)
           arg(:right, :string, source: :value)
         end
@@ -478,6 +486,13 @@ defmodule Selecto.Config.OverlayDSLTest do
       assert overlay.functions["similarity"].returns == :float
       assert overlay.functions["similarity"].allowed_in == [:select, :order_by]
       assert overlay.functions["similarity"].capability == "search.similarity"
+
+      assert overlay.functions["similarity"].database == %{
+               adapters: [:postgresql],
+               requires: [extension: "pg_trgm"],
+               volatility: :stable,
+               minimum_version: 14
+             }
 
       assert overlay.functions["similarity"].args == [
                %{name: :left, type: :string, source: :selector},

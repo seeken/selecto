@@ -898,32 +898,9 @@ defmodule Selecto.Builder.Sql.Select do
   def build_udf(selecto, function_id, args, call_site, retarget_aliases \\ %{})
 
   def build_udf(selecto, function_id, args, call_site, retarget_aliases) when is_list(args) do
-    spec = fetch_udf_spec!(selecto, function_id)
-    kind = Map.get(spec, :kind) || Map.get(spec, "kind")
-    allowed_in = Map.get(spec, :allowed_in) || Map.get(spec, "allowed_in") || []
-    spec_args = Map.get(spec, :args) || Map.get(spec, "args") || []
-    sql_name = Map.get(spec, :sql_name) || Map.get(spec, "sql_name")
-
-    if kind == :table and call_site != :lateral do
-      raise ArgumentError,
-            "UDF '#{Selecto.UDF.normalize_id(function_id)}' is a table function and cannot be used as a selector"
-    end
-
-    allowed_for_call_site? =
-      case call_site do
-        :lateral -> :lateral in allowed_in or :query_member in allowed_in
-        other -> other in allowed_in
-      end
-
-    if not allowed_for_call_site? do
-      raise ArgumentError,
-            "UDF '#{Selecto.UDF.normalize_id(function_id)}' is not allowed in :#{call_site}. Allowed: #{inspect(allowed_in)}"
-    end
-
-    if length(args) != length(spec_args) do
-      raise ArgumentError,
-            "UDF '#{Selecto.UDF.normalize_id(function_id)}' expects #{length(spec_args)} argument(s), got #{length(args)}"
-    end
+    spec = Selecto.FunctionSpec.resolve!(selecto, function_id, args, call_site)
+    spec_args = Map.get(spec, :args, [])
+    sql_name = Map.get(spec, :sql_name)
 
     {arg_iodata_parts, join, param} =
       Enum.zip(args, spec_args)
@@ -1319,13 +1296,6 @@ defmodule Selecto.Builder.Sql.Select do
         )
 
       {filter_iodata, List.wrap(join) ++ List.wrap(join_w), param ++ param_w}
-    end
-  end
-
-  defp fetch_udf_spec!(selecto, function_id) do
-    case Selecto.UDF.fetch(selecto, function_id) do
-      {:ok, spec} -> spec
-      :error -> raise ArgumentError, "Unknown UDF '#{Selecto.UDF.normalize_id(function_id)}'"
     end
   end
 
