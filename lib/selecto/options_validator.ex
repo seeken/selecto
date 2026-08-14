@@ -52,13 +52,21 @@ defmodule Selecto.OptionsValidator do
     stream_producer: [type: {:fun, 1}]
   ]
 
-  @to_sql_option_keys [:pretty, :highlight, :indent, :include_comments, :pretty_print]
+  @to_sql_option_keys [
+    :pretty,
+    :highlight,
+    :indent,
+    :include_comments,
+    :pretty_print,
+    :validate_tenant
+  ]
   @to_sql_schema [
     pretty: [type: :boolean],
     highlight: [type: {:in, [nil, false, :ansi, :markdown]}],
     indent: [type: :string],
     include_comments: [type: :boolean],
-    pretty_print: [type: :boolean]
+    pretty_print: [type: :boolean],
+    validate_tenant: [type: :boolean]
   ]
 
   @diagnostic_option_keys [

@@ -20,9 +20,13 @@ defmodule Selecto.Performance.HooksTest do
       source: %{
         source_table: "users",
         primary_key: :id,
-        fields: [:id, :name],
+        fields: [:id, :name, :tenant_id],
         redact_fields: [],
-        columns: %{id: %{type: :integer}, name: %{type: :string}},
+        columns: %{
+          id: %{type: :integer},
+          name: %{type: :string},
+          tenant_id: %{type: :string}
+        },
         associations: %{}
       },
       schemas: %{},
@@ -155,8 +159,8 @@ defmodule Selecto.Performance.HooksTest do
   test "cache key includes tenant namespace to avoid cross-tenant cache bleed" do
     {:ok, _pid} = QueryCache.start_link(default_ttl: 60_000)
 
-    tenant_a = Selecto.with_tenant(selecto(), %{tenant_id: "a"})
-    tenant_b = Selecto.with_tenant(selecto(), %{tenant_id: "b"})
+    tenant_a = selecto() |> Selecto.with_tenant(%{tenant_id: "a"}) |> Selecto.apply_tenant_scope()
+    tenant_b = selecto() |> Selecto.with_tenant(%{tenant_id: "b"}) |> Selecto.apply_tenant_scope()
 
     assert {:ok, %{tenant: "a"}} =
              Hooks.with_hooks(

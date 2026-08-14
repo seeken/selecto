@@ -426,10 +426,15 @@ defmodule Selecto.Query do
   - `:pretty` - format SQL for readability
   - `:highlight` - apply highlighting (`:ansi` or `:markdown`)
   - `:indent` - indentation string used by pretty formatter
+  - `:validate_tenant` - enforce required tenant scope (defaults to `true`)
   """
   @spec to_sql(Selecto.Types.t(), keyword()) :: {String.t(), list()}
   def to_sql(selecto, opts \\ []) do
     {query, _aliases, params} = Selecto.gen_sql(selecto, opts)
+
+    if Keyword.get(opts, :validate_tenant, true) do
+      Selecto.Tenant.ensure_scope!(selecto)
+    end
 
     query =
       if Keyword.get(opts, :pretty, false) do

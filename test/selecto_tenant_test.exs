@@ -131,6 +131,19 @@ defmodule Selecto.TenantTest do
     assert "acme" in params
   end
 
+  test "to_sql enforces required tenant scope unless explicitly disabled" do
+    query =
+      tenant_required_domain()
+      |> selecto()
+      |> Selecto.select(["name"])
+
+    assert_raise RuntimeError, ~r/Tenant scope is required but missing/, fn ->
+      Selecto.to_sql(query)
+    end
+
+    assert {_sql, _params} = Selecto.to_sql(query, validate_tenant: false)
+  end
+
   test "validate_tenant_scope returns error when tenant is required but missing" do
     query =
       tenant_required_domain()
