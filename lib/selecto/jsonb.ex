@@ -194,21 +194,26 @@ defmodule Selecto.Jsonb do
 
     column_ref =
       if alias_name do
-        ~s("#{alias_name}"."#{column}")
+        ~s("#{escape_postgres_identifier(alias_name)}"."#{escape_postgres_identifier(column)}")
       else
-        ~s("#{column}")
+        ~s("#{escape_postgres_identifier(column)}")
       end
 
     extraction =
       case path do
         [single_key] ->
           operator = if as_text, do: "->>", else: "->"
-          ~s(#{column_ref}#{operator}'#{single_key}')
+          ~s(#{column_ref}#{operator}'#{escape_sql_literal(to_string(single_key))}')
 
         keys when is_list(keys) ->
-          path_str = Enum.join(keys, ",")
           operator = if as_text, do: "#>>", else: "#>"
-          ~s(#{column_ref}#{operator}'{#{path_str}}')
+
+          path_array =
+            keys
+            |> Enum.map(fn key -> "'#{escape_sql_literal(to_string(key))}'" end)
+            |> Enum.join(", ")
+
+          ~s(#{column_ref}#{operator}ARRAY[#{path_array}])
       end
 
     # Apply type cast if needed
@@ -221,7 +226,7 @@ defmodule Selecto.Jsonb do
       :date -> "(#{extraction})::date"
       :datetime -> "(#{extraction})::timestamp"
       :utc_datetime -> "(#{extraction})::timestamptz"
-      other -> "(#{extraction})::#{other}"
+      other -> "(#{extraction})::#{safe_cast_type!(other)}"
     end
   end
 
@@ -233,7 +238,7 @@ defmodule Selecto.Jsonb do
     column_ref = mssql_column_ref(column, alias_name)
     json_path = to_json_path(path)
     extractor = if as_text, do: "JSON_VALUE", else: "JSON_QUERY"
-    extraction = "#{extractor}(#{column_ref}, '#{json_path}')"
+    extraction = "#{extractor}(#{column_ref}, '#{escape_sql_literal(json_path)}')"
 
     case cast do
       nil -> extraction
@@ -255,7 +260,7 @@ defmodule Selecto.Jsonb do
 
     column_ref = mysql_column_ref(column, alias_name)
     json_path = to_json_path(path)
-    extraction = "JSON_EXTRACT(#{column_ref}, '#{json_path}')"
+    extraction = "JSON_EXTRACT(#{column_ref}, '#{escape_sql_literal(json_path)}')"
     extraction = if as_text, do: "JSON_UNQUOTE(#{extraction})", else: extraction
 
     case cast do
@@ -277,7 +282,7 @@ defmodule Selecto.Jsonb do
 
     column_ref = sqlite_column_ref(column, alias_name)
     json_path = to_json_path(path)
-    extraction = "json_extract(#{column_ref}, '#{json_path}')"
+    extraction = "json_extract(#{column_ref}, '#{escape_sql_literal(json_path)}')"
 
     case cast do
       nil -> extraction
@@ -317,13 +322,13 @@ defmodule Selecto.Jsonb do
         build_sqlite_contains(column, value, alias_name)
 
       _ ->
-        json_value = Jason.encode!(value)
+        json_value = Jason.encode!(value) |> escape_sql_literal()
 
         column_ref =
           if alias_name do
-            ~s("#{alias_name}"."#{column}")
+            ~s("#{escape_postgres_identifier(alias_name)}"."#{escape_postgres_identifier(column)}")
           else
-            ~s("#{column}")
+            ~s("#{escape_postgres_identifier(column)}")
           end
 
         ~s(#{column_ref} @> '#{json_value}'::jsonb)
@@ -349,33 +354,34 @@ defmodule Selecto.Jsonb do
       :mssql ->
         json_path = key_or_path |> normalize_path_segments() |> to_json_path()
         column_ref = mssql_column_ref(column, alias_name)
+        json_path = escape_sql_literal(json_path)
 
         "(JSON_QUERY(#{column_ref}, '#{json_path}') IS NOT NULL OR JSON_VALUE(#{column_ref}, '#{json_path}') IS NOT NULL)"
 
       adapter_name when adapter_name in [:mysql, :mariadb] ->
         json_path = key_or_path |> normalize_path_segments() |> to_json_path()
         column_ref = mysql_column_ref(column, alias_name)
-        "JSON_CONTAINS_PATH(#{column_ref}, 'one', '#{json_path}')"
+        "JSON_CONTAINS_PATH(#{column_ref}, 'one', '#{escape_sql_literal(json_path)}')"
 
       :sqlite ->
         json_path = key_or_path |> normalize_path_segments() |> to_json_path()
         column_ref = sqlite_column_ref(column, alias_name)
-        "json_type(#{column_ref}, '#{json_path}') IS NOT NULL"
+        "json_type(#{column_ref}, '#{escape_sql_literal(json_path)}') IS NOT NULL"
 
       _ ->
         column_ref =
           if alias_name do
-            ~s("#{alias_name}"."#{column}")
+            ~s("#{escape_postgres_identifier(alias_name)}"."#{escape_postgres_identifier(column)}")
           else
-            ~s("#{column}")
+            ~s("#{escape_postgres_identifier(column)}")
           end
 
         case key_or_path do
           key when is_binary(key) ->
-            ~s(#{column_ref} ? '#{key}')
+            ~s(#{column_ref} ? '#{escape_sql_literal(key)}')
 
           [single_key] ->
-            ~s(#{column_ref} ? '#{single_key}')
+            ~s(#{column_ref} ? '#{escape_sql_literal(to_string(single_key))}')
 
           keys when is_list(keys) ->
             {parent_path, [last_key]} = Enum.split(keys, -1)
@@ -383,7 +389,7 @@ defmodule Selecto.Jsonb do
             parent_expr =
               build_extraction(column, parent_path, as_text: false, table_alias: alias_name)
 
-            ~s(#{parent_expr} ? '#{last_key}')
+            ~s(#{parent_expr} ? '#{escape_sql_literal(to_string(last_key))}')
         end
     end
   end
@@ -418,10 +424,10 @@ defmodule Selecto.Jsonb do
 
         case value do
           v when is_binary(v) ->
-            ~s(#{array_expr} ? '#{v}')
+            ~s(#{array_expr} ? '#{escape_sql_literal(v)}')
 
           values when is_list(values) ->
-            escaped = Enum.map(values, fn v -> "'#{v}'" end) |> Enum.join(",")
+            escaped = Enum.map(values, &postgres_array_value/1) |> Enum.join(",")
             ~s(#{array_expr} ?| array[#{escaped}])
         end
     end
@@ -457,7 +463,7 @@ defmodule Selecto.Jsonb do
 
       _ ->
         array_expr = build_extraction(column, path, as_text: false, table_alias: alias_name)
-        escaped = Enum.map(values, fn v -> "'#{v}'" end) |> Enum.join(",")
+        escaped = Enum.map(values, &postgres_array_value/1) |> Enum.join(",")
         ~s(#{array_expr} ?& array[#{escaped}])
     end
   end
@@ -557,7 +563,7 @@ defmodule Selecto.Jsonb do
       "EXISTS (SELECT 1 FROM OPENJSON(",
       column_ref,
       ", '",
-      json_path,
+      escape_sql_literal(json_path),
       "') WHERE value = '",
       escape_sql_literal(value),
       "')"
@@ -575,7 +581,15 @@ defmodule Selecto.Jsonb do
     json_path = to_json_path(path)
     candidate = mysql_json_literal(value)
 
-    ["JSON_CONTAINS(", column_ref, ", '", candidate, "', '", json_path, "')"]
+    [
+      "JSON_CONTAINS(",
+      column_ref,
+      ", '",
+      candidate,
+      "', '",
+      escape_sql_literal(json_path),
+      "')"
+    ]
   end
 
   defp build_sqlite_array_contains(column, path, value, alias_name) when is_list(value) do
@@ -592,7 +606,7 @@ defmodule Selecto.Jsonb do
       "EXISTS (SELECT 1 FROM json_each(",
       column_ref,
       ", '",
-      json_path,
+      escape_sql_literal(json_path),
       "') WHERE value = '",
       escape_sql_literal(value),
       "')"
@@ -647,6 +661,24 @@ defmodule Selecto.Jsonb do
     identifier
     |> to_string()
     |> String.replace("\"", "\"\"")
+  end
+
+  defp escape_postgres_identifier(identifier) do
+    identifier
+    |> to_string()
+    |> String.replace("\"", "\"\"")
+  end
+
+  defp postgres_array_value(value), do: "'#{escape_sql_literal(to_string(value))}'"
+
+  defp safe_cast_type!(type) do
+    type = to_string(type)
+
+    if Regex.match?(~r/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?$/, type) do
+      type
+    else
+      raise ArgumentError, "invalid JSON extraction cast type: #{inspect(type)}"
+    end
   end
 
   defp escape_sql_literal(value) when is_binary(value), do: String.replace(value, "'", "''")

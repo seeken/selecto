@@ -20,6 +20,7 @@ defmodule Selecto.Subfilter.SQL.ExistsBuilder do
   alias Selecto.Subfilter.{Spec, Error}
   alias Selecto.Subfilter.JoinPathResolver.JoinResolution
   alias Selecto.Subfilter.SQL.Helpers, as: SQLHelpers
+  alias Selecto.Subfilter.SQL.Safe
 
   @doc """
   Generate EXISTS subquery SQL for a given subfilter.
@@ -96,27 +97,7 @@ defmodule Selecto.Subfilter.SQL.ExistsBuilder do
   # Build filter condition based on filter spec type
   defp build_filter_condition(%{type: :temporal} = filter_spec, target_table, target_field) do
     qualified_field = "#{SQLHelpers.table_name(target_table)}.#{target_field}"
-
-    case filter_spec.temporal_type do
-      :recent_years ->
-        sql = "#{qualified_field} > (CURRENT_DATE - INTERVAL '#{filter_spec.value} years')"
-        {:ok, sql, []}
-
-      :within_days ->
-        sql = "#{qualified_field} > (CURRENT_DATE - INTERVAL '#{filter_spec.value} days')"
-        {:ok, sql, []}
-
-      :within_hours ->
-        sql = "#{qualified_field} > (NOW() - INTERVAL '#{filter_spec.value} hours')"
-        {:ok, sql, []}
-
-      :since_date ->
-        sql = "#{qualified_field} > ?"
-        {:ok, sql, [filter_spec.value]}
-
-      _ ->
-        {:error, "Unsupported temporal type: #{filter_spec.temporal_type}"}
-    end
+    Safe.temporal_condition(filter_spec, qualified_field)
   end
 
   defp build_filter_condition(%{type: :range} = filter_spec, target_table, target_field) do
@@ -134,10 +115,9 @@ defmodule Selecto.Subfilter.SQL.ExistsBuilder do
   end
 
   defp build_filter_condition(filter_spec, target_table, target_field) do
-    # Default case for existing equality, comparison, in_list, aggregation filters
-    qualified_field = "#{SQLHelpers.table_name(target_table)}.#{target_field}"
-    sql = "#{qualified_field} #{filter_spec.operator} ?"
-    params = [filter_spec.value]
-    {:ok, sql, params}
+    with {:ok, operator} <- Safe.comparison_operator(filter_spec.operator) do
+      qualified_field = "#{SQLHelpers.table_name(target_table)}.#{target_field}"
+      {:ok, "#{qualified_field} #{operator} ?", [filter_spec.value]}
+    end
   end
 end

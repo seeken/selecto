@@ -104,8 +104,8 @@ defmodule Selecto.Subfilter.SQLTest do
       {:ok, sql, params} = SQL.generate(registry)
 
       assert sql =~ "EXISTS ("
-      assert sql =~ "film.release_year > (CURRENT_DATE - INTERVAL '5 years')"
-      assert params == []
+      assert sql =~ "film.release_year > (CURRENT_DATE - (? * INTERVAL '1 year'))"
+      assert params == [5]
     end
 
     test "generates SQL for temporal subfilter - within days" do
@@ -115,8 +115,8 @@ defmodule Selecto.Subfilter.SQLTest do
       {:ok, sql, params} = SQL.generate(registry)
 
       assert sql =~ "EXISTS ("
-      assert sql =~ "film.release_year > (CURRENT_DATE - INTERVAL '30 days')"
-      assert params == []
+      assert sql =~ "film.release_year > (CURRENT_DATE - (? * INTERVAL '1 day'))"
+      assert params == [30]
     end
 
     test "generates SQL for temporal subfilter - since date" do
@@ -153,8 +153,8 @@ defmodule Selecto.Subfilter.SQLTest do
       {:ok, sql, params} = SQL.generate(registry)
 
       assert sql =~ "film.film_id IN ("
-      assert sql =~ "film.release_year > (CURRENT_DATE - INTERVAL '7 days')"
-      assert params == []
+      assert sql =~ "film.release_year > (CURRENT_DATE - (? * INTERVAL '1 day'))"
+      assert params == [7]
     end
 
     test "generates SQL for range subfilter with IN strategy" do

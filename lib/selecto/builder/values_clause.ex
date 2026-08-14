@@ -35,7 +35,7 @@ defmodule Selecto.Builder.ValuesClause do
       "VALUES ",
       values_rows,
       " AS ",
-      spec.alias,
+      quote_alias(spec.alias),
       " ",
       column_list
     ]
@@ -103,11 +103,26 @@ defmodule Selecto.Builder.ValuesClause do
   defp format_value(%Date{} = date), do: "'#{Date.to_string(date)}'"
   defp format_value(%DateTime{} = datetime), do: "'#{DateTime.to_iso8601(datetime)}'"
   defp format_value(%NaiveDateTime{} = datetime), do: "'#{NaiveDateTime.to_iso8601(datetime)}'"
-  defp format_value(value), do: "'#{inspect(value)}'"
+
+  defp format_value(value) do
+    escaped = value |> inspect() |> String.replace("'", "''")
+    "'#{escaped}'"
+  end
 
   # Quote SQL identifiers to handle reserved words and special characters
   defp quote_identifier(identifier) do
-    "\"#{identifier}\""
+    escaped = identifier |> to_string() |> String.replace("\"", "\"\"")
+    "\"#{escaped}\""
+  end
+
+  defp quote_alias(identifier) do
+    identifier = to_string(identifier)
+
+    if Regex.match?(~r/^[A-Za-z_][A-Za-z0-9_$]*$/, identifier) do
+      identifier
+    else
+      quote_identifier(identifier)
+    end
   end
 
   @doc """
@@ -142,7 +157,7 @@ defmodule Selecto.Builder.ValuesClause do
     column_list = build_column_list(spec.columns)
 
     [
-      spec.alias,
+      quote_alias(spec.alias),
       " ",
       column_list,
       " AS (VALUES ",
@@ -155,7 +170,7 @@ defmodule Selecto.Builder.ValuesClause do
     select_rows = build_select_rows(spec.data, spec.data_type, spec.columns)
 
     [
-      spec.alias,
+      quote_alias(spec.alias),
       " AS (",
       select_rows,
       ")"
@@ -225,7 +240,7 @@ defmodule Selecto.Builder.ValuesClause do
       "VALUES ",
       values_rows,
       " AS ",
-      spec.alias,
+      quote_alias(spec.alias),
       " ",
       column_list
     ]

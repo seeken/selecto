@@ -53,13 +53,13 @@ defmodule Selecto.JsonbTest do
   test "build_extraction supports alias path operators and casts" do
     assert ~s("attributes"->>'color') == Jsonb.build_extraction("attributes", ["color"])
 
-    assert ~s("u"."attributes"#>'{dimensions,length}') ==
+    assert ~s("u"."attributes"#>ARRAY['dimensions', 'length']) ==
              Jsonb.build_extraction("attributes", ["dimensions", "length"],
                as_text: false,
                table_alias: "u"
              )
 
-    assert "(\"attributes\"#>>'{dimensions,length}')::numeric" ==
+    assert "(\"attributes\"#>>ARRAY['dimensions', 'length'])::numeric" ==
              Jsonb.build_extraction("attributes", ["dimensions", "length"], cast: :decimal)
   end
 

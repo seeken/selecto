@@ -128,26 +128,29 @@ defmodule Selecto.Builder.Sql.Where do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
     query_iodata = selecto_subquery_to_iodata(query_selecto)
+    operator = subquery_operator!(comp)
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     [" ", sel, " ", comp, " ", to_string(agg), " (", query_iodata, ") "], param}
+     [" ", sel, " ", operator, " ", to_string(agg), " (", query_iodata, ") "], param}
   end
 
   def build(selecto, {field, comp, {:subquery, agg, query, params}}) when agg in [:any, :all] do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
     query_iodata = convert_sql_placeholders_to_iodata(query, params)
+    operator = subquery_operator!(comp)
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     [" ", sel, " ", comp, " ", to_string(agg), " (", query_iodata, ") "], param ++ params}
+     [" ", sel, " ", operator, " ", to_string(agg), " (", query_iodata, ") "], param ++ params}
   end
 
   def build(selecto, {field, comp, {:subquery, agg, query}}) when agg in [:any, :all] do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
+    operator = subquery_operator!(comp)
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     [" ", sel, " ", comp, " ", to_string(agg), " (", query, ") "], param}
+     [" ", sel, " ", operator, " ", to_string(agg), " (", query, ") "], param}
   end
 
   def build(_selecto, {:exists, %Selecto{} = query_selecto}) do
@@ -1273,6 +1276,31 @@ defmodule Selecto.Builder.Sql.Where do
 
   defp rewrite_subquery_root_alias(subquery_sql, alias_name) when is_binary(subquery_sql) do
     Regex.replace(~r/\bselecto_root\b/u, subquery_sql, alias_name)
+  end
+
+  defp subquery_operator!(operator) do
+    normalized =
+      case operator do
+        value when value in [:eq, :==] -> "="
+        value when value in [:neq, :!=] -> "!="
+        :gt -> ">"
+        :gte -> ">="
+        :lt -> "<"
+        :lte -> "<="
+        value -> to_string(value)
+      end
+
+    if normalized in ~w(= != <> < <= > >=) do
+      normalized
+    else
+      error =
+        Error.validation_error("Invalid ANY/ALL comparison operator", %{
+          operator: operator,
+          allowed: ~w(= != <> < <= > >=)
+        })
+
+      raise Error.to_exception(error)
+    end
   end
 
   # Ensure `IN` subqueries are wrapped in parentheses.

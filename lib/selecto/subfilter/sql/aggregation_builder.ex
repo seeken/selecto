@@ -18,6 +18,7 @@ defmodule Selecto.Subfilter.SQL.AggregationBuilder do
   alias Selecto.Subfilter.{Spec, Error}
   alias Selecto.Subfilter.JoinPathResolver.JoinResolution
   alias Selecto.Subfilter.SQL.Helpers, as: SQLHelpers
+  alias Selecto.Subfilter.SQL.Safe
 
   @doc """
   Generate aggregation subquery SQL for a given subfilter.
@@ -29,7 +30,8 @@ defmodule Selecto.Subfilter.SQL.AggregationBuilder do
         %JoinResolution{} = join_resolution,
         registry
       ) do
-    with {:ok, joins_sql, params1} <- build_joins_sql(join_resolution),
+    with {:ok, operator} <- Safe.comparison_operator(filter_spec.operator),
+         {:ok, joins_sql, params1} <- build_joins_sql(join_resolution),
          {:ok, where_sql, params2} <- build_where_sql(spec, join_resolution, registry) do
       subquery_sql = """
       (
@@ -40,7 +42,7 @@ defmodule Selecto.Subfilter.SQL.AggregationBuilder do
       )
       """
 
-      final_sql = "#{subquery_sql} #{filter_spec.operator} ?"
+      final_sql = "#{subquery_sql} #{operator} ?"
       params = params1 ++ params2 ++ [filter_spec.value]
 
       {:ok, final_sql, params}
@@ -120,32 +122,7 @@ defmodule Selecto.Subfilter.SQL.AggregationBuilder do
   # Build temporal condition for aggregation subqueries
   defp build_temporal_condition(filter_spec, target_table, target_field) do
     qualified_field = "#{SQLHelpers.table_name(target_table)}.#{target_field}"
-
-    case filter_spec.temporal_type do
-      :recent_years ->
-        sql = "#{qualified_field} > (CURRENT_DATE - INTERVAL '#{filter_spec.value} years')"
-        {:ok, sql, []}
-
-      :within_days ->
-        sql = "#{qualified_field} > (CURRENT_DATE - INTERVAL '#{filter_spec.value} days')"
-        {:ok, sql, []}
-
-      :within_hours ->
-        sql = "#{qualified_field} > (NOW() - INTERVAL '#{filter_spec.value} hours')"
-        {:ok, sql, []}
-
-      :since_date ->
-        sql = "#{qualified_field} > ?"
-        {:ok, sql, [filter_spec.value]}
-
-      _ ->
-        {:error,
-         %Error{
-           type: :unsupported_temporal_type,
-           message: "Unsupported temporal type: #{filter_spec.temporal_type}",
-           details: %{temporal_type: filter_spec.temporal_type}
-         }}
-    end
+    Safe.temporal_condition(filter_spec, qualified_field)
   end
 
   # Build range condition for aggregation subqueries

@@ -23,6 +23,7 @@ defmodule Selecto.Subfilter.SQL.AnyAllBuilder do
   alias Selecto.Subfilter.{Spec, Error}
   alias Selecto.Subfilter.JoinPathResolver.JoinResolution
   alias Selecto.Subfilter.SQL.Helpers, as: SQLHelpers
+  alias Selecto.Subfilter.SQL.Safe
 
   @doc """
   Generate ANY or ALL subquery SQL for a given subfilter.
@@ -30,7 +31,8 @@ defmodule Selecto.Subfilter.SQL.AnyAllBuilder do
   @spec generate(:any | :all, Spec.t(), JoinResolution.t(), any()) ::
           {:ok, String.t(), [any()]} | {:error, Error.t()}
   def generate(type, %Spec{} = spec, %JoinResolution{} = join_resolution, registry) do
-    with {:ok, joins_sql, params1} <- build_joins_sql(join_resolution),
+    with {:ok, operator} <- Safe.comparison_operator(spec.filter_spec.operator),
+         {:ok, joins_sql, params1} <- build_joins_sql(join_resolution),
          {:ok, where_sql, params2} <- build_where_sql(spec, join_resolution, registry) do
       subquery_sql = """
       SELECT #{build_select_clause(join_resolution)}
@@ -42,7 +44,7 @@ defmodule Selecto.Subfilter.SQL.AnyAllBuilder do
       main_query_field = build_main_query_field(spec, join_resolution, registry)
 
       final_sql =
-        "#{main_query_field} #{spec.filter_spec.operator} #{String.upcase(to_string(type))} (#{subquery_sql})"
+        "#{main_query_field} #{operator} #{String.upcase(to_string(type))} (#{subquery_sql})"
 
       {:ok, final_sql, params1 ++ params2}
     else
@@ -109,32 +111,7 @@ defmodule Selecto.Subfilter.SQL.AnyAllBuilder do
   # Build temporal condition for ANY/ALL subqueries
   defp build_temporal_condition(filter_spec, target_table, target_field) do
     qualified_field = "#{SQLHelpers.table_name(target_table)}.#{target_field}"
-
-    case filter_spec.temporal_type do
-      :recent_years ->
-        sql = "#{qualified_field} > (CURRENT_DATE - INTERVAL '#{filter_spec.value} years')"
-        {:ok, sql, []}
-
-      :within_days ->
-        sql = "#{qualified_field} > (CURRENT_DATE - INTERVAL '#{filter_spec.value} days')"
-        {:ok, sql, []}
-
-      :within_hours ->
-        sql = "#{qualified_field} > (NOW() - INTERVAL '#{filter_spec.value} hours')"
-        {:ok, sql, []}
-
-      :since_date ->
-        sql = "#{qualified_field} > ?"
-        {:ok, sql, [filter_spec.value]}
-
-      _ ->
-        {:error,
-         %Error{
-           type: :unsupported_temporal_type,
-           message: "Unsupported temporal type: #{filter_spec.temporal_type}",
-           details: %{temporal_type: filter_spec.temporal_type}
-         }}
-    end
+    Safe.temporal_condition(filter_spec, qualified_field)
   end
 
   # Build range condition for ANY/ALL subqueries

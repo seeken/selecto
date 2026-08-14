@@ -242,7 +242,9 @@ defmodule Selecto.Builder.JsonOperations do
   defp build_json_build_object(%Spec{value: pairs} = spec) when is_list(pairs) do
     formatted_pairs =
       pairs
-      |> Enum.map(fn {key, value} -> ["'#{key}'", ", ", format_json_value(value)] end)
+      |> Enum.map(fn {key, value} ->
+        [sql_string_literal(key), ", ", format_json_value(value)]
+      end)
       |> Enum.intersperse(", ")
 
     sql_parts = [
@@ -274,7 +276,9 @@ defmodule Selecto.Builder.JsonOperations do
   defp build_jsonb_build_object(%Spec{value: pairs} = spec) when is_list(pairs) do
     formatted_pairs =
       pairs
-      |> Enum.map(fn {key, value} -> ["'#{key}'", ", ", format_json_value(value)] end)
+      |> Enum.map(fn {key, value} ->
+        [sql_string_literal(key), ", ", format_json_value(value)]
+      end)
       |> Enum.intersperse(", ")
 
     sql_parts = [
@@ -466,7 +470,7 @@ defmodule Selecto.Builder.JsonOperations do
       "(",
       sqlite_json_column_ref(column, table_alias),
       ", '",
-      path,
+      escape_sql_literal(path),
       "')"
     ]
   end
@@ -492,7 +496,7 @@ defmodule Selecto.Builder.JsonOperations do
     path_parts
     |> Enum.map(fn part ->
       case part do
-        {:key, key} -> [" -> '", key, "'"]
+        {:key, key} -> [" -> '", escape_sql_literal(key), "'"]
         {:index, idx} -> [" -> ", Integer.to_string(idx)]
       end
     end)
@@ -508,14 +512,14 @@ defmodule Selecto.Builder.JsonOperations do
       init_parts
       |> Enum.map(fn part ->
         case part do
-          {:key, key} -> [" -> '", key, "'"]
+          {:key, key} -> [" -> '", escape_sql_literal(key), "'"]
           {:index, idx} -> [" -> ", Integer.to_string(idx)]
         end
       end)
 
     last_sql =
       case last_part do
-        {:key, key} -> [" ->> '", key, "'"]
+        {:key, key} -> [" ->> '", escape_sql_literal(key), "'"]
         {:index, idx} -> [" ->> ", Integer.to_string(idx)]
       end
 
@@ -545,12 +549,12 @@ defmodule Selecto.Builder.JsonOperations do
   # Format JSON path as PostgreSQL array literal
   defp format_json_path_array(path) do
     elements = parse_json_path(path)
-    formatted_elements = Enum.map(elements, fn el -> "'#{el}'" end)
+    formatted_elements = Enum.map(elements, &sql_string_literal/1)
 
     [
-      "'{",
+      "ARRAY[",
       Enum.intersperse(formatted_elements, ", "),
-      "}'"
+      "]"
     ]
   end
 
@@ -573,6 +577,14 @@ defmodule Selecto.Builder.JsonOperations do
   end
 
   defp format_json_value(value), do: "'#{inspect(value)}'"
+
+  defp sql_string_literal(value), do: ["'", escape_sql_literal(value), "'"]
+
+  defp escape_sql_literal(value) do
+    value
+    |> to_string()
+    |> String.replace("'", "''")
+  end
 
   # Add alias to SQL parts if present
   defp extraction_sql(column, path, kind, opts) do
@@ -610,7 +622,7 @@ defmodule Selecto.Builder.JsonOperations do
       if AdapterSupport.callback_available?(adapter, :quote_identifier, 1) do
         adapter.quote_identifier(alias_name)
       else
-        "\"#{alias_name}\""
+        "\"#{String.replace(to_string(alias_name), "\"", "\"\"")}\""
       end
 
     [sql_parts, " AS ", quoted_alias]

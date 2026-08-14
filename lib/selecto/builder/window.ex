@@ -244,9 +244,38 @@ defmodule Selecto.Builder.Window do
   defp build_frame_boundary(:unbounded_preceding), do: "UNBOUNDED PRECEDING"
   defp build_frame_boundary(:current_row), do: "CURRENT ROW"
   defp build_frame_boundary(:unbounded_following), do: "UNBOUNDED FOLLOWING"
-  defp build_frame_boundary({:preceding, n}), do: "#{n} PRECEDING"
-  defp build_frame_boundary({:following, n}), do: "#{n} FOLLOWING"
-  defp build_frame_boundary({:interval, interval}), do: "INTERVAL '#{interval}' PRECEDING"
+
+  defp build_frame_boundary({:preceding, n}) when is_integer(n) and n >= 0,
+    do: "#{n} PRECEDING"
+
+  defp build_frame_boundary({:following, n}) when is_integer(n) and n >= 0,
+    do: "#{n} FOLLOWING"
+
+  defp build_frame_boundary({:interval, interval}) when is_binary(interval) do
+    interval = String.trim(interval)
+
+    if Regex.match?(
+         ~r/^\d+(?:\.\d+)?\s+(?:microseconds?|milliseconds?|seconds?|minutes?|hours?|days?|weeks?|months?|years?)$/i,
+         interval
+       ) do
+      "INTERVAL '#{interval}' PRECEDING"
+    else
+      error =
+        Error.validation_error("Invalid window frame interval", %{
+          interval: interval,
+          expected: "positive numeric value followed by a supported time unit"
+        })
+
+      raise Error.to_exception(error)
+    end
+  end
+
+  defp build_frame_boundary(boundary) do
+    error =
+      Error.validation_error("Invalid window frame boundary", %{boundary: inspect(boundary)})
+
+    raise Error.to_exception(error)
+  end
 
   # Resolve field references (handle joins if needed)
   defp resolve_field_reference(_selecto, field) when is_binary(field) do

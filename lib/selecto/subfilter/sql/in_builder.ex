@@ -19,6 +19,7 @@ defmodule Selecto.Subfilter.SQL.InBuilder do
   alias Selecto.Subfilter.{Spec, Error}
   alias Selecto.Subfilter.JoinPathResolver.JoinResolution
   alias Selecto.Subfilter.SQL.Helpers, as: SQLHelpers
+  alias Selecto.Subfilter.SQL.Safe
 
   @doc """
   Generate IN subquery SQL for a given subfilter.
@@ -92,32 +93,7 @@ defmodule Selecto.Subfilter.SQL.InBuilder do
   # Build filter condition based on filter spec type
   defp build_filter_condition(%{type: :temporal} = filter_spec, target_table, target_field) do
     qualified_field = "#{SQLHelpers.table_name(target_table)}.#{target_field}"
-
-    case filter_spec.temporal_type do
-      :recent_years ->
-        sql = "#{qualified_field} > (CURRENT_DATE - INTERVAL '#{filter_spec.value} years')"
-        {:ok, sql, []}
-
-      :within_days ->
-        sql = "#{qualified_field} > (CURRENT_DATE - INTERVAL '#{filter_spec.value} days')"
-        {:ok, sql, []}
-
-      :within_hours ->
-        sql = "#{qualified_field} > (NOW() - INTERVAL '#{filter_spec.value} hours')"
-        {:ok, sql, []}
-
-      :since_date ->
-        sql = "#{qualified_field} > ?"
-        {:ok, sql, [filter_spec.value]}
-
-      _ ->
-        {:error,
-         %Error{
-           type: :unsupported_temporal_type,
-           message: "Unsupported temporal type: #{filter_spec.temporal_type}",
-           details: %{temporal_type: filter_spec.temporal_type}
-         }}
-    end
+    Safe.temporal_condition(filter_spec, qualified_field)
   end
 
   defp build_filter_condition(%{type: :range} = filter_spec, target_table, target_field) do
