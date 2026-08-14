@@ -1,9 +1,9 @@
 defmodule Selecto.Builder.CaseExpression do
   @moduledoc """
-  SQL generation for PostgreSQL CASE expressions.
+  SQL generation for standard CASE expressions.
 
   Generates SQL for both simple and searched CASE expressions with proper
-  condition handling, value escaping, and PostgreSQL-specific syntax.
+  condition handling, value escaping, and nested expressions.
   """
 
   require Logger
@@ -13,7 +13,7 @@ defmodule Selecto.Builder.CaseExpression do
   @doc """
   Build CASE expression SQL from specification.
 
-  Returns {case_expression_iodata, parameters} tuple with proper PostgreSQL
+  Returns `{case_expression_iodata, parameters}` with adapter-ready
   CASE syntax and parameter bindings.
   """
   def build_case_expression(%Spec{} = spec, selecto \\ nil) do

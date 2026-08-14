@@ -1,6 +1,6 @@
 defmodule Selecto.Advanced.CaseExpression do
   @moduledoc """
-  CASE expression support for PostgreSQL conditional logic.
+  Portable CASE expression support for conditional logic.
 
   Provides comprehensive support for both simple and searched CASE expressions,
   enabling conditional data transformation within SELECT clauses.

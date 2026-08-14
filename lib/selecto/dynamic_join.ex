@@ -236,6 +236,7 @@ defmodule Selecto.DynamicJoin do
         join_type: :subquery,
         subquery: rewritten_subquery_sql,
         subquery_params: subquery_params,
+        subquery_adapter: join_selecto.adapter,
         subquery_root_alias: subquery_root_alias,
         on: on_conditions,
         type: join_type,

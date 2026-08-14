@@ -11,6 +11,7 @@ defmodule Selecto.Builder.Window do
 
   alias Selecto.Window.{Spec, Frame}
   alias Selecto.AdapterSupport
+  alias Selecto.Dialect.Window.FrameBoundary
   alias Selecto.Error
 
   @doc """
@@ -228,12 +229,9 @@ defmodule Selecto.Builder.Window do
   defp build_frame_clause(_selecto, nil), do: {[], []}
 
   defp build_frame_clause(selecto, %Frame{type: type, start: start_bound, end: end_bound}) do
-    validate_frame_support!(selecto, start_bound)
-    validate_frame_support!(selecto, end_bound)
-
     type_str = String.upcase(to_string(type))
-    start_str = build_frame_boundary(start_bound)
-    end_str = build_frame_boundary(end_bound)
+    start_str = build_frame_boundary(selecto, start_bound)
+    end_str = build_frame_boundary(selecto, end_bound)
 
     iodata = [type_str, " BETWEEN ", start_str, " AND ", end_str]
 
@@ -241,36 +239,42 @@ defmodule Selecto.Builder.Window do
   end
 
   # Build individual frame boundary
-  defp build_frame_boundary(:unbounded_preceding), do: "UNBOUNDED PRECEDING"
-  defp build_frame_boundary(:current_row), do: "CURRENT ROW"
-  defp build_frame_boundary(:unbounded_following), do: "UNBOUNDED FOLLOWING"
+  defp build_frame_boundary(_selecto, :unbounded_preceding), do: "UNBOUNDED PRECEDING"
+  defp build_frame_boundary(_selecto, :current_row), do: "CURRENT ROW"
+  defp build_frame_boundary(_selecto, :unbounded_following), do: "UNBOUNDED FOLLOWING"
 
-  defp build_frame_boundary({:preceding, n}) when is_integer(n) and n >= 0,
+  defp build_frame_boundary(_selecto, {:preceding, n}) when is_integer(n) and n >= 0,
     do: "#{n} PRECEDING"
 
-  defp build_frame_boundary({:following, n}) when is_integer(n) and n >= 0,
+  defp build_frame_boundary(_selecto, {:following, n}) when is_integer(n) and n >= 0,
     do: "#{n} FOLLOWING"
 
-  defp build_frame_boundary({:interval, interval}) when is_binary(interval) do
-    interval = String.trim(interval)
-
-    if Regex.match?(
-         ~r/^\d+(?:\.\d+)?\s+(?:microseconds?|milliseconds?|seconds?|minutes?|hours?|days?|weeks?|months?|years?)$/i,
-         interval
-       ) do
-      "INTERVAL '#{interval}' PRECEDING"
+  defp build_frame_boundary(selecto, {:interval, interval}) do
+    with {:ok, boundary} <- FrameBoundary.new(interval, :preceding),
+         {:ok, sql} <-
+           Selecto.DialectSupport.render_window_frame_boundary(
+             selecto.adapter,
+             boundary,
+             selecto
+           ) do
+      sql
     else
-      error =
-        Error.validation_error("Invalid window frame interval", %{
-          interval: interval,
-          expected: "positive numeric value followed by a supported time unit"
-        })
+      {:error, %Error{} = error} ->
+        raise Error.to_exception(error)
 
-      raise Error.to_exception(error)
+      {:error, reason} ->
+        error =
+          Error.validation_error("Invalid window frame interval", %{
+            interval: interval,
+            reason: reason,
+            expected: "positive numeric value followed by a supported time unit"
+          })
+
+        raise Error.to_exception(error)
     end
   end
 
-  defp build_frame_boundary(boundary) do
+  defp build_frame_boundary(_selecto, boundary) do
     error =
       Error.validation_error("Invalid window frame boundary", %{boundary: inspect(boundary)})
 
@@ -386,23 +390,6 @@ defmodule Selecto.Builder.Window do
   end
 
   defp is_empty_iodata(_), do: false
-
-  defp validate_frame_support!(selecto, {:interval, interval}) do
-    adapter = Map.get(selecto, :adapter, AdapterSupport.default_adapter())
-
-    if AdapterSupport.adapter_name(adapter) == :mssql do
-      error =
-        Error.validation_error("MSSQL window frames do not support interval boundaries", %{
-          adapter: :mssql,
-          frame_boundary: {:interval, interval},
-          unsupported_feature: :window_interval_frame
-        })
-
-      raise Error.to_exception(error)
-    end
-  end
-
-  defp validate_frame_support!(_selecto, _boundary), do: :ok
 
   defp validate_nth_value_support!(selecto) do
     adapter = Map.get(selecto, :adapter, AdapterSupport.default_adapter())

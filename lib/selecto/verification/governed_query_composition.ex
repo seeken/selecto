@@ -221,7 +221,7 @@ defmodule Selecto.Verification.GovernedQueryComposition do
   end
 
   defp apply_unsafe_form(:ad_hoc_lateral, state) do
-    Selecto.with_lateral(state.query, {:function, :generate_series, [1, 2]},
+    Selecto.with_lateral(state.query, {:function, :bounded_row_source, [1, 2]},
       as: "manual_series",
       join_type: :inner
     )
@@ -454,8 +454,12 @@ defmodule Selecto.Verification.GovernedQueryComposition do
   defp base_query(policy_mode, tenant_mode, tenant_identity) do
     opts = if policy_mode == :strict, do: [mode: :strict], else: []
 
+    adapter = Selecto.Verification.QuerySafety.Adapter
+
+    runtime = Selecto.Runtime.Context.new(adapter, :compile_only)
+
     domain()
-    |> Selecto.configure(:verification_connection, opts)
+    |> Selecto.configure(runtime, opts)
     |> Selecto.select(["id", "name"])
     |> attach_tenant(tenant_mode, tenant_identity)
   end
@@ -518,7 +522,7 @@ defmodule Selecto.Verification.GovernedQueryComposition do
         },
         laterals: %{
           bounded_series: %{
-            source: {:function, :generate_series, [1, 2]},
+            source: {:function, :bounded_row_source, [1, 2]},
             as: "bounded_series",
             join_type: :inner
           }

@@ -72,6 +72,8 @@ defmodule Selecto.EnhancedJoins do
   ```
   """
 
+  alias Selecto.Dialect.TableFunction.Join, as: TableFunctionJoin
+
   @type join_type ::
           :self_join | :lateral_join | :cross_join | :full_outer_join | :conditional_join
   @type condition_type :: :inner | :left | :right | :full
@@ -353,17 +355,21 @@ defmodule Selecto.EnhancedJoins do
     ]
   end
 
-  defp build_lateral_join_sql(join_config, _selecto) do
-    lateral_query = join_config.lateral_query
-    alias_name = join_config.join_alias
+  defp build_lateral_join_sql(join_config, selecto) do
+    adapter = Map.get(selecto, :adapter, Selecto.AdapterSupport.default_adapter())
 
-    [
-      " LEFT JOIN LATERAL (",
-      lateral_query,
-      ") ",
-      alias_name,
-      " ON true"
-    ]
+    fragment = %TableFunctionJoin{
+      join_type: :left,
+      source_sql: ["(", join_config.lateral_query, ")"],
+      alias: join_config.join_alias,
+      source_kind: :subquery
+    }
+
+    case Selecto.DialectSupport.render_table_function_join(adapter, fragment, selecto) do
+      {:ok, sql} -> [" ", sql]
+      {:error, %Selecto.Error{} = error} -> raise Selecto.Error.to_exception(error)
+      {:error, reason} -> raise ArgumentError, "unsupported lateral join: #{inspect(reason)}"
+    end
   end
 
   defp build_cross_join_sql(join_config, _selecto) do

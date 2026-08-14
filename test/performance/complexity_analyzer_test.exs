@@ -298,7 +298,6 @@ defmodule Selecto.Performance.ComplexityAnalyzerTest do
 
   defp build_simple_selecto do
     %Selecto{
-      postgrex_opts: :mock_repo,
       adapter: nil,
       connection: nil,
       domain: %{

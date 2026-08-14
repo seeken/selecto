@@ -26,7 +26,6 @@ defmodule Selecto.Types do
           | :binary
           | :uuid
           | :json
-          | :jsonb
           | :array
           | :geometry
           | :geography
@@ -164,9 +163,8 @@ defmodule Selecto.Types do
           | :lt
           | :lte
           | :like
-          | :ilike
+          | :case_insensitive_like
           | :not_like
-          | :not_ilike
           | :is_null
           | :not_null
           | :in

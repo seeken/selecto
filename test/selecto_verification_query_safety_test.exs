@@ -15,7 +15,7 @@ defmodule Selecto.Verification.QuerySafetyTest do
 
   test "the finite model never opens a database connection" do
     assert Enum.all?(QuerySafety.states(), fn state ->
-             state.query.adapter == Selecto.DB.PostgreSQL and
+             state.query.adapter == Selecto.Verification.QuerySafety.Adapter and
                state.query.connection == :verification
            end)
   end

@@ -99,7 +99,7 @@ defmodule SelectoTest do
     # Give the docker container a moment to start
     Process.sleep(5000)
 
-    postgrex_opts = [
+    connection = [
       hostname: System.get_env("SELECTO_POSTGRES_HOST", "localhost"),
       port: env_integer("SELECTO_POSTGRES_PORT", 5432),
       username: System.get_env("SELECTO_POSTGRES_USER", "postgres"),
@@ -107,7 +107,7 @@ defmodule SelectoTest do
       database: System.get_env("SELECTO_POSTGRES_DATABASE", "selecto_test")
     ]
 
-    {:ok, pid} = Postgrex.start_link(postgrex_opts)
+    {:ok, pid} = Postgrex.start_link(connection)
 
     # Create tables
     Postgrex.query!(
@@ -151,7 +151,7 @@ defmodule SelectoTest do
       Postgrex.query!(pid, "DROP TABLE post_tags", [])
     end)
 
-    {:ok, selecto: selecto, postgrex_opts: postgrex_opts}
+    {:ok, selecto: selecto, connection: connection}
   end
 
   test "configure/2", %{selecto: selecto} do
@@ -159,15 +159,15 @@ defmodule SelectoTest do
   end
 
   test "generated pool names register and release real Postgrex pools", %{
-    postgrex_opts: postgrex_opts
+    connection: connection
   } do
     pool_name =
       Selecto.ConnectionPool.generate_pool_name(%{
         adapter: SelectoDBPostgreSQL.Adapter,
-        connection_config: postgrex_opts ++ [verification_identity: make_ref()]
+        connection_config: connection ++ [verification_identity: make_ref()]
       })
 
-    assert {:ok, pool_pid} = Postgrex.start_link(Keyword.put(postgrex_opts, :name, pool_name))
+    assert {:ok, pool_pid} = Postgrex.start_link(Keyword.put(connection, :name, pool_name))
     assert GenServer.whereis(pool_name) == pool_pid
     assert {:ok, %Postgrex.Result{rows: [[1]]}} = Postgrex.query(pool_pid, "SELECT 1", [])
 

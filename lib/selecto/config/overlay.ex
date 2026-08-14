@@ -136,7 +136,7 @@ defmodule Selecto.Config.Overlay do
   def merge(base, overlay) when is_map(base) and is_map(overlay) do
     base
     |> merge_columns(overlay)
-    |> merge_jsonb_schemas(overlay)
+    |> merge_json_schemas(overlay)
     |> merge_filters(overlay)
     |> merge_functions(overlay)
     |> merge_detail_actions(overlay)
@@ -177,17 +177,17 @@ defmodule Selecto.Config.Overlay do
     end
   end
 
-  # Merges JSONB schema definitions from overlay into base columns.
+  # Merges JSON schema definitions from overlay into base columns.
   #
-  # For each JSONB schema defined in the overlay, the schema is added
+  # For each JSON schema defined in the overlay, the schema is added
   # to the corresponding column's configuration. This replaces the
   # `schema: :stub` placeholder with the actual schema.
-  defp merge_jsonb_schemas(base, overlay) do
-    overlay_jsonb_schemas = get_in(overlay, [:jsonb_schemas]) || %{}
+  defp merge_json_schemas(base, overlay) do
+    overlay_json_schemas = get_in(overlay, [:json_schemas]) || %{}
 
-    if map_size(overlay_jsonb_schemas) > 0 do
-      Enum.reduce(overlay_jsonb_schemas, base, fn {column_name, schema}, acc ->
-        # Update the column configuration with the JSONB schema
+    if map_size(overlay_json_schemas) > 0 do
+      Enum.reduce(overlay_json_schemas, base, fn {column_name, schema}, acc ->
+        # Update the column configuration with the JSON schema
         update_in(acc, [:source, :columns, column_name], fn column_config ->
           column_config = column_config || %{}
           Map.put(column_config, :schema, schema)
@@ -445,7 +445,7 @@ defmodule Selecto.Config.Overlay do
       :functions,
       :detail_actions,
       :redact_fields,
-      :jsonb_schemas,
+      :json_schemas,
       :query_members,
       :schemas,
       :joins,

@@ -1,8 +1,13 @@
 Code.require_file("support/selecto_db_postgresql_adapter.exs", __DIR__)
+Code.require_file("support/selecto_json_dialect_stubs.exs", __DIR__)
+Code.require_file("support/selecto_db_dialect_stubs.exs", __DIR__)
+
+Application.put_env(:selecto, :default_adapter, SelectoDBPostgreSQL.Adapter)
 
 Code.require_file("support/selecto_db_sqlite_adapter.exs", __DIR__)
 
 Code.require_file("support/selecto_db_adapter_stubs.exs", __DIR__)
+Code.require_file("support/selecto_sql_params.exs", __DIR__)
 
 run_db_tests? =
   System.get_env("SELECTO_RUN_DB_TESTS", "0")

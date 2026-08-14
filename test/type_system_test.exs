@@ -47,7 +47,7 @@ defmodule Selecto.TypeSystemTest do
              TypeSystem.infer_type(nil, {:literal, ~N[2024-01-01 10:11:12]})
 
     assert {:ok, {:array, :unknown}} = TypeSystem.infer_type(nil, {:literal, [1, 2, 3]})
-    assert {:ok, :jsonb} = TypeSystem.infer_type(nil, {:literal, %{a: 1}})
+    assert {:ok, :json} = TypeSystem.infer_type(nil, {:literal, %{a: 1}})
     assert {:ok, :string} = TypeSystem.infer_type(nil, {:literal, "x"})
   end
 
@@ -62,6 +62,22 @@ defmodule Selecto.TypeSystemTest do
     assert {:ok, :string} = TypeSystem.infer_type(selecto, {:abs, "age"})
     assert {:ok, :string} = TypeSystem.infer_type(selecto, "age")
     assert {:ok, :string} = TypeSystem.infer_type(selecto, "missing_field")
+  end
+
+  test "infers portable datetime, normalized-text, and bucket selector types" do
+    selecto = Selecto.configure(domain(), nil)
+
+    assert {:ok, :string} =
+             TypeSystem.infer_type(selecto, {:datetime_format, "name", "YYYY", %{}})
+
+    assert {:ok, :decimal} =
+             TypeSystem.infer_type(selecto, {:datetime_extract, "name", :year, %{}})
+
+    assert {:ok, :string} =
+             TypeSystem.infer_type(selecto, {:text_normalize, "name", %{ignore_case: true}})
+
+    assert {:ok, :string} =
+             TypeSystem.infer_type(selecto, {:bucket, "age", %{kind: :numeric_increment}})
   end
 
   test "type categories and compatibility" do
@@ -91,15 +107,38 @@ defmodule Selecto.TypeSystemTest do
     assert :uuid == TypeSystem.normalize_type(:binary_id)
     assert {:array, :integer} == TypeSystem.normalize_type({:array, :id})
 
-    assert :integer == TypeSystem.parse_sql_type("INT4")
+    assert :integer == TypeSystem.parse_sql_type("integer")
     assert :varchar == TypeSystem.parse_sql_type("varchar(255)")
     assert :char == TypeSystem.parse_sql_type("character(10)")
     assert :time == TypeSystem.parse_sql_type("time with time zone")
     assert :time == TypeSystem.parse_sql_type("timestamp without time zone")
     assert :geometry == TypeSystem.parse_sql_type("geometry(Point,4326)")
-    assert :geometry == TypeSystem.parse_sql_type("public.geometry")
+    assert :unknown == TypeSystem.parse_sql_type("public.geometry")
     assert :geography == TypeSystem.parse_sql_type("geography")
-    assert :geography == TypeSystem.parse_sql_type("public.geography")
+    assert :unknown == TypeSystem.parse_sql_type("public.geography")
     assert :unknown == TypeSystem.parse_sql_type("mystery")
+  end
+
+  test "accepts explicitly scoped native type identities without blessing unscoped aliases" do
+    assert TypeSystem.valid_type?({:native, :postgresql, :jsonb})
+    assert TypeSystem.valid_type?({:native, :postgresql, "jsonb"})
+    refute TypeSystem.valid_type?(:jsonb)
+    refute TypeSystem.valid_type?({:native, nil, :jsonb})
+    refute TypeSystem.valid_type?({:native, :postgresql, nil})
+    refute TypeSystem.valid_type?({:native, :postgresql, ""})
+  end
+
+  test "query contracts preserve sortable microsecond temporal types" do
+    surface =
+      Selecto.Domain.Projector.query_contract_field_surface(
+        %{},
+        "published_at_usec",
+        :source,
+        :utc_datetime_usec,
+        MapSet.new()
+      )
+
+    assert surface.sortable
+    assert surface.groupable
   end
 end

@@ -11,7 +11,7 @@ defmodule Selecto.Builder.Sql.Tagging do
   ## Supported Patterns
 
   - **Basic many-to-many joins**: LEFT JOIN through intermediate table
-  - **Tag aggregation**: string_agg for comma-separated tag lists  
+  - **Tag aggregation**: adapter-rendered delimited collection aggregation
   - **Faceted filtering**: EXISTS subqueries for tag filtering
   - **Tag counting**: COUNT-based filtering for minimum tag requirements
 
@@ -29,7 +29,7 @@ defmodule Selecto.Builder.Sql.Tagging do
       # Generates SQL like:
       # LEFT JOIN post_tags pt ON main.id = pt.post_id  
       # LEFT JOIN tags t ON pt.tag_id = t.id
-      # With string_agg(t.name, ', ') for aggregation
+      # With the configured adapter's delimited aggregation operation
   """
 
   import Selecto.Builder.Sql.Helpers
@@ -100,28 +100,26 @@ defmodule Selecto.Builder.Sql.Tagging do
   @doc """
   Build tag aggregation column SQL.
 
-  Generates string_agg expressions for displaying comma-separated tag lists.
+  Generates an adapter-rendered delimited aggregation expression.
   Handles NULL values and provides proper GROUP BY compatibility.
 
   ## Examples
 
-      build_tag_aggregation_column("tags", "name", "tag_list")
-      #=> "string_agg(tags.name, ', ') as tag_list"
-      
-      build_tag_aggregation_column("categories", "title", "category_names")  
-      #=> "string_agg(categories.title, ', ') as category_names"
+      build_tag_aggregation_column(selecto, "tags", "name", "tag_list")
 
   Returns: iodata for SELECT clause
   """
-  def build_tag_aggregation_column(tag_table_alias, tag_field, column_alias) do
-    [
-      "string_agg(",
-      tag_table_alias,
-      ".",
-      tag_field,
-      ", ', ') as ",
-      column_alias
-    ]
+  def build_tag_aggregation_column(%Selecto{} = selecto, tag_table_alias, tag_field, column_alias) do
+    spec =
+      Selecto.Advanced.ArrayOperations.create_array_operation(
+        :string_agg,
+        "#{tag_table_alias}.#{tag_field}",
+        delimiter: ", ",
+        as: column_alias
+      )
+
+    {sql, _params} = Selecto.Advanced.ArrayOperations.to_sql(spec, [], selecto)
+    sql
   end
 
   @doc """
@@ -191,14 +189,17 @@ defmodule Selecto.Builder.Sql.Tagging do
           " = main.id ",
           "AND t.",
           tag_field,
-          " = $1",
+          " = ",
+          {:param, tag_values},
           ")"
         ]
 
         {where_iodata, [tag_values]}
 
       :any when is_list(tag_values) ->
-        # Multiple tags with ANY match (tag1 OR tag2 OR tag3)
+        # Multiple tags with any match using portable IN semantics.
+        markers = tag_values |> Enum.map(&{:param, &1}) |> Enum.intersperse(", ")
+
         where_iodata = [
           "EXISTS (",
           "SELECT 1 FROM ",
@@ -214,16 +215,20 @@ defmodule Selecto.Builder.Sql.Tagging do
           " = main.id ",
           "AND t.",
           tag_field,
-          " = ANY($1)",
+          " IN (",
+          markers,
+          ")",
           ")"
         ]
 
-        {where_iodata, [tag_values]}
+        {where_iodata, tag_values}
 
       :all when is_list(tag_values) ->
         # Multiple tags with ALL required (tag1 AND tag2 AND tag3)
         # Uses COUNT to ensure all tags are present
         tag_count = length(tag_values)
+
+        markers = tag_values |> Enum.map(&{:param, &1}) |> Enum.intersperse(", ")
 
         where_iodata = [
           "(",
@@ -242,11 +247,14 @@ defmodule Selecto.Builder.Sql.Tagging do
           " = main.id ",
           "AND t.",
           tag_field,
-          " = ANY($1)",
-          ") = $2"
+          " IN (",
+          markers,
+          ")",
+          ") = ",
+          {:param, tag_count}
         ]
 
-        {where_iodata, [tag_values, tag_count]}
+        {where_iodata, tag_values ++ [tag_count]}
     end
   end
 
@@ -289,7 +297,8 @@ defmodule Selecto.Builder.Sql.Tagging do
       " = main.id",
       ") ",
       sql_op,
-      " $1"
+      " ",
+      {:param, count}
     ]
 
     {where_iodata, [count]}
@@ -307,7 +316,10 @@ defmodule Selecto.Builder.Sql.Tagging do
       "WHERE jt.",
       main_foreign_key,
       " = main.id",
-      ") BETWEEN $1 AND $2"
+      ") BETWEEN ",
+      {:param, min_count},
+      " AND ",
+      {:param, max_count}
     ]
 
     {where_iodata, [min_count, max_count]}

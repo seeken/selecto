@@ -2,6 +2,7 @@ defmodule Selecto.TenantTest do
   use ExUnit.Case, async: true
 
   defmodule Adapter do
+    def placeholder(_index), do: "?"
     def execute(:ok, _query, _params, _opts), do: {:ok, %{rows: [[1]], columns: ["id"]}}
   end
 

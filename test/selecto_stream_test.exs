@@ -2,6 +2,8 @@ defmodule Selecto.StreamTest do
   use ExUnit.Case, async: true
 
   defmodule StreamAdapter do
+    def placeholder(_index), do: "?"
+
     def stream(:ok, _query, _params, _opts) do
       {:ok, Stream.map([[1, "Alpha"], [2, "Beta"]], & &1), ["id", "name"]}
     end

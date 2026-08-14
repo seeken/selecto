@@ -4,6 +4,26 @@
 ## Unreleased
 -------------
 
+#### Breaking
+- Raised the package version and coordinated adapter baseline to `0.5.0`.
+- Removed implicit PostgreSQL adapter selection, `postgrex_opts`, the in-core
+  `Selecto.DB.PostgreSQL` implementation, and PostgreSQL-named JSONB helpers.
+- Replaced the PostgreSQL-named `:ilike` and `:to_char` query forms with
+  portable `:case_insensitive_like` and `:datetime_format` intent.
+- Native database types now require explicit adapter scoping; portable domains
+  should use canonical JSON, collection, text-search, and temporal types.
+
+#### Changed
+- Database execution, placeholders, native type/error normalization, dialect
+  fragments, hierarchy paths, pooling, streaming, transactions, query
+  analysis, and benchmark behavior now cross explicit adapter ports.
+- Dynamic subqueries and set operations retain source-adapter provenance when
+  rebinding finalized placeholders for a different target adapter.
+- Date/time extraction and formatting, normalized text, finite buckets, and
+  case-insensitive comparisons now cross typed dialect ports and fail closed
+  when the configured adapter has no implementation.
+- `mix selecto.verify` now runs with an adapter-neutral verification probe.
+
 #### Added
 - Added normalized registered-function signatures with optional overloads,
   overload-specific SQL names and return types, known Selecto type validation,

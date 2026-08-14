@@ -3,7 +3,7 @@ defmodule Selecto.RetargetIntegrationTest do
   doctest Selecto.Builder.Retarget
 
   alias Selecto.Builder.Retarget
-  alias Selecto.SQL.Params
+  alias Selecto.TestSQLParams, as: Params
 
   def test_domain do
     %{
@@ -76,8 +76,8 @@ defmodule Selecto.RetargetIntegrationTest do
 
   def create_test_selecto do
     domain = test_domain()
-    postgrex_opts = [hostname: "localhost", username: "test"]
-    Selecto.configure(domain, postgrex_opts, validate: false)
+    connection = [hostname: "localhost", username: "test"]
+    Selecto.configure(domain, connection, validate: false)
   end
 
   describe "build_retarget_query/2" do

@@ -130,18 +130,18 @@ defmodule Selecto.ConnectionPoolTest do
   describe "connection validation" do
     test "validates different connection types through executor" do
       # Test with Ecto repo (should be valid)
-      ecto_selecto = %Selecto{postgrex_opts: MyApp.Repo}
+      ecto_selecto = %Selecto{adapter: SelectoDBPostgreSQL.Adapter, connection: MyApp.Repo}
       assert :ok = Selecto.Executor.validate_connection(ecto_selecto)
 
       # Test with invalid connection (nil should be invalid)
-      invalid_selecto = %Selecto{postgrex_opts: nil}
+      invalid_selecto = %Selecto{adapter: SelectoDBPostgreSQL.Adapter, connection: nil}
 
       assert {:error, "Invalid connection configuration"} =
                Selecto.Executor.validate_connection(invalid_selecto)
 
       # Test basic pool reference structure validation (without GenServer calls)
       pool_ref = {:pool, %{manager: :non_existent_manager}}
-      pool_selecto = %Selecto{postgrex_opts: pool_ref}
+      pool_selecto = %Selecto{adapter: SelectoDBPostgreSQL.Adapter, connection: pool_ref}
 
       # This should recognize it as a pool type but fail validation due to no actual manager
       result = Selecto.Executor.validate_connection(pool_selecto)
@@ -152,7 +152,7 @@ defmodule Selecto.ConnectionPoolTest do
   describe "connection info" do
     test "provides connection information for different types" do
       # Test Ecto repo info
-      ecto_selecto = %Selecto{postgrex_opts: MyApp.Repo}
+      ecto_selecto = %Selecto{adapter: SelectoDBPostgreSQL.Adapter, connection: MyApp.Repo}
       info = Selecto.Executor.connection_info(ecto_selecto)
 
       assert info.type == :ecto_repo
@@ -161,7 +161,12 @@ defmodule Selecto.ConnectionPoolTest do
 
       # Test pooled connection info structure (without actual GenServer interaction)
       pool_ref = %{pool: :test_pool, manager: :test_manager}
-      pool_selecto = %Selecto{postgrex_opts: {:pool, pool_ref}}
+
+      pool_selecto = %Selecto{
+        adapter: SelectoDBPostgreSQL.Adapter,
+        connection: {:pool, pool_ref}
+      }
+
       info = Selecto.Executor.connection_info(pool_selecto)
 
       # Should return the correct structure even if the pool_stats fails
@@ -171,7 +176,11 @@ defmodule Selecto.ConnectionPoolTest do
       assert Map.has_key?(info, :pool_stats)
 
       # Test invalid connection info (use a non-atom to avoid it being treated as Ecto repo)
-      invalid_selecto = %Selecto{postgrex_opts: "invalid"}
+      invalid_selecto = %Selecto{
+        adapter: SelectoDBPostgreSQL.Adapter,
+        connection: "invalid"
+      }
+
       info = Selecto.Executor.connection_info(invalid_selecto)
 
       assert info.type == :unknown
@@ -196,7 +205,7 @@ defmodule Selecto.ConnectionPoolTest do
       }
 
       # Mock connection config
-      _postgrex_opts = [
+      _connection = [
         hostname: "localhost",
         username: "test",
         password: "test",
@@ -210,7 +219,7 @@ defmodule Selecto.ConnectionPoolTest do
       opts = [pool: true, pool_options: [pool_size: 5]]
 
       # The actual pool creation would fail in test, but we can verify the configuration parsing
-      # selecto = Selecto.configure(domain, postgrex_opts, opts)
+      # selecto = Selecto.configure(domain, connection, opts)
 
       # For now, just verify the options are accepted without error
       assert Keyword.get(opts, :pool) == true

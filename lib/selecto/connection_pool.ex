@@ -114,15 +114,10 @@ defmodule Selecto.ConnectionPool do
     pool_name = generate_pool_name(%{adapter: adapter, connection_config: connection_config})
 
     with :ok <- ensure_runtime_started() do
-      cond do
-        Selecto.AdapterSupport.callback_available?(adapter, :start_pool, 3) ->
-          adapter.start_pool(connection_config, pool_config, pool_name)
-
-        Selecto.AdapterSupport.postgresql_adapter?(adapter) ->
-          {:error, {:adapter_pool_start_unavailable, adapter}}
-
-        true ->
-          start_generic_pool(adapter, connection_config, pool_config, pool_name)
+      if Selecto.AdapterSupport.callback_available?(adapter, :start_pool, 3) do
+        adapter.start_pool(connection_config, pool_config, pool_name)
+      else
+        start_generic_pool(adapter, connection_config, pool_config, pool_name)
       end
     end
   end
@@ -209,14 +204,10 @@ defmodule Selecto.ConnectionPool do
   end
 
   def execute(%{adapter: adapter, connection: connection}, query, params, opts) do
-    if Selecto.AdapterSupport.postgresql_adapter?(adapter) do
-      execute(%{adapter: adapter}, query, params, opts)
+    if Selecto.AdapterSupport.callback_available?(adapter, :execute, 4) do
+      adapter.execute(connection, query, params, opts)
     else
-      if Selecto.AdapterSupport.callback_available?(adapter, :execute, 4) do
-        adapter.execute(connection, query, params, opts)
-      else
-        {:error, {:unsupported_adapter, adapter}}
-      end
+      {:error, {:unsupported_adapter, adapter}}
     end
   end
 
@@ -308,7 +299,7 @@ defmodule Selecto.ConnectionPool do
   @impl GenServer
   def handle_call(:pool_reference, _from, state) do
     reference =
-      if Selecto.AdapterSupport.postgresql_adapter?(state.adapter) do
+      if is_nil(state.connection) and not is_nil(state.pool_pid) do
         %{
           adapter: state.adapter,
           pool: state.pool_pid,
@@ -734,9 +725,8 @@ defmodule Selecto.ConnectionPool do
       |> Base.encode16(case: :lower)
       |> String.slice(0, 32)
 
-    # Postgrex accepts GenServer-compatible `:via` names. Registry keys are
-    # ordinary garbage-collected terms, so distinct runtime connection configs
-    # cannot consume atoms for the lifetime of the VM.
+    # Registry keys are ordinary garbage-collected terms, so distinct runtime
+    # connection configs cannot consume atoms for the lifetime of the VM.
     {:via, Registry, {@registry, {:pool, hash}}}
   end
 

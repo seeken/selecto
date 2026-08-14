@@ -9,9 +9,9 @@ defmodule Selecto.ExprCompiler do
     :boolean_search,
     :between,
     :contains,
+    :case_insensitive_like,
     :ends_with,
     :field_exists,
-    :ilike,
     :in,
     :is_nil,
     :like,
@@ -96,8 +96,8 @@ defmodule Selecto.ExprCompiler do
     compile_comparison(operator, left, right)
   end
 
-  defp do_compile_filter({:ilike, _, [field_ast, value_ast]}) do
-    compile_call(:ilike, [field_ast, value_ast])
+  defp do_compile_filter({:case_insensitive_like, _, [field_ast, value_ast]}) do
+    compile_call(:case_insensitive_like, [field_ast, value_ast])
   end
 
   defp do_compile_filter({:like, _, [field_ast, value_ast]}) do

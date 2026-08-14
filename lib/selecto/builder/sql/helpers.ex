@@ -13,8 +13,7 @@ defmodule Selecto.Builder.Sql.Helpers do
   ### SQL safety helpers - prevent injection via string validation
 
   @doc """
-  Get the appropriate quote character for identifiers based on the database adapter.
-  PostgreSQL uses double quotes, MySQL uses backticks, SQLite uses double quotes.
+  Get the quote character exposed by the configured database adapter.
   """
   def get_quote_char(selecto) do
     adapter = Map.get(selecto, :adapter, Selecto.AdapterSupport.default_adapter())
@@ -36,11 +35,11 @@ defmodule Selecto.Builder.Sql.Helpers do
   Only quote if it's a reserved word, contains special characters, or has mixed case.
   """
   def needs_quoting?(str) when is_binary(str) do
-    # PostgreSQL reserved words that commonly appear as column names
+    # Common SQL reserved words that appear as column names.
     reserved_words = ~w(
       user order group select from where having limit offset join left right
       inner outer cross union all distinct as on using natural full exists
-      case when then else end null is not and or in between like ilike
+      case when then else end null is not and or in between like
       primary key foreign references table column index create alter drop
       insert update delete values set into default unique check constraint
       view trigger function procedure return declare begin commit rollback

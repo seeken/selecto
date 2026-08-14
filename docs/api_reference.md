@@ -23,7 +23,7 @@ alias Selecto.Expr, as: X
 
 Selecto.filter(selecto, X.compact_and([
   X.eq("status", "active"),
-  X.when_present(search, &X.ilike("customer.name", "%#{&1}%"))
+  X.when_present(search, &X.case_insensitive_like("customer.name", "%#{&1}%"))
 ]))
 ```
 
@@ -40,7 +40,7 @@ Example:
 ```elixir
 import Selecto.ExprMacros
 
-filters = where(status == ^status and ilike(customer.name, ^pattern))
+filters = where(status == ^status and case_insensitive_like(customer.name, ^pattern))
 selectors = select([customer.name, count_distinct(customer.id)])
 orders = order_by([desc_nulls_last(total), asc(customer.name)])
 ```

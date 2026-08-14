@@ -1,10 +1,10 @@
 defmodule Selecto.Advanced.ArrayOperations do
   @moduledoc """
-  Array operations support for PostgreSQL array functionality.
+  Portable collection-operation intent.
 
   Provides comprehensive support for array construction, aggregation, manipulation,
-  testing, and unnesting operations. Works with PostgreSQL native array types
-  and provides type-safe operations for array columns.
+  testing, and unnesting operations. Adapters render only the operations their
+  native collection model supports.
 
   ## Examples
 

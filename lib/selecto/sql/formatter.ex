@@ -94,9 +94,7 @@ defmodule Selecto.SQL.Formatter do
         )
       end)
 
-    Regex.replace(~r/\$\d+/, keyword_wrapped, fn param ->
-      IO.ANSI.cyan() <> param <> IO.ANSI.reset()
-    end)
+    keyword_wrapped
   end
 
   def highlight(sql, :markdown) when is_binary(sql) do
@@ -105,7 +103,7 @@ defmodule Selecto.SQL.Formatter do
         Regex.replace(~r/\b#{Regex.escape(kw)}\b/i, acc, "**#{String.upcase(kw)}**")
       end)
 
-    Regex.replace(~r/\$\d+/, keyword_wrapped, "<code style=\"color:#0b6\">\\0</code>")
+    keyword_wrapped
   end
 
   def highlight(sql, _unknown_style), do: sql

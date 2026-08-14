@@ -35,9 +35,18 @@ defmodule Selecto.DB.Adapter do
 
   @callback name() :: atom()
   @callback connect(connection_options()) :: {:ok, connection()} | {:error, term()}
+  @callback disconnect(connection()) :: :ok | {:error, term()}
 
   @callback execute(connection(), query(), params(), execute_options()) ::
               {:ok, result()} | {:error, term()}
+
+  @callback normalize_execution_result(term()) :: {:ok, result()} | {:error, term()}
+  @callback normalize_error(term()) :: Selecto.Error.t()
+  @callback normalize_type(term()) :: term()
+  @callback type_family(term()) :: atom()
+  @callback capability(atom()) :: map()
+  @callback dialect() :: module()
+  @callback identifier_policy() :: map()
 
   @callback execute_pool(term(), query(), params(), execute_options()) ::
               {:ok, term()} | {:error, term()}
@@ -66,6 +75,10 @@ defmodule Selecto.DB.Adapter do
   @callback refresh_materialized_view(connection(), String.t(), keyword()) ::
               {:ok, term()} | {:error, term()}
 
+  @callback analyze_query(Selecto.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  @callback analyze_index_usage(Selecto.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  @callback table_statistics(Selecto.t(), keyword()) :: {:ok, map()} | {:error, term()}
+
   @callback verify_function(
               connection(),
               Selecto.FunctionVerification.Request.t(),
@@ -81,6 +94,14 @@ defmodule Selecto.DB.Adapter do
   @callback supports?(atom()) :: boolean()
 
   @optional_callbacks stream: 4,
+                      disconnect: 1,
+                      normalize_execution_result: 1,
+                      normalize_error: 1,
+                      normalize_type: 1,
+                      type_family: 1,
+                      capability: 1,
+                      dialect: 0,
+                      identifier_policy: 0,
                       server_version_major: 1,
                       validate_connection: 1,
                       connection_info: 1,
@@ -94,6 +115,9 @@ defmodule Selecto.DB.Adapter do
                       list_relations: 2,
                       introspect_table: 3,
                       refresh_materialized_view: 3,
+                      analyze_query: 2,
+                      analyze_index_usage: 2,
+                      table_statistics: 2,
                       verify_function: 3,
                       format_datetime: 2,
                       rollup_sql: 1,

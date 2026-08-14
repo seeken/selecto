@@ -74,11 +74,11 @@ defmodule Selecto.Config.OverlayDSL do
 
   - `@redactions` - List of field atoms to redact from queries
 
-  ### JSONB Schema (with `defjsonb_schema`)
+  ### JSON Schema (with `defjson_schema`)
 
-  Define structured schemas for JSONB columns to enable typed access, filtering, and display:
+  Define structured schemas for JSON columns to enable typed access, filtering, and display:
 
-      defjsonb_schema :attributes do
+      defjson_schema :attributes do
         field :color, :string, label: "Color"
         field :weight, :decimal, label: "Weight (kg)", precision: 2
         field :organic, :boolean, label: "Organic"
@@ -238,7 +238,7 @@ defmodule Selecto.Config.OverlayDSL do
       Module.register_attribute(__MODULE__, :overlay_source_associations, accumulate: true)
       Module.register_attribute(__MODULE__, :overlay_source_relationships, accumulate: true)
       Module.register_attribute(__MODULE__, :overlay_choice_sources, accumulate: true)
-      Module.register_attribute(__MODULE__, :overlay_jsonb_schemas, accumulate: true)
+      Module.register_attribute(__MODULE__, :overlay_json_schemas, accumulate: true)
       Module.register_attribute(__MODULE__, :overlay_write_operations, accumulate: true)
       Module.register_attribute(__MODULE__, :overlay_write_fields, accumulate: true)
       Module.register_attribute(__MODULE__, :overlay_write_relationships, accumulate: true)
@@ -294,7 +294,7 @@ defmodule Selecto.Config.OverlayDSL do
 
     choice_sources = Module.get_attribute(env.module, :overlay_choice_sources) |> Enum.reverse()
 
-    jsonb_schemas = Module.get_attribute(env.module, :overlay_jsonb_schemas) |> Enum.reverse()
+    json_schemas = Module.get_attribute(env.module, :overlay_json_schemas) |> Enum.reverse()
 
     write_operations =
       Module.get_attribute(env.module, :overlay_write_operations) |> Enum.reverse()
@@ -393,8 +393,8 @@ defmodule Selecto.Config.OverlayDSL do
       |> Enum.map(fn {name, props} -> {name, normalize_overlay_value(props)} end)
       |> Map.new()
 
-    jsonb_schemas_map =
-      jsonb_schemas
+    json_schemas_map =
+      json_schemas
       |> Enum.map(fn {name, fields} -> {name, fields} end)
       |> Map.new()
 
@@ -434,7 +434,7 @@ defmodule Selecto.Config.OverlayDSL do
         source: %{associations: source_associations_map},
         source_relationships: source_relationships_map,
         choice_sources: choice_sources_map,
-        jsonb_schemas: jsonb_schemas_map,
+        json_schemas: json_schemas_map,
         redact_fields: redactions
       }
       |> maybe_put_nonempty(:writes, writes_map)
@@ -900,12 +900,12 @@ defmodule Selecto.Config.OverlayDSL do
   end
 
   @doc """
-  Defines a JSONB schema for a JSONB column, enabling typed field access,
+  Defines a JSON schema for a JSON column, enabling typed field access,
   filtering, and display of structured JSON data.
 
   ## Example
 
-      defjsonb_schema :attributes do
+      defjson_schema :attributes do
         field :color, :string, label: "Color"
         field :weight, :decimal, label: "Weight (kg)", precision: 2
         field :organic, :boolean, label: "Organic"
@@ -939,37 +939,37 @@ defmodule Selecto.Config.OverlayDSL do
   - `sortable` - Whether the field can be sorted (default: true)
   - `format` - Display format (`:currency`, `:percentage`, etc.)
   """
-  defmacro defjsonb_schema(column_name, do: block) do
-    fields = extract_jsonb_fields(block)
+  defmacro defjson_schema(column_name, do: block) do
+    fields = extract_json_fields(block)
 
     quote do
-      @overlay_jsonb_schemas {unquote(column_name), unquote(Macro.escape(fields))}
+      @overlay_json_schemas {unquote(column_name), unquote(Macro.escape(fields))}
     end
   end
 
-  # Extract JSONB field definitions from block
-  defp extract_jsonb_fields({:__block__, _, exprs}) do
-    Enum.flat_map(exprs, &parse_jsonb_field/1)
+  # Extract JSON field definitions from block
+  defp extract_json_fields({:__block__, _, exprs}) do
+    Enum.flat_map(exprs, &parse_json_field/1)
   end
 
-  defp extract_jsonb_fields(expr) do
-    parse_jsonb_field(expr)
+  defp extract_json_fields(expr) do
+    parse_json_field(expr)
   end
 
   # Parse a single field definition
-  defp parse_jsonb_field({:field, _, [name, type | rest]}) do
+  defp parse_json_field({:field, _, [name, type | rest]}) do
     opts = extract_field_options(rest)
-    [build_jsonb_field(name, type, opts)]
+    [build_json_field(name, type, opts)]
   end
 
-  defp parse_jsonb_field(_), do: []
+  defp parse_json_field(_), do: []
 
   # Extract options from field arguments
   defp extract_field_options([]), do: %{}
 
   defp extract_field_options([[do: nested_block]]) do
     # Nested object with fields
-    nested_fields = extract_jsonb_fields(nested_block)
+    nested_fields = extract_json_fields(nested_block)
     %{fields: nested_fields}
   end
 
@@ -978,14 +978,14 @@ defmodule Selecto.Config.OverlayDSL do
   end
 
   defp extract_field_options([opts, [do: nested_block]]) when is_list(opts) do
-    nested_fields = extract_jsonb_fields(nested_block)
+    nested_fields = extract_json_fields(nested_block)
     opts |> Map.new() |> Map.put(:fields, nested_fields)
   end
 
   defp extract_field_options(_), do: %{}
 
   # Build the field specification map
-  defp build_jsonb_field(name, type, opts) do
+  defp build_json_field(name, type, opts) do
     base = %{
       name: name,
       type: normalize_type(type),
@@ -1509,12 +1509,12 @@ defmodule Selecto.Config.OverlayDSL do
   """
   defmacro ordinality(_value), do: quote(do: nil)
 
-  # JSONB Schema Field Directives
+  # JSON Schema Field Directives
 
   @doc """
-  Defines a field within a JSONB schema.
+  Defines a field within a JSON schema.
 
-  This macro is only valid inside a `defjsonb_schema` block.
+  This macro is only valid inside a `defjson_schema` block.
 
   ## Examples
 
@@ -1534,7 +1534,7 @@ defmodule Selecto.Config.OverlayDSL do
       end
   """
   defmacro field(_name, _type, _opts \\ []) do
-    # This is a placeholder - actual processing happens in extract_jsonb_fields
+    # This is a placeholder - actual processing happens in extract_json_fields
     quote do: nil
   end
 end

@@ -15,8 +15,8 @@ defmodule Selecto.ExprMacroSigilTest do
   test "where macro supports functions and null checks" do
     pattern = "%chair%"
 
-    assert where(not is_nil(deleted_at) or ilike(name, ^pattern)) ==
-             {:or, [{"deleted_at", :not_null}, {"name", {:ilike, "%chair%"}}]}
+    assert where(not is_nil(deleted_at) or case_insensitive_like(name, ^pattern)) ==
+             {:or, [{"deleted_at", :not_null}, {"name", {:case_insensitive_like, "%chair%"}}]}
   end
 
   test "where macro supports starts_with and ends_with helpers" do
@@ -251,8 +251,8 @@ defmodule Selecto.ExprMacroSigilTest do
     min_price = 50
     pattern = "%lamp%"
 
-    assert ~SELECTO"price >= ^min_price and ilike(name, ^pattern)" ==
-             {:and, [{"price", {:gte, 50}}, {"name", {:ilike, "%lamp%"}}]}
+    assert ~SELECTO"price >= ^min_price and case_insensitive_like(name, ^pattern)" ==
+             {:and, [{"price", {:gte, 50}}, {"name", {:case_insensitive_like, "%lamp%"}}]}
   end
 
   test "uppercase ~SELECTO sigil supports dotted fields" do

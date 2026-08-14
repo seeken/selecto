@@ -9,6 +9,8 @@ defmodule Selecto.ExecutorTest do
   end
 
   defmodule Adapter do
+    def placeholder(_index), do: "?"
+
     def execute(:single, _query, _params, _opts), do: {:ok, %{rows: [[1]], columns: ["id"]}}
     def execute(:empty, _query, _params, _opts), do: {:ok, %{rows: [], columns: ["id"]}}
 
@@ -41,6 +43,8 @@ defmodule Selecto.ExecutorTest do
   end
 
   defmodule NoStreamCapabilityAdapter do
+    def placeholder(_index), do: "?"
+
     def execute(:single_stream, _query, _params, _opts),
       do: {:ok, %{rows: [[1]], columns: ["id"]}}
 
@@ -51,6 +55,8 @@ defmodule Selecto.ExecutorTest do
   end
 
   defmodule DeclaredStreamMissingAdapter do
+    def placeholder(_index), do: "?"
+
     def execute(:single_stream, _query, _params, _opts),
       do: {:ok, %{rows: [[1]], columns: ["id"]}}
 
@@ -92,7 +98,7 @@ defmodule Selecto.ExecutorTest do
     Selecto.configure(domain(), connection)
     |> Selecto.select(["id"])
     |> Map.put(:adapter, SelectoDBPostgreSQL.Adapter)
-    |> Map.put(:postgrex_opts, connection)
+    |> Map.put(:connection, connection)
   end
 
   test "execute_with_adapter normalizes successful results" do
@@ -115,9 +121,15 @@ defmodule Selecto.ExecutorTest do
              Executor.execute_with_adapter(Adapter, :exit, "select 1", [], ["id"])
   end
 
-  test "execute_with_postgrex rejects invalid connection types" do
+  test "execute_with_adapter rejects invalid connection types" do
     assert {:error, %Selecto.Error{type: :connection_error}} =
-             Executor.execute_with_postgrex(123, "select 1", [], ["id"])
+             Executor.execute_with_adapter(
+               SelectoDBPostgreSQL.Adapter,
+               123,
+               "select 1",
+               [],
+               ["id"]
+             )
   end
 
   test "execute_with_connection_pool returns normalized pooled result" do
@@ -201,11 +213,13 @@ defmodule Selecto.ExecutorTest do
     assert aliases_1 == aliases_2
   end
 
-  test "execute_stream returns explicit contract error for ecto repo context" do
-    assert {:error, %Selecto.Error{type: :validation_error, details: details}} =
-             Executor.execute_stream(postgrex_stream_selecto(FakeRepo), analyze_complexity: false)
+  test "execute_stream leaves repository-shaped handles to the configured adapter" do
+    assert {:ok, stream} =
+             Executor.execute_stream(postgrex_stream_selecto(FakeRepo),
+               analyze_complexity: false
+             )
 
-    assert details[:stream_context] == :ecto_repo
+    assert Enum.count(stream) == 2
   end
 
   test "execute_stream receive_timeout errors when producer stalls" do
@@ -375,26 +389,38 @@ defmodule Selecto.ExecutorTest do
     assert is_integer(metadata.execution_time)
   end
 
-  test "validate_connection checks pid lifecycle" do
+  test "validate_connection delegates pid lifecycle checks to the adapter" do
     pid = spawn(fn -> Process.sleep(:infinity) end)
-    assert :ok == Executor.validate_connection(%Selecto{postgrex_opts: pid})
+
+    selecto = %Selecto{adapter: SelectoDBPostgreSQL.Adapter, connection: pid}
+    assert :ok == Executor.validate_connection(selecto)
     Process.exit(pid, :kill)
     Process.sleep(10)
 
     assert {:error, "Postgrex connection process is not alive"} ==
-             Executor.validate_connection(%Selecto{postgrex_opts: pid})
+             Executor.validate_connection(selecto)
   end
 
   test "connection_info describes repo, pid, and unknown connections" do
-    repo_info = Executor.connection_info(%Selecto{postgrex_opts: SomeRepo})
+    repo_info =
+      Executor.connection_info(%Selecto{
+        adapter: SelectoDBPostgreSQL.Adapter,
+        connection: SomeRepo
+      })
+
     assert %{type: :ecto_repo, repo: SomeRepo, status: :connected} = repo_info
 
     pid = spawn(fn -> Process.sleep(:infinity) end)
-    pid_info = Executor.connection_info(%Selecto{postgrex_opts: pid})
+
+    pid_info =
+      Executor.connection_info(%Selecto{adapter: SelectoDBPostgreSQL.Adapter, connection: pid})
+
     assert %{type: :postgrex, pid: ^pid, status: :connected} = pid_info
     Process.exit(pid, :kill)
 
-    unknown = Executor.connection_info(%Selecto{postgrex_opts: 123})
+    unknown =
+      Executor.connection_info(%Selecto{adapter: SelectoDBPostgreSQL.Adapter, connection: 123})
+
     assert %{type: :unknown, status: :invalid, value: 123} = unknown
   end
 

@@ -4,7 +4,7 @@ defmodule Selecto.MixProject do
   def project do
     [
       app: :selecto,
-      version: "0.4.14",
+      version: "0.5.0",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -110,8 +110,6 @@ defmodule Selecto.MixProject do
       {:ex_doc, "~> 0.40", only: :dev, runtime: false},
       {:timex, "~> 3.7"},
       {:mneme, ">= 0.0.0", only: [:dev, :test]},
-      {:benchee, "~> 1.5", only: [:dev, :test], optional: true},
-      {:benchee_html, "~> 1.0", only: [:dev, :test], optional: true},
       {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:ecto_sql, "~> 3.13", optional: true},
@@ -126,6 +124,7 @@ defmodule Selecto.MixProject do
       precommit: [
         "compile --warnings-as-errors",
         "format --check-formatted",
+        "cmd scripts/check_postgresql_boundary.sh",
         "credo",
         "credo.atom_audit",
         "test",

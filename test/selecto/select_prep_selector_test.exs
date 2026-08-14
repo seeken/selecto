@@ -2,7 +2,7 @@ defmodule Selecto.SelectPrepSelectorTest do
   use ExUnit.Case, async: true
 
   alias Selecto.Builder.Sql.Select
-  alias Selecto.SQL.Params
+  alias Selecto.TestSQLParams, as: Params
 
   defp selecto do
     domain = %{
@@ -93,10 +93,10 @@ defmodule Selecto.SelectPrepSelectorTest do
     assert coalesce_sum_params == [0]
     assert finalized_coalesce_sum_params == [0]
 
-    {to_char_sql, _join, []} =
-      Select.prep_selector(selecto(), {:to_char, {"created_at", "YYYY-MM"}})
+    {datetime_sql, _join, []} =
+      Select.prep_selector(selecto(), {:datetime_format, "created_at", "YYYY-MM", %{}})
 
-    assert IO.iodata_to_binary(to_char_sql) =~ ~r/to_char\(/i
+    assert IO.iodata_to_binary(datetime_sql) =~ ~r/TO_CHAR\(/i
 
     {concat_sql, _join, []} =
       Select.prep_selector(selecto(), {:concat, ["name", {:literal, "!"}]})

@@ -75,7 +75,10 @@ defmodule Selecto.Property.QueryGenerators do
       map(boolean(), &{"active", &1}),
       map(integer(0..120), &{"age", {:gt, &1}}),
       map(integer(0..120), &{"age", {:lt, &1}}),
-      map(string(:alphanumeric, min_length: 1, max_length: 6), &{"name", {:ilike, "%#{&1}%"}})
+      map(
+        string(:alphanumeric, min_length: 1, max_length: 6),
+        &{"name", {:case_insensitive_like, "%#{&1}%"}}
+      )
     ])
   end
 

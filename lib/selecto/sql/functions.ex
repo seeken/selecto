@@ -15,7 +15,6 @@ defmodule Selecto.SQL.Functions do
   - `length/1` - String length
   - `position/2` - Find substring position
   - `replace/3` - String replacement
-  - `split_part/3` - Split and extract part
 
   ### Mathematical Functions
   - `abs/1` - Absolute value
@@ -75,6 +74,10 @@ defmodule Selecto.SQL.Functions do
       {:unnest, "tags"}
   """
 
+  alias Selecto.Dialect.Collection.Operation, as: CollectionOperation
+  alias Selecto.Dialect.DateTime.Operation, as: DateTimeOperation
+  alias Selecto.Dialect.Json.Operation, as: JsonOperation
+
   @doc """
   Process advanced SQL functions that extend beyond the basic set.
 
@@ -114,9 +117,6 @@ defmodule Selecto.SQL.Functions do
       {:replace, field, old, new} ->
         prep_string_function(selecto, "replace", [field, old, new])
 
-      {:split_part, field, delimiter, position} ->
-        prep_string_function(selecto, "split_part", [field, delimiter, {:literal, position}])
-
       # Mathematical Functions
       {:abs, field} ->
         prep_math_function(selecto, "abs", [field])
@@ -147,50 +147,49 @@ defmodule Selecto.SQL.Functions do
 
       # Date/Time Functions
       {:now} ->
-        prep_datetime_function(selecto, "now", [])
+        prep_datetime_operation(selecto, :current_timestamp, [])
 
       {:date_trunc, part, field} ->
-        prep_datetime_function(selecto, "date_trunc", [part, field])
+        prep_datetime_operation(selecto, :truncate, [field], part: part)
 
       {:interval, spec} ->
         prep_interval(selecto, spec)
 
       {:age, field} ->
-        prep_datetime_function(selecto, "age", [field])
+        prep_datetime_operation(selecto, :age, [field])
 
       {:age, field1, field2} ->
-        prep_datetime_function(selecto, "age", [field1, field2])
+        prep_datetime_operation(selecto, :age, [field1, field2])
 
       {:date_part, part, field} ->
-        prep_datetime_function(selecto, "date_part", [part, field])
+        prep_datetime_operation(selecto, :extract_part, [field], part: part)
 
       # Array Functions
       {:array_agg, field} ->
-        prep_array_function(selecto, "array_agg", [field])
+        prep_collection_operation(selecto, :array_agg, field)
 
       {:array_agg, field, opts} when is_list(opts) ->
-        prep_array_agg_with_opts(selecto, field, opts)
+        prep_collection_aggregate(selecto, :array_agg, field, opts)
 
       # String aggregation - 2 argument version
       {:string_agg, field, delimiter} ->
-        prep_string_agg(selecto, field, delimiter)
+        prep_collection_aggregate(selecto, :string_agg, field, delimiter: delimiter)
 
       {:string_agg, field, delimiter, opts} when is_list(opts) ->
-        prep_string_agg_with_opts(selecto, field, delimiter, opts)
+        prep_collection_aggregate(
+          selecto,
+          :string_agg,
+          field,
+          Keyword.put(opts, :delimiter, delimiter)
+        )
 
-      # JSON/JSONB object aggregation - 2 argument versions
+      # JSON object aggregation - 2 argument version
       {:json_object_agg, key_field, value_field} ->
-        prep_object_agg(selecto, "json_object_agg", key_field, value_field)
-
-      {:jsonb_object_agg, key_field, value_field} ->
-        prep_object_agg(selecto, "jsonb_object_agg", key_field, value_field)
+        prep_json_object_aggregate(selecto, key_field, value_field)
 
       # JSON array aggregation
       {:json_agg, field} ->
-        prep_array_function(selecto, "json_agg", [field])
-
-      {:jsonb_agg, field} ->
-        prep_array_function(selecto, "jsonb_agg", [field])
+        prep_json_aggregate(selecto, field)
 
       # GROUPING function for ROLLUP/CUBE queries
       {:grouping, fields} when is_list(fields) ->
@@ -200,61 +199,66 @@ defmodule Selecto.SQL.Functions do
         prep_grouping_function(selecto, [field])
 
       {:array_length, field} ->
-        prep_array_function(selecto, "array_length", [field, {:literal, 1}])
+        prep_collection_operation(selecto, :array_length, field, dimension: 1)
 
       {:array_to_string, field, delimiter} ->
-        prep_array_function(selecto, "array_to_string", [field, {:literal, delimiter}])
+        prep_collection_operation(selecto, :array_to_string, field,
+          value: literal_value(delimiter)
+        )
 
       {:string_to_array, field, delimiter} ->
-        prep_array_function(selecto, "string_to_array", [field, {:literal, delimiter}])
+        prep_collection_operation(selecto, :string_to_array, field,
+          value: literal_value(delimiter)
+        )
 
       {:unnest, field} ->
-        prep_array_function(selecto, "unnest", [field])
+        prep_collection_operation(selecto, :unnest, field)
 
       {:array_cat, array1, array2} ->
-        prep_array_function(selecto, "array_cat", [array1, array2])
+        prep_collection_expression_operation(selecto, :array_cat, array1, array2)
 
       # Additional array functions
       {:cardinality, field} ->
-        prep_array_function(selecto, "cardinality", [field])
+        prep_collection_operation(selecto, :cardinality, field)
 
       {:array_ndims, field} ->
-        prep_array_function(selecto, "array_ndims", [field])
+        prep_collection_operation(selecto, :array_ndims, field)
 
       {:array_dims, field} ->
-        prep_array_function(selecto, "array_dims", [field])
+        prep_collection_operation(selecto, :array_dims, field)
 
       {:array_append, array, element} ->
-        prep_array_function(selecto, "array_append", [array, {:literal, element}])
+        prep_collection_operation(selecto, :array_append, array, value: literal_value(element))
 
       {:array_prepend, element, array} ->
-        prep_array_function(selecto, "array_prepend", [{:literal, element}, array])
+        prep_collection_operation(selecto, :array_prepend, array, value: literal_value(element))
 
       {:array_fill, value, dimensions} ->
-        prep_array_function(selecto, "array_fill", [{:literal, value}, {:literal, dimensions}])
+        prep_collection_operation(selecto, :array_fill, nil,
+          value: literal_value(value),
+          options: %{dimensions: literal_value(dimensions)}
+        )
 
       {:array_remove, array, element} ->
-        prep_array_function(selecto, "array_remove", [array, {:literal, element}])
+        prep_collection_operation(selecto, :array_remove, array, value: literal_value(element))
 
       {:array_replace, array, from_elem, to_elem} ->
-        prep_array_function(selecto, "array_replace", [
-          array,
-          {:literal, from_elem},
-          {:literal, to_elem}
-        ])
+        prep_collection_operation(selecto, :array_replace, array,
+          value: literal_value(from_elem),
+          options: %{new_value: literal_value(to_elem)}
+        )
 
       {:array_position, array, element} ->
-        prep_array_function(selecto, "array_position", [array, {:literal, element}])
+        prep_collection_operation(selecto, :array_position, array, value: literal_value(element))
 
       {:array_position, array, element, start} ->
-        prep_array_function(selecto, "array_position", [
-          array,
-          {:literal, element},
-          {:literal, start}
-        ])
+        prep_collection_operation(selecto, :array_position, array,
+          value: literal_value(element),
+          options: %{start: literal_value(start)}
+        )
 
       {:array_positions, array, element} ->
-        prep_array_function(selecto, "array_positions", [array, {:literal, element}])
+        prep_collection_operation(selecto, :array_positions, array, value: literal_value(element))
 
       # Window Functions
       {:window, func, opts} ->
@@ -300,19 +304,193 @@ defmodule Selecto.SQL.Functions do
     {func_iodata, joins, params}
   end
 
-  # Date/time function helpers
-  defp prep_datetime_function(selecto, func_name, args) do
-    {sel_parts, joins, params} = prep_function_args(selecto, args)
-    func_iodata = [func_name, "(", Enum.intersperse(sel_parts, ", "), ")"]
-    {func_iodata, joins, params}
+  # Date/time operation helpers
+  defp prep_datetime_operation(selecto, operation, args, opts \\ []) do
+    {expressions, joins, params} = prep_function_args(selecto, args)
+
+    part =
+      case Keyword.fetch(opts, :part) do
+        :error -> nil
+        {:ok, raw_part} -> normalize_datetime_part!(raw_part)
+      end
+
+    fragment = %DateTimeOperation{
+      operation: operation,
+      clause: :select,
+      expression: Enum.at(expressions, 0),
+      second_expression: Enum.at(expressions, 1),
+      part: part
+    }
+
+    render_dialect_fragment(
+      Selecto.DialectSupport.render_datetime_operation(selecto.adapter, fragment, selecto),
+      joins,
+      params
+    )
   end
 
-  # Array function helpers
-  defp prep_array_function(selecto, func_name, args) do
-    {sel_parts, joins, params} = prep_function_args(selecto, args)
-    func_iodata = [func_name, "(", Enum.intersperse(sel_parts, ", "), ")"]
-    {func_iodata, joins, params}
+  defp normalize_datetime_part!(part) do
+    case DateTimeOperation.normalize_part(part) do
+      {:ok, normalized} -> normalized
+      {:error, reason} -> raise ArgumentError, "invalid datetime part: #{inspect(reason)}"
+    end
   end
+
+  # Collection and JSON helpers construct finite core fragments. The configured
+  # adapter dialect owns the concrete function names, operators, and placeholder
+  # additions for those fragments.
+  defp prep_collection_operation(selecto, operation, field, attrs \\ []) do
+    {column, joins, params} = prep_optional_arg(selecto, field)
+
+    fragment =
+      struct!(CollectionOperation, %{
+        operation: operation,
+        clause: :select,
+        column: column,
+        dimension: Keyword.get(attrs, :dimension),
+        value: Keyword.get(attrs, :value),
+        distinct: Keyword.get(attrs, :distinct, false),
+        order_by: Keyword.get(attrs, :order_by, []),
+        options: Keyword.get(attrs, :options, %{})
+      })
+
+    render_dialect_fragment(
+      Selecto.DialectSupport.render_collection_operation(selecto.adapter, fragment, selecto),
+      joins,
+      params
+    )
+  end
+
+  defp prep_collection_expression_operation(selecto, operation, field, value_expression) do
+    {column, column_joins, column_params} = prep_single_arg(selecto, field)
+    {value_sql, value_joins, value_params} = prep_single_arg(selecto, value_expression)
+
+    fragment = %CollectionOperation{
+      operation: operation,
+      clause: :select,
+      column: column,
+      order_by: [],
+      options: %{value_expression: value_sql}
+    }
+
+    render_dialect_fragment(
+      Selecto.DialectSupport.render_collection_operation(selecto.adapter, fragment, selecto),
+      List.wrap(column_joins) ++ List.wrap(value_joins),
+      column_params ++ value_params
+    )
+  end
+
+  defp prep_collection_aggregate(selecto, operation, field, opts) do
+    {column, column_joins, column_params} = prep_single_arg(selecto, field)
+    {order_by, order_joins, order_params} = prep_aggregate_order(selecto, opts[:order_by])
+
+    options =
+      case Keyword.fetch(opts, :delimiter) do
+        {:ok, delimiter} -> %{delimiter: literal_value(delimiter)}
+        :error -> %{}
+      end
+
+    fragment = %CollectionOperation{
+      operation: operation,
+      clause: :select,
+      column: column,
+      distinct: Keyword.get(opts, :distinct, false),
+      order_by: order_by,
+      options: options
+    }
+
+    render_dialect_fragment(
+      Selecto.DialectSupport.render_collection_operation(selecto.adapter, fragment, selecto),
+      List.wrap(column_joins) ++ order_joins,
+      column_params ++ order_params
+    )
+  end
+
+  defp prep_json_aggregate(selecto, field) do
+    {column, joins, params} = prep_single_arg(selecto, field)
+
+    fragment = %JsonOperation{
+      operation: :json_agg,
+      clause: :select,
+      column: nil,
+      options: %{column_sql: column}
+    }
+
+    render_dialect_fragment(
+      Selecto.DialectSupport.render_json(
+        selecto.adapter,
+        :render_json_operation,
+        fragment,
+        selecto
+      ),
+      joins,
+      params
+    )
+  end
+
+  defp prep_json_object_aggregate(selecto, key_field, value_field) do
+    {key_sql, key_joins, key_params} = prep_single_arg(selecto, key_field)
+    {value_sql, value_joins, value_params} = prep_single_arg(selecto, value_field)
+
+    fragment = %JsonOperation{
+      operation: :json_object_agg,
+      clause: :select,
+      key_field: nil,
+      value_field: nil,
+      options: %{key_sql: key_sql, value_sql: value_sql}
+    }
+
+    render_dialect_fragment(
+      Selecto.DialectSupport.render_json(
+        selecto.adapter,
+        :render_json_operation,
+        fragment,
+        selecto
+      ),
+      List.wrap(key_joins) ++ List.wrap(value_joins),
+      key_params ++ value_params
+    )
+  end
+
+  defp prep_aggregate_order(_selecto, nil), do: {[], [], []}
+
+  defp prep_aggregate_order(selecto, order_by) do
+    order_by
+    |> List.wrap()
+    |> Enum.reduce({[], [], []}, fn order, {parts, joins, params} ->
+      {field, direction} = normalize_aggregate_order(order)
+      {field_sql, field_joins, field_params} = prep_single_arg(selecto, field)
+
+      {
+        parts ++ [{field_sql, direction}],
+        joins ++ List.wrap(field_joins),
+        params ++ field_params
+      }
+    end)
+  end
+
+  defp normalize_aggregate_order({field, direction}) when direction in [:asc, :desc],
+    do: {field, direction}
+
+  defp normalize_aggregate_order(field), do: {field, :asc}
+
+  defp prep_optional_arg(_selecto, nil), do: {nil, [], []}
+  defp prep_optional_arg(selecto, field), do: prep_single_arg(selecto, field)
+
+  defp render_dialect_fragment({:ok, {iodata, dialect_params}}, joins, params),
+    do: {iodata, List.wrap(joins), params ++ dialect_params}
+
+  defp render_dialect_fragment({:ok, iodata}, joins, params),
+    do: {iodata, List.wrap(joins), params}
+
+  defp render_dialect_fragment({:error, %Selecto.Error{} = error}, _joins, _params),
+    do: raise(Selecto.Error.to_exception(error))
+
+  defp render_dialect_fragment({:error, reason}, _joins, _params),
+    do: raise(ArgumentError, "unsupported dialect fragment: #{inspect(reason)}")
+
+  defp literal_value({:literal, value}), do: value
+  defp literal_value(value), do: value
 
   # Window function helpers
   defp prep_window_function(selecto, func, opts) do
@@ -432,16 +610,18 @@ defmodule Selecto.SQL.Functions do
   end
 
   # Interval function helper
-  defp prep_interval(_selecto, spec) when is_binary(spec) do
-    # Handle PostgreSQL interval syntax: "1 day", "2 hours", etc.
-    interval_iodata = ["interval '", spec, "'"]
-    {interval_iodata, [], []}
-  end
+  defp prep_interval(selecto, spec) do
+    with {:ok, interval} <- Selecto.Dialect.Interval.new(spec),
+         {:ok, iodata} <-
+           Selecto.DialectSupport.render_interval(selecto.adapter, interval, selecto) do
+      {iodata, [], []}
+    else
+      {:error, %Selecto.Error{} = error} ->
+        raise Selecto.Error.to_exception(error)
 
-  defp prep_interval(_selecto, {amount, unit}) do
-    # Handle tuple format: {1, "day"}, {2, "hour"}, etc.
-    interval_iodata = ["interval '", Integer.to_string(amount), " ", unit, "'"]
-    {interval_iodata, [], []}
+      {:error, reason} ->
+        raise ArgumentError, "invalid or unsupported interval: #{inspect(reason)}"
+    end
   end
 
   # Decode function (Oracle-style conditional)
@@ -560,100 +740,6 @@ defmodule Selecto.SQL.Functions do
             result
         end
     end
-  end
-
-  # String aggregation helper - string_agg(field, delimiter)
-  defp prep_string_agg(selecto, field, delimiter) do
-    {field_iodata, field_joins, field_params} = prep_single_arg(selecto, field)
-
-    # Delimiter is typically a literal string
-    delimiter_str = if is_binary(delimiter), do: delimiter, else: to_string(delimiter)
-
-    func_iodata = ["string_agg(", field_iodata, ", ", {:param, delimiter_str}, ")"]
-    {func_iodata, field_joins, field_params ++ [delimiter_str]}
-  end
-
-  # String aggregation with options (ORDER BY, DISTINCT)
-  defp prep_string_agg_with_opts(selecto, field, delimiter, opts) do
-    {field_iodata, field_joins, field_params} = prep_single_arg(selecto, field)
-
-    delimiter_str = if is_binary(delimiter), do: delimiter, else: to_string(delimiter)
-
-    # Handle DISTINCT
-    distinct = if Keyword.get(opts, :distinct, false), do: "DISTINCT ", else: ""
-
-    # Handle ORDER BY within the aggregate
-    {order_clause, order_joins, order_params} =
-      case Keyword.get(opts, :order_by) do
-        nil ->
-          {[], [], []}
-
-        fields when is_list(fields) ->
-          {order_parts, o_joins, o_params} = prep_function_args(selecto, fields)
-          {[" ORDER BY ", Enum.intersperse(order_parts, ", ")], o_joins, o_params}
-
-        field_spec ->
-          {order_parts, o_joins, o_params} = prep_function_args(selecto, [field_spec])
-          {[" ORDER BY ", order_parts], o_joins, o_params}
-      end
-
-    func_iodata = [
-      "string_agg(",
-      distinct,
-      field_iodata,
-      ", ",
-      {:param, delimiter_str},
-      order_clause,
-      ")"
-    ]
-
-    all_joins = field_joins ++ order_joins
-    all_params = field_params ++ [delimiter_str] ++ order_params
-
-    {func_iodata, all_joins, all_params}
-  end
-
-  # Array aggregation with options (ORDER BY, DISTINCT)
-  defp prep_array_agg_with_opts(selecto, field, opts) do
-    {field_iodata, field_joins, field_params} = prep_single_arg(selecto, field)
-
-    # Handle DISTINCT
-    distinct = if Keyword.get(opts, :distinct, false), do: "DISTINCT ", else: ""
-
-    # Handle ORDER BY within the aggregate
-    {order_clause, order_joins, order_params} =
-      case Keyword.get(opts, :order_by) do
-        nil ->
-          {[], [], []}
-
-        fields when is_list(fields) ->
-          {order_parts, o_joins, o_params} = prep_function_args(selecto, fields)
-          {[" ORDER BY ", Enum.intersperse(order_parts, ", ")], o_joins, o_params}
-
-        field_spec ->
-          {order_parts, o_joins, o_params} = prep_function_args(selecto, [field_spec])
-          {[" ORDER BY ", order_parts], o_joins, o_params}
-      end
-
-    func_iodata = ["array_agg(", distinct, field_iodata, order_clause, ")"]
-
-    all_joins = field_joins ++ order_joins
-    all_params = field_params ++ order_params
-
-    {func_iodata, all_joins, all_params}
-  end
-
-  # JSON/JSONB object aggregation helper - takes key and value fields
-  defp prep_object_agg(selecto, func_name, key_field, value_field) do
-    {key_iodata, key_joins, key_params} = prep_single_arg(selecto, key_field)
-    {value_iodata, value_joins, value_params} = prep_single_arg(selecto, value_field)
-
-    func_iodata = [func_name, "(", key_iodata, ", ", value_iodata, ")"]
-
-    all_joins = key_joins ++ value_joins
-    all_params = key_params ++ value_params
-
-    {func_iodata, all_joins, all_params}
   end
 
   # GROUPING function for ROLLUP/CUBE - indicates whether a column is aggregated

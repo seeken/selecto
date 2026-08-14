@@ -39,7 +39,10 @@ defmodule Selecto.Expr do
   def normalize({:lt, field, value}), do: lt(field, value)
   def normalize({:lte, field, value}), do: lte(field, value)
   def normalize({:like, field, value}), do: like(field, value)
-  def normalize({:ilike, field, value}), do: ilike(field, value)
+
+  def normalize({:case_insensitive_like, field, value}),
+    do: case_insensitive_like(field, value)
+
   def normalize({:contains, field, value}), do: contains(field, value)
   def normalize({:starts_with, field, value}), do: starts_with(field, value)
   def normalize({:ends_with, field, value}), do: ends_with(field, value)
@@ -283,9 +286,9 @@ defmodule Selecto.Expr do
   @spec like(term(), term()) :: tuple()
   def like(field, value), do: {field, {:like, value}}
 
-  @doc "Builds an `ILIKE` filter."
-  @spec ilike(term(), term()) :: tuple()
-  def ilike(field, value), do: {field, {:ilike, value}}
+  @doc "Builds a portable case-insensitive pattern filter."
+  @spec case_insensitive_like(term(), term()) :: tuple()
+  def case_insensitive_like(field, value), do: {field, {:case_insensitive_like, value}}
 
   @doc "Builds a contains filter using Selecto's existing `:contains` operator."
   @spec contains(term(), term()) :: tuple()
@@ -405,7 +408,7 @@ defmodule Selecto.Expr do
     text_search(field, value, Keyword.put_new(opts, :mode, :boolean))
   end
 
-  @doc "Builds a field-path existence filter for JSONB paths or non-null fields."
+  @doc "Builds a field-path existence filter for structured values or non-null fields."
   @spec field_exists(term()) :: tuple()
   def field_exists(field), do: {field, :exists}
 
@@ -707,7 +710,10 @@ defmodule Selecto.Expr do
   defp normalize_selector_input({:lt, _, _} = expression), do: normalize(expression)
   defp normalize_selector_input({:lte, _, _} = expression), do: normalize(expression)
   defp normalize_selector_input({:like, _, _} = expression), do: normalize(expression)
-  defp normalize_selector_input({:ilike, _, _} = expression), do: normalize(expression)
+
+  defp normalize_selector_input({:case_insensitive_like, _, _} = expression),
+    do: normalize(expression)
+
   defp normalize_selector_input({:contains, _, _} = expression), do: normalize(expression)
   defp normalize_selector_input({:starts_with, _, _} = expression), do: normalize(expression)
   defp normalize_selector_input({:ends_with, _, _} = expression), do: normalize(expression)

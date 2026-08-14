@@ -9,10 +9,13 @@ defmodule Selecto.Builder.Sql.Select do
 
   import Selecto.Builder.Sql.Helpers
 
-  alias Selecto.AdapterSQL
   alias Selecto.AdapterSupport
+  alias Selecto.Dialect.Bucket.Expression, as: BucketExpression
+  alias Selecto.Dialect.Collection.Operation, as: CollectionOperation
+  alias Selecto.Dialect.DateTime.Operation, as: DateTimeOperation
+  alias Selecto.Dialect.Text.Normalization, as: TextNormalization
   alias Selecto.Error
-  alias Selecto.Jsonb
+  alias Selecto.Json
 
   ### TODO alter prep_selector to return the data type
 
@@ -226,8 +229,20 @@ defmodule Selecto.Builder.Sql.Select do
     prep_selector(selecto, {:literal, value}, %{})
   end
 
-  def prep_selector(selecto, {:to_char, {field, format}}) do
-    prep_selector(selecto, {:to_char, {field, format}}, %{})
+  def prep_selector(selecto, {:datetime_format, _field, _format, _options} = selector) do
+    prep_selector(selecto, selector, %{})
+  end
+
+  def prep_selector(selecto, {:datetime_extract, _field, _part, _options} = selector) do
+    prep_selector(selecto, selector, %{})
+  end
+
+  def prep_selector(selecto, {:text_normalize, _field, _options} = selector) do
+    prep_selector(selecto, selector, %{})
+  end
+
+  def prep_selector(selecto, {:bucket, _field, _spec} = selector) do
+    prep_selector(selecto, selector, %{})
   end
 
   def prep_selector(selecto, {:raw_sql, sql}) when is_binary(sql) do
@@ -440,7 +455,7 @@ defmodule Selecto.Builder.Sql.Select do
   end
 
   def prep_selector(selecto, {:array, values}, _retarget_aliases) when is_list(values) do
-    # Build ARRAY[val1, val2, ...] expression
+    # Build a portable array-constructor fragment for the configured dialect.
     {values_iodata, values_params} =
       values
       |> Enum.map(fn value ->
@@ -464,10 +479,20 @@ defmodule Selecto.Builder.Sql.Select do
     values_iodata = Enum.reverse(values_iodata)
     values_params = Enum.reverse(values_params)
 
-    array_elements = Enum.intersperse(values_iodata, ", ")
-    iodata = ["ARRAY[", array_elements, "]"]
+    fragment = %CollectionOperation{
+      operation: :array_constructor,
+      clause: :select,
+      value: Enum.intersperse(values_iodata, ", "),
+      order_by: [],
+      options: %{}
+    }
 
-    {iodata, [], values_params}
+    case Selecto.DialectSupport.render_collection_operation(selecto.adapter, fragment, selecto) do
+      {:ok, {iodata, dialect_params}} -> {iodata, [], values_params ++ dialect_params}
+      {:ok, iodata} -> {iodata, [], values_params}
+      {:error, %Error{} = error} -> raise Error.to_exception(error)
+      {:error, reason} -> raise ArgumentError, "unsupported array constructor: #{inspect(reason)}"
+    end
   end
 
   def prep_selector(selecto, {:array_cat, _, _} = selector, _retarget_aliases) do
@@ -554,6 +579,7 @@ defmodule Selecto.Builder.Sql.Select do
   # The third element is bucket_ranges configuration, not a filter
   def prep_selector(selecto, {:count_age_bucket_other, field, bucket_ranges}, retarget_aliases) do
     {field_iodata, join, param} = prep_selector(selecto, field, retarget_aliases)
+    age_days = elapsed_days_expression!(selecto, field_iodata)
 
     # Parse ranges to build the "Other" condition
     ranges = parse_bucket_ranges_simple(bucket_ranges)
@@ -562,31 +588,26 @@ defmodule Selecto.Builder.Sql.Select do
       Enum.map(ranges, fn
         {min, max, _} when is_integer(min) and is_integer(max) ->
           if min == max do
-            [
-              "EXTRACT(DAY FROM AGE(CURRENT_DATE, ",
-              field_iodata,
-              ")) != ",
-              Integer.to_string(min)
-            ]
+            [age_days, " != ", Integer.to_string(min)]
           else
             [
-              "NOT (EXTRACT(DAY FROM AGE(CURRENT_DATE, ",
-              field_iodata,
-              ")) >= ",
+              "NOT (",
+              age_days,
+              " >= ",
               Integer.to_string(min),
-              " AND EXTRACT(DAY FROM AGE(CURRENT_DATE, ",
-              field_iodata,
-              ")) <= ",
+              " AND ",
+              age_days,
+              " <= ",
               Integer.to_string(max),
               ")"
             ]
           end
 
         {min, :infinity, _} ->
-          ["EXTRACT(DAY FROM AGE(CURRENT_DATE, ", field_iodata, ")) < ", Integer.to_string(min)]
+          [age_days, " < ", Integer.to_string(min)]
 
         {:negative_infinity, max, _} ->
-          ["EXTRACT(DAY FROM AGE(CURRENT_DATE, ", field_iodata, ")) > ", Integer.to_string(max)]
+          [age_days, " > ", Integer.to_string(max)]
 
         _ ->
           nil
@@ -689,20 +710,6 @@ defmodule Selecto.Builder.Sql.Select do
     )
   end
 
-  def prep_selector(selecto, {func, field, filter}, retarget_aliases) when is_atom(func) do
-    {sel_iodata, join, param} = prep_selector(selecto, field, retarget_aliases)
-
-    {join_w, filters_iodata, param_w} =
-      Selecto.Builder.Sql.Where.build(selecto, {:and, List.wrap(filter)})
-
-    func_name = sql_function_name(selecto, func)
-
-    filter_iodata =
-      build_filtered_aggregate_iodata(selecto, func_name, [sel_iodata], false, filters_iodata)
-
-    {filter_iodata, List.wrap(join) ++ List.wrap(join_w), param ++ param_w}
-  end
-
   # {:literal, value} should NOT be parameterized - render as SQL literal
   # Special case for "*" used in COUNT(*) and similar functions
   def prep_selector(_selecto, {:literal, "*"}, _retarget_aliases) do
@@ -744,10 +751,108 @@ defmodule Selecto.Builder.Sql.Select do
     {[Integer.to_string(value)], :selecto_root, []}
   end
 
-  def prep_selector(selecto, {:to_char, {field, format}}, retarget_aliases) do
+  def prep_selector(selecto, {:datetime_format, field, format, options}, retarget_aliases)
+      when is_binary(format) and is_map(options) do
+    {expression, joins, params} = prep_selector(selecto, field, retarget_aliases)
+
+    fragment = %DateTimeOperation{
+      operation: :format,
+      clause: :select,
+      expression: expression,
+      options: Map.put(options, :format, format)
+    }
+
+    render_selector_fragment!(
+      Selecto.DialectSupport.render_datetime_operation(selecto.adapter, fragment, selecto),
+      joins,
+      params,
+      :datetime_format
+    )
+  end
+
+  def prep_selector(selecto, {:datetime_extract, field, part, options}, retarget_aliases)
+      when is_map(options) do
+    {expression, joins, params} = prep_selector(selecto, field, retarget_aliases)
+
+    normalized_part =
+      case DateTimeOperation.normalize_part(part) do
+        {:ok, value} -> value
+        {:error, reason} -> raise ArgumentError, "invalid datetime part: #{inspect(reason)}"
+      end
+
+    fragment = %DateTimeOperation{
+      operation: :extract_part,
+      clause: :select,
+      expression: expression,
+      part: normalized_part,
+      options: options
+    }
+
+    render_selector_fragment!(
+      Selecto.DialectSupport.render_datetime_operation(selecto.adapter, fragment, selecto),
+      joins,
+      params,
+      :datetime_extract
+    )
+  end
+
+  def prep_selector(selecto, {:text_normalize, field, options}, retarget_aliases)
+      when is_map(options) do
+    {expression, joins, params} = prep_selector(selecto, field, retarget_aliases)
+
+    fragment = %TextNormalization{
+      expression: expression,
+      exclude_articles: Map.get(options, :exclude_articles, []),
+      ignore_case: Map.get(options, :ignore_case, true)
+    }
+
+    render_selector_fragment!(
+      Selecto.DialectSupport.render_text_normalization(selecto.adapter, fragment, selecto),
+      joins,
+      params,
+      :text_normalization
+    )
+  end
+
+  def prep_selector(selecto, {:bucket, field, spec}, retarget_aliases) when is_map(spec) do
+    {expression, joins, params} = prep_selector(selecto, field, retarget_aliases)
+    kind = Map.fetch!(spec, :kind)
+
+    unless kind in BucketExpression.kinds() do
+      raise ArgumentError, "unsupported bucket kind: #{inspect(kind)}"
+    end
+
+    fragment = %BucketExpression{
+      kind: kind,
+      expression: expression,
+      increment: Map.get(spec, :increment),
+      ranges: Map.get(spec, :ranges, []),
+      prefix_length: Map.get(spec, :prefix_length, 2),
+      exclude_articles: Map.get(spec, :exclude_articles, []),
+      ignore_case: Map.get(spec, :ignore_case, true),
+      temporal_options: Map.get(spec, :temporal_options, %{})
+    }
+
+    render_selector_fragment!(
+      Selecto.DialectSupport.render_bucket(selecto.adapter, fragment, selecto),
+      joins,
+      params,
+      :bucket_expression
+    )
+  end
+
+  def prep_selector(selecto, {func, field, filter}, retarget_aliases) when is_atom(func) do
     {sel_iodata, join, param} = prep_selector(selecto, field, retarget_aliases)
 
-    {AdapterSQL.format_datetime(selecto, sel_iodata, format), join, param}
+    {join_w, filters_iodata, param_w} =
+      Selecto.Builder.Sql.Where.build(selecto, {:and, List.wrap(filter)})
+
+    func_name = sql_function_name(selecto, func)
+
+    filter_iodata =
+      build_filtered_aggregate_iodata(selecto, func_name, [sel_iodata], false, filters_iodata)
+
+    {filter_iodata, List.wrap(join) ++ List.wrap(join_w), param ++ param_w}
   end
 
   def prep_selector(selecto, {:field, selector}, retarget_aliases) do
@@ -767,45 +872,46 @@ defmodule Selecto.Builder.Sql.Select do
   # Handle count_age_bucket for age-based buckets
   def prep_selector(selecto, {:count_age_bucket, field, min, max}, retarget_aliases) do
     {field_iodata, join, param} = prep_selector(selecto, field, retarget_aliases)
+    age_days = elapsed_days_expression!(selecto, field_iodata)
 
     case_sql =
       cond do
         min == max ->
           [
-            "COUNT(CASE WHEN CURRENT_DATE - DATE(",
-            field_iodata,
-            ") = ",
+            "COUNT(CASE WHEN ",
+            age_days,
+            " = ",
             Integer.to_string(min),
             " THEN 1 END)"
           ]
 
         max == :infinity ->
           [
-            "COUNT(CASE WHEN CURRENT_DATE - DATE(",
-            field_iodata,
-            ") >= ",
+            "COUNT(CASE WHEN ",
+            age_days,
+            " >= ",
             Integer.to_string(min),
             " THEN 1 END)"
           ]
 
         min == :negative_infinity ->
           [
-            "COUNT(CASE WHEN CURRENT_DATE - DATE(",
-            field_iodata,
-            ") <= ",
+            "COUNT(CASE WHEN ",
+            age_days,
+            " <= ",
             Integer.to_string(max),
             " THEN 1 END)"
           ]
 
         true ->
           [
-            "COUNT(CASE WHEN CURRENT_DATE - DATE(",
-            field_iodata,
-            ") >= ",
+            "COUNT(CASE WHEN ",
+            age_days,
+            " >= ",
             Integer.to_string(min),
-            " AND CURRENT_DATE - DATE(",
-            field_iodata,
-            ") <= ",
+            " AND ",
+            age_days,
+            " <= ",
             Integer.to_string(max),
             " THEN 1 END)"
           ]
@@ -873,9 +979,9 @@ defmodule Selecto.Builder.Sql.Select do
     if regular_selector?(selector, selecto.config) do
       prep_regular_selector(selecto, selector, retarget_aliases)
     else
-      case Jsonb.parse_field_reference(selector, selecto.config) do
-        {:jsonb, column, path} ->
-          prep_jsonb_selector(selecto, column, path, retarget_aliases)
+      case Json.parse_field_reference(selector, selecto.config) do
+        {:json_path, column, path} ->
+          prep_json_selector(selecto, column, path, retarget_aliases)
 
         {:regular, _} ->
           prep_regular_selector(selecto, selector, retarget_aliases)
@@ -894,6 +1000,37 @@ defmodule Selecto.Builder.Sql.Select do
         result
     end
   end
+
+  defp elapsed_days_expression!(selecto, field_iodata) do
+    fragment = %DateTimeOperation{
+      operation: :elapsed_days,
+      clause: :select,
+      expression: field_iodata
+    }
+
+    case Selecto.DialectSupport.render_datetime_operation(selecto.adapter, fragment, selecto) do
+      {:ok, expression} ->
+        expression
+
+      {:error, %Error{} = error} ->
+        raise Error.to_exception(error)
+
+      {:error, reason} ->
+        raise ArgumentError, "unsupported elapsed-days operation: #{inspect(reason)}"
+    end
+  end
+
+  defp render_selector_fragment!({:ok, {iodata, dialect_params}}, joins, params, _feature),
+    do: {iodata, joins, params ++ List.wrap(dialect_params)}
+
+  defp render_selector_fragment!({:ok, iodata}, joins, params, _feature),
+    do: {iodata, joins, params}
+
+  defp render_selector_fragment!({:error, %Error{} = error}, _joins, _params, _feature),
+    do: raise(Error.to_exception(error))
+
+  defp render_selector_fragment!({:error, reason}, _joins, _params, feature),
+    do: raise(ArgumentError, "unsupported #{feature}: #{inspect(reason)}")
 
   def build_udf(selecto, function_id, args, call_site, retarget_aliases \\ %{})
 
@@ -927,14 +1064,14 @@ defmodule Selecto.Builder.Sql.Select do
     {[sql_name, "(", args_iodata, ")"], join, param}
   end
 
-  # Handle JSONB path selectors - extract value from JSONB column
-  defp prep_jsonb_selector(selecto, column, path, retarget_aliases) do
+  # Handle structured JSON path selectors.
+  defp prep_json_selector(selecto, column, path, retarget_aliases) do
     domain = selecto.config
 
     # Get schema info for type casting
-    path_schema = Jsonb.get_path_schema(domain, column, path)
+    path_schema = Json.get_path_schema(domain, column, path)
     field_type = if path_schema, do: Map.get(path_schema, :type), else: nil
-    cast = Jsonb.pg_cast_for_type(field_type)
+    cast = Json.cast_for_type(field_type)
 
     # Get the table alias
     conf = Selecto.field(selecto, column)
@@ -950,18 +1087,18 @@ defmodule Selecto.Builder.Sql.Select do
     table_alias_str = get_table_alias_string(selecto, join_alias)
 
     extraction =
-      Jsonb.build_extraction(column, path,
+      Json.build_extraction(column, path,
         as_text: true,
         table_alias: table_alias_str,
         cast: cast,
-        adapter: Map.get(selecto, :adapter, Selecto.AdapterSupport.default_adapter())
+        adapter: Map.fetch!(selecto, :adapter)
       )
 
     requires_join = if conf, do: conf.requires_join, else: :selecto_root
     {[extraction], requires_join, []}
   end
 
-  # Standard field resolution (non-JSONB)
+  # Standard field resolution for non-JSON paths.
   defp prep_regular_selector(selecto, selector, retarget_aliases) do
     # First check if it's a dynamic column (from UNNEST, CTE, etc.)
     set = Map.get(selecto, :set) || %{}
@@ -1124,7 +1261,7 @@ defmodule Selecto.Builder.Sql.Select do
     |> Enum.uniq()
   end
 
-  # Get the string representation of a table alias for JSONB extraction
+  # Get the table alias used for structured JSON extraction.
   defp get_table_alias_string(_selecto, nil), do: nil
   defp get_table_alias_string(_selecto, :selecto_root), do: "selecto_root"
   defp get_table_alias_string(_selecto, alias) when is_binary(alias), do: alias
@@ -1145,7 +1282,7 @@ defmodule Selecto.Builder.Sql.Select do
   # Case for func call with field as arg
   ## Check for SQL INJ TODO
   ## TODO allow for func call args
-  ## TODO variant for 2 arg aggs eg string_agg, jsonb_object_agg, Grouping
+  ## TODO variant for multi-argument aggregates and grouping.
   ## ^^ and mixed lit/field args - field as list?
 
   # Phase 4: iodata-based build functions (now main functions)
@@ -1356,7 +1493,7 @@ defmodule Selecto.Builder.Sql.Select do
          filters_iodata,
          fallback_iodata \\ nil
        ) do
-    case AdapterSupport.adapter_name(Map.get(selecto, :adapter, AdapterSupport.default_adapter())) do
+    case AdapterSupport.adapter_name(Map.fetch!(selecto, :adapter)) do
       :mssql ->
         build_mssql_filtered_aggregate_iodata(
           function_name,
@@ -1422,7 +1559,7 @@ defmodule Selecto.Builder.Sql.Select do
   defp to_boolean(_value), do: false
 
   defp sql_function_name(selecto, :stddev) do
-    case Map.get(selecto, :adapter, Selecto.AdapterSupport.default_adapter())
+    case Map.fetch!(selecto, :adapter)
          |> Selecto.AdapterSupport.adapter_name() do
       :mssql -> "STDEV"
       _ -> "stddev"
@@ -1430,7 +1567,7 @@ defmodule Selecto.Builder.Sql.Select do
   end
 
   defp sql_function_name(selecto, :variance) do
-    case Map.get(selecto, :adapter, Selecto.AdapterSupport.default_adapter())
+    case Map.fetch!(selecto, :adapter)
          |> Selecto.AdapterSupport.adapter_name() do
       :mssql -> "VAR"
       _ -> "variance"
@@ -1448,7 +1585,7 @@ defmodule Selecto.Builder.Sql.Select do
         first = binary_part(selector, 0, dot_index)
 
         case Map.get(Map.get(domain, :columns, %{}), first) do
-          %{type: type} when type in [:jsonb, :json] -> false
+          %{type: :json} -> false
           _ -> true
         end
     end

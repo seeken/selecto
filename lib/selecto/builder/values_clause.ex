@@ -1,6 +1,6 @@
 defmodule Selecto.Builder.ValuesClause do
   @moduledoc """
-  SQL generation for VALUES clauses in PostgreSQL queries.
+  SQL generation for portable VALUES clauses.
 
   Generates inline table definitions from literal data using the VALUES construct.
   Supports both list-of-lists and list-of-maps data formats with proper
@@ -9,6 +9,7 @@ defmodule Selecto.Builder.ValuesClause do
 
   alias Selecto.Advanced.ValuesClause.Spec
   alias Selecto.AdapterSupport
+  alias Selecto.SQL.Params
 
   @doc """
   Generate SQL for a VALUES clause.
@@ -89,9 +90,6 @@ defmodule Selecto.Builder.ValuesClause do
   defp format_value(nil), do: "NULL"
 
   defp format_value(value) when is_binary(value) do
-    # Use $n parameter placeholders for proper parameter binding
-    # For now, we'll use literal values but this should be enhanced
-    # to use parameter binding in the full implementation
     escaped = String.replace(value, "'", "''")
     "'#{escaped}'"
   end
@@ -220,19 +218,22 @@ defmodule Selecto.Builder.ValuesClause do
   Returns {sql_iodata, parameters} tuple where parameters is a flat list
   of values in the order they appear in the SQL.
   """
-  def build_values_clause_with_params(%Spec{} = spec) do
+  def build_values_clause_with_params(
+        %Spec{} = spec,
+        adapter \\ AdapterSupport.default_adapter()
+      ) do
     case spec.validated do
       false ->
         raise ArgumentError,
               "VALUES clause specification must be validated before parameterized SQL generation"
 
       true ->
-        generate_parameterized_values_sql(spec)
+        generate_parameterized_values_sql(spec, adapter)
     end
   end
 
   # Generate parameterized VALUES SQL with parameter binding
-  defp generate_parameterized_values_sql(%Spec{} = spec) do
+  defp generate_parameterized_values_sql(%Spec{} = spec, adapter) do
     {values_rows, parameters} = build_parameterized_values_rows(spec.data, spec.data_type, 1, [])
     column_list = build_column_list(spec.columns)
 
@@ -245,7 +246,13 @@ defmodule Selecto.Builder.ValuesClause do
       column_list
     ]
 
-    {sql, parameters}
+    {finalized_sql, finalized_parameters} = Params.finalize(sql, adapter: adapter)
+
+    if finalized_parameters == parameters do
+      {finalized_sql, finalized_parameters}
+    else
+      raise ArgumentError, "VALUES parameter order changed during SQL finalization"
+    end
   end
 
   # Build parameterized VALUES rows with parameter collection
@@ -300,7 +307,7 @@ defmodule Selecto.Builder.ValuesClause do
     {values_sql, final_index, row_params} =
       row
       |> Enum.reduce({[], param_index, []}, fn value, {sql_acc, index, params_acc} ->
-        param_placeholder = "$#{index}"
+        param_placeholder = {:param, value}
 
         new_sql =
           case sql_acc do

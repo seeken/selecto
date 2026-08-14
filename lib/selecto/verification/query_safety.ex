@@ -13,6 +13,57 @@ defmodule Selecto.Verification.QuerySafety do
 
   alias Selecto.Verification.BoundedModel
 
+  defmodule Adapter do
+    @moduledoc false
+    @behaviour Selecto.DB.Adapter
+
+    defmodule Dialect do
+      @moduledoc false
+      @behaviour Selecto.DB.Dialect
+
+      alias Selecto.Dialect.TableFunction.Join
+
+      @impl true
+      def render_table_function_join(%Join{ordinality_alias: nil} = join, _selecto) do
+        source = [
+          join.source_sql,
+          " AS ",
+          Selecto.Verification.QuerySafety.Adapter.quote_identifier(join.alias)
+        ]
+
+        join_type = join.join_type |> Atom.to_string() |> String.upcase()
+
+        if join.join_type == :cross,
+          do: {:ok, [join_type, " JOIN ", source]},
+          else: {:ok, [join_type, " JOIN ", source, " ON TRUE"]}
+      end
+
+      def render_table_function_join(%Join{}, _selecto),
+        do: {:error, :verification_probe_does_not_support_ordinality}
+    end
+
+    @impl true
+    def name, do: :verification
+
+    @impl true
+    def connect(connection), do: {:ok, connection}
+
+    @impl true
+    def execute(_connection, _query, _params, _opts), do: {:error, :verification_only}
+
+    @impl true
+    def placeholder(index), do: ["@selecto", Integer.to_string(index)]
+
+    @impl true
+    def quote_identifier(identifier), do: ~s("#{String.replace(identifier, "\"", "\"\"")}")
+
+    @impl true
+    def dialect, do: Dialect
+
+    @impl true
+    def supports?(_feature), do: false
+  end
+
   @contexts [
     :none,
     :tenant_id,
@@ -56,7 +107,7 @@ defmodule Selecto.Verification.QuerySafety do
       tenant_required?
       |> domain()
       |> Selecto.configure(:verification,
-        adapter: Selecto.DB.PostgreSQL,
+        adapter: Adapter,
         rollup_sort_fix: false,
         validate: false
       )

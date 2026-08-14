@@ -3,7 +3,7 @@ defmodule Selecto.Builder.LateralJoinTest do
 
   alias Selecto.Advanced.LateralJoin.Spec
   alias Selecto.Builder.LateralJoin
-  alias Selecto.SQL.Params
+  alias Selecto.TestSQLParams, as: Params
 
   defp to_sql(iodata) do
     {sql, _params} = Params.finalize(iodata)
@@ -317,7 +317,7 @@ defmodule Selecto.Builder.LateralJoinTest do
       validated: true
     }
 
-    assert_raise RuntimeError, ~r/does not support lateral\/apply joins/, fn ->
+    assert_raise RuntimeError, ~r/does not support this collection operation/, fn ->
       LateralJoin.build_lateral_join(spec, adapter: SelectoDBSQLite.Adapter)
     end
   end

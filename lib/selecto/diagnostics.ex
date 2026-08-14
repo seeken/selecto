@@ -118,14 +118,8 @@ defmodule Selecto.Diagnostics do
       {:error, Error.from_reason(e)}
   end
 
-  defp runtime_connection(%{connection: nil, postgrex_opts: postgrex_opts}), do: postgrex_opts
-  defp runtime_connection(%{connection: connection}), do: connection
-  defp runtime_connection(%{postgrex_opts: postgrex_opts}), do: postgrex_opts
-  defp runtime_connection(_), do: nil
-
-  defp runtime_adapter(%{adapter: nil}), do: Selecto.AdapterSupport.default_adapter()
-  defp runtime_adapter(%{adapter: adapter}) when not is_nil(adapter), do: adapter
-  defp runtime_adapter(_), do: Selecto.AdapterSupport.default_adapter()
+  defp runtime_connection(selecto), do: Selecto.Runtime.Context.connection(selecto)
+  defp runtime_adapter(selecto), do: Selecto.Runtime.Context.adapter(selecto)
 
   defp maybe_true_flag(flags, _name, nil), do: flags
   defp maybe_true_flag(flags, _name, false), do: flags

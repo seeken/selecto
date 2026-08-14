@@ -50,23 +50,23 @@ defmodule Selecto.CoreTest do
   describe "configure/3" do
     test "creates Selecto struct with domain configuration" do
       domain = mock_domain()
-      postgrex_opts = [database: "test"]
+      connection = [database: "test"]
 
-      selecto = Selecto.configure(domain, postgrex_opts)
+      selecto = Selecto.configure(domain, connection)
 
       assert %Selecto{} = selecto
-      assert selecto.postgrex_opts == postgrex_opts
+      assert selecto.connection == connection
       assert selecto.domain == domain
       assert is_map(selecto.config)
     end
 
-    test "handles empty postgrex_opts" do
+    test "handles empty connection" do
       domain = mock_domain()
 
       selecto = Selecto.configure(domain, nil)
 
       assert %Selecto{} = selecto
-      assert selecto.postgrex_opts == nil
+      assert selecto.connection == nil
       assert selecto.domain == domain
     end
 

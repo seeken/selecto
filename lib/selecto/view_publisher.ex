@@ -7,6 +7,7 @@ defmodule Selecto.ViewPublisher do
   """
 
   alias Selecto.SQL.QualifiedIdentifier
+  alias Selecto.Dialect.View.{Definition, Index, Refresh}
 
   @type validation_result :: :ok | {:error, [String.t()]}
   @type publish_result ::
@@ -53,14 +54,24 @@ defmodule Selecto.ViewPublisher do
       database_name = spec[:database_name] || spec["database_name"]
       kind = spec[:kind] || spec["kind"]
 
-      {:ok,
-       %{
-         sql: sql,
-         ddl: ddl_for(kind, database_name, sql),
-         kind: kind,
-         database_name: database_name,
-         index_statements: index_statements(spec)
-       }}
+      adapter = query.adapter
+
+      with {:ok, ddl} <-
+             render_view(adapter, :render_view_definition, %Definition{
+               kind: kind,
+               database_name: database_name,
+               query_sql: sql
+             }),
+           {:ok, indexes} <- render_indexes(adapter, spec) do
+        {:ok,
+         %{
+           sql: sql,
+           ddl: ddl,
+           kind: kind,
+           database_name: database_name,
+           index_statements: indexes
+         }}
+      end
     end
   end
 
@@ -87,46 +98,52 @@ defmodule Selecto.ViewPublisher do
   def refresh(_domain, _spec, _adapter, _connection, _opts),
     do: {:error, :invalid_refresh_arguments}
 
-  @spec ddl_for(atom(), String.t(), String.t()) :: String.t()
-  def ddl_for(:view, database_name, sql) when is_binary(database_name) and is_binary(sql) do
-    "CREATE VIEW #{QualifiedIdentifier.quote!(database_name)} AS\n#{sql};"
+  @spec ddl_for(module(), atom(), String.t(), String.t()) :: String.t()
+  def ddl_for(adapter, kind, database_name, sql)
+      when is_atom(adapter) and kind in [:view, :materialized_view] and
+             is_binary(database_name) and is_binary(sql) do
+    render_view!(adapter, :render_view_definition, %Definition{
+      kind: kind,
+      database_name: database_name,
+      query_sql: sql
+    })
   end
 
-  def ddl_for(:materialized_view, database_name, sql)
-      when is_binary(database_name) and is_binary(sql) do
-    "CREATE MATERIALIZED VIEW #{QualifiedIdentifier.quote!(database_name)} AS\n#{sql};"
+  @spec refresh_sql(module(), String.t(), keyword()) :: String.t()
+  def refresh_sql(adapter, database_name, opts \\ [])
+      when is_atom(adapter) and is_binary(database_name) do
+    render_view!(adapter, :render_view_refresh, %Refresh{
+      database_name: database_name,
+      concurrently: Keyword.get(opts, :concurrently, false)
+    })
   end
 
-  @spec refresh_sql(String.t(), keyword()) :: String.t()
-  def refresh_sql(database_name, opts \\ []) when is_binary(database_name) do
-    concurrently = Keyword.get(opts, :concurrently, false)
-    database_name = QualifiedIdentifier.quote!(database_name)
-
-    if concurrently do
-      "REFRESH MATERIALIZED VIEW CONCURRENTLY #{database_name};"
-    else
-      "REFRESH MATERIALIZED VIEW #{database_name};"
+  @spec index_statements(module(), map()) :: [String.t()]
+  def index_statements(adapter, spec) when is_atom(adapter) and is_map(spec) do
+    case render_indexes(adapter, spec) do
+      {:ok, statements} -> statements
+      {:error, errors} -> raise ArgumentError, Enum.join(errors, "; ")
     end
-  end
-
-  @spec index_statements(map()) :: [String.t()]
-  def index_statements(spec) when is_map(spec) do
-    spec
-    |> published_indexes()
-    |> Enum.map(&index_statement(spec, &1))
   end
 
   defp build_query(domain, spec) do
     query_builder = spec[:query] || spec["query"]
-    selecto = Selecto.configure(domain, :view_publisher, validate: false)
+    adapter = spec[:adapter] || spec["adapter"]
 
-    if is_function(query_builder, 1) do
-      case query_builder.(selecto) do
-        %Selecto{} = query -> {:ok, query}
-        other -> {:error, [":query must return a Selecto struct, got: #{inspect(other)}"]}
-      end
+    if is_nil(adapter) do
+      {:error, [":adapter is required for published view compilation"]}
     else
-      {:error, [":query must be a function with arity 1"]}
+      runtime = Selecto.Runtime.Context.new(adapter, :view_publisher)
+      selecto = Selecto.configure(domain, runtime, validate: false)
+
+      if is_function(query_builder, 1) do
+        case query_builder.(selecto) do
+          %Selecto{} = query -> {:ok, query}
+          other -> {:error, [":query must return a Selecto struct, got: #{inspect(other)}"]}
+        end
+      else
+        {:error, [":query must be a function with arity 1"]}
+      end
     end
   end
 
@@ -243,23 +260,44 @@ defmodule Selecto.ViewPublisher do
     spec[:indexes] || spec["indexes"] || []
   end
 
-  defp index_statement(spec, index_spec) do
+  defp index_fragment(spec, index_spec) do
     columns = index_spec[:columns] || index_spec["columns"] || []
     unique = index_spec[:unique] || index_spec["unique"] || false
     concurrently = index_spec[:concurrently] || index_spec["concurrently"] || false
 
-    create = if unique, do: "CREATE UNIQUE INDEX", else: "CREATE INDEX"
-    concurrently_sql = if concurrently, do: " CONCURRENTLY", else: ""
-    index_name = spec |> index_name(columns) |> QualifiedIdentifier.quote_part!()
+    %Index{
+      database_name: database_name(spec),
+      index_name: index_name(spec, columns),
+      columns: Enum.map(columns, &to_string/1),
+      unique: unique,
+      concurrently: concurrently
+    }
+  end
 
-    column_sql =
-      columns
-      |> Enum.map(&QualifiedIdentifier.quote_part!/1)
-      |> Enum.join(", ")
+  defp render_indexes(adapter, spec) do
+    spec
+    |> published_indexes()
+    |> Enum.reduce_while({:ok, []}, fn index_spec, {:ok, statements} ->
+      case render_view(adapter, :render_view_index, index_fragment(spec, index_spec)) do
+        {:ok, statement} -> {:cont, {:ok, statements ++ [statement]}}
+        {:error, errors} -> {:halt, {:error, errors}}
+      end
+    end)
+  end
 
-    relation_name = spec |> database_name() |> QualifiedIdentifier.quote!()
+  defp render_view(adapter, callback, fragment) do
+    case Selecto.DialectSupport.render_view(adapter, callback, fragment, %{adapter: adapter}) do
+      {:ok, sql} -> {:ok, IO.iodata_to_binary(sql)}
+      {:error, %Selecto.Error{} = error} -> {:error, [error.message]}
+      {:error, reason} -> {:error, ["view dialect error: #{inspect(reason)}"]}
+    end
+  end
 
-    "#{create}#{concurrently_sql} #{index_name} ON #{relation_name} (#{column_sql});"
+  defp render_view!(adapter, callback, fragment) do
+    case render_view(adapter, callback, fragment) do
+      {:ok, sql} -> sql
+      {:error, errors} -> raise ArgumentError, Enum.join(errors, "; ")
+    end
   end
 
   defp index_name(spec, columns) do

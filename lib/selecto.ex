@@ -1,7 +1,7 @@
 defmodule Selecto do
-  @derive {Inspect, only: [:postgrex_opts, :adapter, :connection, :set, :tenant, :policy]}
+  @derive {Inspect, only: [:runtime, :adapter, :set, :tenant, :policy]}
   defstruct [
-    :postgrex_opts,
+    :runtime,
     :adapter,
     :connection,
     :domain,
@@ -19,9 +19,8 @@ defmodule Selecto do
   @type t :: Selecto.Types.t()
 
   @moduledoc """
-  Selecto is a query builder for Elixir that uses Postgrex to execute queries.
-  It is designed to be a flexible and powerful tool for building complex SQL queries
-  without writing SQL by hand.
+  Selecto is an adapter-neutral query builder for Elixir. It builds governed,
+  composable SQL through an explicitly configured database adapter.
 
   ## Domain Configuration
 
@@ -180,7 +179,8 @@ defmodule Selecto do
       or invalid advanced join configurations.
     - `:pool` - (boolean, default: false) Whether to enable connection pooling
     - `:pool_options` - Connection pool configuration options
-    - `:adapter` - (module, default: `SelectoDBPostgreSQL.Adapter`) Database adapter module
+    - `:adapter` - Database adapter module. Pass it explicitly unless the host
+      application configures a default adapter.
     - `:mode` - (`:permissive | :strict`, default: `:permissive`) governance mode.
       Strict mode seals the configured domain, requires validation, rejects
       query-authored SQL, and limits runtime joins and row sources to declared
@@ -220,7 +220,10 @@ defmodule Selecto do
         selecto = Selecto.configure(domain, connection_input, validate: false)
 
         # With Ecto repository and schema
-        selecto = Selecto.from_ecto(MyApp.Repo, MyApp.User)
+        selecto =
+          Selecto.from_ecto(MyApp.Repo, MyApp.User,
+            adapter: MyApp.SelectoAdapter
+          )
 
         # Validation can also be called explicitly
         :ok = Selecto.DomainValidator.validate_domain!(domain)
@@ -230,6 +233,23 @@ defmodule Selecto do
   def configure(domain, connection_input, opts \\ []) do
     Selecto.OptionsValidator.validate_configure_opts!(opts)
     Selecto.Configuration.configure(domain, connection_input, opts)
+  end
+
+  @doc """
+  Releases a Selecto connection through its configured adapter.
+
+  Call this only when the caller owns the connection. Borrowed pids, named
+  connections, repositories, pools, and runtime contexts retain their original
+  lifecycle. Adapters without an explicit disconnect callback require no
+  action and return `:ok`.
+  """
+  @spec disconnect(t()) :: :ok | {:error, term()}
+  def disconnect(%__MODULE__{adapter: adapter, connection: connection}) do
+    if Selecto.AdapterSupport.callback_available?(adapter, :disconnect, 1) do
+      adapter.disconnect(connection)
+    else
+      :ok
+    end
   end
 
   @doc """
@@ -247,16 +267,24 @@ defmodule Selecto do
     ## Examples
 
         # Basic usage
-        selecto = Selecto.from_ecto(MyApp.Repo, MyApp.User)
+        selecto =
+          Selecto.from_ecto(MyApp.Repo, MyApp.User,
+            adapter: MyApp.SelectoAdapter
+          )
 
         # With joins and options
         selecto = Selecto.from_ecto(MyApp.Repo, MyApp.User,
+          adapter: MyApp.SelectoAdapter,
           joins: [:posts, :profile],
           redact_fields: [:password_hash]
         )
 
         # With validation
-        selecto = Selecto.from_ecto(MyApp.Repo, MyApp.User, validate: true)
+        selecto =
+          Selecto.from_ecto(MyApp.Repo, MyApp.User,
+            adapter: MyApp.SelectoAdapter,
+            validate: true
+          )
   """
   def from_ecto(repo, schema, opts \\ []) do
     Selecto.Configuration.from_ecto(repo, schema, opts)
@@ -847,7 +875,7 @@ defmodule Selecto do
   Add subselect fields to return related data as aggregated arrays.
 
   This prevents result set denormalization while maintaining relational context
-  by returning related data as JSON arrays, PostgreSQL arrays, or other formats.
+  by returning related data in adapter-supported collection formats.
 
   ## Examples
 
@@ -958,17 +986,16 @@ defmodule Selecto do
 
   ## Options
 
-  - `:max_rows` - PostgreSQL cursor batch size (default `500`)
+  - `:max_rows` - adapter stream batch-size hint (default `500`)
   - `:receive_timeout` - stream consumer wait timeout in ms (default `60000`)
   - `:queue_timeout` - internal task yield timeout in ms (default `100`)
   - `:stream_timeout` - transaction timeout for cursor execution (default `30000`)
 
   ## Notes
 
-  - Direct PostgreSQL connections use cursor-backed streaming.
-  - Adapter-backed streaming requires `adapter.stream/4` support.
-  - Ecto repo and pooled PostgreSQL stream paths currently return structured
-    `:validation_error` responses.
+  - Streaming requires `adapter.stream/4` support.
+  - The configured adapter owns cursor, transaction, pool, and repository
+    semantics and returns structured errors for unsupported runtime contexts.
   """
   @spec execute_stream(Selecto.Types.t(), keyword()) :: Selecto.Types.safe_execute_stream_result()
   def execute_stream(selecto, opts \\ []) do
@@ -1230,15 +1257,6 @@ defmodule Selecto do
   def text_search_rank(selecto, fields, opts \\ []),
     do: Selecto.TextSearch.text_search_rank(selecto, fields, opts)
 
-  @doc false
-  defdelegate mysql_text_search_rank(selecto, fields, opts), to: Selecto.TextSearch
-
-  @doc false
-  defdelegate postgresql_text_search_rank(selecto, fields, opts), to: Selecto.TextSearch
-
-  @doc false
-  defdelegate sqlite_fts_rank(selecto, fields, opts \\ []), to: Selecto.TextSearch
-
   @doc """
   Apply a named UNNEST preset from `domain.query_members.unnests`.
 
@@ -1470,11 +1488,11 @@ defmodule Selecto do
         "features"
       )
 
-      # LATERAL join with generate_series
+      # LATERAL join with an adapter-supported table function
       selecto
       |> Selecto.lateral_join(
         :inner,
-        {:function, :generate_series, [1, 10]},
+        {:function, :configured_row_source, [1, 10]},
         "numbers"
       )
   """
@@ -2117,7 +2135,7 @@ defmodule Selecto do
   end
 
   @doc """
-  Add JSON operations to SELECT clauses for PostgreSQL JSON/JSONB functionality.
+  Add portable JSON operations to SELECT clauses through the configured adapter.
 
   Supports JSON path extraction, aggregation, construction, and manipulation operations.
 
@@ -2152,7 +2170,7 @@ defmodule Selecto do
     do: Selecto.JsonQuery.select(selecto, json_operations, opts)
 
   @doc """
-  Add JSON operations to WHERE clauses for filtering with PostgreSQL JSON/JSONB functionality.
+  Add portable JSON operations to WHERE clauses through the configured adapter.
 
   Supports JSON containment, existence, and comparison operations.
 
@@ -2186,7 +2204,7 @@ defmodule Selecto do
     do: Selecto.JsonQuery.filter(selecto, json_filters, opts)
 
   @doc """
-  Add JSON operations to ORDER BY clauses for sorting with PostgreSQL JSON/JSONB functionality.
+  Add portable JSON operations to ORDER BY clauses through the configured adapter.
 
   ## Parameters
 
@@ -2458,10 +2476,10 @@ defmodule Selecto do
       # Generated SQL:
       # SELECT customer.first_name,
       #        CASE
-      #          WHEN payment_total > $1 THEN $2
-      #          WHEN payment_total BETWEEN $3 AND $4 THEN $5
-      #          WHEN payment_total > $6 THEN $7
-      #          ELSE $8
+      #          WHEN payment_total > <param> THEN <param>
+      #          WHEN payment_total BETWEEN <param> AND <param> THEN <param>
+      #          WHEN payment_total > <param> THEN <param>
+      #          ELSE <param>
       #        END AS customer_tier
   """
   def case_when_select(selecto, when_clauses, opts \\ []) do

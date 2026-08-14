@@ -72,7 +72,7 @@ defmodule Selecto.Output.Transformers.Maps do
   Transform rows with type coercion based on database column types.
 
   This is a more advanced version that can coerce database types to proper Elixir types
-  based on PostgreSQL column type information.
+  based on canonical column type information.
   """
   @spec transform_with_types(list(), list(), map(), keyword()) ::
           {:ok, list(map())} | {:error, term()}
@@ -191,7 +191,7 @@ defmodule Selecto.Output.Transformers.Maps do
     Enum.reject(key_value_pairs, fn {_key, value} -> is_nil(value) end)
   end
 
-  # Basic type coercion - this would be expanded with proper PostgreSQL type mapping
+  # Basic coercion consumes adapter-normalized type evidence.
   defp coerce_value(value, _opts) when is_nil(value), do: value
 
   defp coerce_value(value, opts) do

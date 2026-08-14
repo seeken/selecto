@@ -15,7 +15,7 @@ defmodule Selecto.QueryEagerValidationTest do
           total: %{type: :decimal},
           active: %{type: :boolean},
           tags: %{type: :array},
-          metadata: %{type: :jsonb}
+          metadata: %{type: :json}
         },
         associations: %{
           order_items: %{
@@ -84,6 +84,29 @@ defmodule Selecto.QueryEagerValidationTest do
     assert_raise ArgumentError, ~r/missing_total/, fn ->
       selecto()
       |> Selecto.select([{:sum, "missing_total"}])
+    end
+  end
+
+  test "portable dialect selectors validate their field references and datetime parts" do
+    query =
+      selecto()
+      |> Selecto.select([
+        {:datetime_format, "status", "YYYY", %{}},
+        {:datetime_extract, "status", :year, %{}},
+        {:text_normalize, "status", %{ignore_case: true}},
+        {:bucket, "total", %{kind: :numeric_increment, increment: 10}}
+      ])
+
+    assert length(query.set.selected) == 4
+
+    assert_raise ArgumentError, ~r/missing_status/, fn ->
+      selecto()
+      |> Selecto.select([{:text_normalize, "missing_status", %{}}])
+    end
+
+    assert_raise ArgumentError, ~r/invalid datetime part/, fn ->
+      selecto()
+      |> Selecto.select([{:datetime_extract, "status", :fortnight, %{}}])
     end
   end
 

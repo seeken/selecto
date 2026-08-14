@@ -401,7 +401,7 @@ defmodule Selecto.FieldResolver do
     fields
     |> Enum.filter(fn field -> field not in redact_fields end)
     |> Enum.into(%{}, fn field ->
-      # Handle both atom and string fields for Postgrex compatibility
+      # Domain inputs may use atom or string field identifiers.
       field_str = if is_atom(field), do: Atom.to_string(field), else: field
 
       field_info = %{
@@ -423,7 +423,7 @@ defmodule Selecto.FieldResolver do
   defp get_join_fields(selecto) do
     selecto.config.joins
     |> Enum.flat_map(fn {join_name, join_config} ->
-      # For Postgrex domains, fields come from schemas, not directly from join config
+      # Normalized domain fields come from schemas, not directly from join config.
       join_fields =
         if is_map(join_config) and Map.get(join_config, :fields) do
           Map.get(join_config, :fields)

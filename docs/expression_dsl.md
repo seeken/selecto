@@ -20,7 +20,7 @@ alias Selecto.Expr, as: X
 filters =
   X.compact_and([
     X.eq("status", "active"),
-    X.when_present(search, &X.ilike("customer.name", "%#{&1}%")),
+    X.when_present(search, &X.case_insensitive_like("customer.name", "%#{&1}%")),
     X.gte("total", 100)
   ])
 
@@ -45,7 +45,7 @@ Use macros when you want lighter Elixir-native authoring inside source files.
 import Selecto.ExprMacros
 
 where_ast =
-  where(status == ^status and ilike(customer.name, ^pattern))
+  where(status == ^status and case_insensitive_like(customer.name, ^pattern))
 
 select_ast =
   select([

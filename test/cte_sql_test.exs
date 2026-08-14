@@ -3,7 +3,7 @@ defmodule Selecto.CteSqlTest do
 
   alias Selecto.Advanced.CTE
   alias Selecto.Builder.CteSql
-  alias Selecto.SQL.Params
+  alias Selecto.TestSQLParams, as: Params
 
   defp domain do
     %{

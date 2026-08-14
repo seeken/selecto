@@ -217,8 +217,8 @@ defmodule Selecto.Performance.ComplexityAnalyzer do
           recommendations:
             analysis.recommendations ++
               [
-                "Consider PostgreSQL full-text search (tsvector/tsquery) for leading wildcard patterns",
-                "Use trigram indexes (pg_trgm) if full-text search is not suitable"
+                "Consider an adapter-supported indexed text-search feature for leading wildcard patterns",
+                "Consult the configured adapter for supported substring-index strategies"
               ],
           details: Map.put(analysis.details, :leading_wildcard_count, leading_wildcard_count)
       }
@@ -413,7 +413,8 @@ defmodule Selecto.Performance.ComplexityAnalyzer do
 
         # Map format with comp: "LIKE"
         %{"comp" => comp, "value" => value}
-        when comp in ["LIKE", "like", "ILIKE", "ilike"] and is_binary(value) ->
+        when comp in ["LIKE", "like", "CASE_INSENSITIVE_LIKE", "case_insensitive_like"] and
+               is_binary(value) ->
           String.starts_with?(value, "%")
 
         _ ->

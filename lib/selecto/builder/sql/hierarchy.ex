@@ -10,6 +10,8 @@ defmodule Selecto.Builder.Sql.Hierarchy do
   """
 
   import Selecto.Builder.Sql.Helpers
+  alias Selecto.Dialect.Hierarchy.{Adjacency, MaterializedPath}
+  alias Selecto.Error
   alias Selecto.SQL.Params
   # Hierarchy CTE definitions are emitted as raw CTE entries consumed by Selecto.Builder.CteSql.
 
@@ -137,26 +139,14 @@ defmodule Selecto.Builder.Sql.Hierarchy do
   @doc """
   Build recursive CTE for adjacency list pattern.
 
-  Generates a recursive CTE that traverses parent-child relationships to build
-  hierarchical paths and levels. Uses Selecto-powered CTE generation for safety.
+  Builds a portable adjacency-list request and delegates its concrete recursive
+  CTE syntax to the configured adapter dialect.
 
   ## Examples
 
       # Build CTE for category hierarchy
       {hierarchy_cte, params} = build_adjacency_list_cte(selecto, :categories, config)
       
-      # Generates CTE like:
-      # WITH RECURSIVE category_hierarchy AS (
-      #   -- Base case: root nodes
-      #   SELECT id, name, parent_id, 0 as level, CAST(id AS TEXT) as path
-      #   FROM categories WHERE parent_id IS NULL
-      #   UNION ALL
-      #   -- Recursive case: child nodes  
-      #   SELECT c.id, c.name, c.parent_id, h.level + 1, h.path || '/' || c.id
-      #   FROM categories c JOIN category_hierarchy h ON c.parent_id = h.id
-      #   WHERE h.level < 5
-      # )
-
   Returns: {cte_iodata, params}
   """
   def build_adjacency_list_cte(selecto, join, config) do
@@ -167,37 +157,18 @@ defmodule Selecto.Builder.Sql.Hierarchy do
     name_field = Map.get(config, :name_field, "name")
     parent_field = Map.get(config, :parent_field, "parent_id")
 
-    # Build a deterministic recursive CTE with a configurable depth limit.
-    cte_name = hierarchy_cte_name(join)
+    fragment = %Adjacency{
+      cte_name: hierarchy_cte_name(join),
+      source_table: source_table,
+      id_field: id_field,
+      name_field: name_field,
+      parent_field: parent_field,
+      depth_limit: depth_limit
+    }
 
-    # Build raw SQL iodata for recursive CTE with parameter placeholder
-    # Base case: SELECT id, name, parent_id, 0 as level, CAST(id AS TEXT) as path FROM table WHERE parent_id IS NULL
-    base_case_iodata = [
-      "SELECT #{id_field}, #{name_field}, #{parent_field}, 0 as level, ",
-      "CAST(#{id_field} AS TEXT) as path, ARRAY[#{id_field}] as path_array ",
-      "FROM #{source_table} WHERE #{parent_field} IS NULL"
-    ]
-
-    # Recursive case: JOIN with CTE
-    recursive_case_iodata = [
-      "SELECT c.#{id_field}, c.#{name_field}, c.#{parent_field}, h.level + 1, ",
-      "h.path || '/' || CAST(c.#{id_field} AS TEXT), h.path_array || c.#{id_field} ",
-      "FROM #{source_table} c JOIN #{cte_name} h ON c.#{parent_field} = h.#{id_field} ",
-      "WHERE h.level < ",
-      {:param, depth_limit}
-    ]
-
-    # Build CTE definition body (WITH keyword added by CTE builder)
-    cte_template = [
-      cte_name,
-      " AS (",
-      base_case_iodata,
-      " UNION ALL ",
-      recursive_case_iodata,
-      ")"
-    ]
-
-    finalize_fragment(selecto, cte_template)
+    adapter_for(selecto)
+    |> Selecto.DialectSupport.render_hierarchy_adjacency(fragment, selecto)
+    |> finalize_dialect_fragment(selecto)
   end
 
   @doc """
@@ -235,22 +206,17 @@ defmodule Selecto.Builder.Sql.Hierarchy do
         path -> "#{path}#{path_separator}%"
       end
 
-    # Build query that includes depth calculation
-    query_name = "#{join}_materialized_path"
+    fragment = %MaterializedPath{
+      query_name: "#{join}_materialized_path",
+      source_table: source_table,
+      path_field: path_field,
+      path_separator: path_separator,
+      path_pattern: path_pattern
+    }
 
-    query_template = [
-      query_name,
-      " AS (",
-      "SELECT *, ",
-      "(length(#{path_field}) - length(replace(#{path_field}, '#{path_separator}', ''))) as depth, ",
-      "string_to_array(#{path_field}, '#{path_separator}') as path_array ",
-      "FROM #{source_table} ",
-      "WHERE #{path_field} LIKE ",
-      {:param, path_pattern},
-      ")"
-    ]
-
-    finalize_fragment(selecto, query_template)
+    adapter_for(selecto)
+    |> Selecto.DialectSupport.render_hierarchy_materialized_path(fragment, selecto)
+    |> finalize_dialect_fragment(selecto)
   end
 
   @doc """
@@ -298,15 +264,26 @@ defmodule Selecto.Builder.Sql.Hierarchy do
   end
 
   defp finalize_fragment(selecto, fragment) do
-    adapter =
-      case selecto do
-        %{adapter: adapter} when not is_nil(adapter) -> adapter
-        _ -> Selecto.AdapterSupport.default_adapter()
-      end
+    adapter = adapter_for(selecto)
 
     {sql, params} = Params.finalize(fragment, adapter: adapter)
     {[sql], params}
   end
+
+  defp adapter_for(%{adapter: adapter}) when not is_nil(adapter), do: adapter
+  defp adapter_for(_selecto), do: Selecto.AdapterSupport.default_adapter()
+
+  defp finalize_dialect_fragment({:ok, {fragment, _params}}, selecto),
+    do: finalize_fragment(selecto, fragment)
+
+  defp finalize_dialect_fragment({:ok, fragment}, selecto),
+    do: finalize_fragment(selecto, fragment)
+
+  defp finalize_dialect_fragment({:error, %Error{} = error}, _selecto),
+    do: raise(Error.to_exception(error))
+
+  defp finalize_dialect_fragment({:error, reason}, _selecto),
+    do: raise(ArgumentError, "unsupported hierarchy operation: #{inspect(reason)}")
 
   @doc """
   Example of hierarchical join integration using Selecto-powered CTEs.
@@ -318,7 +295,7 @@ defmodule Selecto.Builder.Sql.Hierarchy do
       
       def build_adjacency_cte_with_selecto(selecto, join, config) do
         domain = build_hierarchy_domain(selecto, join, config)
-        connection = selecto.postgrex_opts
+        connection = selecto.connection
         
         # Base case using Selecto
         base_case = Selecto.configure(domain, connection)

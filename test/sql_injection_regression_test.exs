@@ -5,37 +5,47 @@ defmodule Selecto.SqlInjectionRegressionTest do
   alias Selecto.Builder.JsonOperations, as: JsonBuilder
   alias Selecto.Builder.ValuesClause, as: ValuesBuilder
   alias Selecto.Builder.Window
-  alias Selecto.Jsonb
+  alias Selecto.Json
   alias Selecto.Subfilter.FilterSpec
   alias Selecto.Subfilter.SQL.Safe
   alias Selecto.Window.{Frame, Spec}
 
-  test "JSONB paths, keys, containment JSON, and array values stay inside literals" do
+  test "JSON paths, keys, containment values, and arrays stay inside literals" do
     attack = "x' OR TRUE --"
 
-    assert Jsonb.build_extraction("attributes", [attack]) ==
+    assert Json.build_extraction("attributes", [attack], adapter: SelectoDBPostgreSQL.Adapter) ==
              ~s("attributes"->>'x'' OR TRUE --')
 
-    assert Jsonb.build_extraction("attributes", ["outer", attack]) ==
+    assert Json.build_extraction("attributes", ["outer", attack],
+             adapter: SelectoDBPostgreSQL.Adapter
+           ) ==
              ~s("attributes"#>>ARRAY['outer', 'x'' OR TRUE --'])
 
-    assert Jsonb.build_key_exists("attributes", attack) ==
+    assert Json.build_key_exists("attributes", attack, adapter: SelectoDBPostgreSQL.Adapter) ==
              ~s("attributes" ? 'x'' OR TRUE --')
 
-    assert Jsonb.build_array_contains("attributes", ["tags"], attack) ==
+    assert Json.build_array_contains("attributes", ["tags"], attack,
+             adapter: SelectoDBPostgreSQL.Adapter
+           ) ==
              ~s("attributes"->'tags' ? 'x'' OR TRUE --')
 
-    assert Jsonb.build_contains("attributes", %{"owner" => "O'Reilly"}) ==
+    assert Json.build_contains("attributes", %{"owner" => "O'Reilly"},
+             adapter: SelectoDBPostgreSQL.Adapter
+           ) ==
              ~s("attributes" @> '{"owner":"O''Reilly"}'::jsonb)
   end
 
   test "JSON construction keys and VALUES aliases are encoded as data or identifiers" do
     json_spec =
-      JsonOperations.create_json_operation(:jsonb_build_object, nil,
+      JsonOperations.create_json_operation(:json_build_object, nil,
         value: [{"x'); DROP TABLE users; --", "safe"}]
       )
 
-    json_sql = json_spec |> JsonBuilder.build_json_select() |> IO.iodata_to_binary()
+    json_sql =
+      json_spec
+      |> JsonBuilder.build_json_select(adapter: SelectoDBPostgreSQL.Adapter)
+      |> IO.iodata_to_binary()
+
     assert json_sql =~ "'x''); DROP TABLE users; --'"
 
     values_spec =

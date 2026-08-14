@@ -3,7 +3,7 @@ defmodule Selecto.SubselectIntegrationTest do
   doctest Selecto.Builder.Subselect
 
   alias Selecto.Builder.Subselect
-  alias Selecto.SQL.Params
+  alias Selecto.TestSQLParams, as: Params
 
   def test_domain do
     %{
@@ -40,7 +40,7 @@ defmodule Selecto.SubselectIntegrationTest do
             quantity: %{type: :integer},
             price: %{type: :decimal},
             metadata: %{
-              type: :jsonb,
+              type: :json,
               schema: %{
                 "priority" => %{type: :string},
                 "warehouse" => %{
@@ -82,8 +82,8 @@ defmodule Selecto.SubselectIntegrationTest do
 
   def create_test_selecto do
     domain = test_domain()
-    postgrex_opts = [hostname: "localhost", username: "test"]
-    Selecto.configure(domain, postgrex_opts, validate: false)
+    connection = [hostname: "localhost", username: "test"]
+    Selecto.configure(domain, connection, validate: false)
   end
 
   def create_mssql_test_selecto do
@@ -154,10 +154,10 @@ defmodule Selecto.SubselectIntegrationTest do
       {clause_sql, finalized_params} = Params.finalize(clauses)
 
       assert clause_sql =~ ~r/for json path/i
-      assert clause_sql =~ "JSON_VALUE(sub_orders.metadata, '$.priority') AS [priority]"
+      assert clause_sql =~ "JSON_VALUE([sub_orders].[metadata], '$.priority') AS [priority]"
 
       assert clause_sql =~
-               "JSON_VALUE(sub_orders.metadata, '$.warehouse.zone') AS [zone]"
+               "JSON_VALUE([sub_orders].[metadata], '$.warehouse.zone') AS [zone]"
 
       assert params == finalized_params
     end

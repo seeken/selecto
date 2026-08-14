@@ -14,7 +14,7 @@ defmodule Selecto.Domain.Constants do
     :lt,
     :lte,
     :like,
-    :ilike,
+    :case_insensitive_like,
     :contains,
     :starts_with,
     :ends_with,

@@ -2,6 +2,18 @@ defmodule SelectoDBMySQL.Adapter do
   @behaviour Selecto.DB.Adapter
 
   def name, do: :mysql
+  def dialect, do: Selecto.TestDialect.MySQL
+
+  def capability(:text_search) do
+    %{
+      feature: :text_search,
+      supported?: true,
+      modes: [:natural, :websearch, :plain, :boolean, :query_expansion],
+      default_mode: :natural
+    }
+  end
+
+  def capability(feature), do: %{feature: feature, supported?: supports?(feature)}
   def connect(_opts), do: {:error, {:adapter_dependency_missing, :myxql}}
 
   def execute(_connection, _query, _params, _opts),
@@ -9,6 +21,7 @@ defmodule SelectoDBMySQL.Adapter do
 
   def placeholder(_index), do: "?"
   def quote_identifier(identifier), do: "`#{String.replace(to_string(identifier), "`", "``")}`"
+  def format_datetime(expression, format), do: mysql_format_datetime(expression, format)
   def supports?(:rollup_with_rollup), do: true
   def supports?(:json_table), do: true
   def supports?(:text_search), do: true
@@ -22,12 +35,37 @@ defmodule SelectoDBMySQL.Adapter do
   def supports?(_feature), do: false
 
   def rollup_sql(grouped_clauses), do: [grouped_clauses, " with rollup"]
+
+  defp mysql_format_datetime(expression, "YYYY-Q"),
+    do: ["CONCAT(DATE_FORMAT(", expression, ", '%Y'), '-', QUARTER(", expression, "))"]
+
+  defp mysql_format_datetime(expression, format) do
+    native_format =
+      Map.get(
+        %{
+          "YYYY-MM-DD" => "%Y-%m-%d",
+          "YYYY-MM" => "%Y-%m",
+          "YYYY" => "%Y",
+          "YYYY-WW" => "%x-%v",
+          "MM" => "%m",
+          "DD" => "%d",
+          "D" => "%w",
+          "HH24" => "%H"
+        },
+        format
+      )
+
+    if native_format,
+      do: ["DATE_FORMAT(", expression, ", '", native_format, "')"],
+      else: ["CAST(", expression, " AS CHAR)"]
+  end
 end
 
 defmodule SelectoDBMariaDB.Adapter do
   @behaviour Selecto.DB.Adapter
 
   def name, do: :mariadb
+  def dialect, do: Selecto.TestDialect.MySQL
   def connect(_opts), do: {:error, {:adapter_dependency_missing, :myxql}}
 
   def execute(_connection, _query, _params, _opts),
@@ -35,6 +73,7 @@ defmodule SelectoDBMariaDB.Adapter do
 
   def placeholder(_index), do: "?"
   def quote_identifier(identifier), do: "`#{String.replace(to_string(identifier), "`", "``")}`"
+  defdelegate format_datetime(expression, format), to: SelectoDBMySQL.Adapter
   def supports?(:rollup_with_rollup), do: true
   def supports?(_feature), do: false
 
@@ -45,6 +84,7 @@ defmodule SelectoDBMSSQL.Adapter do
   @behaviour Selecto.DB.Adapter
 
   def name, do: :mssql
+  def dialect, do: Selecto.TestDialect.MSSQL
   def connect(connection) when is_pid(connection) or is_atom(connection), do: {:ok, connection}
   def connect(_opts), do: {:error, {:adapter_dependency_missing, :tds}}
 

@@ -19,6 +19,8 @@ defmodule Selecto.Builder.Sql do
   alias Selecto.Builder.Sql.Hierarchy
   alias Selecto.Builder.LateralJoin
   alias Selecto.Builder.ValuesClause
+  alias Selecto.Dialect.Collection.Operation, as: CollectionOperation
+  alias Selecto.Dialect.TableFunction.Join, as: TableFunctionJoin
 
   @spec build(Selecto.Types.t(), Selecto.Types.sql_generation_options()) ::
           {String.t(), list(), [any()]}
@@ -1128,15 +1130,19 @@ defmodule Selecto.Builder.Sql do
   end
 
   # Dynamic subquery joins registered by Selecto.DynamicJoin.join_subquery/4.
-  # `config.subquery` is SQL text with $n placeholders and `config.subquery_params`
-  # carries values; convert placeholders to iodata params so numbering is coordinated.
+  # `config.subquery` is finalized SQL and `config.subquery_params` carries its
+  # values. Restore markers through the configured adapter so the outer query
+  # can coordinate placeholders without assuming a database's syntax.
   defp build_subquery_join(selecto, join, config, fc, p, ctes) do
     subquery_sql =
       Map.get(config, :subquery) ||
         raise ArgumentError, "Subquery join #{inspect(join)} is missing :subquery SQL"
 
     subquery_params = Map.get(config, :subquery_params, [])
-    subquery_iodata = convert_sql_placeholders_to_iodata(subquery_sql, subquery_params)
+    subquery_adapter = Map.get(config, :subquery_adapter, selecto.adapter)
+
+    subquery_iodata =
+      Selecto.SQL.Params.rebind_finalized(subquery_sql, subquery_params, subquery_adapter)
 
     on_conditions = Map.get(config, :on, [])
     requires_join = Map.get(config, :requires_join, :selecto_root)
@@ -1183,27 +1189,6 @@ defmodule Selecto.Builder.Sql do
         raise ArgumentError, "Invalid :on condition for join: #{inspect(other)}"
     end)
     |> Enum.intersperse(" and ")
-  end
-
-  defp convert_sql_placeholders_to_iodata(sql, params) do
-    values_by_index =
-      params
-      |> Enum.with_index(1)
-      |> Map.new(fn {value, idx} -> {idx, value} end)
-
-    Regex.split(~r/(\$\d+)/, sql, include_captures: true, trim: false)
-    |> Enum.map(fn part ->
-      case Regex.run(~r/^\$(\d+)$/, part, capture: :all_but_first) do
-        [idx] ->
-          case Map.fetch(values_by_index, String.to_integer(idx)) do
-            {:ok, value} -> {:param, value}
-            :error -> part
-          end
-
-        _ ->
-          part
-      end
-    end)
   end
 
   # Phase 1: Join pattern detection for advanced join types
@@ -1457,27 +1442,60 @@ defmodule Selecto.Builder.Sql do
 
         {:array, _} = array_expr ->
           # Array construction expression
-          Selecto.Builder.Sql.Select.prep_selector(selecto, array_expr)
+          {expression, _joins, params} =
+            Selecto.Builder.Sql.Select.prep_selector(selecto, array_expr)
+
+          {expression, params}
       end
+
+    collection = %CollectionOperation{
+      operation: :unnest,
+      clause: :table,
+      column: field_iodata,
+      order_by: [],
+      options: %{}
+    }
+
+    {source_sql, collection_params} =
+      case Selecto.DialectSupport.render_collection_operation(
+             selecto.adapter,
+             collection,
+             selecto
+           ) do
+        {:ok, {sql, params}} ->
+          {sql, params}
+
+        {:ok, sql} ->
+          {sql, []}
+
+        {:error, %Selecto.Error{} = error} ->
+          raise Selecto.Error.to_exception(error)
+
+        {:error, reason} ->
+          raise ArgumentError, "unsupported UNNEST operation: #{inspect(reason)}"
+      end
+
+    join = %TableFunctionJoin{
+      join_type: :cross,
+      source_sql: source_sql,
+      alias: alias_name,
+      ordinality_alias: ordinality,
+      source_kind: :table_function
+    }
 
     unnest_clause =
-      case ordinality do
-        nil ->
-          ["CROSS JOIN LATERAL UNNEST(", field_iodata, ") AS ", alias_name]
+      case Selecto.DialectSupport.render_table_function_join(selecto.adapter, join, selecto) do
+        {:ok, sql} ->
+          sql
 
-        ord_alias ->
-          [
-            "CROSS JOIN LATERAL UNNEST(",
-            field_iodata,
-            ") WITH ORDINALITY AS ",
-            alias_name,
-            "(value, ",
-            ord_alias,
-            ")"
-          ]
+        {:error, %Selecto.Error{} = error} ->
+          raise Selecto.Error.to_exception(error)
+
+        {:error, reason} ->
+          raise ArgumentError, "unsupported table-function join: #{inspect(reason)}"
       end
 
-    {unnest_clause, field_params}
+    {unnest_clause, field_params ++ collection_params}
   end
 
   # Convert user CTE spec to builder format

@@ -10,13 +10,12 @@ defmodule Selecto.SQL.QualifiedIdentifierTest do
     assert {:ok, ~s("order_id")} = QualifiedIdentifier.quote_part(:order_id)
   end
 
-  test "rejects fragments, pre-quoted names, empty components, and overlong names" do
+  test "rejects fragments, pre-quoted names, and empty components" do
     invalid = [
       "reporting.rollup; DROP TABLE users; --",
       ~s(reporting."rollup"),
       "reporting..rollup",
-      "9starts_with_a_digit",
-      String.duplicate("x", 64)
+      "9starts_with_a_digit"
     ]
 
     for identifier <- invalid do
@@ -26,5 +25,14 @@ defmodule Selecto.SQL.QualifiedIdentifierTest do
 
     assert {:error, %{reason: :qualified_identifier_not_allowed}} =
              QualifiedIdentifier.quote_part("reporting.rollup")
+  end
+
+  test "applies an adapter-specific identifier length policy" do
+    long_identifier = String.duplicate("x", 64)
+
+    assert {:ok, _quoted} = QualifiedIdentifier.quote(long_identifier)
+
+    assert {:error, %{reason: :part_too_long, max_bytes: 63}} =
+             QualifiedIdentifier.quote(long_identifier, max_bytes: 63)
   end
 end

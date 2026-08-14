@@ -1,6 +1,6 @@
 defmodule Selecto.Window do
   @moduledoc """
-  Window functions provide powerful analytical capabilities for PostgreSQL queries.
+  Window functions provide portable analytical query intent with adapter-aware rendering.
 
   Window functions allow you to perform calculations across a set of table rows
   that are related to the current row. Unlike aggregate functions, window functions

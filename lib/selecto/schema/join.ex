@@ -456,7 +456,7 @@ defmodule Selecto.Schema.Join do
           "#{id}_list",
           %{
             name: "#{name} List",
-            select: "string_agg(#{association.field}.#{tag_field}, ', ')",
+            select: {:string_agg, "#{association.field}.#{tag_field}", ", "},
             group_by_format: fn {a, _id}, _def -> a end,
             # Aggregate fields typically aren't filterable
             filterable: false

@@ -16,7 +16,7 @@ defmodule Selecto.Domain.Compose do
     :detail_actions,
     :columns,
     :custom_columns,
-    :jsonb_schemas,
+    :json_schemas,
     :subfilters,
     :window_functions,
     :pagination,

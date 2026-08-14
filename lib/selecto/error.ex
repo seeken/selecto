@@ -180,6 +180,14 @@ defmodule Selecto.Error do
   Converts various error types to standardized Selecto.Error.
   """
   @spec from_reason(term()) :: t()
+  def from_reason({:invalid_connection, connection}) do
+    connection_error("Invalid adapter connection", %{connection: inspect(connection)})
+  end
+
+  def from_reason({:invalid_connection_options, reason}) do
+    connection_error("Invalid adapter connection options", %{reason: reason})
+  end
+
   def from_reason({:exit, reason}) do
     connection_error("Database connection failed", %{reason: reason})
   end

@@ -293,7 +293,7 @@ defmodule Selecto.FunctionSpec do
   defp literal_type(%DateTime{}), do: :utc_datetime
   defp literal_type(%NaiveDateTime{}), do: :naive_datetime
   defp literal_type(value) when is_list(value), do: {:array, :unknown}
-  defp literal_type(value) when is_map(value), do: :jsonb
+  defp literal_type(value) when is_map(value), do: :json
   defp literal_type(_value), do: :unknown
 
   defp null_value?(nil), do: true

@@ -35,8 +35,8 @@ Add `selecto` and the adapter package your app uses:
 ```elixir
 def deps do
   [
-    {:selecto, ">= 0.4.13 and < 0.6.0"},
-    {:selecto_db_postgresql, ">= 0.4.11 and < 0.6.0"}
+    {:selecto, ">= 0.5.0 and < 0.6.0"},
+    {:selecto_db_postgresql, ">= 0.5.0 and < 0.6.0"}
   ]
 end
 ```
@@ -129,7 +129,7 @@ query =
   |> Selecto.filter(
     X.compact_and([
       X.eq("status", "active"),
-      X.when_present(search, &X.ilike("customer.name", "%#{&1}%")),
+      X.when_present(search, &X.case_insensitive_like("customer.name", "%#{&1}%")),
       X.gte("total", 100)
     ])
   )

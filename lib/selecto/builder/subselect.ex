@@ -3,7 +3,7 @@ defmodule Selecto.Builder.Subselect do
   SQL generation logic for Subselect functionality.
 
   This module handles the construction of correlated subqueries that return
-  aggregated data from related tables as JSON arrays, PostgreSQL arrays,
+  aggregated data from related tables as JSON arrays, collection values,
   or other aggregate formats.
   """
 
@@ -11,6 +11,8 @@ defmodule Selecto.Builder.Subselect do
   # alias Selecto.SQL.Params
   alias Selecto.Types
   alias Selecto.AdapterSupport
+  alias Selecto.Dialect.Collection.Operation, as: CollectionOperation
+  alias Selecto.Dialect.Json.Operation, as: JsonOperation
 
   @doc """
   Build subselect clauses for the SELECT portion of the query.
@@ -108,15 +110,6 @@ defmodule Selecto.Builder.Subselect do
           target_alias
         )
 
-      adapter_name == :mssql and subselect_config.format == :string_agg ->
-        build_mssql_string_agg_subselect(
-          selecto,
-          subselect_config,
-          source_alias,
-          target_table,
-          target_alias
-        )
-
       adapter_name == :mssql and subselect_config.format == :array_agg ->
         build_mssql_array_agg_subselect(
           selecto,
@@ -144,8 +137,6 @@ defmodule Selecto.Builder.Subselect do
          target_table,
          target_alias
        ) do
-    adapter_name = AdapterSupport.adapter_name(Map.get(selecto, :adapter))
-
     # Build SELECT fields for the subquery based on aggregation type
     {select_clause, select_params} =
       case subselect_config.format do
@@ -153,74 +144,36 @@ defmodule Selecto.Builder.Subselect do
           if length(subselect_config.fields) == 1 and nested_subselects(subselect_config) == [] do
             [field] = subselect_config.fields
             field_name = adapter_quote_identifier(selecto, to_string(field))
-
-            case adapter_name do
-              :sqlite ->
-                {["json_group_array(", target_alias, ".", field_name, ")"], []}
-
-              name when name in [:mysql, :mariadb] ->
-                {["JSON_ARRAYAGG(", target_alias, ".", field_name, ")"], []}
-
-              _ ->
-                {["json_agg(", target_alias, ".", field_name, ")"], []}
-            end
+            render_json_aggregate!(selecto, [target_alias, ".", field_name])
           else
             # Multiple fields - build JSON objects
             {json_pairs, nested_params} =
               build_json_object_pairs(selecto, subselect_config, target_alias)
 
-            json_build =
-              case adapter_name do
-                :sqlite ->
-                  [
-                    "json_group_array(json_object(",
-                    Enum.intersperse(json_pairs, [", "]),
-                    "))"
-                  ]
+            {json_object, object_params} = render_json_object!(selecto, json_pairs)
+            {json_build, aggregate_params} = render_json_aggregate!(selecto, json_object)
 
-                name when name in [:mysql, :mariadb] ->
-                  [
-                    "JSON_ARRAYAGG(JSON_OBJECT(",
-                    Enum.intersperse(json_pairs, [", "]),
-                    "))"
-                  ]
-
-                _ ->
-                  [
-                    "json_agg(json_build_object(",
-                    Enum.intersperse(json_pairs, [", "]),
-                    "))"
-                  ]
-              end
-
-            {json_build, nested_params}
+            {json_build, nested_params ++ object_params ++ aggregate_params}
           end
 
         :array_agg ->
           # Simplify for now
           [field] = subselect_config.fields
           field_name = adapter_quote_identifier(selecto, to_string(field))
-
-          case adapter_name do
-            :sqlite ->
-              {["json_group_array(", target_alias, ".", field_name, ")"], []}
-
-            name when name in [:mysql, :mariadb] ->
-              {["JSON_ARRAYAGG(", target_alias, ".", field_name, ")"], []}
-
-            _ ->
-              {["array_agg(", target_alias, ".", field_name, ")"], []}
-          end
+          render_collection_aggregate!(selecto, :array_agg, [target_alias, ".", field_name])
 
         :string_agg ->
           # Simplify for now
           [field] = subselect_config.fields
-          field_name = escape_identifier(to_string(field))
+          field_name = adapter_quote_identifier(selecto, to_string(field))
           separator = Map.get(subselect_config, :separator, ",")
-          separator_param = {:param, separator}
 
-          {["string_agg(", target_alias, ".", field_name, ", ", separator_param, ")"],
-           [separator]}
+          render_collection_aggregate!(
+            selecto,
+            :string_agg,
+            [target_alias, ".", field_name],
+            delimiter: separator
+          )
 
         :count ->
           {["count(*)"], []}
@@ -302,14 +255,7 @@ defmodule Selecto.Builder.Subselect do
         child_alias
       )
 
-    adapter_name = AdapterSupport.adapter_name(Map.get(selecto, :adapter))
-
-    empty_json =
-      case adapter_name do
-        :sqlite -> "'[]'"
-        name when name in [:mysql, :mariadb] -> "JSON_ARRAY()"
-        _ -> "'[]'::json"
-      end
+    {empty_json, empty_params} = render_empty_json_array!(selecto)
 
     subquery = [
       "COALESCE((SELECT ",
@@ -325,52 +271,85 @@ defmodule Selecto.Builder.Subselect do
       ")"
     ]
 
-    {[escape_string(child_key), ", ", subquery], child_params ++ correlation_params}
+    {[escape_string(child_key), ", ", subquery],
+     child_params ++ correlation_params ++ empty_params}
   end
 
   defp build_nested_json_agg(selecto, subselect_config, target_alias) do
-    adapter_name = AdapterSupport.adapter_name(Map.get(selecto, :adapter))
-
     cond do
       subselect_config.format == :json_agg and
         length(subselect_config.fields) == 1 and nested_subselects(subselect_config) == [] ->
         [field] = subselect_config.fields
         field_name = adapter_quote_identifier(selecto, to_string(field))
-
-        case adapter_name do
-          :sqlite ->
-            {["json_group_array(", target_alias, ".", field_name, ")"], []}
-
-          name when name in [:mysql, :mariadb] ->
-            {["JSON_ARRAYAGG(", target_alias, ".", field_name, ")"], []}
-
-          _ ->
-            {["json_agg(", target_alias, ".", field_name, ")"], []}
-        end
+        render_json_aggregate!(selecto, [target_alias, ".", field_name])
 
       subselect_config.format == :json_agg ->
         {json_pairs, nested_params} =
           build_json_object_pairs(selecto, subselect_config, target_alias)
 
-        json_build =
-          case adapter_name do
-            :sqlite ->
-              ["json_group_array(json_object(", Enum.intersperse(json_pairs, [", "]), "))"]
+        {json_object, object_params} = render_json_object!(selecto, json_pairs)
+        {json_build, aggregate_params} = render_json_aggregate!(selecto, json_object)
 
-            name when name in [:mysql, :mariadb] ->
-              ["JSON_ARRAYAGG(JSON_OBJECT(", Enum.intersperse(json_pairs, [", "]), "))"]
-
-            _ ->
-              ["json_agg(json_build_object(", Enum.intersperse(json_pairs, [", "]), "))"]
-          end
-
-        {json_build, nested_params}
+        {json_build, nested_params ++ object_params ++ aggregate_params}
 
       true ->
         raise ArgumentError,
               "Nested subselects currently require json_agg format, got #{inspect(subselect_config.format)}"
     end
   end
+
+  defp render_json_aggregate!(selecto, expression) do
+    render_json_operation!(selecto, %JsonOperation{
+      operation: :json_agg,
+      clause: :select,
+      options: %{column_sql: expression}
+    })
+  end
+
+  defp render_json_object!(selecto, pairs) do
+    render_json_operation!(selecto, %JsonOperation{
+      operation: :json_build_object,
+      clause: :select,
+      options: %{pairs_sql: Enum.intersperse(pairs, [", "])}
+    })
+  end
+
+  defp render_empty_json_array!(selecto) do
+    render_json_operation!(selecto, %JsonOperation{
+      operation: :json_empty_array,
+      clause: :select
+    })
+  end
+
+  defp render_json_operation!(selecto, operation) do
+    selecto.adapter
+    |> Selecto.DialectSupport.render_json(:render_json_operation, operation, selecto)
+    |> unwrap_dialect_fragment!()
+  end
+
+  defp render_collection_aggregate!(selecto, operation, expression, opts \\ []) do
+    fragment = %CollectionOperation{
+      operation: operation,
+      clause: :select,
+      column: expression,
+      distinct: false,
+      order_by: [],
+      options: Map.new(opts)
+    }
+
+    selecto.adapter
+    |> Selecto.DialectSupport.render_collection_operation(fragment, selecto)
+    |> unwrap_dialect_fragment!()
+  end
+
+  defp unwrap_dialect_fragment!({:ok, {iodata, params}}), do: {iodata, params}
+  defp unwrap_dialect_fragment!({:ok, iodata}), do: {iodata, []}
+
+  defp unwrap_dialect_fragment!({:error, %Selecto.Error{} = error}),
+    do: raise(Selecto.Error.to_exception(error))
+
+  defp unwrap_dialect_fragment!({:error, reason}),
+    do: raise(ArgumentError, "unsupported subselect dialect fragment: #{inspect(reason)}")
 
   defp build_nested_correlation_condition(
          selecto,
@@ -505,40 +484,6 @@ defmodule Selecto.Builder.Subselect do
     {subselect_iodata, correlation_params ++ additional_params}
   end
 
-  defp build_mssql_string_agg_subselect(
-         selecto,
-         subselect_config,
-         source_alias,
-         target_table,
-         target_alias
-       ) do
-    [field] = subselect_config.fields
-    separator = Map.get(subselect_config, :separator, ",")
-
-    aggregate = [
-      "STRING_AGG(",
-      build_mssql_subselect_field_expr(
-        selecto,
-        subselect_config.target_schema,
-        field,
-        target_alias
-      ),
-      ", ",
-      {:param, separator},
-      ")"
-    ]
-
-    build_mssql_scalar_subselect(
-      selecto,
-      subselect_config,
-      source_alias,
-      target_table,
-      target_alias,
-      aggregate,
-      [separator]
-    )
-  end
-
   defp build_mssql_array_agg_subselect(
          selecto,
          subselect_config,
@@ -567,37 +512,6 @@ defmodule Selecto.Builder.Subselect do
       target_alias,
       select_field
     )
-  end
-
-  defp build_mssql_scalar_subselect(
-         selecto,
-         subselect_config,
-         source_alias,
-         target_table,
-         target_alias,
-         aggregate_sql,
-         aggregate_params
-       ) do
-    {correlation_where, correlation_params} =
-      build_correlation_condition(selecto, subselect_config, target_alias, source_alias)
-
-    {additional_where, additional_params} =
-      build_additional_filters(selecto, subselect_config, target_alias)
-
-    where_clause = build_combined_where_clause(correlation_where, additional_where)
-
-    subselect_iodata = [
-      "SELECT ",
-      aggregate_sql,
-      " FROM ",
-      target_table,
-      " ",
-      target_alias,
-      " WHERE ",
-      where_clause
-    ]
-
-    {subselect_iodata, aggregate_params ++ correlation_params ++ additional_params}
   end
 
   defp build_mssql_json_array_subselect(
@@ -650,9 +564,9 @@ defmodule Selecto.Builder.Subselect do
       field_alias = adapter_quote_identifier(selecto, mssql_json_field_alias(field_string))
 
       field_sql =
-        case Selecto.Jsonb.parse_field_reference(field_string, target_schema_config) do
-          {:jsonb, column, path} ->
-            Selecto.Jsonb.build_extraction(column, path,
+        case Selecto.Json.parse_field_reference(field_string, target_schema_config) do
+          {:json_path, column, path} ->
+            Selecto.Json.build_extraction(column, path,
               adapter: Map.get(selecto, :adapter),
               table_alias: target_alias
             )
@@ -671,9 +585,9 @@ defmodule Selecto.Builder.Subselect do
     field_string = to_string(field)
     target_schema_config = get_target_schema_config(selecto, target_schema)
 
-    case Selecto.Jsonb.parse_field_reference(field_string, target_schema_config) do
-      {:jsonb, column, path} ->
-        Selecto.Jsonb.build_extraction(column, path,
+    case Selecto.Json.parse_field_reference(field_string, target_schema_config) do
+      {:json_path, column, path} ->
+        Selecto.Json.build_extraction(column, path,
           adapter: Map.get(selecto, :adapter),
           table_alias: target_alias
         )
@@ -1324,14 +1238,7 @@ defmodule Selecto.Builder.Subselect do
             [field_key, ", ", target_alias, ".", field_name]
           end)
 
-        json_build_call = [
-          "json_build_object(",
-          Enum.intersperse(json_pairs, [", "]),
-          ")"
-        ]
-
-        # No parameters needed for field names - they're literal strings
-        {json_build_call, []}
+        render_json_object!(selecto, json_pairs)
     end
   end
 
@@ -1512,7 +1419,7 @@ defmodule Selecto.Builder.Subselect do
   end
 
   defp adapter_quote_identifier(selecto, identifier) do
-    adapter = Map.get(selecto, :adapter, Selecto.AdapterSupport.default_adapter())
+    adapter = Map.fetch!(selecto, :adapter)
 
     if Selecto.AdapterSupport.callback_available?(adapter, :quote_identifier, 1) do
       adapter.quote_identifier(to_string(identifier))

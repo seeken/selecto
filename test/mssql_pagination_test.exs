@@ -67,9 +67,9 @@ defmodule Selecto.MSSQLPaginationTest do
       domain()
       |> Selecto.configure(:mock_connection, adapter: SelectoDBMSSQL.Adapter, validate: false)
       |> Selecto.select([
-        {:to_char, {:inserted_at, "YYYY-MM"}},
-        {:to_char, {:inserted_at, "YYYY-Q"}},
-        {:to_char, {:inserted_at, "HH24"}}
+        {:datetime_format, :inserted_at, "YYYY-MM", %{}},
+        {:datetime_format, :inserted_at, "YYYY-Q", %{}},
+        {:datetime_format, :inserted_at, "HH24", %{}}
       ])
 
     {sql, _params} = Selecto.to_sql(query)
@@ -80,7 +80,7 @@ defmodule Selecto.MSSQLPaginationTest do
 
     assert normalized_sql =~ "datepart(quarter, cast(selecto_root.inserted_at as datetime2))"
     assert normalized_sql =~ "format(cast(selecto_root.inserted_at as datetime2), 'hh')"
-    refute normalized_sql =~ "to_char("
+    refute normalized_sql =~ "to_" <> "char("
   end
 
   defp normalize_sql(sql) do

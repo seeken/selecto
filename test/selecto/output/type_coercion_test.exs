@@ -2,6 +2,12 @@ defmodule Selecto.Output.TypeCoercionTest do
   use ExUnit.Case
   alias Selecto.Output.TypeCoercion
 
+  defmodule NativeTypeAdapter do
+    def normalize_type("int4"), do: :integer
+    def normalize_type("native_document"), do: :map
+    def normalize_type(type), do: type
+  end
+
   describe "coerce_value/4 - nil handling" do
     test "returns nil for nil values" do
       assert TypeCoercion.coerce_value(nil, "integer") == nil
@@ -25,7 +31,7 @@ defmodule Selecto.Output.TypeCoercionTest do
 
     test "parses string integers" do
       assert TypeCoercion.coerce_value("42", "integer") == 42
-      assert TypeCoercion.coerce_value("-100", "int4") == -100
+      assert TypeCoercion.coerce_value("-100", "integer") == -100
     end
 
     test "converts whole floats to integers" do
@@ -49,7 +55,7 @@ defmodule Selecto.Output.TypeCoercionTest do
     end
 
     test "converts integers to floats" do
-      assert TypeCoercion.coerce_value(42, "float8") == 42.0
+      assert TypeCoercion.coerce_value(42, "double precision") == 42.0
     end
 
     test "parses string floats" do
@@ -79,7 +85,7 @@ defmodule Selecto.Output.TypeCoercionTest do
     end
 
     test "converts floats to Decimal" do
-      result = TypeCoercion.coerce_value(3.14, "money")
+      result = TypeCoercion.coerce_value(3.14, "decimal")
       assert %Decimal{} = result
     end
   end
@@ -87,7 +93,7 @@ defmodule Selecto.Output.TypeCoercionTest do
   describe "coerce_value/4 - boolean coercion" do
     test "keeps booleans as-is" do
       assert TypeCoercion.coerce_value(true, "boolean") == true
-      assert TypeCoercion.coerce_value(false, "bool") == false
+      assert TypeCoercion.coerce_value(false, "boolean") == false
     end
 
     test "parses truthy strings" do
@@ -157,7 +163,7 @@ defmodule Selecto.Output.TypeCoercionTest do
   describe "coerce_value/4 - utc_datetime coercion" do
     test "keeps DateTime as-is" do
       dt = ~U[2024-01-15 10:30:00Z]
-      assert TypeCoercion.coerce_value(dt, "timestamptz") == dt
+      assert TypeCoercion.coerce_value(dt, "timestamp with time zone") == dt
     end
 
     test "parses ISO8601 UTC datetime strings" do
@@ -169,7 +175,7 @@ defmodule Selecto.Output.TypeCoercionTest do
   describe "coerce_value/4 - map/json coercion" do
     test "keeps maps as-is" do
       map = %{a: 1, b: 2}
-      assert TypeCoercion.coerce_value(map, "jsonb") == map
+      assert TypeCoercion.coerce_value(map, "json") == map
     end
 
     test "parses JSON strings" do
@@ -178,7 +184,7 @@ defmodule Selecto.Output.TypeCoercionTest do
     end
 
     test "returns original value for invalid JSON with :safe" do
-      assert TypeCoercion.coerce_value("not json", "jsonb", :safe) == "not json"
+      assert TypeCoercion.coerce_value("not json", "json", :safe) == "not json"
     end
   end
 
@@ -189,7 +195,7 @@ defmodule Selecto.Output.TypeCoercionTest do
     end
 
     test "parses JSON array strings" do
-      result = TypeCoercion.coerce_value("[1, 2, 3]", "_int4")
+      result = TypeCoercion.coerce_value("[1, 2, 3]", "array")
       assert result == [1, 2, 3]
     end
   end
@@ -213,7 +219,7 @@ defmodule Selecto.Output.TypeCoercionTest do
   describe "coerce_value/4 - binary coercion" do
     test "keeps binary as-is" do
       binary = <<1, 2, 3>>
-      assert TypeCoercion.coerce_value(binary, "bytea") == binary
+      assert TypeCoercion.coerce_value(binary, "binary") == binary
     end
   end
 
@@ -312,14 +318,30 @@ defmodule Selecto.Output.TypeCoercionTest do
     end
   end
 
+  describe "adapter-native type normalization" do
+    test "routes native identities through the adapter before coercion" do
+      assert TypeCoercion.coerce_value("42", "int4", :safe, %{}, NativeTypeAdapter) == 42
+
+      assert TypeCoercion.coerce_value(
+               ~s({"ok": true}),
+               "native_document",
+               :safe,
+               %{},
+               NativeTypeAdapter
+             ) == %{
+               "ok" => true
+             }
+    end
+  end
+
   describe "get_elixir_type/1" do
-    test "returns correct type for known PostgreSQL types" do
+    test "returns correct type for portable and standard SQL types" do
       assert TypeCoercion.get_elixir_type("integer") == :integer
       assert TypeCoercion.get_elixir_type("bigint") == :integer
       assert TypeCoercion.get_elixir_type("text") == :string
       assert TypeCoercion.get_elixir_type("boolean") == :boolean
-      assert TypeCoercion.get_elixir_type("jsonb") == :map
-      assert TypeCoercion.get_elixir_type("timestamptz") == :utc_datetime
+      assert TypeCoercion.get_elixir_type("json") == :map
+      assert TypeCoercion.get_elixir_type("timestamp with time zone") == :utc_datetime
       assert TypeCoercion.get_elixir_type("geometry") == :geometry
       assert TypeCoercion.get_elixir_type("geometry(Point,4326)") == :geometry
       assert TypeCoercion.get_elixir_type("geography(Point,4326)") == :geography
@@ -336,7 +358,8 @@ defmodule Selecto.Output.TypeCoercionTest do
       assert is_map(types)
       assert Map.has_key?(types, "integer")
       assert Map.has_key?(types, "text")
-      assert Map.has_key?(types, "jsonb")
+      assert Map.has_key?(types, "json")
+      refute Map.has_key?(types, "int4")
     end
   end
 

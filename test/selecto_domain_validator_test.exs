@@ -405,6 +405,7 @@ defmodule Selecto.DomainValidatorTest do
         joins: %{},
         published_views: %{
           "order_rollup" => %{
+            adapter: SelectoDBPostgreSQL.Adapter,
             database_name: "reporting.order_rollup",
             kind: :view,
             query: fn selecto ->
@@ -443,6 +444,7 @@ defmodule Selecto.DomainValidatorTest do
         joins: %{},
         published_views: %{
           "bad_rollup" => %{
+            adapter: SelectoDBPostgreSQL.Adapter,
             database_name: "",
             kind: :report,
             query: fn selecto ->
@@ -1056,6 +1058,7 @@ defmodule Selecto.DomainValidatorTest do
       }
 
       spec = %{
+        adapter: SelectoDBPostgreSQL.Adapter,
         database_name: "reporting.order_rollup",
         kind: :view,
         query: fn selecto ->
@@ -1076,7 +1079,12 @@ defmodule Selecto.DomainValidatorTest do
     end
 
     test "build_sql/2 returns CREATE MATERIALIZED VIEW DDL" do
-      assert ViewPublisher.ddl_for(:materialized_view, "reporting.daily_rollup", "select 1") ==
+      assert ViewPublisher.ddl_for(
+               SelectoDBPostgreSQL.Adapter,
+               :materialized_view,
+               "reporting.daily_rollup",
+               "select 1"
+             ) ==
                ~s(CREATE MATERIALIZED VIEW "reporting"."daily_rollup" AS\nselect 1;)
     end
 
@@ -1095,6 +1103,7 @@ defmodule Selecto.DomainValidatorTest do
       }
 
       spec = %{
+        adapter: SelectoDBPostgreSQL.Adapter,
         database_name: "reporting.daily_rollup",
         kind: :materialized_view,
         query: fn selecto ->
@@ -1116,10 +1125,14 @@ defmodule Selecto.DomainValidatorTest do
     end
 
     test "refresh_sql/2 supports concurrent refresh statements" do
-      assert ViewPublisher.refresh_sql("reporting.daily_rollup") ==
+      assert ViewPublisher.refresh_sql(SelectoDBPostgreSQL.Adapter, "reporting.daily_rollup") ==
                ~s(REFRESH MATERIALIZED VIEW "reporting"."daily_rollup";)
 
-      assert ViewPublisher.refresh_sql("reporting.daily_rollup", concurrently: true) ==
+      assert ViewPublisher.refresh_sql(
+               SelectoDBPostgreSQL.Adapter,
+               "reporting.daily_rollup",
+               concurrently: true
+             ) ==
                ~s(REFRESH MATERIALIZED VIEW CONCURRENTLY "reporting"."daily_rollup";)
     end
 
@@ -1138,6 +1151,7 @@ defmodule Selecto.DomainValidatorTest do
       }
 
       base_spec = %{
+        adapter: SelectoDBPostgreSQL.Adapter,
         database_name: "reporting.order_rollup",
         kind: :materialized_view,
         query: fn selecto -> Selecto.select(selecto, [{:field, "id", "order_id"}]) end,
@@ -1164,11 +1178,16 @@ defmodule Selecto.DomainValidatorTest do
       assert Enum.any?(errors, &String.contains?(&1, ":indexes[0].columns"))
 
       assert_raise ArgumentError, ~r/invalid SQL identifier/, fn ->
-        ViewPublisher.ddl_for(:view, "safe; DROP VIEW safe", "select 1")
+        ViewPublisher.ddl_for(
+          SelectoDBPostgreSQL.Adapter,
+          :view,
+          "safe; DROP VIEW safe",
+          "select 1"
+        )
       end
 
       assert_raise ArgumentError, ~r/invalid SQL identifier/, fn ->
-        ViewPublisher.refresh_sql("safe --")
+        ViewPublisher.refresh_sql(SelectoDBPostgreSQL.Adapter, "safe --")
       end
     end
 
@@ -1187,6 +1206,7 @@ defmodule Selecto.DomainValidatorTest do
       }
 
       spec = %{
+        adapter: SelectoDBPostgreSQL.Adapter,
         database_name: "reporting.order_rollup",
         kind: :view,
         query: fn selecto -> selecto |> Selecto.select([{:field, "id", "id"}]) end,

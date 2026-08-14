@@ -9,6 +9,21 @@ defmodule SelectoDBSQLite.Adapter do
   def name, do: :sqlite
 
   @impl true
+  def dialect, do: Selecto.TestDialect.SQLite
+
+  @impl true
+  def capability(:text_search) do
+    %{
+      feature: :text_search,
+      supported?: true,
+      modes: [:websearch, :boolean, :phrase],
+      default_mode: :websearch
+    }
+  end
+
+  def capability(feature), do: %{feature: feature, supported?: supports?(feature)}
+
+  @impl true
   def connect(connection) when is_reference(connection), do: {:ok, connection}
   def connect(opts) when is_map(opts), do: connect(Map.to_list(opts))
 

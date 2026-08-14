@@ -34,7 +34,7 @@ defmodule Selecto.Domain.Sections do
   @projection_sections MapSet.new([
                          "columns",
                          "custom_columns",
-                         "jsonb_schemas",
+                         "json_schemas",
                          "subfilters",
                          "window_functions",
                          "pagination",

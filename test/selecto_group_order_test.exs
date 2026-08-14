@@ -61,7 +61,7 @@ defmodule Selecto.GroupOrderTest do
     assert length(aliases) == 1
   end
 
-  test "ROLLUP falls back to plain grouping for adapters without rollup support" do
+  test "ROLLUP fails closed for adapters without rollup rendering" do
     domain = %{
       source: %{
         source_table: "sales",
@@ -89,11 +89,9 @@ defmodule Selecto.GroupOrderTest do
       |> Selecto.group_by(rollup: ["region"])
       |> Selecto.order_by([{"region", :asc}])
 
-    {sql, _aliases, _params} = Selecto.gen_sql(selecto, [])
-
-    assert String.contains?(String.downcase(sql), "group by")
-    refute String.contains?(String.downcase(sql), "rollup")
-    refute String.contains?(sql, ") as rollupfix")
+    assert_raise ArgumentError,
+                 ~r/does not implement rollup rendering/,
+                 fn -> Selecto.gen_sql(selecto, []) end
   end
 
   test "ROLLUP supports linked grouping-set steps" do
@@ -119,7 +117,7 @@ defmodule Selecto.GroupOrderTest do
 
     selecto =
       Selecto.configure(domain, :mock_connection,
-        adapter: Selecto.DB.PostgreSQL,
+        adapter: SelectoDBPostgreSQL.Adapter,
         rollup_sort_fix: false,
         validate: false
       )

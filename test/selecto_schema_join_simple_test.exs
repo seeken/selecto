@@ -161,7 +161,7 @@ defmodule Selecto.Schema.JoinSimpleTest do
       custom_columns = join.config.custom_columns
       assert Map.has_key?(custom_columns, "tags_list")
       assert custom_columns["tags_list"].name == "Tags List"
-      assert String.contains?(custom_columns["tags_list"].select, "string_agg")
+      assert custom_columns["tags_list"].select == {:string_agg, "tags.name", ", "}
       assert custom_columns["tags_list"].filterable == false
 
       # Check faceted filters

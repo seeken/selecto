@@ -5,6 +5,7 @@ defmodule Selecto.Integration.SQLiteTextSearchTest do
     @behaviour Selecto.DB.Adapter
 
     def name, do: :sqlite
+    def dialect, do: Selecto.TestDialect.SQLite
     def connect(_opts), do: {:error, :unsupported}
     def execute(_connection, _query, _params, _opts), do: {:error, :unsupported}
     def placeholder(_index), do: "?"

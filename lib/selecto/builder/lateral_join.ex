@@ -3,11 +3,13 @@ defmodule Selecto.Builder.LateralJoin do
   SQL generation for LATERAL joins.
 
   This module handles the conversion of LATERAL join specifications into
-  proper PostgreSQL LATERAL JOIN SQL syntax.
+  adapter-selected lateral/table-function join syntax.
   """
 
   alias Selecto.Advanced.LateralJoin.Spec
   alias Selecto.AdapterSupport
+  alias Selecto.Dialect.Collection.Operation, as: CollectionOperation
+  alias Selecto.Dialect.TableFunction.Join, as: TableFunctionJoin
   alias Selecto.Error
   # alias Selecto.Builder.SQL
 
@@ -39,8 +41,10 @@ defmodule Selecto.Builder.LateralJoin do
   Build a single LATERAL JOIN SQL clause.
   """
   def build_lateral_join(%Spec{} = spec, opts \\ []) do
-    adapter = Keyword.get(opts, :adapter)
     selecto = Keyword.get(opts, :selecto)
+
+    adapter =
+      Keyword.get(opts, :adapter) || adapter_from(selecto) || AdapterSupport.default_adapter()
 
     case spec.subquery_builder do
       nil ->
@@ -48,10 +52,8 @@ defmodule Selecto.Builder.LateralJoin do
         build_table_function_lateral_join(spec, adapter, selecto)
 
       subquery_builder when is_function(subquery_builder) ->
-        join_syntax = join_syntax(spec, adapter)
-
         # Subquery LATERAL join
-        build_subquery_lateral_join(spec, join_syntax)
+        build_subquery_lateral_join(spec, adapter, selecto)
     end
   end
 
@@ -78,35 +80,14 @@ defmodule Selecto.Builder.LateralJoin do
          adapter,
          selecto
        ) do
-    join_syntax = join_syntax(spec, adapter)
     {function_sql, _joins, params} = build_table_function_sql(spec.table_function, selecto)
 
-    sql =
-      case join_syntax do
-        {:lateral, join_type_sql} ->
-          [join_type_sql, " JOIN LATERAL ", function_sql, " AS ", spec.alias, " ON true"]
-
-        {:apply, apply_sql} ->
-          [apply_sql, " ", function_sql, " AS ", spec.alias]
-      end
-
-    {sql, params}
+    {render_join!(spec, adapter, selecto, function_sql, :table_function), params}
   end
 
-  defp build_table_function_lateral_join(%Spec{} = spec, adapter, _selecto) do
-    join_syntax = join_syntax(spec, adapter)
-    {function_sql, params} = build_table_function_sql(spec.table_function)
-
-    sql =
-      case join_syntax do
-        {:lateral, join_type_sql} ->
-          [join_type_sql, " JOIN LATERAL ", function_sql, " AS ", spec.alias, " ON true"]
-
-        {:apply, apply_sql} ->
-          [apply_sql, " ", function_sql, " AS ", spec.alias]
-      end
-
-    {sql, params}
+  defp build_table_function_lateral_join(%Spec{} = spec, adapter, selecto) do
+    {function_sql, params} = build_table_function_sql(spec.table_function, adapter, selecto)
+    {render_join!(spec, adapter, selecto, function_sql, :table_function), params}
   end
 
   defp build_json_table_join(%Spec{} = spec, adapter) do
@@ -172,38 +153,56 @@ defmodule Selecto.Builder.LateralJoin do
   end
 
   # Build LATERAL join with correlated subquery
-  defp build_subquery_lateral_join(%Spec{} = spec, join_syntax) do
+  defp build_subquery_lateral_join(%Spec{} = spec, adapter, selecto) do
     # Build the subquery - we need to pass a dummy base query since
     # the actual correlation will be resolved at SQL generation time
-    dummy_base = %Selecto{domain: %{}, postgrex_opts: [], set: %{}}
+    dummy_base =
+      selecto ||
+        %Selecto{
+          domain: %{},
+          adapter: adapter,
+          runtime: %Selecto.Runtime.Context{adapter: adapter, connection: :compile_only},
+          connection: :compile_only,
+          set: %{}
+        }
+
     subquery = spec.subquery_builder.(dummy_base)
 
     # Generate SQL for the subquery
     {subquery_sql, params} = Selecto.to_sql(subquery)
 
-    subquery_iodata =
+    subquery_sql =
       subquery_sql
       |> rewrite_subquery_root_alias(build_subquery_root_alias(subquery))
       |> restore_outer_ref_alias()
-      |> convert_sql_placeholders_to_iodata(params)
 
-    sql =
-      case join_syntax do
-        {:lateral, join_type_sql} ->
-          [join_type_sql, " JOIN LATERAL (", subquery_iodata, ") AS ", spec.alias, " ON true"]
-
-        {:apply, apply_sql} ->
-          [apply_sql, " (", subquery_iodata, ") AS ", spec.alias]
-      end
+    subquery_iodata =
+      Selecto.SQL.Params.rebind_finalized(subquery_sql, params, subquery.adapter || adapter)
 
     # Params are now embedded as {:param, value} markers in subquery_iodata.
-    {sql, []}
+    {render_join!(spec, adapter, selecto, ["(", subquery_iodata, ")"], :subquery), []}
   end
 
   # Build table function SQL
-  defp build_table_function_sql({:unnest, column_ref}) do
-    {["UNNEST(", column_ref, ")"], []}
+  defp build_table_function_sql({:unnest, column_ref}, adapter, selecto) do
+    fragment = %CollectionOperation{
+      operation: :unnest,
+      clause: :table,
+      column: column_ref,
+      order_by: [],
+      options: %{}
+    }
+
+    case Selecto.DialectSupport.render_collection_operation(adapter, fragment, selecto) do
+      {:ok, {sql, params}} -> {sql, params}
+      {:ok, sql} -> {sql, []}
+      {:error, %Error{} = error} -> raise Error.to_exception(error)
+      {:error, reason} -> raise ArgumentError, "unsupported UNNEST operation: #{inspect(reason)}"
+    end
   end
+
+  defp build_table_function_sql(table_function, _adapter, _selecto),
+    do: build_table_function_sql(table_function)
 
   defp build_table_function_sql({:function, func_name, args}) do
     arg_sql = build_function_args(args)
@@ -317,53 +316,28 @@ defmodule Selecto.Builder.LateralJoin do
   defp escape_sql_literal(value) when is_binary(value), do: String.replace(value, "'", "''")
   defp escape_sql_literal(value), do: to_string(value)
 
-  # Build JOIN type SQL
-  defp build_join_type(:left), do: "LEFT"
-  defp build_join_type(:inner), do: "INNER"
-  defp build_join_type(:right), do: "RIGHT"
-  defp build_join_type(:full), do: "FULL"
+  defp render_join!(spec, adapter, selecto, source_sql, source_kind) do
+    fragment = %TableFunctionJoin{
+      join_type: spec.join_type,
+      source_sql: source_sql,
+      alias: spec.alias,
+      source_kind: source_kind
+    }
 
-  defp build_join_type(unknown),
-    do: raise(ArgumentError, "Unknown LATERAL join type: #{inspect(unknown)}")
+    case Selecto.DialectSupport.render_table_function_join(adapter, fragment, selecto || %{}) do
+      {:ok, sql} ->
+        sql
 
-  defp build_apply_join_type(:inner), do: "CROSS APPLY"
-  defp build_apply_join_type(:left), do: "OUTER APPLY"
-
-  defp build_apply_join_type(unknown) do
-    error =
-      Error.validation_error("MSSQL APPLY only supports :inner and :left lateral joins", %{
-        adapter: :mssql,
-        join_type: unknown,
-        supported_join_types: [:inner, :left],
-        unsupported_feature: :lateral_join
-      })
-
-    raise Error.to_exception(error)
-  end
-
-  defp join_syntax(%Spec{} = spec, adapter) do
-    cond do
-      adapter in [nil, ""] ->
-        {:lateral, build_join_type(spec.join_type)}
-
-      AdapterSupport.supports_feature?(adapter, :apply_join) ->
-        {:apply, build_apply_join_type(spec.join_type)}
-
-      AdapterSupport.supports_feature?(adapter, :lateral_join) ->
-        {:lateral, build_join_type(spec.join_type)}
-
-      true ->
-        adapter_name = AdapterSupport.adapter_name(adapter) || adapter
-
-        error =
-          Error.validation_error("Adapter does not support lateral/apply joins", %{
-            adapter: adapter_name,
-            unsupported_feature: :lateral_join
-          })
-
+      {:error, %Error{} = error} ->
         raise Error.to_exception(error)
+
+      {:error, reason} ->
+        raise ArgumentError, "unsupported table-function join: #{inspect(reason)}"
     end
   end
+
+  defp adapter_from(%Selecto{adapter: adapter}), do: adapter
+  defp adapter_from(_selecto), do: nil
 
   @doc """
   Integrate LATERAL joins into the main SQL generation pipeline.
@@ -414,61 +388,6 @@ defmodule Selecto.Builder.LateralJoin do
         true -> nil
       end
     end)
-  end
-
-  # Convert SQL with $1-style placeholders to iodata markers that participate
-  # in global parameter numbering.
-  defp convert_sql_placeholders_to_iodata(sql, params) do
-    values_by_index =
-      params
-      |> Enum.with_index(1)
-      |> Map.new(fn {value, idx} -> {idx, value} end)
-
-    cond do
-      String.contains?(sql, "$") ->
-        convert_numbered_placeholders(sql, values_by_index, ~r/(\$\d+)/, ~r/^\$(\d+)$/)
-
-      String.contains?(sql, "@p") ->
-        convert_numbered_placeholders(sql, values_by_index, ~r/(@p\d+)/, ~r/^@p(\d+)$/i)
-
-      String.contains?(sql, "?") ->
-        convert_qmark_placeholders(sql, params)
-
-      true ->
-        sql
-    end
-  end
-
-  defp convert_numbered_placeholders(sql, values_by_index, split_regex, capture_regex) do
-    Regex.split(split_regex, sql, include_captures: true, trim: false)
-    |> Enum.map(fn part ->
-      case Regex.run(capture_regex, part, capture: :all_but_first) do
-        [idx] ->
-          case Map.fetch(values_by_index, String.to_integer(idx)) do
-            {:ok, value} -> {:param, value}
-            :error -> part
-          end
-
-        _ ->
-          part
-      end
-    end)
-  end
-
-  defp convert_qmark_placeholders(sql, params) do
-    segments = String.split(sql, "?", trim: false)
-
-    if length(segments) == length(params) + 1 do
-      [first | rest] = segments
-
-      rest
-      |> Enum.zip(params)
-      |> Enum.reduce([first], fn {segment, value}, acc ->
-        acc ++ [{:param, value}, segment]
-      end)
-    else
-      sql
-    end
   end
 
   defp build_subquery_root_alias(query_selecto) do

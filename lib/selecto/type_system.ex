@@ -16,9 +16,9 @@ defmodule Selecto.TypeSystem do
   - **String**: `:string`, `:text`, `:varchar`, `:char`
   - **Boolean**: `:boolean`
   - **DateTime**: `:date`, `:time`, `:datetime`, `:utc_datetime`, `:naive_datetime`, `:timestamp`
-  - **JSON**: `:json`, `:jsonb`, `:map`
+  - **JSON**: `:json`, `:map`
   - **Array**: `{:array, inner_type}`
-  - **Binary**: `:binary`, `:bytea`
+  - **Binary**: `:binary`
   - **UUID**: `:uuid`, `:binary_id`
   - **Spatial**: `:geometry`, `:geography`, `:point`, `:polygon`, etc.
 
@@ -59,10 +59,8 @@ defmodule Selecto.TypeSystem do
           | :naive_datetime
           | :timestamp
           | :json
-          | :jsonb
           | :map
           | :binary
-          | :bytea
           | :uuid
           | :binary_id
           | :geometry
@@ -74,6 +72,7 @@ defmodule Selecto.TypeSystem do
           | :multilinestring
           | :multipolygon
           | :geometrycollection
+          | {:native, atom(), atom() | String.t()}
           | {:array, sql_type()}
 
   @type type_category ::
@@ -92,8 +91,8 @@ defmodule Selecto.TypeSystem do
   @numeric_types [:integer, :bigint, :smallint, :decimal, :float, :numeric]
   @string_types [:string, :text, :varchar, :char]
   @datetime_types [:date, :time, :datetime, :utc_datetime, :naive_datetime, :timestamp]
-  @json_types [:json, :jsonb, :map]
-  @binary_types [:binary, :bytea]
+  @json_types [:json, :map]
+  @binary_types [:binary]
   @uuid_types [:uuid, :binary_id]
   @spatial_types [
     :geometry,
@@ -122,9 +121,7 @@ defmodule Selecto.TypeSystem do
     :string_agg => :string,
     # JSON aggregation
     :json_agg => :json,
-    :jsonb_agg => :jsonb,
     :json_object_agg => :json,
-    :jsonb_object_agg => :jsonb,
     :array_agg => :array,
     # Boolean aggregates
     :bool_and => :boolean,
@@ -173,11 +170,9 @@ defmodule Selecto.TypeSystem do
     :rpad => :string,
     :left => :string,
     :right => :string,
-    :split_part => :string,
     :initcap => :string,
     :translate => :string,
     :format => :string,
-    :to_char => :string,
     :chr => :string,
     :ascii => :integer,
     :length => :integer,
@@ -234,23 +229,16 @@ defmodule Selecto.TypeSystem do
     :make_date => :date,
     :make_time => :time,
     :make_timestamp => :timestamp,
-    :make_timestamptz => :timestamp,
     :to_date => :date,
-    :to_timestamp => :timestamp,
     # Type conversion
     :cast => :dynamic,
     :to_number => :decimal,
     # JSON functions
     :to_json => :json,
-    :to_jsonb => :jsonb,
     :json_build_object => :json,
-    :jsonb_build_object => :jsonb,
     :json_build_array => :json,
-    :jsonb_build_array => :jsonb,
     :json_typeof => :string,
-    :jsonb_typeof => :string,
     :json_array_length => :integer,
-    :jsonb_array_length => :integer,
     # Conditional
     :case => :dynamic,
     :case_when => :dynamic,
@@ -319,7 +307,7 @@ defmodule Selecto.TypeSystem do
   defp do_infer_type(_selecto, {:literal, %DateTime{}}), do: :utc_datetime
   defp do_infer_type(_selecto, {:literal, %NaiveDateTime{}}), do: :naive_datetime
   defp do_infer_type(_selecto, {:literal, val}) when is_list(val), do: {:array, :unknown}
-  defp do_infer_type(_selecto, {:literal, val}) when is_map(val), do: :jsonb
+  defp do_infer_type(_selecto, {:literal, val}) when is_map(val), do: :json
   defp do_infer_type(_selecto, {:literal, _}), do: :unknown
 
   # Count always returns bigint
@@ -362,9 +350,7 @@ defmodule Selecto.TypeSystem do
 
   # JSON aggregation
   defp do_infer_type(_selecto, {:json_agg, _}), do: :json
-  defp do_infer_type(_selecto, {:jsonb_agg, _}), do: :jsonb
   defp do_infer_type(_selecto, {:json_object_agg, _, _}), do: :json
-  defp do_infer_type(_selecto, {:jsonb_object_agg, _, _}), do: :jsonb
 
   # Array aggregation - infer inner type
   defp do_infer_type(selecto, {:array_agg, field}) do
@@ -426,6 +412,10 @@ defmodule Selecto.TypeSystem do
 
   # Extract returns numeric
   defp do_infer_type(_selecto, {:extract, _part, _field}), do: :decimal
+  defp do_infer_type(_selecto, {:datetime_extract, _field, _part, _options}), do: :decimal
+  defp do_infer_type(_selecto, {:datetime_format, _field, _format, _options}), do: :string
+  defp do_infer_type(_selecto, {:text_normalize, _field, _options}), do: :string
+  defp do_infer_type(_selecto, {:bucket, _field, _spec}), do: :string
 
   # Concat returns string
   defp do_infer_type(_selecto, {:concat, _fields}), do: :string
@@ -638,6 +628,11 @@ defmodule Selecto.TypeSystem do
   @spec valid_type?(term()) :: boolean()
   def valid_type?({:array, inner}), do: valid_type?(inner)
 
+  def valid_type?({:native, adapter, type})
+      when is_atom(adapter) and not is_nil(adapter) and
+             ((is_atom(type) and not is_nil(type)) or (is_binary(type) and type != "")),
+      do: true
+
   def valid_type?(type) when is_atom(type),
     do:
       normalize_type(type) in (@numeric_types ++
@@ -654,26 +649,27 @@ defmodule Selecto.TypeSystem do
   Parse a SQL type string into an atom type.
   """
   @spec parse_sql_type(String.t()) :: sql_type()
-  def parse_sql_type(type_str) when is_binary(type_str) do
-    type_str
-    |> String.downcase()
-    |> String.trim()
-    |> do_parse_sql_type()
+  def parse_sql_type(type_str, adapter \\ nil) when is_binary(type_str) do
+    case Selecto.AdapterSupport.normalize_type(adapter, type_str) do
+      normalized when is_binary(normalized) ->
+        normalized
+        |> String.downcase()
+        |> String.trim()
+        |> do_parse_sql_type()
+
+      normalized ->
+        normalize_type(normalized)
+    end
   end
 
   defp do_parse_sql_type("integer"), do: :integer
   defp do_parse_sql_type("int"), do: :integer
-  defp do_parse_sql_type("int4"), do: :integer
   defp do_parse_sql_type("bigint"), do: :bigint
-  defp do_parse_sql_type("int8"), do: :bigint
   defp do_parse_sql_type("smallint"), do: :smallint
-  defp do_parse_sql_type("int2"), do: :smallint
   defp do_parse_sql_type("decimal"), do: :decimal
   defp do_parse_sql_type("numeric"), do: :numeric
   defp do_parse_sql_type("real"), do: :float
-  defp do_parse_sql_type("float4"), do: :float
   defp do_parse_sql_type("double precision"), do: :float
-  defp do_parse_sql_type("float8"), do: :float
   defp do_parse_sql_type("float"), do: :float
   defp do_parse_sql_type("text"), do: :text
   defp do_parse_sql_type("varchar" <> _), do: :varchar
@@ -681,19 +677,13 @@ defmodule Selecto.TypeSystem do
   defp do_parse_sql_type("char" <> _), do: :char
   defp do_parse_sql_type("character" <> _), do: :char
   defp do_parse_sql_type("boolean"), do: :boolean
-  defp do_parse_sql_type("bool"), do: :boolean
   defp do_parse_sql_type("date"), do: :date
   defp do_parse_sql_type("time" <> _), do: :time
   defp do_parse_sql_type("timestamp" <> _), do: :timestamp
-  defp do_parse_sql_type("timestamptz"), do: :utc_datetime
   defp do_parse_sql_type("json"), do: :json
-  defp do_parse_sql_type("jsonb"), do: :jsonb
-  defp do_parse_sql_type("bytea"), do: :bytea
   defp do_parse_sql_type("uuid"), do: :uuid
   defp do_parse_sql_type("geometry"), do: :geometry
-  defp do_parse_sql_type("public.geometry"), do: :geometry
   defp do_parse_sql_type("geography"), do: :geography
-  defp do_parse_sql_type("public.geography"), do: :geography
   defp do_parse_sql_type("point"), do: :point
   defp do_parse_sql_type("linestring"), do: :linestring
   defp do_parse_sql_type("polygon"), do: :polygon

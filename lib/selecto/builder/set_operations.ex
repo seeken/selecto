@@ -93,60 +93,7 @@ defmodule Selecto.Builder.SetOperations do
     # one. Restoring markers lets the outer builder finalize the complete set
     # expression once with globally coordinated placeholder numbers.
     {sql, _aliases, params} = Sql.build(clean_selecto, [])
-    {restore_param_markers(sql, params), params}
-  end
-
-  defp restore_param_markers(sql, params) do
-    values_by_index =
-      params
-      |> Enum.with_index(1)
-      |> Map.new(fn {value, index} -> {index, value} end)
-
-    cond do
-      Regex.match?(~r/\$\d+/, sql) ->
-        restore_numbered_markers(sql, values_by_index, ~r/(\$\d+)/, ~r/^\$(\d+)$/)
-
-      Regex.match?(~r/@p\d+/i, sql) ->
-        restore_numbered_markers(sql, values_by_index, ~r/(@p\d+)/i, ~r/^@p(\d+)$/i)
-
-      String.contains?(sql, "?") ->
-        restore_qmark_markers(sql, params)
-
-      true ->
-        sql
-    end
-  end
-
-  defp restore_numbered_markers(sql, values_by_index, split_regex, capture_regex) do
-    Regex.split(split_regex, sql, include_captures: true, trim: false)
-    |> Enum.map(fn part ->
-      case Regex.run(capture_regex, part, capture: :all_but_first) do
-        [index] ->
-          case Map.fetch(values_by_index, String.to_integer(index)) do
-            {:ok, value} -> {:param, value}
-            :error -> part
-          end
-
-        _ ->
-          part
-      end
-    end)
-  end
-
-  defp restore_qmark_markers(sql, params) do
-    case String.split(sql, "?", trim: false) do
-      segments when length(segments) == length(params) + 1 ->
-        [first | rest] = segments
-
-        rest
-        |> Enum.zip(params)
-        |> Enum.reduce([first], fn {segment, value}, acc ->
-          acc ++ [{:param, value}, segment]
-        end)
-
-      _segments ->
-        sql
-    end
+    {Selecto.SQL.Params.rebind_finalized(sql, params, clean_selecto.adapter), params}
   end
 
   # Build the operation SQL keyword
@@ -314,7 +261,7 @@ defmodule Selecto.Builder.SetOperations do
   end
 
   @set_result_metadata_fields [
-    :postgrex_opts,
+    :runtime,
     :adapter,
     :connection,
     :domain,

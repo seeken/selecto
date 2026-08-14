@@ -1,7 +1,7 @@
 defmodule Selecto.SQL.Params do
   @moduledoc false
   # Utilities for turning an iodata tree with {:param, value} markers into
-  # a final SQL string with $n placeholders and the ordered params list.
+  # final SQL using the configured adapter's placeholder strategy.
   #
   # Extended in Phase 1 to support CTE markers for advanced join patterns.
 
@@ -11,7 +11,7 @@ defmodule Selecto.SQL.Params do
 
   @spec finalize(iodata() | [fragment], Keyword.t()) :: {String.t(), [any()]}
   def finalize(fragments, opts \\ []) do
-    adapter = Keyword.get(opts, :adapter, Selecto.AdapterSupport.default_adapter())
+    adapter = Keyword.fetch!(opts, :adapter)
     placeholder_fun = placeholder_fun(adapter)
 
     {iodata, params, _idx} =
@@ -31,7 +31,7 @@ defmodule Selecto.SQL.Params do
   @spec finalize_with_ctes(iodata() | [fragment], Keyword.t()) ::
           {[{String.t(), String.t()}], String.t(), [any()]}
   def finalize_with_ctes(iodata_with_ctes, opts \\ []) do
-    adapter = Keyword.get(opts, :adapter, Selecto.AdapterSupport.default_adapter())
+    adapter = Keyword.fetch!(opts, :adapter)
     placeholder_fun = placeholder_fun(adapter)
     {cte_sections, main_iodata, extracted_params} = extract_ctes(List.wrap(iodata_with_ctes))
 
@@ -52,6 +52,21 @@ defmodule Selecto.SQL.Params do
     # Combine all parameters in correct order
     final_params = cte_params ++ main_specific_params ++ extracted_params
     {processed_ctes, main_sql, final_params}
+  end
+
+  @doc false
+  def rebind_finalized(sql, [], adapter) when is_binary(sql) and is_atom(adapter), do: sql
+
+  def rebind_finalized(sql, params, adapter)
+      when is_binary(sql) and is_list(params) and is_atom(adapter) do
+    placeholder = placeholder_fun(adapter)
+    placeholders = Enum.map(1..length(params), &(&1 |> placeholder.() |> IO.iodata_to_binary()))
+
+    if Enum.uniq(placeholders) |> length() == 1 do
+      rebind_repeated(sql, params, hd(placeholders))
+    else
+      rebind_numbered(sql, params, placeholders)
+    end
   end
 
   # Process iodata with parameter offset for coordinated numbering
@@ -149,13 +164,63 @@ defmodule Selecto.SQL.Params do
 
   defp traverse([], state, _placeholder_fun), do: state
 
+  defp rebind_repeated(sql, params, placeholder) do
+    segments = String.split(sql, placeholder, trim: false)
+
+    if length(segments) == length(params) + 1 do
+      [first | rest] = segments
+
+      rest
+      |> Enum.zip(params)
+      |> Enum.reduce([first], fn {segment, value}, acc -> [acc, {:param, value}, segment] end)
+    else
+      raise ArgumentError,
+            "adapter placeholder count does not match the finalized parameter count"
+    end
+  end
+
+  defp rebind_numbered(sql, params, placeholders) do
+    values = placeholders |> Enum.zip(params) |> Map.new()
+
+    pattern =
+      placeholders
+      |> Enum.sort_by(&String.length/1, :desc)
+      |> Enum.map(&Regex.escape/1)
+      |> Enum.join("|")
+      |> then(&Regex.compile!("(#{&1})"))
+
+    rebound =
+      Regex.split(pattern, sql, include_captures: true, trim: false)
+      |> Enum.map(fn part ->
+        case Map.fetch(values, part) do
+          {:ok, value} -> {:param, value}
+          :error -> part
+        end
+      end)
+
+    consumed = Enum.count(rebound, &match?({:param, _value}, &1))
+
+    if consumed == length(params) do
+      rebound
+    else
+      raise ArgumentError,
+            "adapter placeholders do not match the finalized parameter sequence"
+    end
+  end
+
   defp placeholder_fun(adapter) when is_atom(adapter) do
     if Selecto.AdapterSupport.callback_available?(adapter, :placeholder, 1) do
       &adapter.placeholder/1
     else
-      &["$", Integer.to_string(&1)]
+      raise ArgumentError,
+            "adapter #{inspect(adapter)} must implement placeholder/1 before SQL finalization"
     end
   end
 
-  defp placeholder_fun(_adapter), do: &["$", Integer.to_string(&1)]
+  defp placeholder_fun(adapter),
+    do:
+      raise(
+        ArgumentError,
+        "SQL finalization requires an explicit adapter, got: #{inspect(adapter)}"
+      )
 end

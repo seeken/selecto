@@ -23,21 +23,33 @@ defmodule Selecto.Configuration do
   - `:validate` - (boolean, default: true) Whether to validate the domain configuration
   - `:pool` - (boolean, default: false) Whether to enable connection pooling
   - `:pool_options` - Connection pool configuration options
-  - `:adapter` - (module, default: `SelectoDBPostgreSQL.Adapter`) Database adapter module
+  - `:adapter` - database adapter module. It must be passed explicitly unless
+    the host application configures `config :selecto, :default_adapter, ...`.
   - `:rollup_sort_fix` - (`true | false | :auto`, default: `:auto`) whether to
     wrap `GROUP BY ROLLUP ... ORDER BY` queries in a compatibility subquery;
-    `:auto` disables the wrapper on PostgreSQL 18+
+    `:auto` delegates version-specific behavior to the configured adapter.
 
   ## Examples
 
       # Basic usage (validation enabled by default)
-      selecto = Selecto.Configuration.configure(domain, connection_input)
+      selecto =
+        Selecto.Configuration.configure(domain, connection_input,
+          adapter: MyApp.SelectoAdapter
+        )
 
       # With connection pooling
-      selecto = Selecto.Configuration.configure(domain, connection_input, pool: true)
+      selecto =
+        Selecto.Configuration.configure(domain, connection_input,
+          adapter: MyApp.SelectoAdapter,
+          pool: true
+        )
 
       # Disable validation for performance
-      selecto = Selecto.Configuration.configure(domain, connection_input, validate: false)
+      selecto =
+        Selecto.Configuration.configure(domain, connection_input,
+          adapter: MyApp.SelectoAdapter,
+          validate: false
+        )
   """
   @spec configure(Selecto.Types.domain(), term(), keyword()) :: Selecto.Types.t()
   def configure(domain, connection_input, opts \\ []) do
@@ -46,7 +58,7 @@ defmodule Selecto.Configuration do
 
     validate? = Keyword.get(opts, :validate, true)
     use_pool? = Keyword.get(opts, :pool, false)
-    adapter = Keyword.get(opts, :adapter, Selecto.AdapterSupport.default_adapter())
+    adapter = resolve_adapter!(opts, connection_input)
     pool_options = opts |> Keyword.get(:pool_options, []) |> Keyword.put_new(:adapter, adapter)
 
     extension_specs = Selecto.Extensions.from_domain(domain)
@@ -58,7 +70,8 @@ defmodule Selecto.Configuration do
 
     # Handle connection pooling
     final_connection_input =
-      if use_pool? and not match?({:pool, _}, connection_input) do
+      if use_pool? and not match?({:pool, _}, connection_input) and
+           not match?(%Selecto.Runtime.Context{}, connection_input) do
         case Selecto.ConnectionPool.start_pool(connection_input, pool_options) do
           {:ok, pool_ref} ->
             {:pool, pool_ref}
@@ -74,27 +87,8 @@ defmodule Selecto.Configuration do
         connection_input
       end
 
-    # Initialize connection based on adapter
-    connection =
-      if Selecto.AdapterSupport.postgresql_adapter?(adapter) do
-        final_connection_input
-      else
-        # For non-PostgreSQL adapters, reuse pooled adapter reference when available.
-        case final_connection_input do
-          {:pool, %{adapter: ^adapter} = pool_ref} ->
-            pool_ref
-
-          _ ->
-            # Otherwise let the adapter establish its own connection.
-            case adapter.connect(connection_input) do
-              {:ok, conn} ->
-                conn
-
-              {:error, reason} ->
-                raise "Failed to connect with adapter #{inspect(adapter)}: #{inspect(reason)}"
-            end
-        end
-      end
+    connection = initialize_connection!(adapter, final_connection_input)
+    runtime = runtime_context(adapter, connection, final_connection_input)
 
     rollup_sort_fix = resolve_rollup_sort_fix(adapter, connection, opts)
 
@@ -105,8 +99,7 @@ defmodule Selecto.Configuration do
     policy = Selecto.Policy.new!(domain, config, opts)
 
     %Selecto{
-      # Historical struct field; adapter-neutral rename is tracked as a separate cleanup.
-      postgrex_opts: final_connection_input,
+      runtime: runtime,
       adapter: adapter,
       connection: connection,
       domain: domain,
@@ -123,6 +116,61 @@ defmodule Selecto.Configuration do
       }
     }
   end
+
+  defp resolve_adapter!(opts, connection_input) do
+    configured_adapter =
+      Keyword.get(opts, :adapter) ||
+        Selecto.Runtime.Context.adapter(connection_input) ||
+        Selecto.AdapterSupport.default_adapter()
+
+    case configured_adapter do
+      adapter when is_atom(adapter) and not is_nil(adapter) ->
+        adapter
+
+      _ ->
+        raise ArgumentError,
+              "Selecto.configure/3 requires an explicit :adapter or a configured " <>
+                "application default"
+    end
+  end
+
+  defp initialize_connection!(adapter, %Selecto.Runtime.Context{
+         adapter: adapter,
+         connection: connection
+       }),
+       do: connection
+
+  defp initialize_connection!(adapter, %Selecto.Runtime.Context{adapter: context_adapter}) do
+    raise ArgumentError,
+          "configured adapter #{inspect(adapter)} does not match runtime context adapter " <>
+            inspect(context_adapter)
+  end
+
+  defp initialize_connection!(adapter, {:pool, %{adapter: adapter} = pool_ref}), do: pool_ref
+
+  defp initialize_connection!(adapter, connection_input) do
+    unless Selecto.AdapterSupport.callback_available?(adapter, :connect, 1) do
+      raise ArgumentError, "adapter #{inspect(adapter)} does not implement connect/1"
+    end
+
+    case adapter.connect(connection_input) do
+      {:ok, connection} ->
+        connection
+
+      {:error, reason} ->
+        raise "Failed to connect with adapter #{inspect(adapter)}: #{inspect(reason)}"
+    end
+  end
+
+  defp runtime_context(
+         adapter,
+         connection,
+         %Selecto.Runtime.Context{adapter: adapter, connection: connection} = runtime
+       ),
+       do: runtime
+
+  defp runtime_context(adapter, connection, _connection_input),
+    do: Selecto.Runtime.Context.new(adapter, connection)
 
   defp resolve_rollup_sort_fix(adapter, connection, opts) do
     case Keyword.get(opts, :rollup_sort_fix, :auto) do
@@ -157,10 +205,14 @@ defmodule Selecto.Configuration do
   ## Examples
 
       # Basic usage
-      selecto = Selecto.Configuration.from_ecto(MyApp.Repo, MyApp.User)
+      selecto =
+        Selecto.Configuration.from_ecto(MyApp.Repo, MyApp.User,
+          adapter: MyApp.SelectoAdapter
+        )
 
       # With joins and options
       selecto = Selecto.Configuration.from_ecto(MyApp.Repo, MyApp.User,
+        adapter: MyApp.SelectoAdapter,
         joins: [:posts, :profile],
         redact_fields: [:password_hash]
       )

@@ -2,6 +2,12 @@ defmodule Selecto.TaggingTest do
   use ExUnit.Case
   alias Selecto.Builder.Sql.Tagging
 
+  defp selecto, do: %Selecto{adapter: SelectoDBPostgreSQL.Adapter}
+
+  defp finalize(iodata) do
+    Selecto.SQL.Params.finalize(iodata, adapter: SelectoDBPostgreSQL.Adapter)
+  end
+
   @moduledoc """
   Tests for Phase 3 many-to-many tagging implementation.
 
@@ -11,17 +17,21 @@ defmodule Selecto.TaggingTest do
 
   describe "Tag Aggregation" do
     test "build_tag_aggregation_column generates proper string_agg SQL" do
-      result = Tagging.build_tag_aggregation_column("tags", "name", "tag_list")
-      sql = IO.iodata_to_binary(result)
+      result = Tagging.build_tag_aggregation_column(selecto(), "tags", "name", "tag_list")
+      {sql, params} = finalize(result)
 
-      assert sql == "string_agg(tags.name, ', ') as tag_list"
+      assert sql == "STRING_AGG(\"tags\".\"name\", $1) AS \"tag_list\""
+      assert params == [", "]
     end
 
     test "build_tag_aggregation_column handles different field names" do
-      result = Tagging.build_tag_aggregation_column("categories", "title", "category_names")
-      sql = IO.iodata_to_binary(result)
+      result =
+        Tagging.build_tag_aggregation_column(selecto(), "categories", "title", "category_names")
 
-      assert sql == "string_agg(categories.title, ', ') as category_names"
+      {sql, params} = finalize(result)
+
+      assert sql == "STRING_AGG(\"categories\".\"title\", $1) AS \"category_names\""
+      assert params == [", "]
     end
   end
 
@@ -56,7 +66,7 @@ defmodule Selecto.TaggingTest do
 
     test "build_faceted_tag_filter generates single tag EXISTS filter", %{config: config} do
       {where_iodata, params} = Tagging.build_faceted_tag_filter(config, "programming", :single)
-      where_sql = IO.iodata_to_binary(where_iodata)
+      {where_sql, finalized_params} = finalize(where_iodata)
 
       assert String.contains?(where_sql, "EXISTS (")
       assert String.contains?(where_sql, "FROM post_tags jt")
@@ -66,6 +76,7 @@ defmodule Selecto.TaggingTest do
       assert String.contains?(where_sql, ")")
 
       assert params == ["programming"]
+      assert finalized_params == params
     end
 
     test "build_faceted_tag_filter generates ANY match filter for multiple tags", %{
@@ -74,12 +85,13 @@ defmodule Selecto.TaggingTest do
       {where_iodata, params} =
         Tagging.build_faceted_tag_filter(config, ["elixir", "phoenix"], :any)
 
-      where_sql = IO.iodata_to_binary(where_iodata)
+      {where_sql, finalized_params} = finalize(where_iodata)
 
       assert String.contains?(where_sql, "EXISTS (")
-      assert String.contains?(where_sql, "AND t.name = ANY($1)")
+      assert String.contains?(where_sql, "AND t.name IN ($1, $2)")
 
-      assert params == [["elixir", "phoenix"]]
+      assert params == ["elixir", "phoenix"]
+      assert finalized_params == params
     end
 
     test "build_faceted_tag_filter generates ALL match filter requiring all tags", %{
@@ -87,14 +99,15 @@ defmodule Selecto.TaggingTest do
     } do
       tag_list = ["web", "backend", "api"]
       {where_iodata, params} = Tagging.build_faceted_tag_filter(config, tag_list, :all)
-      where_sql = IO.iodata_to_binary(where_iodata)
+      {where_sql, finalized_params} = finalize(where_iodata)
 
       assert String.contains?(where_sql, "SELECT COUNT(DISTINCT t.name)")
-      assert String.contains?(where_sql, "AND t.name = ANY($1)")
-      assert String.contains?(where_sql, ") = $2")
+      assert String.contains?(where_sql, "AND t.name IN ($1, $2, $3)")
+      assert String.contains?(where_sql, ") = $4")
 
       # [tags_array, required_count]
-      assert params == [tag_list, 3]
+      assert params == tag_list ++ [3]
+      assert finalized_params == params
     end
   end
 
@@ -111,29 +124,32 @@ defmodule Selecto.TaggingTest do
 
     test "build_tag_count_filter generates >= filter", %{config: config} do
       {where_iodata, params} = Tagging.build_tag_count_filter(config, {:gte, 3})
-      where_sql = IO.iodata_to_binary(where_iodata)
+      {where_sql, finalized_params} = finalize(where_iodata)
 
       assert String.contains?(where_sql, "SELECT COUNT(*) FROM post_tags jt")
       assert String.contains?(where_sql, "WHERE jt.post_id = main.id")
       assert String.contains?(where_sql, ") >= $1")
 
       assert params == [3]
+      assert finalized_params == params
     end
 
     test "build_tag_count_filter generates = filter", %{config: config} do
       {where_iodata, params} = Tagging.build_tag_count_filter(config, {:eq, 1})
-      where_sql = IO.iodata_to_binary(where_iodata)
+      {where_sql, finalized_params} = finalize(where_iodata)
 
       assert String.contains?(where_sql, ") = $1")
       assert params == [1]
+      assert finalized_params == params
     end
 
     test "build_tag_count_filter generates BETWEEN filter", %{config: config} do
       {where_iodata, params} = Tagging.build_tag_count_filter(config, {:between, 2, 5})
-      where_sql = IO.iodata_to_binary(where_iodata)
+      {where_sql, finalized_params} = finalize(where_iodata)
 
       assert String.contains?(where_sql, ") BETWEEN $1 AND $2")
       assert params == [2, 5]
+      assert finalized_params == params
     end
 
     test "build_tag_count_filter handles different operators", %{config: config} do
@@ -147,10 +163,11 @@ defmodule Selecto.TaggingTest do
 
       for {op, value, sql_op} <- operators do
         {where_iodata, params} = Tagging.build_tag_count_filter(config, {op, value})
-        where_sql = IO.iodata_to_binary(where_iodata)
+        {where_sql, finalized_params} = finalize(where_iodata)
 
         assert String.contains?(where_sql, ") #{sql_op} $1")
         assert params == [value]
+        assert finalized_params == params
       end
     end
   end

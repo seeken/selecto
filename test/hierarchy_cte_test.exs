@@ -56,7 +56,7 @@ defmodule Selecto.HierarchyCteTest do
 
   test "build_adjacency_list_cte generates valid recursive CTE" do
     # Mock selecto struct
-    selecto = %{postgrex_opts: :mock_connection}
+    selecto = %{connection: :mock_connection}
 
     # Mock join configuration
     join = :categories
@@ -102,7 +102,7 @@ defmodule Selecto.HierarchyCteTest do
   end
 
   test "build_adjacency_list_cte handles different configuration options" do
-    selecto = %{postgrex_opts: :mock_connection}
+    selecto = %{connection: :mock_connection}
     join = :employees
 
     # Test custom field names and depth limit
@@ -129,7 +129,7 @@ defmodule Selecto.HierarchyCteTest do
   end
 
   test "build_adjacency_list_cte with default values" do
-    selecto = %{postgrex_opts: :mock_connection}
+    selecto = %{connection: :mock_connection}
     join = :nodes
 
     # Minimal config - should use defaults
@@ -169,7 +169,7 @@ defmodule Selecto.HierarchyCteTest do
   end
 
   test "build_materialized_path_query generates path-based SQL" do
-    selecto = %{postgrex_opts: :mock_connection}
+    selecto = %{connection: :mock_connection}
     join = :categories
 
     config = %{
@@ -200,7 +200,7 @@ defmodule Selecto.HierarchyCteTest do
   end
 
   test "build_materialized_path_query with default values" do
-    selecto = %{postgrex_opts: :mock_connection}
+    selecto = %{connection: :mock_connection}
     join = :items
 
     config = %{
@@ -221,7 +221,7 @@ defmodule Selecto.HierarchyCteTest do
   end
 
   test "build_closure_table_query generates closure table SQL" do
-    selecto = %{postgrex_opts: :mock_connection}
+    selecto = %{connection: :mock_connection}
     join = :categories
 
     config = %{
@@ -255,7 +255,7 @@ defmodule Selecto.HierarchyCteTest do
   end
 
   test "build_closure_table_query with default table name" do
-    selecto = %{postgrex_opts: :mock_connection}
+    selecto = %{connection: :mock_connection}
     join = :nodes
 
     config = %{

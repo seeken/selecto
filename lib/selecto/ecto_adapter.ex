@@ -9,10 +9,14 @@ defmodule Selecto.EctoAdapter do
   ## Usage
 
       # Configure from Ecto repo and schema
-      selecto = Selecto.EctoAdapter.configure(MyApp.Repo, MyApp.User)
+      selecto =
+        Selecto.EctoAdapter.configure(MyApp.Repo, MyApp.User,
+          adapter: MyApp.SelectoAdapter
+        )
       
       # With options
       selecto = Selecto.EctoAdapter.configure(MyApp.Repo, MyApp.User, 
+        adapter: MyApp.SelectoAdapter,
         joins: [:posts, :comments],
         redact_fields: [:password_hash]
       )
@@ -37,22 +41,28 @@ defmodule Selecto.EctoAdapter do
   - `:custom_columns` - Map of custom column definitions
   - `:custom_filters` - Map of custom filter definitions
   - `:extensions` - List of Selecto extension specs applied during domain build
+  - `:adapter` - Explicit Selecto database adapter module (required)
   - `:validate` - Whether to validate domain configuration (boolean)
   - `:name` - Custom name for the domain (string)
 
   ## Examples
 
       # Basic usage
-      selecto = Selecto.EctoAdapter.configure(MyApp.Repo, MyApp.User)
+      selecto =
+        Selecto.EctoAdapter.configure(MyApp.Repo, MyApp.User,
+          adapter: MyApp.SelectoAdapter
+        )
       
       # With joins and redacted fields
       selecto = Selecto.EctoAdapter.configure(MyApp.Repo, MyApp.User,
+        adapter: MyApp.SelectoAdapter,
         joins: [:posts, :profile],
         redact_fields: [:password_hash, :email]
       )
       
       # With custom columns
       selecto = Selecto.EctoAdapter.configure(MyApp.Repo, MyApp.User,
+        adapter: MyApp.SelectoAdapter,
         custom_columns: %{
           "full_name" => %{
             name: "Full Name",
@@ -65,7 +75,11 @@ defmodule Selecto.EctoAdapter do
     domain = schema_to_domain(schema, opts)
     db_conn = get_db_connection(repo)
 
-    Selecto.configure(domain, db_conn, Keyword.take(opts, [:validate, :mode, :domain_sql]))
+    Selecto.configure(
+      domain,
+      db_conn,
+      Keyword.take(opts, [:adapter, :validate, :mode, :domain_sql])
+    )
   end
 
   @doc """

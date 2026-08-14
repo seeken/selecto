@@ -61,7 +61,7 @@ defmodule Selecto.WindowJsonRegressionTest do
           price: %{type: :decimal},
           active: %{type: :boolean},
           tags: %{type: {:array, :string}},
-          metadata: %{type: :jsonb}
+          metadata: %{type: :json}
         },
         associations: %{}
       },
@@ -403,14 +403,15 @@ defmodule Selecto.WindowJsonRegressionTest do
     sql = normalize_sql(sql)
 
     assert params == [true]
-    assert sql =~ "metadata ->> 'price_band' AS \"price_band\""
-    assert sql =~ "metadata -> 'warehouse' ->> 'zone' AS \"warehouse_zone\""
+    assert sql =~ "\"metadata\"->>'price_band' AS \"price_band\""
+    assert sql =~ "\"metadata\"#>>ARRAY['warehouse', 'zone'] AS \"warehouse_zone\""
     assert sql =~ "\"metadata\" @> '{\"price_band\":\"premium\"}'::jsonb"
 
     assert sql =~
              "where (( selecto_root.active = $1 ) and ( \"metadata\" @> '{\"price_band\":\"premium\"}'::jsonb ))"
 
-    assert sql =~ "order by selecto_root.price desc, metadata -> 'warehouse' ->> 'zone' asc"
+    assert sql =~
+             "order by selecto_root.price desc, \"metadata\"#>>ARRAY['warehouse', 'zone'] asc"
   end
 
   test "mssql json_select + json_filter + json_order_by use json_value" do
@@ -434,16 +435,16 @@ defmodule Selecto.WindowJsonRegressionTest do
     downcased = String.downcase(sql)
 
     assert params == [true]
-    assert sql =~ "JSON_VALUE(selecto_root.metadata, '$.price_band') AS [price_band]"
+    assert sql =~ "JSON_VALUE([selecto_root].[metadata], '$.price_band') AS [price_band]"
 
     assert sql =~
-             "JSON_VALUE(selecto_root.metadata, '$.warehouse.zone') AS [warehouse_zone]"
+             "JSON_VALUE([selecto_root].[metadata], '$.warehouse.zone') AS [warehouse_zone]"
 
     assert downcased =~
-             "where (( selecto_root.active = @p1 ) and ( json_value(selecto_root.metadata, '$.price_band') = 'premium' ))"
+             "where (( selecto_root.active = @p1 ) and ( json_value([selecto_root].[metadata], '$.price_band') = 'premium' ))"
 
     assert downcased =~
-             "order by selecto_root.price desc, json_value(selecto_root.metadata, '$.warehouse.zone') asc"
+             "order by selecto_root.price desc, json_value([selecto_root].[metadata], '$.warehouse.zone') asc"
   end
 
   test "mssql dot-path json selectors and filters use json_value casts" do
@@ -459,8 +460,8 @@ defmodule Selecto.WindowJsonRegressionTest do
     sql = normalize_sql(sql)
 
     assert params == ["premium"]
-    assert sql =~ "JSON_VALUE(selecto_root.metadata, '$.price_band')"
-    assert sql =~ "where (( JSON_VALUE(selecto_root.metadata, '$.price_band') = @p1 ))"
+    assert sql =~ "JSON_VALUE([selecto_root].[metadata], '$.price_band')"
+    assert sql =~ "where (( JSON_VALUE([selecto_root].[metadata], '$.price_band') = @p1 ))"
   end
 
   test "mssql json path exists uses json_value/json_query helpers" do
@@ -478,7 +479,7 @@ defmodule Selecto.WindowJsonRegressionTest do
     assert params == []
 
     assert sql =~
-             "(JSON_QUERY(selecto_root.metadata, '$.warehouse.zone') IS NOT NULL OR JSON_VALUE(selecto_root.metadata, '$.warehouse.zone') IS NOT NULL)"
+             "(JSON_QUERY([selecto_root].[metadata], '$.warehouse.zone') IS NOT NULL OR JSON_VALUE([selecto_root].[metadata], '$.warehouse.zone') IS NOT NULL)"
   end
 
   test "mssql json array filters use openjson" do
@@ -495,7 +496,7 @@ defmodule Selecto.WindowJsonRegressionTest do
     sql = normalize_sql(sql)
 
     assert params == []
-    assert sql =~ "OPENJSON(selecto_root.metadata, '$.tags')"
+    assert sql =~ "OPENJSON([selecto_root].[metadata], '$.tags')"
     assert sql =~ "WHERE value = 'featured'"
     assert sql =~ "WHERE value = 'new'"
   end

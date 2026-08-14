@@ -3,88 +3,74 @@ defmodule Selecto.Performance.QueryAnalyzerTest do
 
   alias Selecto.Performance.QueryAnalyzer
 
-  defp selecto do
-    domain = %{
-      name: "Query analyzer",
-      source: %{
-        source_table: "users",
-        primary_key: :id,
-        fields: [:id, :name],
-        redact_fields: [],
-        columns: %{id: %{type: :integer}, name: %{type: :string}},
-        associations: %{}
-      },
-      schemas: %{},
-      joins: %{}
-    }
+  defmodule AnalysisAdapter do
+    def name, do: :analysis_probe
 
-    Selecto.configure(domain, [])
-    |> Selecto.select(["id", "name"])
-  end
+    def analyze_query(_selecto, options) do
+      multiplier = if Keyword.get(options, :analyze, true), do: 2, else: 1
 
-  test "analyze_query returns invalid connection error" do
-    assert {:error, :invalid_connection} = QueryAnalyzer.analyze_query(selecto())
-  end
-
-  test "analyze_query accepts explain options" do
-    assert {:error, :invalid_connection} =
-             QueryAnalyzer.analyze_query(selecto(),
-               format: :text,
-               analyze: false,
-               buffers: false,
-               verbose: true,
-               costs: false,
-               timing: false,
-               summary: false,
-               settings: true
-             )
-  end
-
-  test "analyze_query rejects unsupported explain formats" do
-    assert_raise ArgumentError, ~r/invalid EXPLAIN format/, fn ->
-      QueryAnalyzer.analyze_query(selecto(), format: "pdf")
+      {:ok,
+       %{
+         execution_time: 10 * multiplier,
+         planning_time: 2,
+         total_cost: 30,
+         actual_rows: 4,
+         options: options
+       }}
     end
+
+    def analyze_index_usage(_selecto, _options),
+      do: {:ok, %{indexes_used: ["users_pkey"], indexes_missing: []}}
+
+    def table_statistics(_selecto, _options),
+      do: {:ok, %{"users" => %{live_rows: 4}}}
   end
 
-  test "repo-like atom connection is wrapped as explain failure" do
-    repo_like =
-      selecto()
-      |> Map.put(:postgrex_opts, :invalid_connection)
-      |> Map.put(:connection, :invalid_connection)
-
-    assert {:error, {:explain_failed, _}} = QueryAnalyzer.analyze_query(repo_like)
+  defmodule UnsupportedAdapter do
+    def name, do: :unsupported_analysis_probe
   end
 
-  test "pool connection failures are wrapped" do
-    pooled =
-      selecto()
-      |> Map.put(:postgrex_opts, {:pool, :bad_pool_ref})
-      |> Map.put(:connection, {:pool, :bad_pool_ref})
-
-    assert {:error, {:explain_failed, _}} = QueryAnalyzer.analyze_query(pooled)
-  end
-
-  test "table statistics handles mixed query structures and invalid connection" do
-    selecto_map = %{
-      source: %{source_table: "users"},
-      joins: %{posts: %{table: "posts"}},
-      postgrex_opts: []
+  defp selecto(adapter \\ AnalysisAdapter) do
+    %Selecto{
+      adapter: adapter,
+      runtime: %Selecto.Runtime.Context{adapter: adapter, connection: :probe}
     }
-
-    assert {:ok, stats} = QueryAnalyzer.get_table_statistics(selecto_map)
-    assert Map.has_key?(stats, "users")
-    assert Map.has_key?(stats, "posts")
-    assert stats["users"][:error] == "Could not fetch statistics"
   end
 
-  test "public wrappers propagate analysis errors" do
-    assert {:error, :invalid_connection} = QueryAnalyzer.get_query_plan(selecto())
-    assert {:error, :invalid_connection} = QueryAnalyzer.analyze_index_usage(selecto())
+  test "analysis dispatches to the configured adapter" do
+    assert {:ok, %{execution_time: 20}} = QueryAnalyzer.analyze_query(selecto())
+
+    assert {:ok, %{options: options}} =
+             QueryAnalyzer.get_query_plan(selecto(), buffers: false)
+
+    assert options[:analyze] == false
+    assert options[:buffers] == false
   end
 
-  test "compare_queries short-circuits on first failure" do
-    s1 = selecto()
-    s2 = selecto()
-    assert {:error, :invalid_connection} = QueryAnalyzer.compare_queries(s1, s2)
+  test "index and table-statistics requests cross adapter callbacks" do
+    assert {:ok, %{indexes_used: ["users_pkey"]}} =
+             QueryAnalyzer.analyze_index_usage(selecto())
+
+    assert {:ok, %{"users" => %{live_rows: 4}}} =
+             QueryAnalyzer.get_table_statistics(selecto())
+  end
+
+  test "unsupported analysis fails closed with normalized evidence" do
+    assert {:error, %Selecto.Error{type: :validation_error, details: details}} =
+             QueryAnalyzer.analyze_query(selecto(UnsupportedAdapter))
+
+    assert details.adapter == :unsupported_analysis_probe
+    assert details.unsupported_feature == :query_analysis
+  end
+
+  test "comparison computes only normalized numeric differences" do
+    assert {:ok, comparison} = QueryAnalyzer.compare_queries(selecto(), selecto())
+
+    assert comparison.performance_diff == %{
+             actual_rows: 0,
+             execution_time: 0,
+             planning_time: 0,
+             total_cost: 0
+           }
   end
 end

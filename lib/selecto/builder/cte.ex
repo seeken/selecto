@@ -1,10 +1,10 @@
 defmodule Selecto.Builder.CteSql do
   @moduledoc """
-  SQL generation for PostgreSQL Common Table Expressions (CTEs).
+  SQL generation for Common Table Expressions (CTEs).
 
   Generates SQL for both non-recursive and recursive WITH clauses,
   handling dependency ordering, column specifications, and proper
-  PostgreSQL CTE syntax.
+  standard CTE statement structure.
   """
 
   alias Selecto.Advanced.CTE.Spec
@@ -82,10 +82,10 @@ defmodule Selecto.Builder.CteSql do
       raw_ctes
       |> Enum.map(fn
         {:raw_cte, cte_definition, params} ->
-          {normalize_raw_cte_definition(cte_definition, params), params}
+          {normalize_raw_cte_definition(cte_definition, params, adapter), params}
 
         {:raw_recursive_cte, cte_definition, params} ->
-          {normalize_raw_cte_definition(cte_definition, params), params}
+          {normalize_raw_cte_definition(cte_definition, params, adapter), params}
       end)
       |> Enum.unzip()
 
@@ -125,10 +125,8 @@ defmodule Selecto.Builder.CteSql do
     {sql, _aliases, params} = Sql.build(selecto_query, emit_user_ctes: false)
 
     # Convert SQL string back to iodata with param markers
-    sql_iodata =
-      sql
-      |> rewrite_cte_root_alias(spec.name)
-      |> convert_sql_to_iodata(params)
+    sql = rewrite_cte_root_alias(sql, spec.name)
+    sql_iodata = Selecto.SQL.Params.rebind_finalized(sql, params, selecto_query.adapter)
 
     # Build CTE definition
     cte_name = escape_identifier(spec.name)
@@ -161,16 +159,20 @@ defmodule Selecto.Builder.CteSql do
       Sql.build(recursive_selecto, emit_user_ctes: false)
 
     # Convert SQL strings back to iodata with param markers
+    base_sql = rewrite_cte_root_alias(base_sql, spec.name)
+
     base_sql_iodata =
-      base_sql
-      |> rewrite_cte_root_alias(spec.name)
-      |> convert_sql_to_iodata(base_params)
+      Selecto.SQL.Params.rebind_finalized(base_sql, base_params, base_selecto.adapter)
 
     # Adjust param indices for recursive part
+    recursive_sql = rewrite_cte_root_alias(recursive_sql, spec.name)
+
     recursive_sql_iodata =
-      recursive_sql
-      |> rewrite_cte_root_alias(spec.name)
-      |> convert_sql_to_iodata_with_offset(recursive_params, length(base_params))
+      Selecto.SQL.Params.rebind_finalized(
+        recursive_sql,
+        recursive_params,
+        recursive_selecto.adapter
+      )
 
     # Build recursive CTE definition
     cte_name = escape_identifier(spec.name)
@@ -265,20 +267,14 @@ defmodule Selecto.Builder.CteSql do
     end
   end
 
-  # Convert SQL string with $1, $2 placeholders back to iodata with {:param, value} markers
-  defp convert_sql_to_iodata(sql, params) do
-    convert_sql_to_iodata_with_offset(sql, params, 0)
-  end
+  defp normalize_raw_cte_definition(cte_definition, [], _adapter), do: cte_definition
 
-  defp normalize_raw_cte_definition(cte_definition, []), do: cte_definition
-
-  defp normalize_raw_cte_definition(cte_definition, params) do
+  defp normalize_raw_cte_definition(cte_definition, params, adapter) do
     if contains_param_marker?(cte_definition) do
       cte_definition
     else
-      cte_definition
-      |> IO.iodata_to_binary()
-      |> convert_sql_to_iodata(params)
+      cte_definition = IO.iodata_to_binary(cte_definition)
+      Selecto.SQL.Params.rebind_finalized(cte_definition, params, adapter)
     end
   end
 
@@ -289,28 +285,6 @@ defmodule Selecto.Builder.CteSql do
   end
 
   defp contains_param_marker?(_), do: false
-
-  defp convert_sql_to_iodata_with_offset(sql, params, _offset) do
-    params
-    |> Enum.with_index(1)
-    |> Enum.reduce([sql], fn {value, idx}, acc ->
-      placeholder = "$#{idx}"
-
-      Enum.flat_map(acc, fn
-        s when is_binary(s) ->
-          case String.split(s, placeholder, parts: 2) do
-            [before, after_str] ->
-              [before, {:param, value}, after_str]
-
-            [unchanged] ->
-              [unchanged]
-          end
-
-        other ->
-          [other]
-      end)
-    end)
-  end
 
   defp rewrite_cte_root_alias(sql, cte_name) when is_binary(sql) and is_binary(cte_name) do
     Regex.replace(~r/\bselecto_root\b/u, sql, cte_root_alias(cte_name))

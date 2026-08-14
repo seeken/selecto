@@ -1,8 +1,6 @@
 defmodule Selecto.AdapterSQL do
   @moduledoc false
 
-  import Selecto.Builder.Sql.Helpers, only: [single_wrap: 1]
-
   alias Selecto.AdapterSupport
 
   def adapter(selecto_or_adapter)
@@ -19,7 +17,8 @@ defmodule Selecto.AdapterSQL do
     if AdapterSupport.callback_available?(adapter, :format_datetime, 2) do
       adapter.format_datetime(expression, format)
     else
-      ["to_char(", expression, ", ", single_wrap(format), ")"]
+      raise ArgumentError,
+            "adapter #{inspect(adapter)} does not implement datetime formatting"
     end
   end
 
@@ -27,17 +26,12 @@ defmodule Selecto.AdapterSQL do
     adapter = adapter(selecto)
 
     cond do
-      not AdapterSupport.supports_feature?(adapter, :rollup) ->
-        grouped_clauses
-
       AdapterSupport.callback_available?(adapter, :rollup_sql, 1) ->
         adapter.rollup_sql(grouped_clauses)
 
-      AdapterSupport.supports_feature?(adapter, :rollup_with_rollup) ->
-        [grouped_clauses, " with rollup"]
-
       true ->
-        ["rollup( ", grouped_clauses, " )"]
+        raise ArgumentError,
+              "adapter #{inspect(adapter)} does not implement rollup rendering"
     end
   end
 
@@ -48,9 +42,6 @@ defmodule Selecto.AdapterSQL do
       AdapterSupport.callback_available?(adapter, :rollup_literal_order, 1) ->
         adapter.rollup_literal_order(index)
 
-      AdapterSupport.supports_feature?(adapter, :native_null_ordering) ->
-        [Integer.to_string(index), " asc nulls first"]
-
       true ->
         [Integer.to_string(index), " asc"]
     end
@@ -58,7 +49,7 @@ defmodule Selecto.AdapterSQL do
 
   def rollup_sort_fix(selecto) do
     adapter = adapter(selecto)
-    connection = Map.get(selecto, :connection, Map.get(selecto, :postgrex_opts))
+    connection = Selecto.Runtime.Context.connection(selecto)
 
     if AdapterSupport.callback_available?(adapter, :rollup_sort_fix, 1) do
       adapter.rollup_sort_fix(connection)

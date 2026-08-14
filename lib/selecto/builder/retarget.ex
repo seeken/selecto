@@ -804,10 +804,31 @@ defmodule Selecto.Builder.Retarget do
     {[selector, " BETWEEN ", {:param, min}, " AND ", {:param, max}], [min, max]}
   end
 
-  defp build_retarget_filter(_selecto, target_schema, target_alias, {field, {comp, value}})
-       when comp in [:like, :ilike] do
+  defp build_retarget_filter(_selecto, target_schema, target_alias, {field, {:like, value}}) do
     selector = retarget_target_selector(target_schema, target_alias, field)
-    {[selector, " ", to_string(comp), " ", {:param, value}], [value]}
+    {[selector, " LIKE ", {:param, value}], [value]}
+  end
+
+  defp build_retarget_filter(selecto, target_schema, target_alias, {field, {comp, value}})
+       when comp in [:case_insensitive_like, :case_insensitive_not_like] do
+    selector = retarget_target_selector(target_schema, target_alias, field)
+
+    operation =
+      if comp == :case_insensitive_not_like,
+        do: :case_insensitive_not_like,
+        else: :case_insensitive_like
+
+    fragment = %Selecto.Dialect.Predicate.Comparison{
+      operation: operation,
+      left: selector,
+      right: {:param, value}
+    }
+
+    case Selecto.DialectSupport.render_comparison(selecto.adapter, fragment, selecto) do
+      {:ok, sql} -> {sql, [value]}
+      {:error, %Selecto.Error{} = error} -> raise Selecto.Error.to_exception(error)
+      {:error, reason} -> raise ArgumentError, "unsupported comparison: #{inspect(reason)}"
+    end
   end
 
   defp build_retarget_filter(_selecto, target_schema, target_alias, {field, {:not_like, value}}) do

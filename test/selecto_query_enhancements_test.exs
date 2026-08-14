@@ -60,7 +60,7 @@ defmodule Selecto.QueryEnhancementsTest do
           id: %{type: :integer},
           name: %{type: :string},
           price: %{type: :decimal},
-          metadata: %{type: :jsonb}
+          metadata: %{type: :json}
         },
         associations: %{}
       },

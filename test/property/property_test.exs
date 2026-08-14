@@ -131,7 +131,7 @@ defmodule Selecto.PropertyDbTest do
   @moduletag :requires_db
 
   setup_all do
-    postgrex_opts = [
+    connection = [
       hostname: System.get_env("SELECTO_POSTGRES_HOST", "localhost"),
       port: env_integer("SELECTO_POSTGRES_PORT", 5432),
       username: System.get_env("SELECTO_POSTGRES_USER", "postgres"),
@@ -139,7 +139,7 @@ defmodule Selecto.PropertyDbTest do
       database: System.get_env("SELECTO_POSTGRES_DATABASE", "selecto_test")
     ]
 
-    {:ok, connection} = Postgrex.start_link(postgrex_opts)
+    {:ok, connection} = Postgrex.start_link(connection)
     source_table = "selecto_property_users_#{System.unique_integer([:positive])}"
 
     Postgrex.query!(

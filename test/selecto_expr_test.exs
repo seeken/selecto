@@ -74,7 +74,7 @@ defmodule Selecto.ExprTest do
     assert X.compact_and([
              X.eq("status", "active"),
              nil,
-             X.when_present("", &X.ilike("name", "%#{&1}%")),
+             X.when_present("", &X.case_insensitive_like("name", "%#{&1}%")),
              X.gte("price", 100)
            ]) == {:and, [{"status", "active"}, {"price", {:gte, 100}}]}
   end
@@ -202,7 +202,7 @@ defmodule Selecto.ExprTest do
       |> X.merge_where([
         X.eq("active", true),
         X.when_present(nil, &X.eq("status", &1)),
-        X.ilike("name", "%chair%")
+        X.case_insensitive_like("name", "%chair%")
       ])
       |> X.append_select([
         X.field("name"),
@@ -210,7 +210,7 @@ defmodule Selecto.ExprTest do
       ])
 
     assert query.set.filtered ==
-             [{:and, [{"active", true}, {"name", {:ilike, "%chair%"}}]}]
+             [{:and, [{"active", true}, {"name", {:case_insensitive_like, "%chair%"}}]}]
 
     assert query.set.selected == [
              {:field, "name"},

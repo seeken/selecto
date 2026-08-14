@@ -15,14 +15,6 @@ defmodule Selecto.Builder.JsonOperationsTest do
     end
   end
 
-  test "mysql rejects postgres-only jsonb select operations explicitly" do
-    spec = JsonOperations.create_json_operation(:jsonb_agg, "metadata", as: "metadata_items")
-
-    assert_raise RuntimeError, ~r/does not support this JSON operation/, fn ->
-      BuilderJsonOperations.build_json_select(spec, adapter: SelectoDBMySQL.Adapter)
-    end
-  end
-
   test "mssql rejects unsupported json aggregate and construction operations explicitly" do
     agg_spec = JsonOperations.create_json_operation(:json_agg, "metadata", as: "metadata_items")
 
@@ -49,7 +41,7 @@ defmodule Selecto.Builder.JsonOperationsTest do
     end
   end
 
-  test "sqlite rejects unsupported json containment and aggregate operations explicitly" do
+  test "sqlite renders native JSON containment and aggregation operations" do
     contains_spec =
       JsonOperations.create_json_operation(:json_contains, "metadata",
         value: %{"price_band" => "premium"}
@@ -63,9 +55,11 @@ defmodule Selecto.Builder.JsonOperationsTest do
 
     agg_spec = JsonOperations.create_json_operation(:json_agg, "metadata", as: "metadata_items")
 
-    assert_raise RuntimeError, ~r/does not support this JSON operation/, fn ->
+    agg_sql =
       BuilderJsonOperations.build_json_select(agg_spec, adapter: SelectoDBSQLite.Adapter)
-    end
+      |> IO.iodata_to_binary()
+
+    assert agg_sql =~ ~r/json_group_array\("metadata"\)/i
   end
 
   test "sqlite supports json_typeof and json_array_length selects" do

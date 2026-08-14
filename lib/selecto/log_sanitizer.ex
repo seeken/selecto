@@ -7,15 +7,15 @@ defmodule Selecto.LogSanitizer do
 
   ## Security
 
-  - Parameters are replaced with placeholders like `$1`, `$2`, etc.
+  - Adapter-generated placeholders are preserved while values are omitted.
   - Parameter values are NEVER logged
   - SQL structure is preserved for debugging purposes
   - Query previews are truncated to prevent log bloat
 
   ## Usage
 
-      iex> LogSanitizer.sanitize_query("SELECT * FROM users WHERE id = $1", [123])
-      "SELECT * FROM users WHERE id = $1 [1 param(s) redacted]"
+      iex> LogSanitizer.sanitize_query("SELECT * FROM users WHERE id = ?", [123])
+      "SELECT * FROM users WHERE id = ? [1 param(s) redacted]"
 
       iex> LogSanitizer.sanitize_params([1, "secret", %{key: "value"}])
       "[3 param(s) redacted]"
@@ -33,8 +33,8 @@ defmodule Selecto.LogSanitizer do
 
   ## Examples
 
-      iex> sanitize_query("SELECT * FROM users WHERE id = $1", [123])
-      "SELECT * FROM users WHERE id = $1 [1 param(s) redacted]"
+      iex> sanitize_query("SELECT * FROM users WHERE id = ?", [123])
+      "SELECT * FROM users WHERE id = ? [1 param(s) redacted]"
 
       iex> sanitize_query("SELECT * FROM users", [])
       "SELECT * FROM users"

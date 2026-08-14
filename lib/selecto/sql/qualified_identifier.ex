@@ -4,15 +4,14 @@ defmodule Selecto.SQL.QualifiedIdentifier do
 
   Qualified identifiers are split on `.` and every component must use the
   portable identifier subset `letter | underscore` followed by letters,
-  digits, underscores, or dollar signs. Each component is bounded to the
-  PostgreSQL identifier limit before it is always double-quoted.
+  digits, underscores, or dollar signs. Adapter-specific length and quoting
+  policy may be supplied as the second argument.
 
   This module deliberately does not accept pre-quoted identifiers or arbitrary
   SQL fragments. Callers that need a single identifier, such as an index name
   or column name, must use the `*_part/1` functions.
   """
 
-  @max_identifier_bytes 63
   @identifier_pattern ~r/\A[A-Za-z_][A-Za-z0-9_$]*\z/
 
   @type validation_error :: %{
@@ -33,32 +32,38 @@ defmodule Selecto.SQL.QualifiedIdentifier do
 
   @doc "Validates a possibly qualified atom or string identifier."
   @spec validate(term()) :: :ok | {:error, validation_error()}
-  def validate(identifier), do: validate_identifier(identifier, true)
+  def validate(identifier, adapter_or_policy \\ nil),
+    do: validate_identifier(identifier, true, policy(adapter_or_policy))
 
   @doc "Validates one unqualified atom or string identifier."
   @spec validate_part(term()) :: :ok | {:error, validation_error()}
-  def validate_part(identifier), do: validate_identifier(identifier, false)
+  def validate_part(identifier, adapter_or_policy \\ nil),
+    do: validate_identifier(identifier, false, policy(adapter_or_policy))
 
   @doc "Validates and always quotes a possibly qualified identifier."
   @spec quote(term()) :: {:ok, String.t()} | {:error, validation_error()}
-  def quote(identifier) do
-    with :ok <- validate(identifier) do
-      {:ok, identifier |> identifier_string() |> quote_parts()}
+  def quote(identifier, adapter_or_policy \\ nil) do
+    policy = policy(adapter_or_policy)
+
+    with :ok <- validate_identifier(identifier, true, policy) do
+      {:ok, identifier |> identifier_string() |> quote_parts(policy)}
     end
   end
 
   @doc "Validates and always quotes one unqualified identifier."
   @spec quote_part(term()) :: {:ok, String.t()} | {:error, validation_error()}
-  def quote_part(identifier) do
-    with :ok <- validate_part(identifier) do
-      {:ok, identifier |> identifier_string() |> quote_component()}
+  def quote_part(identifier, adapter_or_policy \\ nil) do
+    policy = policy(adapter_or_policy)
+
+    with :ok <- validate_identifier(identifier, false, policy) do
+      {:ok, identifier |> identifier_string() |> quote_component(policy)}
     end
   end
 
   @doc "Like `quote/1`, but raises `ArgumentError` for an invalid identifier."
   @spec quote!(term()) :: String.t()
-  def quote!(identifier) do
-    case __MODULE__.quote(identifier) do
+  def quote!(identifier, adapter_or_policy \\ nil) do
+    case __MODULE__.quote(identifier, adapter_or_policy) do
       {:ok, quoted} -> quoted
       {:error, error} -> raise ArgumentError, error_message(error)
     end
@@ -66,8 +71,8 @@ defmodule Selecto.SQL.QualifiedIdentifier do
 
   @doc "Like `quote_part/1`, but raises `ArgumentError` for an invalid identifier."
   @spec quote_part!(term()) :: String.t()
-  def quote_part!(identifier) do
-    case quote_part(identifier) do
+  def quote_part!(identifier, adapter_or_policy \\ nil) do
+    case quote_part(identifier, adapter_or_policy) do
       {:ok, quoted} -> quoted
       {:error, error} -> raise ArgumentError, error_message(error)
     end
@@ -96,12 +101,12 @@ defmodule Selecto.SQL.QualifiedIdentifier do
     "invalid SQL identifier #{inspect(identifier)}#{location}: #{detail}"
   end
 
-  defp validate_identifier(identifier, qualified?)
+  defp validate_identifier(identifier, qualified?, policy)
        when is_atom(identifier) and not is_nil(identifier) do
-    identifier |> Atom.to_string() |> validate_identifier(qualified?)
+    identifier |> Atom.to_string() |> validate_identifier(qualified?, policy)
   end
 
-  defp validate_identifier(identifier, qualified?) when is_binary(identifier) do
+  defp validate_identifier(identifier, qualified?, policy) when is_binary(identifier) do
     cond do
       identifier == "" ->
         invalid(identifier, :empty)
@@ -117,7 +122,7 @@ defmodule Selecto.SQL.QualifiedIdentifier do
         |> String.split(".", trim: false)
         |> Enum.with_index()
         |> Enum.reduce_while(:ok, fn {part, index}, :ok ->
-          case validate_component(identifier, part, index) do
+          case validate_component(identifier, part, index, policy) do
             :ok -> {:cont, :ok}
             {:error, _error} = error -> {:halt, error}
           end
@@ -125,18 +130,21 @@ defmodule Selecto.SQL.QualifiedIdentifier do
     end
   end
 
-  defp validate_identifier(identifier, _qualified?), do: invalid(identifier, :invalid_type)
+  defp validate_identifier(identifier, _qualified?, _policy),
+    do: invalid(identifier, :invalid_type)
 
-  defp validate_component(identifier, "", index),
+  defp validate_component(identifier, "", index, _policy),
     do: invalid(identifier, :empty_part, part: "", part_index: index)
 
-  defp validate_component(identifier, part, index) do
+  defp validate_component(identifier, part, index, policy) do
+    max_bytes = Map.get(policy, :max_bytes)
+
     cond do
-      byte_size(part) > @max_identifier_bytes ->
+      is_integer(max_bytes) and max_bytes > 0 and byte_size(part) > max_bytes ->
         invalid(identifier, :part_too_long,
           part: part,
           part_index: index,
-          max_bytes: @max_identifier_bytes
+          max_bytes: max_bytes
         )
 
       not Regex.match?(@identifier_pattern, part) ->
@@ -157,11 +165,33 @@ defmodule Selecto.SQL.QualifiedIdentifier do
   defp identifier_string(identifier) when is_atom(identifier), do: Atom.to_string(identifier)
   defp identifier_string(identifier), do: identifier
 
-  defp quote_parts(identifier) do
+  defp quote_parts(identifier, policy) do
     identifier
     |> String.split(".")
-    |> Enum.map_join(".", &quote_component/1)
+    |> Enum.map_join(".", &quote_component(&1, policy))
   end
 
-  defp quote_component(part), do: ~s("#{part}")
+  defp quote_component(part, %{quote_identifier: quote}) when is_function(quote, 1),
+    do: quote.(part)
+
+  defp quote_component(part, _policy), do: ~s("#{part}")
+
+  defp policy(nil), do: %{}
+  defp policy(policy) when is_list(policy), do: Map.new(policy)
+  defp policy(policy) when is_map(policy), do: policy
+
+  defp policy(adapter) when is_atom(adapter) do
+    base =
+      if Code.ensure_loaded?(adapter) and function_exported?(adapter, :identifier_policy, 0),
+        do: adapter.identifier_policy(),
+        else: %{}
+
+    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :quote_identifier, 1) do
+      Map.put(base, :quote_identifier, &adapter.quote_identifier/1)
+    else
+      base
+    end
+  end
+
+  defp policy(_other), do: %{}
 end

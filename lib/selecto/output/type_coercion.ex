@@ -1,45 +1,33 @@
 defmodule Selecto.Output.TypeCoercion do
   @moduledoc """
-  Database type coercion system for transforming raw database values
-  to appropriate Elixir types based on PostgreSQL column types.
+  Database-neutral coercion of raw values into canonical Elixir types.
 
-  This module provides configurable type coercion strategies and can be extended
-  to support custom type mappings and coercion functions.
+  Native database type identities must first cross the configured adapter's
+  `normalize_type/1` boundary. Without an adapter, this module recognizes only
+  portable semantic types and standard SQL type names.
   """
 
-  # PostgreSQL type mappings to Elixir types.
-  #
-  # This provides the standard mapping from PostgreSQL column types to
-  # their corresponding Elixir types.
+  # Portable semantic and standard SQL names only. Native aliases belong to
+  # the adapter that owns them.
   @type_mappings %{
     # Integer types
     "integer" => :integer,
     "bigint" => :integer,
     "smallint" => :integer,
-    "int4" => :integer,
-    "int8" => :integer,
-    "int2" => :integer,
 
     # Numeric types
     "decimal" => :decimal,
     "numeric" => :decimal,
     "real" => :float,
     "double precision" => :float,
-    "float4" => :float,
-    "float8" => :float,
-    "money" => :decimal,
 
     # String types
     "varchar" => :string,
     "text" => :string,
     "char" => :string,
-    # char(n)
-    "bpchar" => :string,
-    "name" => :string,
 
     # Boolean
     "boolean" => :boolean,
-    "bool" => :boolean,
 
     # Date/Time types
     "date" => :date,
@@ -49,45 +37,25 @@ defmodule Selecto.Output.TypeCoercion do
     "timestamp" => :naive_datetime,
     "timestamp without time zone" => :naive_datetime,
     "timestamp with time zone" => :utc_datetime,
-    "timestamptz" => :utc_datetime,
     "interval" => :interval,
 
     # JSON types
     "json" => :map,
-    "jsonb" => :map,
 
     # Array types
     "array" => :list,
-    # integer array
-    "_int4" => {:array, :integer},
-    # text array
-    "_text" => {:array, :string},
-    # varchar array
-    "_varchar" => {:array, :string},
 
     # UUID
     "uuid" => :uuid,
 
-    # Network types
-    "inet" => :string,
-    "cidr" => :string,
-    "macaddr" => :string,
-
-    # Geometric types (keep as string by default)
+    # Portable spatial families
     "geometry" => :geometry,
     "geometry(" => :geometry,
     "geography" => :geography,
     "geography(" => :geography,
-    "point" => :string,
-    "line" => :string,
-    "lseg" => :string,
-    "box" => :string,
-    "path" => :string,
-    "polygon" => :string,
-    "circle" => :string,
 
-    # Binary data
-    "bytea" => :binary
+    # Portable binary value
+    "binary" => :binary
   }
 
   @doc """
@@ -96,7 +64,7 @@ defmodule Selecto.Output.TypeCoercion do
   ## Parameters
 
   - `value` - The raw database value
-  - `column_type` - The PostgreSQL column type (optional)
+  - `column_type` - A canonical or standard SQL type (optional)
   - `strategy` - Coercion strategy (:strict, :safe, :ignore, :custom)
   - `custom_coercions` - Map of custom coercion functions
 
@@ -107,20 +75,27 @@ defmodule Selecto.Output.TypeCoercion do
   - `:ignore` - Skip coercion, return raw values
   - `:custom` - Use custom coercion functions
   """
-  @spec coerce_value(term(), String.t() | nil, atom(), map()) :: term()
-  def coerce_value(value, column_type \\ nil, strategy \\ :safe, custom_coercions \\ %{})
+  @spec coerce_value(term(), term(), atom(), map(), module() | nil) :: term()
+  def coerce_value(
+        value,
+        column_type \\ nil,
+        strategy \\ :safe,
+        custom_coercions \\ %{},
+        adapter \\ nil
+      )
 
   # Handle NULL values
-  def coerce_value(nil, _column_type, _strategy, _custom_coercions), do: nil
+  def coerce_value(nil, _column_type, _strategy, _custom_coercions, _adapter), do: nil
 
   # Skip coercion if strategy is :ignore
-  def coerce_value(value, _column_type, :ignore, _custom_coercions), do: value
+  def coerce_value(value, _column_type, :ignore, _custom_coercions, _adapter), do: value
 
   # Use custom coercion if available
-  def coerce_value(value, column_type, :custom, custom_coercions) when is_map(custom_coercions) do
+  def coerce_value(value, column_type, :custom, custom_coercions, adapter)
+      when is_map(custom_coercions) do
     case Map.get(custom_coercions, column_type) do
       nil ->
-        coerce_value(value, column_type, :safe, %{})
+        coerce_value(value, column_type, :safe, %{}, adapter)
 
       coercion_func when is_function(coercion_func, 1) ->
         apply_coercion_safely(coercion_func, value, :safe)
@@ -131,13 +106,14 @@ defmodule Selecto.Output.TypeCoercion do
   end
 
   # Main coercion logic
-  def coerce_value(value, column_type, strategy, _custom_coercions) when column_type != nil do
-    target_type = resolve_target_type(column_type)
+  def coerce_value(value, column_type, strategy, _custom_coercions, adapter)
+      when column_type != nil do
+    target_type = resolve_target_type(column_type, adapter)
     do_coerce_value(value, target_type, strategy)
   end
 
   # Fallback to safe auto-detection if no column type provided
-  def coerce_value(value, nil, strategy, _custom_coercions) do
+  def coerce_value(value, nil, strategy, _custom_coercions, _adapter) do
     auto_detect_and_coerce(value, strategy)
   end
 
@@ -437,14 +413,14 @@ defmodule Selecto.Output.TypeCoercion do
   end
 
   @doc """
-  Get the Elixir type for a given PostgreSQL column type.
+  Get the canonical coercion target for a portable or adapter-native type.
   """
-  def get_elixir_type(postgres_type) do
-    resolve_target_type(postgres_type) || :unknown
+  def get_elixir_type(type, adapter \\ nil) do
+    resolve_target_type(type, adapter) || :unknown
   end
 
   @doc """
-  Get all supported PostgreSQL type mappings.
+  Get all portable type mappings recognized without an adapter.
   """
   def supported_types() do
     @type_mappings
@@ -456,16 +432,28 @@ defmodule Selecto.Output.TypeCoercion do
   This is more efficient than coercing values one by one when you have
   column type information for all values.
   """
-  def batch_coerce(values, column_types, strategy \\ :safe, custom_coercions \\ %{}) do
+  def batch_coerce(
+        values,
+        column_types,
+        strategy \\ :safe,
+        custom_coercions \\ %{},
+        adapter \\ nil
+      ) do
     values
     |> Enum.zip(column_types)
     |> Enum.map(fn {value, col_type} ->
-      coerce_value(value, col_type, strategy, custom_coercions)
+      coerce_value(value, col_type, strategy, custom_coercions, adapter)
     end)
   end
 
-  defp resolve_target_type(column_type) when is_binary(column_type) do
-    normalized = String.downcase(String.trim(column_type))
+  defp resolve_target_type(column_type, adapter) do
+    adapter
+    |> Selecto.AdapterSupport.normalize_type(column_type)
+    |> resolve_canonical_type()
+  end
+
+  defp resolve_canonical_type(column_type) when is_binary(column_type) do
+    normalized = column_type |> String.trim() |> String.downcase()
 
     cond do
       String.starts_with?(normalized, "geometry(") -> :geometry
@@ -474,7 +462,35 @@ defmodule Selecto.Output.TypeCoercion do
     end
   end
 
-  defp resolve_target_type(_), do: nil
+  defp resolve_canonical_type({:array, inner}), do: {:array, resolve_canonical_type(inner)}
+  defp resolve_canonical_type({:list, inner}), do: {:array, resolve_canonical_type(inner)}
+
+  defp resolve_canonical_type(type)
+       when type in [
+              :integer,
+              :float,
+              :decimal,
+              :boolean,
+              :string,
+              :date,
+              :time,
+              :time_with_timezone,
+              :naive_datetime,
+              :utc_datetime,
+              :interval,
+              :map,
+              :list,
+              :uuid,
+              :binary,
+              :geometry,
+              :geography
+            ],
+       do: type
+
+  defp resolve_canonical_type(:text), do: :string
+  defp resolve_canonical_type(:json), do: :map
+  defp resolve_canonical_type(:array), do: :list
+  defp resolve_canonical_type(_type), do: nil
 
   defp coerce_geojson_like(value, strategy) do
     case value do

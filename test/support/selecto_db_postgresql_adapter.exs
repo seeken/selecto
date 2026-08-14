@@ -7,14 +7,34 @@ defmodule SelectoDBPostgreSQL.Adapter do
   def name, do: :postgresql
 
   @impl true
+  def dialect, do: Selecto.TestDialect.PostgreSQL
+
+  @impl true
+  def capability(:text_search) do
+    %{
+      feature: :text_search,
+      supported?: true,
+      modes: [:websearch, :plain, :phrase, :boolean, :natural],
+      default_mode: :websearch
+    }
+  end
+
+  def capability(feature), do: %{feature: feature, supported?: supports?(feature)}
+
+  @impl true
+  def type_family(:tsvector), do: :text_search
+  def type_family(type), do: Selecto.TypeFamily.of(type)
+
+  @impl true
   def connect({:pool, _} = pool_ref), do: {:ok, pool_ref}
   def connect(connection) when is_pid(connection) or is_atom(connection), do: {:ok, connection}
   def connect(opts) when is_map(opts), do: connect(Map.to_list(opts))
 
   def connect(opts) when is_list(opts) do
-    case Postgrex.start_link(opts) do
-      {:ok, conn} -> {:ok, conn}
-      {:error, reason} -> {:error, reason}
+    if Keyword.has_key?(opts, :hostname) and Keyword.has_key?(opts, :database) do
+      Postgrex.start_link(opts)
+    else
+      {:ok, opts}
     end
   end
 
@@ -80,6 +100,15 @@ defmodule SelectoDBPostgreSQL.Adapter do
   def quote_identifier(identifier), do: identifier |> to_string() |> quote_identifier()
 
   @impl true
+  def format_datetime(expression, format) when is_binary(format) do
+    escaped = String.replace(format, "'", "''")
+    ["to_char(", expression, ", '", escaped, "')"]
+  end
+
+  @impl true
+  def rollup_sql(grouped_clauses), do: ["rollup( ", grouped_clauses, " )"]
+
+  @impl true
   def supports?(feature) do
     feature in [
       :cte,
@@ -92,6 +121,7 @@ defmodule SelectoDBPostgreSQL.Adapter do
       :window_functions,
       :lateral_join,
       :prefix,
+      :rollup,
       :stream
     ]
   end

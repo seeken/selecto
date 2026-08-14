@@ -66,7 +66,7 @@ defmodule Selecto.Schema.Column do
   end
 
   def configure(field, join, source, domain) do
-    # Convert field to string - handle both atoms and strings for Postgrex compatibility
+    # Normalize atom and string field identifiers.
     field_str = if is_atom(field), do: Atom.to_string(field), else: field
     # Try to get atom version if field is string (for map lookup)
     field_atom =
@@ -99,7 +99,7 @@ defmodule Selecto.Schema.Column do
             field_str
 
           _ ->
-            # Handle both atom and string join names for Postgrex compatibility
+            # Normalize atom and string join identifiers.
             join_str = if is_atom(join), do: Atom.to_string(join), else: join
             "#{join_str}.#{field_str}"
         end

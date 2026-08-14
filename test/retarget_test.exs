@@ -76,8 +76,8 @@ defmodule Selecto.RetargetTest do
 
   def create_test_selecto do
     domain = test_domain()
-    postgrex_opts = [hostname: "localhost", username: "test"]
-    Selecto.configure(domain, postgrex_opts, validate: false)
+    connection = [hostname: "localhost", username: "test"]
+    Selecto.configure(domain, connection, validate: false)
   end
 
   describe "retarget/3" do

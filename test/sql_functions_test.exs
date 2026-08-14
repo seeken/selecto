@@ -2,7 +2,7 @@ defmodule Selecto.SQLFunctionsTest do
   use ExUnit.Case, async: true
 
   alias Selecto.SQL.Functions
-  alias Selecto.SQL.Params
+  alias Selecto.TestSQLParams, as: Params
 
   @test_domain %{
     name: "SQL Functions Test Domain",
@@ -29,7 +29,9 @@ defmodule Selecto.SQLFunctionsTest do
   }
 
   setup do
-    {:ok, selecto: Selecto.configure(@test_domain, :mock_connection)}
+    {:ok,
+     selecto:
+       Selecto.configure(@test_domain, :mock_connection, adapter: SelectoDBPostgreSQL.Adapter)}
   end
 
   defp render({iodata, _joins, params}) do
@@ -105,6 +107,92 @@ defmodule Selecto.SQLFunctionsTest do
                {key, value} when key == :literal and value == ", " -> true
                _ -> false
              end)
+    end
+
+    test "typed intervals render through the configured dialect", %{selecto: selecto} do
+      assert {"interval '2 day'", []} =
+               selecto
+               |> Functions.prep_advanced_selector({:interval, {2, :days}})
+               |> render()
+
+      assert_raise ArgumentError, ~r/invalid_interval/, fn ->
+        Functions.prep_advanced_selector(
+          selecto,
+          {:interval, "1 day' PRECEDING); DROP TABLE records; --"}
+        )
+      end
+    end
+
+    test "typed datetime parts reject SQL-shaped and unsupported values", %{selecto: selecto} do
+      assert_raise ArgumentError, ~r/invalid datetime part/, fn ->
+        Functions.prep_advanced_selector(
+          selecto,
+          {:date_trunc, {:literal, "month'); DROP TABLE records; --"}, "created_at"}
+        )
+      end
+
+      assert_raise ArgumentError, ~r/invalid datetime part/, fn ->
+        Functions.prep_advanced_selector(selecto, {:date_part, :fortnight, "created_at"})
+      end
+    end
+
+    test "collection function shortcuts render through the adapter dialect", %{selecto: selecto} do
+      cases = [
+        {{:array_agg, "category", distinct: true, order_by: [{"name", :desc}]},
+         ~r/ARRAY_AGG\(DISTINCT .* ORDER BY .* DESC\)/i},
+        {{:string_agg, "name", ", ", distinct: true, order_by: ["name"]},
+         ~r/STRING_AGG\(DISTINCT .* ORDER BY .* ASC\)/i},
+        {{:array_length, "tags"}, ~r/ARRAY_LENGTH\(.*, 1\)/i},
+        {{:cardinality, "tags"}, ~r/CARDINALITY\(/i},
+        {{:array_ndims, "tags"}, ~r/ARRAY_NDIMS\(/i},
+        {{:array_dims, "tags"}, ~r/ARRAY_DIMS\(/i},
+        {{:array_append, "tags", "new"}, ~r/ARRAY_APPEND\(/i},
+        {{:array_prepend, "new", "tags"}, ~r/ARRAY_PREPEND\(/i},
+        {{:array_fill, "x", [2, 3]}, ~r/ARRAY_FILL\(/i},
+        {{:array_remove, "tags", "old"}, ~r/ARRAY_REMOVE\(/i},
+        {{:array_replace, "tags", "old", "new"}, ~r/ARRAY_REPLACE\(/i},
+        {{:array_position, "tags", "needle", 2}, ~r/ARRAY_POSITION\(.*, .*, .*\)/i},
+        {{:array_positions, "tags", "needle"}, ~r/ARRAY_POSITIONS\(/i},
+        {{:array_to_string, "tags", ","}, ~r/ARRAY_TO_STRING\(/i},
+        {{:string_to_array, "name", ","}, ~r/STRING_TO_ARRAY\(/i},
+        {{:unnest, "tags"}, ~r/UNNEST\(/i}
+      ]
+
+      for {selector, expected} <- cases do
+        {sql, _params} = selecto |> Functions.prep_advanced_selector(selector) |> render()
+        assert sql =~ expected
+      end
+
+      {array_cat_sql, _params} =
+        selecto
+        |> Functions.prep_advanced_selector({:array_cat, "tags", "tags"})
+        |> render()
+
+      assert array_cat_sql =~ ~r/ARRAY_CAT\(.*tags.*, .*tags.*\)/i
+    end
+
+    test "JSON aggregate shortcuts render through the adapter dialect", %{selecto: selecto} do
+      {json_agg_sql, _params} =
+        selecto |> Functions.prep_advanced_selector({:json_agg, "name"}) |> render()
+
+      assert json_agg_sql =~ ~r/JSON_AGG\(.*name.*\)/i
+
+      {object_agg_sql, _params} =
+        selecto
+        |> Functions.prep_advanced_selector({:json_object_agg, "category", "name"})
+        |> render()
+
+      assert object_agg_sql =~ ~r/JSON_OBJECT_AGG\(.*category.*, .*name.*\)/i
+    end
+
+    test "unsupported collection shortcuts fail closed for the configured adapter", %{
+      selecto: selecto
+    } do
+      sqlite = %{selecto | adapter: SelectoDBSQLite.Adapter}
+
+      assert_raise RuntimeError, ~r/does not support this collection operation/, fn ->
+        Functions.prep_advanced_selector(sqlite, {:array_append, "tags", "new"})
+      end
     end
   end
 

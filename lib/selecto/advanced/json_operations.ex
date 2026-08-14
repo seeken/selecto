@@ -1,10 +1,9 @@
 defmodule Selecto.Advanced.JsonOperations do
   @moduledoc """
-  JSON operations support for PostgreSQL JSON and JSONB functionality.
+  Portable JSON operation specifications.
 
-  Provides comprehensive support for JSON path queries, aggregation, manipulation,
-  and testing functions. Works with both JSON and JSONB column types with 
-  automatic type detection and optimization.
+  Core validates database-independent JSON intent. The configured adapter
+  decides which operations it supports and renders the native SQL.
 
   ## Examples
 
@@ -72,26 +71,16 @@ defmodule Selecto.Advanced.JsonOperations do
             # Aggregation operations
             | :json_agg
             | :json_object_agg
-            | :jsonb_agg
-            | :jsonb_object_agg
             # Construction operations
             | :json_build_object
             | :json_build_array
-            | :jsonb_build_object
-            | :jsonb_build_array
             # Manipulation operations
             | :json_set
-            | :jsonb_set
             | :json_insert
-            | :jsonb_insert
             | :json_remove
-            | :jsonb_delete
-            | :jsonb_delete_path
             # Type operations
             | :json_typeof
-            | :jsonb_typeof
             | :json_array_length
-            | :jsonb_array_length
 
     @type t :: %__MODULE__{
             id: String.t(),
@@ -171,23 +160,13 @@ defmodule Selecto.Advanced.JsonOperations do
       :json_path_exists,
       :json_agg,
       :json_object_agg,
-      :jsonb_agg,
-      :jsonb_object_agg,
       :json_build_object,
       :json_build_array,
-      :jsonb_build_object,
-      :jsonb_build_array,
       :json_set,
-      :jsonb_set,
       :json_insert,
-      :jsonb_insert,
       :json_remove,
-      :jsonb_delete,
-      :jsonb_delete_path,
       :json_typeof,
-      :jsonb_typeof,
-      :json_array_length,
-      :jsonb_array_length
+      :json_array_length
     ]
 
     if operation in supported_operations do
@@ -262,20 +241,12 @@ defmodule Selecto.Advanced.JsonOperations do
       :json_extract_path_text,
       :json_agg,
       :json_object_agg,
-      :jsonb_agg,
-      :jsonb_object_agg,
       :json_build_object,
       :json_build_array,
-      :jsonb_build_object,
-      :jsonb_build_array,
       :json_set,
-      :jsonb_set,
       :json_insert,
-      :jsonb_insert,
       :json_typeof,
-      :jsonb_typeof,
-      :json_array_length,
-      :jsonb_array_length
+      :json_array_length
     ]
   end
 

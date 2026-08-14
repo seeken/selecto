@@ -16,7 +16,7 @@ defmodule Selecto.Advanced.LateralJoin do
           Selecto.configure(rental_domain, connection)
           |> Selecto.select([{:func, "COUNT", ["*"], as: "rental_count"}])
           |> Selecto.filter([{"customer_id", {:ref, "customer.customer_id"}}])
-          |> Selecto.filter([{"rental_date", {:>, {:func, "CURRENT_DATE - INTERVAL '30 days'"}}}])
+          |> Selecto.filter([{"rental_date", {:>, {:udf, :recent_cutoff, [30, :day]}}}])
         end,
         as: "recent_rentals"
       )

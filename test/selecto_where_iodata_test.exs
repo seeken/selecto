@@ -2,7 +2,7 @@ defmodule Selecto.Builder.Sql.WhereTest do
   use ExUnit.Case
 
   alias Selecto.Builder.Sql.Where
-  alias Selecto.SQL.Params
+  alias Selecto.TestSQLParams, as: Params
 
   @domain %{
     name: "Where Test Domain",
@@ -123,6 +123,17 @@ defmodule Selecto.Builder.Sql.WhereTest do
       {sql, params} = Params.finalize(iodata)
       assert sql =~ ~r/=\s*\$1/
       assert params == ["John"]
+    end
+
+    test "integer and id filters trim surrounding whitespace before coercion" do
+      {_joins, integer_iodata, _params} = Where.build(selecto(), {"count", " 5 "})
+      {_integer_sql, integer_params} = Params.finalize(integer_iodata)
+
+      {_joins, id_iodata, _params} = Where.build(selecto(), {"user_id", " 7 "})
+      {_id_sql, id_params} = Params.finalize(id_iodata)
+
+      assert integer_params == [5]
+      assert id_params == [7]
     end
 
     test "between" do
@@ -458,13 +469,9 @@ defmodule Selecto.Builder.Sql.WhereTest do
     end
 
     test "exists, raw_sql_filter, and empty conjunction" do
-      {_joins, exists_iodata, exists_params} =
+      assert_raise ArgumentError, ~r/placeholder count/, fn ->
         Where.build(selecto(), {:exists, "SELECT 1", ["x"]})
-
-      {exists_sql, exists_finalized_params} = Params.finalize(exists_iodata)
-      assert exists_sql =~ ~r/exists\s*\(/i
-      assert exists_finalized_params == []
-      assert exists_params == ["x"]
+      end
 
       {_joins, param_exists_iodata, param_exists_params} =
         Where.build(selecto(), {:exists, "SELECT 1 FROM users WHERE name = $1", ["x"]})
@@ -509,6 +516,43 @@ defmodule Selecto.Builder.Sql.WhereTest do
       {_joins, id_iodata, _} = Where.build(selecto(), {"user_id", {"=", "456"}})
       {_sql, id_params} = Params.finalize(id_iodata)
       assert id_params == [456]
+    end
+  end
+
+  describe "portable datetime predicates" do
+    test "dispatches datetime-part extraction and epoch conversion through the dialect" do
+      {_joins, iodata, _params} =
+        Where.build(
+          epoch_selecto(),
+          {"occurred_at_epoch", {:datetime_part, :isodow, {:in, [1, 2]}}}
+        )
+
+      {sql, params} = Params.finalize(iodata)
+
+      assert sql =~ "DATE_PART('isodow'"
+      assert sql =~ "TO_TIMESTAMP(("
+      assert params == [1, 2]
+    end
+
+    test "dispatches formatted datetime comparisons through the dialect" do
+      {_joins, iodata, _params} =
+        Where.build(
+          selecto(),
+          {"created_at", {:datetime_format, "YYYY-WW", "2026-08"}}
+        )
+
+      {sql, params} = Params.finalize(iodata)
+
+      assert sql =~ "TO_CHAR("
+      assert params == ["2026-08"]
+    end
+
+    test "fails closed when an adapter does not implement datetime predicates" do
+      sqlite_selecto = Map.put(selecto(), :adapter, SelectoDBSQLite.Adapter)
+
+      assert_raise RuntimeError, ~r/does not support the requested SQL fragment/, fn ->
+        Where.build(sqlite_selecto, {"created_at", {:datetime_part, :month, 8}})
+      end
     end
   end
 

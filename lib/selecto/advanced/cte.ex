@@ -1,6 +1,6 @@
 defmodule Selecto.Advanced.CTE do
   @moduledoc """
-  Common Table Expression (CTE) support for PostgreSQL WITH clauses.
+  Portable Common Table Expression (CTE) query intent.
 
   Provides comprehensive support for non-recursive and recursive CTEs, enabling
   hierarchical queries, query modularity, and complex data processing patterns.

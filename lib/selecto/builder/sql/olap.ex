@@ -100,7 +100,7 @@ defmodule Selecto.Builder.Sql.Olap do
       build_selector_string(selecto, join, related_key)
     ]
 
-    # Add query hints for OLAP performance (PostgreSQL-specific optimizations)
+    # Add portable query-plan hints for OLAP performance.
     optimized_join_iodata = add_star_schema_hints(star_join_iodata, config)
 
     {fc ++ [optimized_join_iodata], p, ctes}
@@ -268,7 +268,7 @@ defmodule Selecto.Builder.Sql.Olap do
   # Helper functions
 
   defp add_star_schema_hints(join_iodata, config) do
-    # Add PostgreSQL-specific hints for star schema performance
+    # Add generic star-schema planning hints.
     case Map.get(config, :enable_query_hints, false) do
       true ->
         # Add index hints and join order suggestions
@@ -334,7 +334,7 @@ defmodule Selecto.Builder.Sql.Olap do
   end
 
   defp build_large_fact_table_hints(_selecto, fact_config) do
-    # Generate PostgreSQL-specific hints for large fact tables
+    # Generate generic hints for large fact tables.
     table_name = Map.get(fact_config, :table_name, "fact_table")
 
     [

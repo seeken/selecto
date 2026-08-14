@@ -3,11 +3,14 @@ defmodule Selecto.QueryValidator do
 
   alias Selecto.Advanced.ArrayOperations.Spec, as: ArraySpec
   alias Selecto.Advanced.JsonOperations.Spec, as: JsonSpec
+  alias Selecto.Dialect.Bucket.Expression, as: BucketExpression
+  alias Selecto.Dialect.DateTime.Operation, as: DateTimeOperation
   alias Selecto.Window.Spec, as: WindowSpec
 
   @skip_function_args ["*", "DISTINCT", "ALL"]
   @skip_function_arg_atoms [:*, :distinct, :all]
   @group_wrapper_keys [:rollup]
+  @bucket_kinds BucketExpression.kinds()
   @order_directions [
     :asc,
     :desc,
@@ -137,7 +140,25 @@ defmodule Selecto.QueryValidator do
     validate_field_selector!(selecto, selector)
   end
 
-  defp validate_selector!(selecto, {:to_char, {field, _format}}) do
+  defp validate_selector!(selecto, {:datetime_format, field, format, options})
+       when is_binary(format) and format != "" and is_map(options) do
+    validate_selector!(selecto, field)
+  end
+
+  defp validate_selector!(selecto, {:datetime_extract, field, part, options})
+       when is_map(options) do
+    case DateTimeOperation.normalize_part(part) do
+      {:ok, _part} -> validate_selector!(selecto, field)
+      {:error, reason} -> raise ArgumentError, "invalid datetime part: #{inspect(reason)}"
+    end
+  end
+
+  defp validate_selector!(selecto, {:text_normalize, field, options}) when is_map(options) do
+    validate_selector!(selecto, field)
+  end
+
+  defp validate_selector!(selecto, {:bucket, field, %{kind: kind}})
+       when kind in @bucket_kinds do
     validate_selector!(selecto, field)
   end
 
@@ -563,8 +584,8 @@ defmodule Selecto.QueryValidator do
         :ok
 
       match?(
-        {:jsonb, _, [_ | _]},
-        Selecto.Jsonb.parse_field_reference(json_field_ref, selecto.config)
+        {:json_path, _, [_ | _]},
+        Selecto.Json.parse_field_reference(json_field_ref, selecto.config)
       ) ->
         :ok
 

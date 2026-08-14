@@ -279,9 +279,20 @@ defmodule Selecto.TaggingIntegrationTest do
       alias Selecto.Builder.Sql.Tagging
 
       # Test aggregation functions
-      agg_result = Tagging.build_tag_aggregation_column("tags", "name", "tag_list")
+      agg_result =
+        Tagging.build_tag_aggregation_column(
+          %Selecto{adapter: SelectoDBPostgreSQL.Adapter},
+          "tags",
+          "name",
+          "tag_list"
+        )
+
       assert is_list(agg_result)
-      assert String.contains?(IO.iodata_to_binary(agg_result), "string_agg")
+
+      {agg_sql, _params} =
+        Selecto.SQL.Params.finalize(agg_result, adapter: SelectoDBPostgreSQL.Adapter)
+
+      assert String.contains?(agg_sql, "STRING_AGG")
 
       # Test count functions  
       count_result = Tagging.build_tag_count_column("tags", "count")
@@ -292,14 +303,26 @@ defmodule Selecto.TaggingIntegrationTest do
       config = %{source: "tags", join_table: "post_tags", tag_field: "name"}
       {filter_result, params} = Tagging.build_faceted_tag_filter(config, "test", :single)
       assert is_list(filter_result)
-      assert String.contains?(IO.iodata_to_binary(filter_result), "EXISTS")
+
+      {filter_sql, finalized_params} =
+        Selecto.SQL.Params.finalize(filter_result, adapter: SelectoDBPostgreSQL.Adapter)
+
+      assert String.contains?(filter_sql, "EXISTS")
       assert params == ["test"]
+      assert finalized_params == params
 
       # Test count filtering
       {count_filter_result, count_params} = Tagging.build_tag_count_filter(config, {:gte, 2})
       assert is_list(count_filter_result)
-      assert String.contains?(IO.iodata_to_binary(count_filter_result), "COUNT(*)")
+
+      {count_filter_sql, finalized_count_params} =
+        Selecto.SQL.Params.finalize(count_filter_result,
+          adapter: SelectoDBPostgreSQL.Adapter
+        )
+
+      assert String.contains?(count_filter_sql, "COUNT(*)")
       assert count_params == [2]
+      assert finalized_count_params == count_params
 
       # Test main integration
       selecto = %{domain: %{source: %{source_table: "test"}}}
@@ -348,12 +371,17 @@ defmodule Selecto.TaggingIntegrationTest do
       assert String.contains?(join_sql, "tag_id")
 
       # Test tag aggregation matches plan: string_agg(tags.{{tag_field}}, ', ')
-      agg_sql =
-        IO.iodata_to_binary(
-          Selecto.Builder.Sql.Tagging.build_tag_aggregation_column("tags", "name", "tag_list")
+      {agg_sql, agg_params} =
+        Selecto.Builder.Sql.Tagging.build_tag_aggregation_column(
+          %Selecto{adapter: SelectoDBPostgreSQL.Adapter},
+          "tags",
+          "name",
+          "tag_list"
         )
+        |> Selecto.SQL.Params.finalize(adapter: SelectoDBPostgreSQL.Adapter)
 
-      assert agg_sql == "string_agg(tags.name, ', ') as tag_list"
+      assert agg_sql =~ "STRING_AGG"
+      assert agg_params == [", "]
 
       # Test faceted filter matches plan: EXISTS with ANY array matching
       {filter_sql_iodata, _} =
@@ -363,9 +391,14 @@ defmodule Selecto.TaggingIntegrationTest do
           :any
         )
 
-      filter_sql = IO.iodata_to_binary(filter_sql_iodata)
+      {filter_sql, filter_params} =
+        Selecto.SQL.Params.finalize(filter_sql_iodata,
+          adapter: SelectoDBPostgreSQL.Adapter
+        )
+
       assert String.contains?(filter_sql, "EXISTS (")
-      assert String.contains?(filter_sql, "= ANY($1)")
+      assert String.contains?(filter_sql, "IN ($1, $2)")
+      assert filter_params == ["elixir", "phoenix"]
     end
   end
 end

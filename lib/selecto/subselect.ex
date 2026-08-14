@@ -29,7 +29,7 @@ defmodule Selecto.Subselect do
   ## Aggregation Formats
 
   - `:json_agg` - Returns JSON array of objects (default)
-  - `:array_agg` - Returns PostgreSQL array
+  - `:array_agg` - Returns a collection value when supported by the adapter
   - `:string_agg` - Returns delimited string
   - `:count` - Returns count of related records
   """
@@ -375,8 +375,8 @@ defmodule Selecto.Subselect do
       Enum.filter(subselect_config.fields, fn field_name ->
         field_name_string = to_string(field_name)
 
-        case Selecto.Jsonb.parse_field_reference(field_name_string, target_schema_config) do
-          {:jsonb, _column, _path} ->
+        case Selecto.Json.parse_field_reference(field_name_string, target_schema_config) do
+          {:json_path, _column, _path} ->
             false
 
           {:regular, _} ->

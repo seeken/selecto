@@ -9,7 +9,7 @@ defmodule WindowFunctionsTest do
       # Create a basic selecto struct for testing
       selecto = %Selecto{
         domain: %{},
-        postgrex_opts: [],
+        connection: [],
         set: %{}
       }
 

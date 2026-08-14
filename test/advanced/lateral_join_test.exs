@@ -9,7 +9,7 @@ defmodule Selecto.Advanced.LateralJoinTest do
       subquery_builder = fn _base ->
         %Selecto{
           domain: %{},
-          postgrex_opts: [],
+          connection: [],
           set: %{
             selected: ["rental_count"],
             filtered: [{"customer_id", {:ref, "customer.customer_id"}}]
@@ -72,7 +72,7 @@ defmodule Selecto.Advanced.LateralJoinTest do
             }
           }
         },
-        postgrex_opts: [],
+        connection: [],
         set: %{
           joins: %{
             rental: %{
@@ -90,7 +90,7 @@ defmodule Selecto.Advanced.LateralJoinTest do
       subquery_builder = fn _base ->
         %Selecto{
           domain: %{},
-          postgrex_opts: [],
+          connection: [],
           set: %{
             selected: [{"rental_count", :count}],
             filtered: [{"customer_id", {:ref, "customer.customer_id"}}]
@@ -109,7 +109,7 @@ defmodule Selecto.Advanced.LateralJoinTest do
       subquery_builder = fn _base ->
         %Selecto{
           domain: %{},
-          postgrex_opts: [],
+          connection: [],
           set: %{
             selected: [{"rental_count", :count}],
             filtered: [{"customer_id", {:ref, "customer.invalid_field"}}]
@@ -195,7 +195,7 @@ defmodule Selecto.Advanced.LateralJoinTest do
 
   describe "error handling" do
     test "handles validation errors gracefully" do
-      base_selecto = %Selecto{domain: %{}, postgrex_opts: [], set: %{}}
+      base_selecto = %Selecto{domain: %{}, connection: [], set: %{}}
 
       subquery_builder = fn _base ->
         raise "Test error"
@@ -221,7 +221,7 @@ defmodule Selecto.Advanced.LateralJoinTest do
             columns: %{id: %{type: :integer}, name: %{type: :string}}
           }
         },
-        postgrex_opts: [],
+        connection: [],
         set: %{}
       }
 
@@ -263,7 +263,7 @@ defmodule Selecto.Advanced.LateralJoinTest do
       subquery_builder = fn _base ->
         %Selecto{
           domain: %{},
-          postgrex_opts: [],
+          connection: [],
           set: %{
             selected: ["count"],
             filtered: [
@@ -287,7 +287,7 @@ defmodule Selecto.Advanced.LateralJoinTest do
             }
           }
         },
-        postgrex_opts: [],
+        connection: [],
         set: %{}
       }
 
@@ -318,7 +318,7 @@ defmodule Selecto.Advanced.LateralJoinTest do
             }
           }
         },
-        postgrex_opts: [],
+        connection: [],
         set: %{
           joins: %{
             store: %{
@@ -332,7 +332,7 @@ defmodule Selecto.Advanced.LateralJoinTest do
       subquery_builder = fn _base ->
         %Selecto{
           domain: %{},
-          postgrex_opts: [],
+          connection: [],
           set: %{
             selected: ["rental_count"],
             filtered: [

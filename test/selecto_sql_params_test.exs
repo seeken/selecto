@@ -1,7 +1,11 @@
 defmodule Selecto.SQL.ParamsTest do
   use ExUnit.Case
 
-  alias Selecto.SQL.Params
+  alias Selecto.TestSQLParams, as: Params
+
+  test "production finalization requires an explicit adapter" do
+    assert_raise KeyError, fn -> Selecto.SQL.Params.finalize([{:param, 1}]) end
+  end
 
   describe "finalize/1" do
     test "handles empty list" do

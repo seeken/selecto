@@ -8,7 +8,7 @@ defmodule Selecto.Domain.Projector do
 
   @projections [:query, :write, :ui, :api, :query_contract]
   @query_contract_numeric_types ~w(integer float decimal)
-  @query_contract_temporal_types ~w(date time datetime naive_datetime utc_datetime)
+  @query_contract_temporal_types ~w(date time datetime naive_datetime naive_datetime_usec utc_datetime utc_datetime_usec)
   @query_contract_text_types ~w(string text)
   @query_contract_exact_types ~w(boolean uuid enum)
   @query_contract_sortable_types @query_contract_numeric_types ++
@@ -21,7 +21,7 @@ defmodule Selecto.Domain.Projector do
                                     @query_contract_exact_types
   @query_projection_sections [
     :custom_columns,
-    :jsonb_schemas,
+    :json_schemas,
     :subfilters,
     :window_functions,
     :pagination,
@@ -38,14 +38,14 @@ defmodule Selecto.Domain.Projector do
   @ui_projection_sections [
     :columns,
     :custom_columns,
-    :jsonb_schemas,
+    :json_schemas,
     :pagination,
     :redact_fields
   ]
   @api_projection_sections [
     :columns,
     :custom_columns,
-    :jsonb_schemas,
+    :json_schemas,
     :subfilters,
     :window_functions,
     :pagination,
@@ -802,7 +802,7 @@ defmodule Selecto.Domain.Projector do
     %{
       columns: MapHelpers.section(domain, :columns, %{}),
       custom_columns: MapHelpers.section(domain, :custom_columns, %{}),
-      jsonb_schemas: MapHelpers.section(domain, :jsonb_schemas, %{}),
+      json_schemas: MapHelpers.section(domain, :json_schemas, %{}),
       subfilters: MapHelpers.section(domain, :subfilters, %{}),
       window_functions: MapHelpers.section(domain, :window_functions, %{}),
       pagination: MapHelpers.section(domain, :pagination, %{}),
