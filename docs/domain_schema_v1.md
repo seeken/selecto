@@ -1,11 +1,66 @@
-# Selecto Domain Schema v1
+# Selecto Domain Specification — Schema Version 1
 
-Selecto domain schema v1 is the first small, documented contract for authored
-domain maps. It is intentionally compatibility-safe: `Selecto.Domain.normalize/1`
-and `Selecto.Domain.validate/1` expose diagnostics and normalized projections,
-but `Selecto.configure/3` does not consume the normalized contract yet.
+This document is the normative specification for Selecto domain maps and the
+normalized domain contract in Selecto 0.5. Normative words such as **MUST**,
+**MUST NOT**, **SHOULD**, and **MAY** have their usual requirements-language
+meaning.
 
-## Version
+A Selecto domain is a declarative, versioned description of the data,
+relationships, query surfaces, write permissions, actions, choices, and
+capability names that an application elects to expose. It is a governance
+contract for operational applications; it is not a database schema dump, an
+authorization decision engine, or a substitute for database roles, constraints,
+transactions, and row-level security.
+
+## Scope And Representations
+
+The domain contract has three deliberately distinct representations:
+
+1. **Authored domain** — the Elixir map supplied by an application, generator,
+   or overlay. This is the representation consumed by `Selecto.configure/3`.
+2. **Normalized domain** — the deterministic envelope returned by
+   `Selecto.Domain.normalize/1` or `Selecto.Domain.validate/1`. It classifies
+   sections, expands supported shorthand, and exposes stable consumer
+   projections without mutating the authored input.
+3. **Runtime configuration** — the adapter-aware query configuration compiled
+   by `Selecto.configure/3`. It is an internal runtime structure, not a portable
+   serialization format.
+
+These representations are related but not interchangeable. In particular,
+`Selecto.configure/3` validates and compiles the authored map; it does not replace
+that map with the normalized envelope. Consumers that need a stable portable
+contract MUST call `Selecto.Domain.validate/1` and use one of the documented
+projections rather than depending on runtime configuration internals.
+
+## Conformance
+
+An authored domain conforms to schema version 1 when all of the following hold:
+
+- it is a map containing valid `source` and `schemas` sections;
+- `Selecto.Domain.validate/1` returns
+  `{:ok, normalized, diagnostics}`;
+- every warning relevant to the producer's deployment policy has been reviewed;
+- if the domain will be passed to `Selecto.configure/3`,
+  `Selecto.DomainValidator.validate_domain/1` also returns `:ok`.
+
+The two validators have different jobs. `Selecto.Domain.validate/1` validates
+the normalized schema-v1 contract, including writes, actions, capabilities,
+choice sources, and field bindings. `Selecto.DomainValidator.validate_domain/1`
+validates the authored shape used by the current query runtime, including join
+cycles and runtime-oriented association requirements. A producer MUST NOT treat
+one as proof that the other representation is valid.
+
+`Selecto.configure/3` runs authored-domain validation by default after applying
+declared extension callbacks. Passing `validate: false` disables that check in
+permissive mode and is therefore outside the recommended conformance path.
+Strict mode rejects `validate: false`.
+
+Normalization and validation do not connect to a database, execute queries or
+writes, invoke query-builder functions, resolve authorization, or prove behavior
+for arbitrary adapters and database states. Database-backed verification remains
+a separate evidence layer.
+
+## Version And Identity
 
 Generated domains should declare the current schema version:
 
@@ -55,6 +110,25 @@ domain_fingerprint: "sha256:9f5d..."
 Selecto core preserves a supplied fingerprint but does not compute one during
 normalization.
 
+## Key And Identifier Rules
+
+The normalized schema accepts known structural keys in atom or string form.
+Field, registry, relation, action, and capability identifiers are normally
+non-empty atoms or strings. For comparison, most identifiers normalize to their
+string representation, so producers MUST NOT declare both `:status` and
+`"status"` in the same logical registry. Contracts that detect such collisions
+fail closed instead of selecting a winner.
+
+Dotted strings such as `"customer.name"` identify a field through a declared
+schema or relationship path. They MUST be non-empty and MUST NOT start or end
+with `.`, or contain `..`, where a static source path is required.
+
+JSON with string keys is a portable interchange representation for
+normalization, validation, and projection. The current query runtime expects an
+Elixir-authored domain with the atom keys used by its public API. A host loading
+JSON for runtime use MUST translate only the documented finite key and enum set;
+it MUST NOT create atoms from arbitrary untrusted strings.
+
 ## Top-Level Sections
 
 The normalizer classifies authored top-level keys into four categories.
@@ -86,22 +160,24 @@ Canonical sections are part of the current domain contract:
 ### Projection
 
 Projection sections are recognized implementation or consumer-facing sections.
-They are not unknown, but diagnostics call them out because future normalized
-projections may reshape them:
+They are part of the schema-v1 input vocabulary, but diagnostics call them out
+because portable consumers SHOULD obtain them from a named projection:
 
 - `columns`
 - `custom_columns`
-- `jsonb_schemas`
+- `json_schemas`
 - `subfilters`
 - `window_functions`
 - `pagination`
 - `retarget`
 - `redact_fields`
 
-### Proposed
+### Proposed (Diagnostic Category Name)
 
-Proposed sections are reserved for the write/action/reference contract that is
-still being formalized:
+The `:proposed` name is retained by the section-classification diagnostics for
+compatibility. In Selecto 0.5 these are implemented, normalized, validated
+schema-v1 contracts; the label does **not** mean that they are ignored or merely
+planned:
 
 - `writes`
 - `actions`
@@ -111,14 +187,48 @@ still being formalized:
 
 ### Unknown
 
-Any other top-level key is unknown and appears in diagnostics. Unknown keys are
-not preserved as a legacy contract. Selecto is still pre-0.5 and has no shipped
-domain compatibility burden; old experimental write-like keys should be migrated
-or removed rather than carried forward as `legacy` support.
+Any other top-level key is unknown and appears in diagnostics. The authored map
+is retained for inspection, so an unknown value may still be visible under
+`authored_domain` or `domain`; it is not assigned portable semantics and named
+projections are not required to expose it. Producers MUST migrate or remove old
+experimental keys rather than interpreting their preservation as compatibility
+support.
+
+## Normalized Envelope
+
+Successful normalization returns `{:ok, normalized, diagnostics}`. The envelope
+has this stable schema-v1 organization:
+
+| Key | Meaning |
+| --- | --- |
+| `schema_version` | Parsed or inferred schema compatibility version. |
+| `domain_version` | Optional authored release label. |
+| `domain_fingerprint` | Optional authored identity value; never computed by core. |
+| `authored_domain` | Original input map, unchanged. |
+| `domain` | Canonical authored map after version insertion and shorthand expansion. |
+| `sections` | Keys grouped as `canonical`, `projection`, `proposed`, and `unknown`. |
+| `source`, `schemas`, `joins` | Core relation and join sections. |
+| `query` | Query defaults, filters, functions, members, and published views. |
+| `projection` | Display and implementation-facing projection metadata. |
+| `writes`, `actions`, `capabilities` | Mutation and governance registries. |
+| `source_relationships`, `choice_sources` | Cross-domain reference registries. |
+| `detail_actions` | Detail-row UI action metadata. |
+| `domain_data`, `extensions` | Host data and declared extension specifications. |
+
+Missing map registries normalize to `%{}` and missing list-style sections to
+their projection-specific defaults. A normalized envelope is identified by its
+`schema_version`, `domain`, `query`, `projection`, and `sections` structure; an
+arbitrary authored map MUST NOT be passed directly to `Selecto.Domain.project/2`.
+
+Diagnostics are data, not log messages. Errors make `Selecto.Domain.validate/1`
+return `{:error, diagnostics}`. Warnings do not, but producers SHOULD review
+invalid shapes, inferred or unsupported versions, classified projection or
+proposed sections, composition collisions, and unknown keys according to their
+deployment policy.
 
 ## Core Relation Shape
 
-The first strict contract validates `source` and every entry in `schemas` as
+The schema-v1 contract validates `source` and every entry in `schemas` as
 relation maps. A relation map uses this shape:
 
 ```elixir
@@ -150,9 +260,59 @@ Validation checks:
 - `columns` must be a map.
 - Every listed field must have a matching column definition.
 
+Optional `source_kind` is `:table`, `:view`, or `:materialized_view`; optional
+`readonly` is boolean. These properties describe the relation source but do not
+grant or revoke write authority: only the explicit `writes` contract does that.
+
+Column definitions are open metadata maps. Query consumers commonly use
+`type`, labels, formatting, aggregate, filter, sort, capability, choice,
+reference, and colocated write metadata. Schema-v1 validators enforce the
+properties described in this document; consumers MUST ignore unknown display
+metadata unless they explicitly define it and MUST NOT derive SQL identifiers
+or write permission from arbitrary values.
+
 `joins` must be a map when present. Each join key must be declared as an
 association on its parent relation, and each association must point at a schema
 available in `schemas` unless it explicitly targets `:source`.
+
+An association MUST be a map with `queryable` naming its target schema. Runtime
+associations normally also declare `field`, `owner_key`, and `related_key` so the
+join compiler can bind the relationship. A join entry is a map keyed by the
+association id and MAY contain nested `joins`; nested joins are resolved against
+the target relation. Authored runtime validation rejects missing associations,
+missing target schemas, dependency cycles, and incomplete metadata required by
+advanced join types. Join `type`, display fields, cardinality, and advanced
+dimension or hierarchy options are runtime query configuration; they do not
+confer write or authorization rights.
+
+## Projection And Host Metadata
+
+The projection-category sections separate consumer presentation and advanced
+query metadata from the structural relation contract:
+
+| Key | Shape | Meaning |
+| --- | --- | --- |
+| `columns` | map | Overlay-style root column customizations; `Selecto.Config.Overlay.merge/2` deep-merges them into `source.columns`. |
+| `custom_columns` | map | Domain-declared computed or expression-backed query fields. Their ids join the known-field index. |
+| `json_schemas` | map | Typed schemas for structured JSON columns; the overlay DSL can attach each entry to its source column. |
+| `subfilters` | map | Named advanced subfilter metadata consumed by supporting query paths. |
+| `window_functions` | map | Named window-function metadata for supporting consumers. |
+| `pagination` | map | Domain pagination metadata. |
+| `retarget` | map | Domain retargeting metadata for query consumers. |
+| `redact_fields` | list | Projection redaction declarations; composition unions them and runtime overlay merging also unions them into `source.redact_fields`. |
+
+Except for the references and shapes explicitly validated elsewhere in this
+specification, these are open consumer contracts. Core normalization checks the
+map/list category and preserves the values; it does not claim that every
+adapter or companion package implements every option. A consumer MUST document
+and validate any narrower subschema it relies on.
+
+`domain_data` is opaque host metadata preserved in the normalized envelope and
+runtime configuration. Portable consumers MUST NOT infer query, write, or
+authorization rights from it. `extensions` is an ordered list of extension
+specifications resolved through `Selecto.Extensions`; extension callbacks are
+trusted host code and MAY contribute domain metadata, overlay DSL modules,
+adapter type mapping, and companion-package integrations.
 
 ## Query Field Lists
 
@@ -200,7 +360,7 @@ Invalid query list metadata produces `:invalid_section_shape`,
 
 ## Filter References
 
-The first contract also validates filter registry metadata and filter
+The schema-v1 contract also validates filter registry metadata and filter
 references. `filters` must be a map. Each filter id must be a non-empty atom or
 string, and each filter config must be a map. Virtual filters may omit `field`.
 When present, `field` must be a non-empty atom or dotted string path and `type`
@@ -300,7 +460,7 @@ the current named member groups:
 - `unnests`
 
 Each group must be a map of non-empty atom or string ids to member specs. Specs
-must be maps. The first query-member contract validates metadata shape only; it
+must be maps. The schema-v1 query-member contract validates metadata shape only; it
 does not execute member functions or compile SQL.
 
 Current member checks:
@@ -389,9 +549,107 @@ Invalid detail-action metadata produces diagnostics such as
 `:invalid_detail_action_payload`, `:missing_detail_action_url_template`,
 `:missing_detail_action_module`, or `:detail_action_field_not_found`.
 
+## Write Contract
+
+The optional `writes` map declares the only portable write authority granted by
+a domain. Read fields, associations, database introspection, and queryability
+MUST NOT imply write permission. An executable contract requires a non-empty
+`writes.operations` registry containing at least one operation with
+`enabled: true`; otherwise `Selecto.Domain.WriteContract.compile/1` returns
+`:write_not_declared`.
+
+The canonical sections are:
+
+| Key | Shape | Contract |
+| --- | --- | --- |
+| `operations` | map | Named `insert`, `update`, `delete`, or `upsert` operation policies. |
+| `fields` | map | Explicit field-level insert/update grants and restrictions. |
+| `scope` | map | Server-owned scope requirements, currently including `tenant`. |
+| `relationships` | map | Nested-write relationship ownership and mutation policy. |
+| `validations` | list | Portable or host-interpreted validation rules. |
+| `constraints` | list or map | Write constraints, including optimistic locking and foreign keys. |
+| `transitions` | map | Allowed state-transition graphs keyed by a known field. |
+| `hooks` | map | Declared references to host-owned hook code. |
+
+### Operations
+
+Operation ids MUST be `insert`, `update`, `delete`, or `upsert`, in atom or
+string form. Each specification MUST be a map. The schema validator recognizes
+boolean `enabled`, `bulk`, and `require_filter` flags, an optional list of known
+`fields`, and these cardinality forms:
+
+- `:many`
+- `{:exactly, positive_integer}`
+- `{:at_most, non_negative_integer}`
+- `{:at_least, non_negative_integer}`
+- `{:between, minimum, maximum}` where `0 <= minimum <= maximum`
+
+Additional operation metadata such as `returning` and `conflict_targets` is
+preserved for write consumers. A consumer MUST reject an unsupported option or
+adapter requirement rather than silently weakening it.
+
+### Fields
+
+Every key in `writes.fields` MUST resolve to a known source, schema, or custom
+field. A field spec MAY contain boolean `insertable`, `updatable`, `immutable`,
+`write_once`, and `server_managed` flags. `insertable: true` grants the field to
+insert/upsert; `updatable: true` grants it to update. Missing or false flags do
+not grant permission. Portable write metadata MUST NOT contain
+`{:unsafe_sql, ...}` or `{:unsafe_fragment, ...}` terms.
+
+Authoring and downstream write consumers also use metadata such as
+`required_on`, `forbidden_on`, validators, and default providers. These values
+are preserved in the field spec, but their execution belongs to the write
+consumer; core schema validation is not proof that a particular adapter or host
+implements them.
+
+### Scope
+
+The canonical tenant policy is `writes.scope.tenant` (the validator also reads
+the compatibility spelling `writes.scopes`). It is a map with an optional
+boolean `required` flag and a `field` that MUST resolve to a known domain field.
+Consumer-facing metadata may declare `satisfied_by` sources such as trusted
+context or a database prefix. A required tenant scope is server-owned policy:
+clients MUST NOT be permitted to replace the trusted tenant value.
+
+### Relationships
+
+Each `writes.relationships` entry MUST be a map. A writable/enabled relationship
+MUST explicitly declare:
+
+- `cardinality`: `:one` or `:many`;
+- `ownership`: `:owned`, `:shared_reference`, or `:join_only`.
+
+It MAY also declare `allowed_ops`, `strategy: :sync`, non-empty
+`identity_fields`, `parent_key`, `child_key`, `domain`, `delete_missing`, and
+other consumer-specific nested-write policy. `allowed_ops` uses the same four
+operation ids as `writes.operations`. A nested `domain` MUST itself be a map.
+
+### Constraints
+
+`constraints.optimistic_lock` identifies a known `field`. Each entry in
+`constraints.foreign_keys` is keyed by a known local field and MUST declare:
+
+- `source: :input` or `source: {:context, key}` (the equivalent map form is
+  accepted);
+- `references: %{relation: relation_id, field: field_id}`;
+- optional boolean `required`.
+
+These declarations let adapters preflight portable behavior. Database-native
+constraints remain authoritative and MUST still be enabled and tested.
+
+### Hooks And Validations
+
+`writes.validations` is an ordered list. `writes.hooks` is a registry of named
+hook references such as `{Module, :function}` or `{Module, :function, args}`.
+They are host-owned executable code, not portable data-plane behavior. Safe
+inspection exposes only sanitized reference metadata and never executes hooks.
+Applications MUST treat domains containing functions, callbacks, or modules as
+trusted code even when the surrounding map is declarative.
+
 ## Write Transitions
 
-`writes.transitions` is the first proposed write contract section with strict
+`writes.transitions` is a schema-v1 write contract section with strict
 validation. It is a direct state graph keyed by a known domain field:
 
 ```elixir
@@ -418,8 +676,8 @@ Validation checks:
 - each source state must be an atom or string
 - each target list must be a list of atoms or strings
 
-This validation does not execute writes and does not make `Selecto.configure/3`
-depend on the write contract.
+This validation does not execute writes. Query configuration preserves the
+metadata, while execution is owned by the write consumer and configured adapter.
 
 ## Colocated Write Authoring
 
@@ -568,7 +826,7 @@ Decision statuses are `:allow`, `:deny`, `:conditional`, and
 
 ## Direct Transition Actions
 
-`actions` declares named business commands. The first strict action shape is a
+`actions` declares named business commands. The canonical transition action is a
 row action that directly references a `writes.transitions` edge:
 
 ```elixir
@@ -613,7 +871,7 @@ does not execute actions.
 
 ## Source Relationships And Choice Sources
 
-`source_relationships` declares the first compact working-domain to source-domain
+`source_relationships` declares the compact working-domain to source-domain
 binding shape. It is used by `choice_sources` to describe context-safe option
 providers.
 
@@ -759,19 +1017,20 @@ The normalized form contains:
 - compact `choice_source: :customer_choices` on the field
 
 If `id` values are omitted, the normalizer generates deterministic string ids
-from the field path. This is canonical shorthand only; pre-0.5 legacy sections
-are still not preserved or expanded.
+from the field path. This is canonical shorthand only; undocumented legacy
+sections are not expanded or assigned compatibility semantics.
 
-The current slice validates static choice-source metadata and filter expression
+Schema v1 validates static choice-source metadata and filter expression
 syntax plus static source-relationship metadata. It does not resolve external
 source-domain schemas, apply filters, fetch options, or execute membership
 checks.
 
 ## Domain Composition
 
-`Selecto.Domain.compose/2` is the opt-in Stage 2 boundary for combining an
-authored domain with overlays before projecting or validating it. It does not
-change `Selecto.configure/3` behavior.
+`Selecto.Domain.compose/2` is the explicit boundary for combining an authored
+domain with one or more data overlays before projecting or validating it. The
+function returns a normalized envelope; it does not mutate the map later passed
+to `Selecto.configure/3`.
 
 ```elixir
 {:ok, normalized, diagnostics} =
@@ -798,11 +1057,41 @@ Composition semantics are deterministic:
 After overlays merge, declared extension `merge_domain/2` callbacks run in
 declaration order and the result is normalized again.
 
+## Overlay Authoring DSL
+
+`use Selecto.Config.OverlayDSL` defines an `overlay/0` function for compile-time
+authoring. The returned value is an ordinary domain overlay and MUST be merged
+into a complete base domain before runtime configuration. Declaring a DSL block
+does not by itself validate the complete result.
+
+The schema-v1 DSL families are:
+
+- query and UI: `defcolumn`, `deffilter`, `deffunction`, `defdetail_action`,
+  `defpopup`, and `defjson_schema`;
+- query members: `defcte`, `defvalues`, `defsubquery`, `deflateral`, and
+  `defunnest`;
+- structure: `defschema`, `defjoin`, `defschema_assoc`, and `defsource_assoc`;
+- references: `defsource_relationship` and `defchoice_source`;
+- writes: `defwrite_operation`, `defwrite_field`, `defwrite_relationship`,
+  `defwrite_transition`, `defwrite_validation`, `defwrite_constraint`,
+  `defwrite_tenant_scope`, and `defwrite_hook`;
+- governance: `defaction` and `defcapability`.
+
+Block forms use property macros such as `label`, `type`, `capability`,
+`enabled`, `insertable`, `updatable`, `required_on`, `operations`, `transition`,
+and `execution`. Map forms remain useful when a complete nested shape is clearer.
+
+`Selecto.Config.Overlay.merge/2` implements the runtime-oriented overlay merge:
+registries and column metadata deep-merge, redactions union, and overlay values
+win where no section-specific rule applies. `Selecto.Domain.compose/2` is the
+portable normalization/composition API described above. Producers SHOULD choose
+one boundary deliberately and validate the fully merged domain, rather than
+assuming every overlay mechanism has identical collision semantics.
+
 ## Domain Projections
 
 `Selecto.Domain.project/2` turns a normalized domain into read-only consumer
-views. These projections are opt-in and do not change `Selecto.configure/3`
-behavior.
+views. These projections do not change `Selecto.configure/3` behavior.
 
 Supported projections are:
 
@@ -830,6 +1119,59 @@ keys, or function captures from query members and published views.
 For consumers that do not need the lower-level projection API,
 `Selecto.Domain.query_contract/1` accepts either an authored domain or an
 already-normalized domain and returns `{:ok, query_contract, diagnostics}`.
+
+Consumers SHOULD request the narrowest projection that satisfies their needs:
+
+| Consumer concern | Projection |
+| --- | --- |
+| Query compilation or query tooling | `:query` |
+| Portable mutation/action tooling | `:write` |
+| UI labels, choices, and actions | `:ui` |
+| Combined API contract | `:api` |
+| Constrained discovery for tools or AI | `:query_contract` |
+
+A projection is a read-only metadata boundary, not an authorization decision.
+Capability ids in a projection remain names that a host resolver must evaluate.
+
+## Runtime Configuration And Governance
+
+The runtime entry point is:
+
+```elixir
+selecto =
+  Selecto.configure(domain, connection_input,
+    adapter: MyApp.SelectoAdapter,
+    validate: true,
+    mode: :strict,
+    domain_sql: :declared
+  )
+```
+
+An adapter MUST be supplied explicitly unless the host application configures a
+default. Before compilation, Selecto discovers domain extension specs and calls
+their domain-merge callbacks in declaration order. With validation enabled, it
+runs `Selecto.DomainValidator.validate_domain!/1`; it then compiles query fields
+and joins and seals the applicable policy state.
+
+The policy modes are:
+
+- `:permissive` — preserves the traditional dynamic query surface;
+- `:strict` — seals the composed domain and compiled authority, rejects
+  query-authored raw SQL escape hatches, prohibits ad hoc or structurally
+  overridden joins, and requires advanced row sources to originate in declared
+  query members.
+
+`domain_sql: :declared` permits trusted SQL already authored inside the domain.
+`domain_sql: :forbid` rejects that declared SQL as well when used with strict
+mode. Strict mode is a query-construction governance boundary. It MUST be paired
+with database privileges, tenant controls, parameterized execution, and any
+required row-level security.
+
+Capabilities follow the same separation of concerns: the domain declares stable
+names and where they apply; the host supplies an actor/tenant-aware resolver and
+acts on an `allow`, `deny`, `conditional`, or `not_applicable` decision. A
+missing capability declaration or unresolved decision MUST NOT be interpreted
+as authorization.
 
 ## Domain Inspection
 
@@ -984,6 +1326,37 @@ The option-list API is a projection contract for future Components, API,
 GraphQL, AI, operations, and Updato integrations. It does not change
 `Selecto.configure/3` behavior.
 
+## Validation And Inspection Workflow
+
+Domain tooling SHOULD use the following sequence:
+
+```elixir
+with {:ok, normalized, diagnostics} <- Selecto.Domain.validate(domain),
+     :ok <- Selecto.DomainValidator.validate_domain(domain) do
+  query_contract = Selecto.Domain.project(normalized, :query_contract)
+  {:ok, inspection, _diagnostics} = Selecto.Domain.describe(normalized)
+  {:ok, normalized, query_contract, inspection, diagnostics}
+end
+```
+
+The public boundaries are:
+
+| API | Input | Result and purpose |
+| --- | --- | --- |
+| `Selecto.Domain.normalize/1` | authored map | Envelope plus warnings; expands shorthand but does not run contract errors. |
+| `Selecto.Domain.validate/1` | authored map | Normalizes and runs the schema-v1 contract. |
+| `Selecto.DomainValidator.validate_domain/1` | authored runtime map | Runtime-oriented structural and join validation. |
+| `Selecto.DomainValidator.validate_domain(domain, normalize: true, projection: p)` | authored map | Validates the normalized contract and then the selected `:query`, `:write`, `:ui`, or `:api` projection through the authored validator. |
+| `Selecto.Domain.project/2` | normalized envelope | Produces a named read-only consumer view. |
+| `Selecto.Domain.query_contract/1` | authored or normalized | Produces the constrained query-discovery projection. |
+| `Selecto.Domain.describe/1` | authored or normalized | Produces deterministic counts, registries, security-review entries, and sanitized hook metadata. |
+| `Selecto.Domain.WriteContract.compile/1` | authored, normalized, or configured Selecto | Produces the explicit fail-closed write contract or an error. |
+
+Compile-time modules may `use Selecto.DomainValidator, domain: domain` for a
+static authored domain. Generated artifacts SHOULD also record `schema_version`,
+`domain_version`, and a producer-computed `domain_fingerprint` so deployments
+can detect drift. Core preserves but does not calculate the fingerprint.
+
 ## Elixir Example
 
 ```elixir
@@ -1009,7 +1382,12 @@ domain = %{
       }
     },
     associations: %{
-      customer: %{queryable: :customers}
+      customer: %{
+        queryable: :customers,
+        field: :customer,
+        owner_key: :customer_id,
+        related_key: :id
+      }
     }
   },
   schemas: %{
@@ -1067,6 +1445,12 @@ domain = %{
     "customer.choose" => %{operations: [:choice_source]}
   },
   writes: %{
+    operations: %{
+      update: %{enabled: true, require_filter: true, fields: [:status]}
+    },
+    fields: %{
+      status: %{updatable: true}
+    },
     transitions: %{
       status: %{
         "pending" => ["ready", "cancelled"],
@@ -1087,11 +1471,15 @@ domain = %{
 }
 
 {:ok, normalized, diagnostics} = Selecto.Domain.validate(domain)
+:ok = Selecto.DomainValidator.validate_domain(domain)
+{:ok, write_contract} = Selecto.Domain.WriteContract.compile(normalized)
 ```
 
 ## JSON Equivalent
 
-JSON domains use string keys and string field identifiers:
+This JSON example is the string-keyed interchange equivalent. As described in
+the key rules, hosts MUST translate only the finite documented vocabulary before
+passing JSON-derived maps to the current query runtime:
 
 ```json
 {
@@ -1116,7 +1504,12 @@ JSON domains use string keys and string field identifiers:
       }
     },
     "associations": {
-      "customer": {"queryable": "customers"}
+      "customer": {
+        "queryable": "customers",
+        "field": "customer",
+        "owner_key": "customer_id",
+        "related_key": "id"
+      }
     }
   },
   "schemas": {
@@ -1174,6 +1567,12 @@ JSON domains use string keys and string field identifiers:
     "customer.choose": {"operations": ["choice_source"]}
   },
   "writes": {
+    "operations": {
+      "update": {"enabled": true, "require_filter": true, "fields": ["status"]}
+    },
+    "fields": {
+      "status": {"updatable": true}
+    },
     "transitions": {
       "status": {
         "pending": ["ready", "cancelled"],

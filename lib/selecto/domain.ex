@@ -1,11 +1,12 @@
 defmodule Selecto.Domain do
   @moduledoc """
-  Compatibility-safe normalization entry point for Selecto domains.
+  Normalization, validation, projection, composition, and inspection for the
+  versioned Selecto domain contract.
 
-  This module does not participate in `Selecto.configure/3` yet. It provides a
-  read-only normalization boundary for callers that want a stable, diagnostic
-  view of authored domain maps while existing runtime behavior remains
-  unchanged.
+  `Selecto.configure/3` consumes and separately validates the authored runtime
+  map; it does not replace that map with this module's normalized envelope.
+  Callers use this module when they need the complete schema-v1 contract or a
+  stable, read-only consumer projection.
   """
 
   use Selecto.Domain.Constants
@@ -125,11 +126,11 @@ defmodule Selecto.Domain do
   end
 
   @doc """
-  Normalizes an authored domain and validates it against the first-wave
-  canonical contract.
+  Normalizes an authored domain and validates it against the schema-v1 contract.
 
-  This is still a compatibility-safe entry point: it does not participate in
-  `Selecto.configure/3` unless a caller opts in elsewhere.
+  Runtime configuration uses `Selecto.DomainValidator` for its authored-map
+  checks. Domain producers should use this function as the portable contract
+  boundary in addition to runtime validation.
   """
   @spec validate(term()) :: {:ok, map(), Diagnostics.t()} | {:error, Diagnostics.t()}
   def validate(domain) do
@@ -238,9 +239,8 @@ defmodule Selecto.Domain do
   @doc """
   Projects a normalized domain into a read-only consumer view.
 
-  Projection helpers are intentionally conservative in this slice. They reshape
-  the normalized map for future consumers, but no existing runtime path calls
-  them yet.
+  Projection helpers reshape the normalized map into explicit consumer
+  contracts. Runtime query configuration does not consume these projections.
 
   Supported projections:
 

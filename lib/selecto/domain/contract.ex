@@ -1,12 +1,12 @@
 defmodule Selecto.Domain.Contract do
   @moduledoc """
-  First-wave canonical domain contract checks.
+  Canonical schema-v1 domain contract checks.
 
-  This module validates the normalized shape produced by `Selecto.Domain`.
-  It is intentionally small: it covers the required core sections and the first
-  strict subschemas for `source`, `schemas`, `joins`, and filter references.
-  Existing runtime configuration does not call this module unless a caller opts
-  into normalized validation.
+  This module validates the normalized shape produced by `Selecto.Domain`,
+  including relations, joins, query metadata, query members, published views,
+  detail actions, writes, capabilities, actions, source relationships, choice
+  sources, and field bindings. Runtime configuration separately validates the
+  authored map unless a caller explicitly requests normalized validation.
   """
 
   use Selecto.Domain.Constants
@@ -34,7 +34,7 @@ defmodule Selecto.Domain.Contract do
         }
 
   @doc """
-  Returns `:ok` when a normalized domain satisfies the first-wave contract.
+  Returns `:ok` when a normalized domain satisfies the schema-v1 contract.
   """
   @spec validate(map()) :: :ok | {:error, [error()]}
   def validate(normalized_domain) when is_map(normalized_domain) do

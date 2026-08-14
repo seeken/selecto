@@ -245,7 +245,7 @@ Use extensions when a package needs to contribute domain metadata, overlay DSL, 
 
 ## Status
 
-Current `0.4.x` scope:
+Current `0.5.x` scope:
 
 - core query building is usable but not stable
 - advanced subfilter internals are still high-risk/experimental
@@ -264,7 +264,8 @@ Current `0.4.x` scope:
   choice sources, published views, writes, and domain actions.
 - `docs/write_adapter_protocol.md` for portable write ownership, versioned
   capability preflight, and the adapter support matrix.
-- `docs/domain_schema_v1.md` for the normalized domain schema contract.
+- `docs/domain_schema_v1.md` for the normative authored, normalized, write,
+  projection, validation, and governance domain specification.
 - `docs/expression_dsl.md` for dynamic expression helpers, macros, and sigils.
 - `docs/strict_mode.md` for sealed domains and governed query construction.
 
