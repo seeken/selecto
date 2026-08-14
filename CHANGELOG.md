@@ -1,6 +1,19 @@
 
 # Selecto Library Changelog
 
+## V 0.4.14 - SQL Construction and Tenant Derivation Hardening
+--------------------------------------------------------------
+
+#### Security
+- Replaced interpolated JSONB path keys, JSON operator keys, containment
+  payloads, and array-membership values with escaped literals or bound
+  parameters, closing quote-based SQL injection paths.
+- Restricted `ANY` and `ALL` array comparisons to an explicit operator
+  allowlist, safely quoted `VALUES` CTE aliases, and validated dynamic window
+  and recent-subfilter intervals before SQL construction.
+- Made `to_sql/2` enforce required tenant scope by default, with an explicit
+  `validate_tenant: false` escape hatch for trusted diagnostic derivation.
+
 ## V 0.4.13 - Versioned Portable Write Adapter Contract
 ------------------------------------------------------
 
