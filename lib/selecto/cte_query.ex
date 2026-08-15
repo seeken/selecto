@@ -278,6 +278,13 @@ defmodule Selecto.CteQuery do
     current_ctes = Map.get(selecto.set, :ctes, [])
     updated_ctes = current_ctes ++ cte_specs
 
+    structured_ctes = Enum.filter(updated_ctes, &match?(%Selecto.Advanced.CTE.Spec{}, &1))
+
+    case Selecto.Advanced.CTE.validate_dependencies(structured_ctes) do
+      {:ok, _ordered_ctes} -> :ok
+      {:error, validation_error} -> raise validation_error
+    end
+
     put_in(selecto.set[:ctes], updated_ctes)
   end
 

@@ -64,16 +64,10 @@ defmodule Selecto.Builder.JsonOperationsTest do
 
   test "sqlite supports json_typeof and json_array_length selects" do
     typeof_spec =
-      JsonOperations.create_json_operation(:json_typeof, "metadata",
-        path: "$.details.priority",
-        as: "priority_type"
-      )
+      JsonOperations.create_json_operation(:json_typeof, "metadata", as: "priority_type")
 
     array_length_spec =
-      JsonOperations.create_json_operation(:json_array_length, "metadata",
-        path: "$.items",
-        as: "item_count"
-      )
+      JsonOperations.create_json_operation(:json_array_length, "metadata", as: "item_count")
 
     typeof_sql =
       BuilderJsonOperations.build_json_select(typeof_spec, adapter: SelectoDBSQLite.Adapter)
@@ -83,9 +77,9 @@ defmodule Selecto.Builder.JsonOperationsTest do
       BuilderJsonOperations.build_json_select(array_length_spec, adapter: SelectoDBSQLite.Adapter)
       |> IO.iodata_to_binary()
 
-    assert typeof_sql =~ ~r/json_type\("metadata", '\$\.details\.priority'\)/i
+    assert typeof_sql =~ ~r/json_type\("metadata"\)/i
     assert typeof_sql =~ ~r/as "priority_type"/i
-    assert array_length_sql =~ ~r/json_array_length\("metadata", '\$\.items'\)/i
+    assert array_length_sql =~ ~r/json_array_length\("metadata"\)/i
     assert array_length_sql =~ ~r/as "item_count"/i
   end
 end

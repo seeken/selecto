@@ -9,7 +9,7 @@ defmodule Selecto.JsonQuery do
     json_specs = Enum.map(json_operations, &build_select_spec/1)
 
     selecto
-    |> validate_specs!(json_specs)
+    |> validate_specs!(json_specs, :select)
     |> append_specs(:json_selects, json_specs)
   end
 
@@ -25,7 +25,7 @@ defmodule Selecto.JsonQuery do
     json_specs = Enum.map(json_filters, &build_filter_spec/1)
 
     selecto
-    |> validate_specs!(json_specs)
+    |> validate_specs!(json_specs, :filter)
     |> append_specs(:json_filters, json_specs)
   end
 
@@ -63,12 +63,28 @@ defmodule Selecto.JsonQuery do
       end)
 
     selecto
-    |> validate_specs!(Enum.map(json_specs, fn {spec, _direction} -> spec end))
+    |> validate_specs!(Enum.map(json_specs, fn {spec, _direction} -> spec end), :order)
     |> append_specs(:json_order_by, json_specs)
   end
 
   def order_by(selecto, json_sort, opts) do
     order_by(selecto, [json_sort], opts)
+  end
+
+  defp build_select_spec({:json_object_agg, key_field, value_field, opts})
+       when is_list(opts) do
+    Selecto.Advanced.JsonOperations.create_json_operation(
+      :json_object_agg,
+      key_field,
+      [key_field: key_field, value_field: value_field] ++ opts
+    )
+  end
+
+  defp build_select_spec({:json_object_agg, key_field, value_field}) do
+    Selecto.Advanced.JsonOperations.create_json_operation(:json_object_agg, key_field,
+      key_field: key_field,
+      value_field: value_field
+    )
   end
 
   defp build_select_spec({operation, column, path_or_opts}) when is_binary(path_or_opts) do
@@ -80,7 +96,11 @@ defmodule Selecto.JsonQuery do
   end
 
   defp build_select_spec({operation, column, opts}) when is_list(opts) do
-    Selecto.Advanced.JsonOperations.create_json_operation(operation, column, opts)
+    if Keyword.keyword?(opts) do
+      Selecto.Advanced.JsonOperations.create_json_operation(operation, column, opts)
+    else
+      Selecto.Advanced.JsonOperations.create_json_operation(operation, column, value: opts)
+    end
   end
 
   defp build_select_spec({operation, column}) do
@@ -109,7 +129,14 @@ defmodule Selecto.JsonQuery do
     Selecto.Advanced.JsonOperations.create_json_operation(operation, column)
   end
 
-  defp validate_specs!(selecto, specs) do
+  defp validate_specs!(selecto, specs, clause) do
+    Enum.each(specs, fn spec ->
+      case Selecto.Advanced.JsonOperations.validate_operation_clause(spec, clause) do
+        :ok -> :ok
+        {:error, validation_error} -> raise validation_error
+      end
+    end)
+
     Selecto.QueryValidator.validate_json_specs!(selecto, specs)
     selecto
   end

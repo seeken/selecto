@@ -32,7 +32,7 @@ defmodule Selecto.Builder.CteSql do
           []
 
         list ->
-          case Selecto.Advanced.CTE.detect_circular_dependencies(list) do
+          case Selecto.Advanced.CTE.validate_dependencies(list) do
             {:ok, ordered_ctes} ->
               ordered_ctes
 

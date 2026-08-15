@@ -91,7 +91,13 @@ defmodule Selecto.Advanced.CTE do
 
     @type t :: %__MODULE__{
             type:
-              :invalid_name | :invalid_query | :circular_dependency | :missing_recursive_parts,
+              :invalid_name
+              | :invalid_query
+              | :invalid_dependency
+              | :missing_dependency
+              | :duplicate_cte
+              | :circular_dependency
+              | :missing_recursive_parts,
             message: String.t(),
             details: map()
           }
@@ -206,8 +212,9 @@ defmodule Selecto.Advanced.CTE do
   @doc """
   Validate a CTE specification.
 
-  Ensures the CTE name is valid, queries are properly formed,
-  and dependencies don't create circular references.
+  Ensures the CTE name, query builder, and dependency declarations are valid.
+  Cross-CTE checks such as missing references, duplicates, and cycles are
+  performed by `validate_dependencies/1`.
   """
   def validate_cte(%Spec{} = spec) do
     with :ok <- validate_cte_name(spec.name),
@@ -302,19 +309,49 @@ defmodule Selecto.Advanced.CTE do
     end
   end
 
-  # Validate CTE dependencies (placeholder for circular dependency detection)
   defp validate_cte_dependencies(%Spec{dependencies: dependencies}) do
-    # For now, just validate that dependencies are strings
-    if Enum.all?(dependencies, &is_binary/1) do
+    cond do
+      not is_list(dependencies) ->
+        invalid_dependency_error(
+          "CTE dependencies must be a list of valid CTE names",
+          dependencies
+        )
+
+      invalid_dependency = Enum.find(dependencies, &(validate_dependency_name(&1) != :ok)) ->
+        invalid_dependency_error(
+          "Each CTE dependency must be a valid CTE name",
+          dependencies,
+          invalid_dependency
+        )
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_dependency_name(name) when is_binary(name) do
+    if String.length(name) in 1..63 and String.match?(name, ~r/^[a-zA-Z_][a-zA-Z0-9_]*$/) do
       :ok
     else
-      {:error,
-       %ValidationError{
-         type: :circular_dependency,
-         message: "CTE dependencies must be strings",
-         details: %{dependencies: dependencies}
-       }}
+      :error
     end
+  end
+
+  defp validate_dependency_name(_name), do: :error
+
+  defp invalid_dependency_error(message, dependencies, dependency \\ nil) do
+    details =
+      %{dependencies: dependencies}
+      |> then(fn details ->
+        if is_nil(dependency), do: details, else: Map.put(details, :dependency, dependency)
+      end)
+
+    {:error,
+     %ValidationError{
+       type: :invalid_dependency,
+       message: message,
+       details: details
+     }}
   end
 
   # Generate unique ID for CTE
@@ -324,82 +361,132 @@ defmodule Selecto.Advanced.CTE do
   end
 
   @doc """
-  Detect circular dependencies in a list of CTEs.
+  Validate and order dependencies in a list of CTEs.
 
-  Returns {:error, cycle} if a circular dependency is found,
-  {:ok, ordered_ctes} if CTEs can be ordered for execution.
+  Returns `{:ok, ordered_ctes}` in stable dependency order. Duplicate names,
+  missing references, and cycles return distinct `ValidationError` types.
   """
-  def detect_circular_dependencies(ctes) when is_list(ctes) do
-    # Build dependency graph
-    graph = build_dependency_graph(ctes)
+  def validate_dependencies(ctes) when is_list(ctes) do
+    with {:ok, validated_ctes} <- validate_cte_specs(ctes),
+         :ok <- validate_unique_names(validated_ctes),
+         :ok <- validate_dependency_references(validated_ctes),
+         {:ok, ordered_names} <- topological_sort(validated_ctes) do
+      specs_by_name = Map.new(validated_ctes, &{&1.name, &1})
+      {:ok, Enum.map(ordered_names, &Map.fetch!(specs_by_name, &1))}
+    end
+  end
 
-    # Perform topological sort to detect cycles
-    case topological_sort(graph) do
-      {:ok, ordered_names} ->
-        # Return CTEs in dependency order
-        ordered_ctes =
-          Enum.map(ordered_names, fn name ->
-            Enum.find(ctes, &(&1.name == name))
-          end)
+  defp validate_cte_specs(ctes) do
+    Enum.reduce_while(ctes, {:ok, []}, fn
+      %Spec{} = spec, {:ok, validated_specs} ->
+        case validate_cte(spec) do
+          {:ok, validated_spec} -> {:cont, {:ok, validated_specs ++ [validated_spec]}}
+          {:error, validation_error} -> {:halt, {:error, validation_error}}
+        end
 
-        {:ok, ordered_ctes}
+      entry, {:ok, _validated_specs} ->
+        {:halt,
+         {:error,
+          %ValidationError{
+            type: :invalid_query,
+            message: "CTE dependency validation requires CTE specifications",
+            details: %{entry: entry}
+          }}}
+    end)
+  end
 
-      {:error, cycle} ->
+  defp validate_unique_names(ctes) do
+    names = Enum.map(ctes, & &1.name)
+    counts = Enum.frequencies(names)
+    duplicates = names |> Enum.filter(&(Map.fetch!(counts, &1) > 1)) |> Enum.uniq()
+
+    case duplicates do
+      [] ->
+        :ok
+
+      _ ->
         {:error,
          %ValidationError{
-           type: :circular_dependency,
-           message: "Circular dependency detected in CTEs",
-           details: %{cycle: cycle}
+           type: :duplicate_cte,
+           message: "CTE names must be unique within a query",
+           details: %{duplicates: duplicates}
          }}
     end
   end
 
-  # Build dependency graph from CTE list
-  defp build_dependency_graph(ctes) do
-    Enum.reduce(ctes, %{}, fn cte, graph ->
-      deps = cte.dependencies || []
-      Map.put(graph, cte.name, deps)
-    end)
-  end
+  defp validate_dependency_references(ctes) do
+    known_names = ctes |> Enum.map(& &1.name) |> MapSet.new()
 
-  # Simple topological sort implementation
-  defp topological_sort(graph) do
-    # Find nodes with no incoming edges
-    all_nodes = Map.keys(graph)
-    nodes_with_incoming = graph |> Map.values() |> List.flatten() |> MapSet.new()
-    start_nodes = Enum.reject(all_nodes, &MapSet.member?(nodes_with_incoming, &1))
+    missing =
+      Enum.flat_map(ctes, fn cte ->
+        cte.dependencies
+        |> Enum.reject(&MapSet.member?(known_names, &1))
+        |> Enum.map(&%{cte: cte.name, dependency: &1})
+      end)
 
-    topological_sort_helper(graph, start_nodes, [], MapSet.new())
-  end
+    case missing do
+      [] ->
+        :ok
 
-  defp topological_sort_helper(graph, [], result, visited) do
-    if MapSet.size(visited) == map_size(graph) do
-      {:ok, Enum.reverse(result)}
-    else
-      # There are remaining nodes, which means there's a cycle
-      remaining = Map.keys(graph) |> Enum.reject(&MapSet.member?(visited, &1))
-      {:error, remaining}
+      _ ->
+        {:error,
+         %ValidationError{
+           type: :missing_dependency,
+           message: "CTE dependencies must reference CTEs in the same query",
+           details: %{missing: missing}
+         }}
     end
   end
 
-  defp topological_sort_helper(graph, [node | rest_nodes], result, visited) do
-    if MapSet.member?(visited, node) do
-      topological_sort_helper(graph, rest_nodes, result, visited)
-    else
-      new_visited = MapSet.put(visited, node)
-      new_result = [node | result]
+  defp topological_sort(ctes) do
+    names = Enum.map(ctes, & &1.name)
+    dependencies = Map.new(ctes, &{&1.name, &1.dependencies})
+    topological_sort(names, dependencies, MapSet.new(), [])
+  end
 
-      # Add nodes that depend on this node to the queue
-      dependencies = Map.get(graph, node, [])
+  defp topological_sort(names, dependencies, emitted, ordered) do
+    case Enum.find(names, fn name ->
+           not MapSet.member?(emitted, name) and
+             Enum.all?(Map.fetch!(dependencies, name), &MapSet.member?(emitted, &1))
+         end) do
+      nil ->
+        if MapSet.size(emitted) == length(names) do
+          {:ok, Enum.reverse(ordered)}
+        else
+          remaining = Enum.reject(names, &MapSet.member?(emitted, &1))
+          cycle = find_cycle(remaining, dependencies)
 
-      ready_nodes =
-        Enum.filter(dependencies, fn dep ->
-          # Check if all dependencies of dep are already visited
-          dep_deps = Map.get(graph, dep, [])
-          Enum.all?(dep_deps, &MapSet.member?(new_visited, &1))
-        end)
+          {:error,
+           %ValidationError{
+             type: :circular_dependency,
+             message: "Circular dependency detected in CTEs",
+             details: %{cycle: cycle}
+           }}
+        end
 
-      topological_sort_helper(graph, rest_nodes ++ ready_nodes, new_result, new_visited)
+      name ->
+        topological_sort(
+          names,
+          dependencies,
+          MapSet.put(emitted, name),
+          [name | ordered]
+        )
+    end
+  end
+
+  defp find_cycle(names, dependencies) do
+    Enum.find_value(names, [], &find_cycle_from(&1, dependencies, []))
+  end
+
+  defp find_cycle_from(name, dependencies, path) do
+    case Enum.find_index(path, &(&1 == name)) do
+      nil ->
+        dependencies
+        |> Map.fetch!(name)
+        |> Enum.find_value(&find_cycle_from(&1, dependencies, path ++ [name]))
+
+      cycle_start ->
+        Enum.drop(path, cycle_start) ++ [name]
     end
   end
 end

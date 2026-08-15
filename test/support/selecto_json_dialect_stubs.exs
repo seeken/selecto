@@ -242,10 +242,10 @@ defmodule Selecto.TestDialect.Json do
 
   def operation(style, %Operation{} = operation) do
     case operation.operation do
-      kind when kind in [:json_extract, :json_extract_path] ->
+      :json_extract ->
         operation_extraction(style, operation, false)
 
-      kind when kind in [:json_extract_text, :json_extract_path_text] ->
+      :json_extract_text ->
         operation_extraction(style, operation, true)
 
       :json_contains ->
@@ -312,9 +312,6 @@ defmodule Selecto.TestDialect.Json do
 
       :json_set when style in [:postgresql, :mysql] ->
         operation_mutation(style, "SET", operation)
-
-      :json_insert when style in [:postgresql, :mysql] ->
-        operation_mutation(style, "INSERT", operation)
 
       :json_remove when style == :postgresql ->
         {:ok, [column_ref(style, operation), " #- ", postgres_path(operation.path)]}

@@ -6,6 +6,11 @@
 
 #### Breaking
 - Raised the package version and coordinated adapter baseline to `0.5.0`.
+- Removed heuristic automatic retargeting. Applications must now opt in with
+  the explicit, validated `Selecto.retarget/3` API.
+- Removed the redundant `json_extract_path`, `json_extract_path_text`, and
+  unused `json_insert` operation names. Use `json_extract`,
+  `json_extract_text`, and `json_set` in the reduced portable JSON contract.
 - Removed implicit PostgreSQL adapter selection, `postgrex_opts`, the in-core
   `Selecto.DB.PostgreSQL` implementation, and PostgreSQL-named JSONB helpers.
 - Replaced the PostgreSQL-named `:ilike` and `:to_char` query forms with
@@ -44,6 +49,12 @@
   boundary in both text and JSON evidence.
 
 #### Fixed
+- CTE dependency validation now rejects malformed, missing, duplicate, and
+  circular references distinctly, and emits acyclic CTEs in stable dependency
+  order.
+- JSON operation validation now enforces required arguments, portable shapes,
+  and clause compatibility; extraction comparisons now compile to bound filter
+  parameters instead of a bare JSON expression.
 - Registered function calls now reject known argument type mismatches and
   ambiguous overloads before SQL generation while preserving permissive
   handling for expressions whose type cannot yet be inferred.

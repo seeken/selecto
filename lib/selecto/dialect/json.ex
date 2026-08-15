@@ -68,13 +68,11 @@ defmodule Selecto.Dialect.Json.Operation do
     options: %{}
   ]
 
-  @type clause :: :select | :filter
+  @type clause :: :select | :filter | :order
 
   @type operation ::
           :json_extract
           | :json_extract_text
-          | :json_extract_path
-          | :json_extract_path_text
           | :json_contains
           | :json_contained
           | :json_exists
@@ -85,7 +83,6 @@ defmodule Selecto.Dialect.Json.Operation do
           | :json_build_array
           | :json_empty_array
           | :json_set
-          | :json_insert
           | :json_remove
           | :json_typeof
           | :json_array_length

@@ -146,12 +146,7 @@ defmodule Selecto.SelectionShape do
     with specs when is_list(specs) <- Map.get(selecto.set, :json_selects, []),
          %{} = spec <- Enum.find(specs, &(Map.get(&1, :alias) == alias_name)),
          operation
-         when operation in [
-                :json_extract,
-                :json_extract_text,
-                :json_extract_path,
-                :json_extract_path_text
-              ] <- Map.get(spec, :operation),
+         when operation in [:json_extract, :json_extract_text] <- Map.get(spec, :operation),
          column when is_binary(column) <- Map.get(spec, :column),
          path when is_binary(path) <- Map.get(spec, :path),
          {:ok, dot_path} <- json_path_to_dot_path(path) do

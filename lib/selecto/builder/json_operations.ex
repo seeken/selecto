@@ -23,6 +23,11 @@ defmodule Selecto.Builder.JsonOperations do
     build(spec, :filter, opts)
   end
 
+  @doc "Generate SQL for a JSON operation in an ORDER BY clause."
+  def build_json_order(%Spec{} = spec, opts \\ []) do
+    build(spec, :order, opts)
+  end
+
   @doc "Generate SQL for multiple JSON SELECT operations."
   def build_json_operations(specs, opts \\ []) when is_list(specs) do
     sql_parts = specs |> Enum.map(&build_json_select(&1, opts)) |> Enum.intersperse(", ")
@@ -35,6 +40,8 @@ defmodule Selecto.Builder.JsonOperations do
 
   defp build(%Spec{} = spec, clause, opts) do
     adapter = Keyword.fetch!(opts, :adapter)
+    validate_spec!(spec)
+    validate_clause!(spec, clause)
 
     fragment = %Operation{
       operation: spec.operation,
@@ -51,15 +58,56 @@ defmodule Selecto.Builder.JsonOperations do
     case DialectSupport.render_json(adapter, :render_json_operation, fragment, %{
            adapter: adapter
          }) do
-      {:ok, sql} -> add_alias(sql, spec.alias, adapter)
-      {:error, %Error{} = error} -> raise Error.to_exception(error)
-      {:error, reason} -> raise Error.to_exception(render_error(adapter, spec.operation, reason))
+      {:ok, sql} ->
+        sql
+        |> add_filter_comparison(spec, clause)
+        |> add_alias(spec.alias, adapter, clause)
+
+      {:error, %Error{} = error} ->
+        raise Error.to_exception(error)
+
+      {:error, reason} ->
+        raise Error.to_exception(render_error(adapter, spec.operation, reason))
     end
   end
 
-  defp add_alias(sql, nil, _adapter), do: sql
+  defp validate_spec!(spec) do
+    case Selecto.Advanced.JsonOperations.validate_json_operation(spec) do
+      {:ok, _validated_spec} -> :ok
+      {:error, validation_error} -> raise validation_error
+    end
+  end
 
-  defp add_alias(sql, alias_name, adapter) do
+  defp validate_clause!(spec, clause) do
+    case Selecto.Advanced.JsonOperations.validate_operation_clause(spec, clause) do
+      :ok -> :ok
+      {:error, validation_error} -> raise validation_error
+    end
+  end
+
+  defp add_filter_comparison(sql, %Spec{options: options}, :filter) do
+    case Map.get(options || %{}, :comparison) do
+      {operator, value} ->
+        ["(", sql, " ", comparison_operator(operator), " ", {:param, value}, ")"]
+
+      nil ->
+        sql
+    end
+  end
+
+  defp add_filter_comparison(sql, _spec, _clause), do: sql
+
+  defp comparison_operator(operator) when operator in [:=, :==], do: "="
+  defp comparison_operator(operator) when operator in [:!=, :<>], do: "<>"
+  defp comparison_operator(:>), do: ">"
+  defp comparison_operator(:>=), do: ">="
+  defp comparison_operator(:<), do: "<"
+  defp comparison_operator(:<=), do: "<="
+
+  defp add_alias(sql, nil, _adapter, _clause), do: sql
+  defp add_alias(sql, _alias_name, _adapter, clause) when clause != :select, do: sql
+
+  defp add_alias(sql, alias_name, adapter, :select) do
     [sql, " AS ", adapter.quote_identifier(to_string(alias_name))]
   end
 

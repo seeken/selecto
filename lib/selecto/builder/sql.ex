@@ -965,7 +965,7 @@ defmodule Selecto.Builder.Sql do
 
           json_sorts
           |> Enum.map(fn {spec, direction} ->
-            json_sql = Selecto.Builder.JsonOperations.build_json_select(spec, json_builder_opts)
+            json_sql = Selecto.Builder.JsonOperations.build_json_order(spec, json_builder_opts)
 
             dir_str =
               case direction do
