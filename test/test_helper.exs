@@ -22,4 +22,3 @@ exclude_tags =
   end
 
 ExUnit.start(exclude: exclude_tags)
-Mneme.start()

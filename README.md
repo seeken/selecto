@@ -295,6 +295,14 @@ Current `0.5.x` scope:
 - `docs/expression_dsl.md` for dynamic expression helpers, macros, and sigils.
 - `docs/strict_mode.md` for sealed domains and governed query construction.
 
+## Testing
+
+Run the default suite with `mise exec -- mix test`. Database-backed suites must
+use `@moduletag :requires_db`; they are excluded unless
+`SELECTO_RUN_DB_TESTS=1` is set and `--include requires_db` is passed. A
+transitional test may use `@moduletag :skip` only when it names a linked
+tracking issue and the exact condition for re-enabling the test.
+
 ## Related Repos
 
 - `selecto_components`

@@ -109,7 +109,6 @@ defmodule Selecto.MixProject do
       {:decimal, ">= 0.0.0"},
       {:ex_doc, "~> 0.40", only: :dev, runtime: false},
       {:timex, "~> 3.7"},
-      {:mneme, ">= 0.0.0", only: [:dev, :test]},
       {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:ecto_sql, "~> 3.13", optional: true},

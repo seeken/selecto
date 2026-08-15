@@ -24,6 +24,10 @@
   when the configured adapter has no implementation.
 - `mix selecto.verify` now runs with an adapter-neutral verification probe.
 
+#### Removed
+- Removed unused Mneme test scaffolding, no-op query-monitoring calls, an
+  unreachable helper expression, and obsolete internal audit ledgers.
+
 #### Added
 - Added normalized registered-function signatures with optional overloads,
   overload-specific SQL names and return types, known Selecto type validation,

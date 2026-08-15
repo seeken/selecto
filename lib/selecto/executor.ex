@@ -236,9 +236,6 @@ defmodule Selecto.Executor do
         # Calculate execution time
         duration = System.monotonic_time(:millisecond) - start_time
 
-        # Track query execution for monitoring (if SelectoDev.QueryMonitor is available)
-        track_query_execution(query, duration, result)
-
         # Apply output format transformation if specified and add metadata
         case result do
           {:ok, {rows, columns, aliases}} ->
@@ -263,19 +260,14 @@ defmodule Selecto.Executor do
         end
       rescue
         error ->
-          duration = System.monotonic_time(:millisecond) - start_time
           error_result = {:error, Selecto.Error.from_reason(error)}
-          track_query_execution("Query compilation failed", duration, error_result)
           error_result
       catch
         :exit, reason ->
-          duration = System.monotonic_time(:millisecond) - start_time
-
           error_result =
             {:error,
              Selecto.Error.connection_error("Database connection failed", %{exit_reason: reason})}
 
-          track_query_execution("Database connection failed", duration, error_result)
           error_result
       end
     else
@@ -460,8 +452,6 @@ defmodule Selecto.Executor do
     end
   end
 
-  defp track_query_execution(_query, _duration, _result), do: :ok
-
   defp runtime_connection(selecto), do: Selecto.Runtime.Context.connection(selecto)
   defp runtime_adapter(selecto), do: Selecto.Runtime.Context.adapter(selecto)
 
@@ -483,9 +473,6 @@ defmodule Selecto.Executor do
             {result, stop_metadata}
           end)
 
-        duration = System.monotonic_time(:millisecond) - start_time
-
-        track_query_execution(sql, duration, result)
         result
       end,
       hook_options(opts)
