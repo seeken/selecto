@@ -10,6 +10,18 @@ defmodule Selecto.DB.Adapter do
   - quoting identifiers when needed by adapter-specific tooling, and
   - declaring coarse feature support.
 
+  Query root contract:
+
+  - the configured Selecto domain owns the root relation through
+    `domain.source.source_table`,
+  - query composition has no `from` operation and cannot replace that root,
+  - core composes the root `FROM` clause before execution, and
+  - adapters and dialects must not invent or override a query root.
+
+  CTEs, subqueries, set members, and declared retargeting may introduce
+  additional governed sources, but they do not turn the root relation into a
+  free-form query option.
+
   Streaming contract:
 
   - `supports?(:stream)` should return `true` only when `stream/4` is
