@@ -29,6 +29,7 @@ defmodule Selecto.Domain do
     :query_members,
     :published_views,
     :detail_actions,
+    :components,
     :columns,
     :custom_columns,
     :json_schemas,
@@ -279,6 +280,7 @@ defmodule Selecto.Domain do
       source_relationships: MapHelpers.section(canonical_domain, :source_relationships, %{}),
       choice_sources: MapHelpers.section(canonical_domain, :choice_sources, %{}),
       detail_actions: MapHelpers.section(canonical_domain, :detail_actions, %{}),
+      components: MapHelpers.section(canonical_domain, :components, %{}),
       domain_data: MapHelpers.section(canonical_domain, :domain_data, %{}),
       extensions: MapHelpers.section(canonical_domain, :extensions, [])
     }

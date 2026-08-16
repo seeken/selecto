@@ -34,6 +34,9 @@
   unreachable helper expression, and obsolete internal audit ledgers.
 
 #### Added
+- Added canonical `components` UI metadata and preserved it in the UI domain
+  projection, including the `query_params` state-exposure policy consumed by
+  component packages.
 - Added normalized registered-function signatures with optional overloads,
   overload-specific SQL names and return types, known Selecto type validation,
   non-null argument declarations, and deterministic structured resolution

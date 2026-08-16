@@ -159,6 +159,17 @@ defmodule Selecto.DomainTest do
       assert diagnostics.unknown_sections == []
     end
 
+    test "keeps component state exposure policy as canonical UI metadata" do
+      domain = Map.put(minimal_query_domain(), :components, %{query_params: false})
+
+      assert {:ok, normalized, diagnostics} = Domain.normalize(domain)
+      assert normalized.components == %{query_params: false}
+      assert :components in diagnostics.canonical_sections
+      assert diagnostics.unknown_sections == []
+      assert Domain.project(normalized, :ui).components == %{query_params: false}
+      refute Map.has_key?(Domain.project(normalized, :query), :components)
+    end
+
     test "keeps query_members in the query registry" do
       {:ok, normalized, diagnostics} = Domain.normalize(query_member_domain())
 

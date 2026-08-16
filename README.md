@@ -48,6 +48,7 @@ Define a domain:
 ```elixir
 domain = %{
   name: "Orders",
+  components: %{query_params: false},
   source: %{
     source_table: "orders",
     primary_key: :id,
@@ -77,6 +78,10 @@ domain = %{
   }
 }
 ```
+
+`components.query_params` is canonical UI metadata. It defaults to `true`;
+compatible component packages use `false` to keep sensitive explorer state out
+of browser URLs.
 
 Build and run a query:
 

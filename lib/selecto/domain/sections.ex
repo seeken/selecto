@@ -27,6 +27,7 @@ defmodule Selecto.Domain.Sections do
                         "query_members",
                         "published_views",
                         "detail_actions",
+                        "components",
                         "domain_data",
                         "extensions"
                       ])
