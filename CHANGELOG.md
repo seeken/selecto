@@ -34,6 +34,9 @@
   unreachable helper expression, and obsolete internal audit ledgers.
 
 #### Added
+- Added `Selecto.Context` helpers for atom-safe map reads, single-record
+  context semantics, allowlisted parameter normalization, and portable
+  write-result unwrapping without adding Phoenix or Ecto dependencies.
 - Added canonical `components` UI metadata and preserved it in the UI domain
   projection, including the `query_params` state-exposure policy consumed by
   component packages.

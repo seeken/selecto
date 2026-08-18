@@ -35,6 +35,7 @@ defmodule Selecto.MixProject do
           "docs/domain_schema_v1.md",
           "docs/function_verification.md",
           "docs/formal_verification.md",
+          "docs/contexts.md",
           "docs/strict_mode.md",
           "docs/write_adapter_protocol.md",
           "guides/complex_join_patterns.md",
@@ -66,6 +67,7 @@ defmodule Selecto.MixProject do
             Selecto.Capabilities,
             Selecto.Capabilities.Decision,
             Selecto.Capabilities.Request,
+            Selecto.Context,
             Selecto.SQL.Params,
             Selecto.DomainValidator,
             Selecto.Helpers
