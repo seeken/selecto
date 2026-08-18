@@ -25,6 +25,7 @@ defmodule Selecto.Domain.Sections do
                         "filters",
                         "functions",
                         "query_members",
+                        "query_library",
                         "published_views",
                         "detail_actions",
                         "components",

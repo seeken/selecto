@@ -388,6 +388,30 @@ defmodule Selecto do
   @spec extensions(t()) :: [{module(), keyword()}]
   defdelegate extensions(selecto), to: Selecto.Fields
 
+  @doc "Returns the portable named query library configured by the domain."
+  @spec query_library(t()) :: Selecto.QueryLibrary.library()
+  defdelegate query_library(selecto), to: Selecto.QueryLibrary, as: :library
+
+  @doc "Applies a named row-membership segment to a query."
+  @spec apply_segment(t(), Selecto.QueryLibrary.definition_id(), map() | keyword()) :: t()
+  defdelegate apply_segment(selecto, segment_id, params \\ %{}), to: Selecto.QueryLibrary
+
+  @doc "Applies a named result projection to a query."
+  @spec apply_projection(t(), Selecto.QueryLibrary.definition_id()) :: t()
+  defdelegate apply_projection(selecto, projection_id), to: Selecto.QueryLibrary
+
+  @doc "Applies a named deterministic ordering to a query."
+  @spec apply_ordering(t(), Selecto.QueryLibrary.definition_id()) :: t()
+  defdelegate apply_ordering(selecto, ordering_id), to: Selecto.QueryLibrary
+
+  @doc "Applies a named query view and its composed definitions."
+  @spec apply_view(t(), Selecto.QueryLibrary.definition_id(), map() | keyword()) :: t()
+  defdelegate apply_view(selecto, view_id, params \\ %{}), to: Selecto.QueryLibrary
+
+  @doc "Returns named query definitions already applied to a query."
+  @spec applied_query_library(t()) :: map()
+  defdelegate applied_query_library(selecto), to: Selecto.QueryLibrary, as: :applied
+
   @doc """
   Enhanced field resolution with disambiguation and error handling.
 

@@ -78,6 +78,7 @@ defmodule Selecto.Domain.Projector do
       filters: query_contract_filters(MapHelpers.map_value(query, :filters)),
       functions: query_contract_functions(MapHelpers.map_value(query, :functions)),
       query_members: query_contract_query_members(MapHelpers.map_value(query, :query_members)),
+      query_library: MapHelpers.map_value(query, :query_library) || %{},
       published_views:
         query_contract_published_views(MapHelpers.map_value(query, :published_views)),
       source_relationships:
@@ -795,6 +796,7 @@ defmodule Selecto.Domain.Projector do
       filters: MapHelpers.section(domain, :filters, %{}),
       functions: MapHelpers.section(domain, :functions, %{}),
       query_members: MapHelpers.section(domain, :query_members, %{}),
+      query_library: MapHelpers.section(domain, :query_library, %{}),
       published_views: MapHelpers.section(domain, :published_views, %{})
     }
   end

@@ -150,6 +150,7 @@ defmodule Selecto.DomainValidator do
       |> validate_joins(domain)
       |> validate_functions(domain)
       |> validate_query_members(domain)
+      |> validate_query_library(domain)
       |> validate_published_views(domain)
       |> validate_detail_actions(domain)
 
@@ -167,6 +168,13 @@ defmodule Selecto.DomainValidator do
     case final_errors do
       [] -> :ok
       _ -> {:error, final_errors}
+    end
+  end
+
+  defp validate_query_library(errors, domain) do
+    case Selecto.QueryLibrary.structure_errors(map_value(domain, :query_library) || %{}) do
+      [] -> errors
+      query_library_errors -> errors ++ query_library_errors
     end
   end
 

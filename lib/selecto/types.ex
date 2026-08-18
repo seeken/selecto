@@ -318,6 +318,13 @@ defmodule Selecto.Types do
 
   @type published_view_registry :: %{optional(atom() | String.t()) => published_view_spec()}
 
+  @type query_library :: %{
+          optional(:segments) => %{optional(atom() | String.t()) => map()},
+          optional(:projections) => %{optional(atom() | String.t()) => map()},
+          optional(:orderings) => %{optional(atom() | String.t()) => map()},
+          optional(:views) => %{optional(atom() | String.t()) => map()}
+        }
+
   @type domain :: %{
           required(:name) => String.t(),
           required(:source) => source(),
@@ -334,7 +341,8 @@ defmodule Selecto.Types do
           optional(:extensions) => [term()],
           optional(:functions) => function_registry(),
           optional(:query_members) => query_member_registry(),
-          optional(:published_views) => published_view_registry()
+          optional(:published_views) => published_view_registry(),
+          optional(:query_library) => query_library()
         }
 
   # Query set (mutable query state)
@@ -346,7 +354,8 @@ defmodule Selecto.Types do
           required(:order_by) => [order_spec()],
           required(:group_by) => [field_name()],
           optional(:retarget_state) => retarget_config(),
-          optional(:subselected) => [subselect_selector()]
+          optional(:subselected) => [subselect_selector()],
+          optional(:applied_query_library) => map()
         }
 
   @type tenant_context :: %{

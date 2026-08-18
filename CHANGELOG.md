@@ -34,6 +34,10 @@
   unreachable helper expression, and obsolete internal audit ledgers.
 
 #### Added
+- Added portable domain query libraries with `defsegment`, `defprojection`,
+  `defordering`, and `defview` authoring, typed segment parameters, nested
+  projection shapes, runtime application helpers, and domain-contract
+  validation.
 - Added `Selecto.Context` helpers for atom-safe map reads, single-record
   context semantics, allowlisted parameter normalization, and portable
   write-result unwrapping without adding Phoenix or Ecto dependencies.
