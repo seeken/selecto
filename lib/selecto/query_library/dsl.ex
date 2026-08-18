@@ -13,8 +13,20 @@ defmodule Selecto.QueryLibrary.DSL do
           where(:status, eq: "active")
         end
 
+        defsegment visible_products do
+          any_of([:active_products, :preorder_products])
+        end
+
         defprojection product_card do
           fields([:id, :name, :price, :status])
+        end
+
+        defprojection product_card_with_category do
+          include_projection(:product_card)
+
+          association(:category) do
+            fields([:id, :name])
+          end
         end
 
         defordering newest_first do
@@ -114,16 +126,17 @@ defmodule Selecto.QueryLibrary.DSL do
   defp compile_definition(:segment, block, caller) do
     block
     |> expressions()
-    |> Enum.reduce(%{filters: [], parameters: %{}, segments: []}, fn expression, spec ->
-      compile_segment_directive(expression, spec, caller)
-    end)
+    |> Enum.reduce(
+      %{filters: [], parameters: %{}, segments: [], segment_groups: []},
+      fn expression, spec -> compile_segment_directive(expression, spec, caller) end
+    )
     |> validate_segment_parameters!()
   end
 
   defp compile_definition(:projection, block, caller) do
     block
     |> expressions()
-    |> Enum.reduce(%{fields: [], associations: []}, fn expression, spec ->
+    |> Enum.reduce(%{fields: [], associations: [], projections: []}, fn expression, spec ->
       compile_projection_directive(expression, spec, caller)
     end)
   end
@@ -214,6 +227,48 @@ defmodule Selecto.QueryLibrary.DSL do
     Map.update!(spec, :segments, &(&1 ++ [id]))
   end
 
+  defp compile_segment_directive(
+         {combinator, _, [[do: block]]},
+         spec,
+         caller
+       )
+       when combinator in [
+              :all_of,
+              :any_of,
+              :none_of,
+              :one_of,
+              :and_segments,
+              :or_segments,
+              :nor_segments,
+              :xor_segments
+            ] do
+    segment_ids =
+      block
+      |> expressions()
+      |> Enum.map(&segment_group_entry!(&1, caller, combinator))
+
+    append_segment_group(spec, combinator, segment_ids)
+  end
+
+  defp compile_segment_directive({combinator, _, [segment_ids_ast]}, spec, caller)
+       when combinator in [
+              :all_of,
+              :any_of,
+              :none_of,
+              :one_of,
+              :and_segments,
+              :or_segments,
+              :nor_segments,
+              :xor_segments
+            ] do
+    segment_ids = literal!(segment_ids_ast, caller)
+    append_segment_group(spec, combinator, segment_ids)
+  end
+
+  defp compile_segment_directive({:not_segment, _, [segment_id_ast]}, spec, caller) do
+    append_segment_group(spec, :not_segment, [literal!(segment_id_ast, caller)])
+  end
+
   defp compile_segment_directive(expression, spec, caller) do
     compile_metadata_directive(expression, spec, caller, :segment)
   end
@@ -248,6 +303,21 @@ defmodule Selecto.QueryLibrary.DSL do
       end)
 
     Map.update!(spec, :associations, &(&1 ++ [association_spec]))
+  end
+
+  defp compile_projection_directive({:include_projection, _, [id_ast]}, spec, caller) do
+    id = literal!(id_ast, caller)
+    Map.update!(spec, :projections, &(&1 ++ [id]))
+  end
+
+  defp compile_projection_directive({:include_projections, _, [ids_ast]}, spec, caller) do
+    ids = literal!(ids_ast, caller)
+
+    unless is_list(ids) do
+      raise ArgumentError, "included projections must be a list"
+    end
+
+    Map.update!(spec, :projections, &(&1 ++ ids))
   end
 
   defp compile_projection_directive(expression, spec, caller) do
@@ -332,6 +402,59 @@ defmodule Selecto.QueryLibrary.DSL do
     end
   end
 
+  defp append_segment_group(spec, combinator, segment_ids) do
+    unless is_list(segment_ids) and segment_ids != [] do
+      raise ArgumentError, "#{combinator} requires a non-empty list of segment names"
+    end
+
+    unless Enum.all?(segment_ids, &valid_definition_id?/1) do
+      raise ArgumentError,
+            "#{combinator} segment names must be non-empty atoms or strings, got: #{inspect(segment_ids)}"
+    end
+
+    segment_ids = Enum.uniq_by(segment_ids, &definition_key/1)
+    operator = segment_group_operator(combinator)
+
+    if operator == :not and length(segment_ids) != 1 do
+      raise ArgumentError, "not_segment requires exactly one segment name"
+    end
+
+    if operator == :xor and length(segment_ids) != 2 do
+      raise ArgumentError, "xor segment groups require exactly two segment names"
+    end
+
+    group = %{
+      operator: operator,
+      segments: segment_ids
+    }
+
+    Map.update!(spec, :segment_groups, &(&1 ++ [group]))
+  end
+
+  defp segment_group_entry!({directive, _, [id_ast]}, caller, _operator)
+       when directive in [:segment, :include_segment] do
+    id = literal!(id_ast, caller)
+
+    if valid_definition_id?(id) do
+      id
+    else
+      raise ArgumentError, "segment names must be non-empty atoms or strings"
+    end
+  end
+
+  defp segment_group_entry!(expression, _caller, operator) do
+    raise ArgumentError,
+          "#{operator} blocks accept only segment(:name) entries, got: #{Macro.to_string(expression)}"
+  end
+
+  defp segment_group_operator(combinator) when combinator in [:all_of, :and_segments],
+    do: :and
+
+  defp segment_group_operator(combinator) when combinator in [:any_of, :or_segments], do: :or
+  defp segment_group_operator(combinator) when combinator in [:none_of, :nor_segments], do: :nor
+  defp segment_group_operator(combinator) when combinator in [:one_of, :xor_segments], do: :xor
+  defp segment_group_operator(:not_segment), do: :not
+
   defp collect_parameter_references({:param, name}, acc), do: [name | acc]
 
   defp collect_parameter_references(value, acc) when is_tuple(value) do
@@ -400,15 +523,30 @@ defmodule Selecto.QueryLibrary.DSL do
   defp definition_key(value) when is_binary(value), do: value
   defp definition_key(value), do: inspect(value)
 
+  defp valid_definition_id?(value) when is_atom(value), do: not is_nil(value)
+  defp valid_definition_id?(value) when is_binary(value), do: String.trim(value) != ""
+  defp valid_definition_id?(_value), do: false
+
   # Directive placeholders consumed by the definition macros above.
   defmacro where(_field, _condition), do: quote(do: nil)
   defmacro where(_field, _operator, _value), do: quote(do: nil)
   defmacro param(_name), do: quote(do: nil)
   defmacro param(_name, _type, _opts \\ []), do: quote(do: nil)
   defmacro include_segment(_id), do: quote(do: nil)
+  defmacro all_of(_segments_or_block), do: quote(do: nil)
+  defmacro any_of(_segments_or_block), do: quote(do: nil)
+  defmacro none_of(_segments_or_block), do: quote(do: nil)
+  defmacro one_of(_segments_or_block), do: quote(do: nil)
+  defmacro and_segments(_segments_or_block), do: quote(do: nil)
+  defmacro or_segments(_segments_or_block), do: quote(do: nil)
+  defmacro not_segment(_segment), do: quote(do: nil)
+  defmacro nor_segments(_segments_or_block), do: quote(do: nil)
+  defmacro xor_segments(_segments_or_block), do: quote(do: nil)
   defmacro fields(_fields), do: quote(do: nil)
   defmacro field(_field), do: quote(do: nil)
   defmacro association(_association, do: _block), do: quote(do: nil)
+  defmacro include_projection(_id), do: quote(do: nil)
+  defmacro include_projections(_ids), do: quote(do: nil)
   defmacro order_by(_field, _direction), do: quote(do: nil)
   defmacro orders(_orders), do: quote(do: nil)
   defmacro segment(_segment), do: quote(do: nil)

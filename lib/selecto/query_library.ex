@@ -4,8 +4,8 @@ defmodule Selecto.QueryLibrary do
 
   A query library separates common query intent into four semantic registries:
 
-  * segments constrain row membership
-  * projections define result shape
+  * segments constrain row membership and compose through boolean operators
+  * projections define and merge reusable result shapes
   * orderings define deterministic ordering
   * views compose the other definitions
 
@@ -49,21 +49,31 @@ defmodule Selecto.QueryLibrary do
     apply_segments(selecto, [segment_id], params)
   end
 
-  @doc "Applies a named projection, replacing optional selections."
-  @spec apply_projection(Selecto.t(), definition_id()) :: Selecto.t()
-  def apply_projection(%Selecto{} = selecto, projection_id) do
+  @doc "Applies one or more named projections, replacing optional selections with their merged shape."
+  @spec apply_projection(Selecto.t(), definition_id() | [definition_id()]) :: Selecto.t()
+  def apply_projection(%Selecto{} = selecto, projection_id_or_ids) do
     library = checked_library(selecto)
-    projection = fetch_definition!(library.projections, :projection, projection_id)
+
+    projection_ids = definition_ids!(projection_id_or_ids, :projection)
+
+    projection =
+      Enum.reduce(projection_ids, empty_projection_resolution(), fn projection_id, acc ->
+        merge_projection_resolutions(acc, resolve_projection!(library, projection_id, []))
+      end)
+
     required = map_value(selecto.domain, :required_selected) || []
     shape = Enum.uniq(List.wrap(required) ++ projection_shape(projection))
 
     if shape == [] do
-      raise ArgumentError, "projection #{inspect(projection_id)} does not select any fields"
+      raise ArgumentError,
+            "projections #{inspect(projection_ids)} do not select any fields"
     end
 
-    selecto
-    |> Selecto.SelectionShape.select_shape(shape)
-    |> record_application(:projection, definition_key(projection_id))
+    selecto = Selecto.SelectionShape.select_shape(selecto, shape)
+
+    Enum.reduce(projection.ids, selecto, fn id, acc ->
+      record_application(acc, :projection, id)
+    end)
   end
 
   @doc "Applies a named ordering while preserving required domain ordering."
@@ -125,6 +135,7 @@ defmodule Selecto.QueryLibrary do
     |> validate_orderings(normalized)
     |> validate_views(normalized)
     |> validate_segment_cycles(normalized)
+    |> validate_projection_cycles(normalized)
     |> Enum.reverse()
   end
 
@@ -177,7 +188,7 @@ defmodule Selecto.QueryLibrary do
 
     segment = fetch_definition!(library.segments, :segment, segment_id)
 
-    composed =
+    included =
       Enum.reduce(
         map_value(segment, :segments) || [],
         %{filters: [], parameters: %{}, ids: []},
@@ -186,11 +197,80 @@ defmodule Selecto.QueryLibrary do
         end
       )
 
-    merge_resolved(composed, %{
+    grouped =
+      Enum.reduce(
+        map_value(segment, :segment_groups) || [],
+        %{filters: [], parameters: %{}, ids: []},
+        fn group, acc ->
+          merge_resolved(acc, resolve_segment_group!(library, group, [key | stack]))
+        end
+      )
+
+    included
+    |> merge_resolved(grouped)
+    |> merge_resolved(%{
       filters: map_value(segment, :filters) || [],
       parameters: map_value(segment, :parameters) || %{},
       ids: [key]
     })
+  end
+
+  defp resolve_segment_group!(library, group, stack) do
+    operator = normalize_boolean_operator(map_value(group, :operator))
+
+    resolved_segments =
+      group
+      |> map_value(:segments)
+      |> Enum.map(&resolve_segment!(library, &1, stack))
+
+    merged =
+      Enum.reduce(
+        resolved_segments,
+        %{filters: [], parameters: %{}, ids: []},
+        &merge_resolved(&2, &1)
+      )
+
+    filters =
+      case operator do
+        :and ->
+          Enum.flat_map(resolved_segments, & &1.filters)
+
+        :or ->
+          operands = Enum.map(resolved_segments, &segment_operand/1)
+
+          if Enum.any?(operands, &is_nil/1) do
+            []
+          else
+            logical_filters(operands, :or)
+          end
+
+        operator when operator in [:not, :nor, :xor] ->
+          operands = Enum.map(resolved_segments, &segment_operand/1)
+
+          if Enum.any?(operands, &is_nil/1) do
+            raise ArgumentError,
+                  "#{operator} segment groups cannot reference an unconstrained segment"
+          end
+
+          lower_boolean_group(operator, operands)
+      end
+
+    %{merged | filters: filters}
+  end
+
+  defp segment_operand(%{filters: []}), do: nil
+  defp segment_operand(%{filters: [filter]}), do: filter
+  defp segment_operand(%{filters: filters}), do: {:and, filters}
+
+  defp logical_filters([], _operator), do: []
+  defp logical_filters([filter], _operator), do: [filter]
+  defp logical_filters(filters, operator), do: [{operator, filters}]
+
+  defp lower_boolean_group(:not, [filter]), do: [{:not, filter}]
+  defp lower_boolean_group(:nor, filters), do: [{:not, {:or, filters}}]
+
+  defp lower_boolean_group(:xor, [left, right]) do
+    [{:and, [{:or, [left, right]}, {:not, {:and, [left, right]}}]}]
   end
 
   defp merge_resolved(left, right) do
@@ -216,6 +296,77 @@ defmodule Selecto.QueryLibrary do
       end
     end)
   end
+
+  defp resolve_projection!(library, projection_id, stack) do
+    key = definition_key(projection_id)
+
+    if key in stack do
+      cycle = Enum.reverse([key | stack])
+      raise ArgumentError, "query-library projection cycle detected: #{Enum.join(cycle, " -> ")}"
+    end
+
+    projection = fetch_definition!(library.projections, :projection, projection_id)
+
+    included =
+      Enum.reduce(
+        map_value(projection, :projections) || [],
+        empty_projection_resolution(),
+        fn id, acc ->
+          merge_projection_resolutions(acc, resolve_projection!(library, id, [key | stack]))
+        end
+      )
+
+    merge_projection_resolutions(included, %{
+      fields: map_value(projection, :fields) || [],
+      associations: map_value(projection, :associations) || [],
+      ids: [key]
+    })
+  end
+
+  defp merge_projection_resolutions(left, right) do
+    %{
+      fields: Enum.uniq(left.fields ++ right.fields),
+      associations: merge_associations(left.associations, right.associations),
+      ids: Enum.uniq(left.ids ++ right.ids)
+    }
+  end
+
+  defp merge_associations(left, right) do
+    Enum.reduce(right, left, fn association, acc ->
+      name = map_value(association, :name)
+
+      case Enum.find_index(acc, &(definition_key(map_value(&1, :name)) == definition_key(name))) do
+        nil ->
+          acc ++ [normalize_association(association)]
+
+        index ->
+          List.update_at(acc, index, &merge_association(&1, association))
+      end
+    end)
+  end
+
+  defp merge_association(left, right) do
+    %{
+      name: map_value(left, :name),
+      fields:
+        Enum.uniq(List.wrap(map_value(left, :fields)) ++ List.wrap(map_value(right, :fields))),
+      associations:
+        merge_associations(
+          List.wrap(map_value(left, :associations)),
+          List.wrap(map_value(right, :associations))
+        )
+    }
+  end
+
+  defp normalize_association(association) do
+    %{
+      name: map_value(association, :name),
+      fields: List.wrap(map_value(association, :fields)),
+      associations: merge_associations([], List.wrap(map_value(association, :associations)))
+    }
+  end
+
+  defp empty_projection_resolution, do: %{fields: [], associations: [], ids: []}
 
   defp normalize_parameters!(specs, params) when is_list(params) do
     if Keyword.keyword?(params) do
@@ -428,16 +579,26 @@ defmodule Selecto.QueryLibrary do
 
     updated =
       case kind do
-        :segment -> Map.update!(applied, :segments, &Enum.uniq(&1 ++ [id]))
-        :projection -> Map.put(applied, :projection, id)
-        :ordering -> Map.put(applied, :ordering, id)
-        :view -> Map.update!(applied, :views, &Enum.uniq(&1 ++ [id]))
+        :segment ->
+          Map.update!(applied, :segments, &Enum.uniq(&1 ++ [id]))
+
+        :projection ->
+          applied
+          |> Map.put(:projection, id)
+          |> Map.update(:projections, [id], &Enum.uniq(&1 ++ [id]))
+
+        :ordering ->
+          Map.put(applied, :ordering, id)
+
+        :view ->
+          Map.update!(applied, :views, &Enum.uniq(&1 ++ [id]))
       end
 
     put_in(selecto.set, Map.put(selecto.set, :applied_query_library, updated))
   end
 
-  defp default_applied, do: %{segments: [], projection: nil, ordering: nil, views: []}
+  defp default_applied,
+    do: %{segments: [], projection: nil, projections: [], ordering: nil, views: []}
 
   defp empty_library do
     %{segments: %{}, projections: %{}, orderings: %{}, views: %{}}
@@ -480,9 +641,11 @@ defmodule Selecto.QueryLibrary do
       |> validate_map_spec(:segment, id, spec)
       |> validate_list_key(:segment, id, spec, :filters)
       |> validate_list_key(:segment, id, spec, :segments)
+      |> validate_list_key(:segment, id, spec, :segment_groups)
       |> validate_map_key(:segment, id, spec, :parameters)
       |> validate_parameter_specs(id, spec)
       |> validate_segment_references(id, spec, library)
+      |> validate_segment_groups(id, spec, library)
     end)
   end
 
@@ -493,6 +656,9 @@ defmodule Selecto.QueryLibrary do
       |> validate_map_spec(:projection, id, spec)
       |> validate_list_key(:projection, id, spec, :fields)
       |> validate_list_key(:projection, id, spec, :associations)
+      |> validate_list_key(:projection, id, spec, :projections)
+      |> validate_projection_references(id, spec, library)
+      |> validate_projection_associations(id, spec)
     end)
   end
 
@@ -661,6 +827,203 @@ defmodule Selecto.QueryLibrary do
     end)
   end
 
+  defp validate_segment_groups(errors, _id, spec, _library) when not is_map(spec), do: errors
+
+  defp validate_segment_groups(errors, id, spec, library) do
+    case map_value(spec, :segment_groups) do
+      groups when is_list(groups) ->
+        groups
+        |> Enum.with_index()
+        |> Enum.reduce(errors, fn {group, index}, acc ->
+          validate_segment_group(
+            acc,
+            group,
+            [:query_library, :segments, id, :segment_groups, index],
+            id,
+            library
+          )
+        end)
+
+      _ ->
+        errors
+    end
+  end
+
+  defp validate_segment_group(errors, group, path, segment_id, library) when is_map(group) do
+    operator = normalize_boolean_operator(map_value(group, :operator))
+    segments = map_value(group, :segments)
+
+    distinct_segments =
+      if is_list(segments), do: Enum.uniq_by(segments, &definition_key/1), else: []
+
+    errors =
+      cond do
+        operator not in [:and, :or, :not, :nor, :xor] ->
+          [
+            error(
+              :invalid_query_segment_group,
+              path ++ [:operator],
+              "segment boolean group operator must be :and, :or, :not, :nor, or :xor",
+              map_value(group, :operator)
+            )
+            | errors
+          ]
+
+        operator == :not and not (is_list(segments) and length(segments) == 1) ->
+          [
+            error(
+              :invalid_query_segment_group,
+              path ++ [:segments],
+              "not segment groups require exactly one segment",
+              segments
+            )
+            | errors
+          ]
+
+        operator == :xor and not (is_list(segments) and length(distinct_segments) == 2) ->
+          [
+            error(
+              :invalid_query_segment_group,
+              path ++ [:segments],
+              "xor segment groups require exactly two segments",
+              segments
+            )
+            | errors
+          ]
+
+        not is_list(segments) or segments == [] ->
+          [
+            error(
+              :invalid_query_segment_group,
+              path ++ [:segments],
+              "segment boolean groups require a non-empty segment list",
+              segments
+            )
+            | errors
+          ]
+
+        true ->
+          errors
+      end
+
+    if is_list(segments) do
+      Enum.reduce(segments, errors, fn reference, acc ->
+        if entry_exists?(library.segments, reference) do
+          acc
+        else
+          [
+            error(
+              :query_segment_not_found,
+              path ++ [:segments],
+              "segment #{inspect(segment_id)} references missing segment #{inspect(reference)}",
+              reference
+            )
+            | acc
+          ]
+        end
+      end)
+    else
+      errors
+    end
+  end
+
+  defp validate_segment_group(errors, group, path, _segment_id, _library) do
+    [
+      error(
+        :invalid_query_segment_group,
+        path,
+        "segment boolean groups must be maps",
+        group
+      )
+      | errors
+    ]
+  end
+
+  defp validate_projection_references(errors, _id, spec, _library) when not is_map(spec),
+    do: errors
+
+  defp validate_projection_references(errors, id, spec, library) do
+    Enum.reduce(List.wrap(map_value(spec, :projections)), errors, fn reference, acc ->
+      if entry_exists?(library.projections, reference) do
+        acc
+      else
+        [
+          error(
+            :query_projection_not_found,
+            [:query_library, :projections, id, :projections],
+            "projection #{inspect(id)} references missing projection #{inspect(reference)}",
+            reference
+          )
+          | acc
+        ]
+      end
+    end)
+  end
+
+  defp validate_projection_associations(errors, _id, spec) when not is_map(spec), do: errors
+
+  defp validate_projection_associations(errors, id, spec) do
+    validate_association_specs(
+      errors,
+      map_value(spec, :associations),
+      [:query_library, :projections, id, :associations]
+    )
+  end
+
+  defp validate_association_specs(errors, associations, path) when is_list(associations) do
+    associations
+    |> Enum.with_index()
+    |> Enum.reduce(errors, fn {association, index}, acc ->
+      association_path = path ++ [index]
+
+      if is_map(association) do
+        nested = map_value(association, :associations)
+
+        acc
+        |> maybe_add_association_error(
+          valid_id?(map_value(association, :name)),
+          association_path ++ [:name],
+          "projection association names must be non-empty atoms or strings",
+          map_value(association, :name)
+        )
+        |> maybe_add_association_error(
+          nil_or_list?(map_value(association, :fields)),
+          association_path ++ [:fields],
+          "projection association fields must be a list",
+          map_value(association, :fields)
+        )
+        |> maybe_add_association_error(
+          nil_or_list?(nested),
+          association_path ++ [:associations],
+          "nested projection associations must be a list",
+          nested
+        )
+        |> validate_association_specs(nested, association_path ++ [:associations])
+      else
+        [
+          error(
+            :invalid_query_projection_association,
+            association_path,
+            "projection associations must be maps",
+            association
+          )
+          | acc
+        ]
+      end
+    end)
+  end
+
+  defp validate_association_specs(errors, _associations, _path), do: errors
+
+  defp maybe_add_association_error(errors, true, _path, _message, _actual), do: errors
+
+  defp maybe_add_association_error(errors, false, path, message, actual) do
+    [error(:invalid_query_projection_association, path, message, actual) | errors]
+  end
+
+  defp nil_or_list?(nil), do: true
+  defp nil_or_list?(value), do: is_list(value)
+
   defp validate_view_references(errors, _id, spec, _library) when not is_map(spec), do: errors
 
   defp validate_view_references(errors, id, spec, library) do
@@ -729,8 +1092,59 @@ defmodule Selecto.QueryLibrary do
     else
       case fetch_entry(library.segments, id) do
         {_stored_id, spec} when is_map(spec) ->
-          Enum.find_value(List.wrap(map_value(spec, :segments)), fn child ->
+          Enum.find_value(segment_references(spec), fn child ->
             find_segment_cycle(library, child, [key | stack])
+          end)
+
+        _ ->
+          nil
+      end
+    end
+  end
+
+  defp segment_references(spec) do
+    grouped =
+      spec
+      |> map_value(:segment_groups)
+      |> List.wrap()
+      |> Enum.flat_map(fn
+        group when is_map(group) -> List.wrap(map_value(group, :segments))
+        _group -> []
+      end)
+
+    List.wrap(map_value(spec, :segments)) ++ grouped
+  end
+
+  defp validate_projection_cycles(errors, library) do
+    Enum.reduce(Map.keys(library.projections), errors, fn id, acc ->
+      case find_projection_cycle(library, id, []) do
+        nil ->
+          acc
+
+        cycle ->
+          [
+            error(
+              :query_projection_cycle,
+              [:query_library, :projections, id],
+              "query-library projection cycle detected: #{Enum.join(cycle, " -> ")}",
+              cycle
+            )
+            | acc
+          ]
+      end
+    end)
+  end
+
+  defp find_projection_cycle(library, id, stack) do
+    key = definition_key(id)
+
+    if key in stack do
+      Enum.reverse([key | stack])
+    else
+      case fetch_entry(library.projections, id) do
+        {_stored_id, spec} when is_map(spec) ->
+          Enum.find_value(List.wrap(map_value(spec, :projections)), fn child ->
+            find_projection_cycle(library, child, [key | stack])
           end)
 
         _ ->
@@ -753,6 +1167,24 @@ defmodule Selecto.QueryLibrary do
 
   defp entry_exists?(map, key), do: not is_nil(fetch_entry(map, key))
 
+  defp definition_ids!(ids, kind) when is_list(ids) do
+    if ids != [] and Enum.all?(ids, &valid_id?/1) do
+      ids
+    else
+      raise ArgumentError,
+            "#{kind} names must be a non-empty name or list of names, got: #{inspect(ids)}"
+    end
+  end
+
+  defp definition_ids!(id, _kind) when is_atom(id) and not is_nil(id), do: [id]
+
+  defp definition_ids!(id, _kind) when is_binary(id) and id != "", do: [id]
+
+  defp definition_ids!(id, kind) do
+    raise ArgumentError,
+          "#{kind} names must be a non-empty name or list of names, got: #{inspect(id)}"
+  end
+
   defp map_value(map, key) when is_map(map) and is_atom(key) do
     Map.get(map, key, Map.get(map, Atom.to_string(key)))
   end
@@ -766,6 +1198,13 @@ defmodule Selecto.QueryLibrary do
   defp valid_id?(value) when is_atom(value), do: not is_nil(value)
   defp valid_id?(value) when is_binary(value), do: String.trim(value) != ""
   defp valid_id?(_value), do: false
+
+  defp normalize_boolean_operator(operator) when operator in [:and, "and"], do: :and
+  defp normalize_boolean_operator(operator) when operator in [:or, "or"], do: :or
+  defp normalize_boolean_operator(operator) when operator in [:not, "not"], do: :not
+  defp normalize_boolean_operator(operator) when operator in [:nor, "nor"], do: :nor
+  defp normalize_boolean_operator(operator) when operator in [:xor, "xor"], do: :xor
+  defp normalize_boolean_operator(_operator), do: nil
 
   defp definition_key(value) when is_atom(value), do: Atom.to_string(value)
   defp definition_key(value) when is_binary(value), do: value

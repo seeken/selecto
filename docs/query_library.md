@@ -29,12 +29,23 @@ defmodule MyApp.Catalog do
   end
 
   defseg active_products_at_price do
-    include_segment(:active_products)
-    include_segment(:priced_at_least)
+    all_of([:active_products, :priced_at_least])
+  end
+
+  defsegment visible_products do
+    any_of([:active_products, :preorder_products])
+  end
+
+  defprojection product_identity do
+    fields([:id, :name])
+  end
+
+  defprojection product_pricing do
+    fields([:price])
   end
 
   defprojection product_card do
-    fields([:id, :name, :price])
+    include_projections([:product_identity, :product_pricing])
 
     association(:category) do
       fields([:id, :name])
@@ -71,6 +82,69 @@ query-contract projection. That makes the same definitions available to
 inspection, generators, and non-Elixir runtimes without evaluating module
 callbacks.
 
+## Compose segments
+
+An included segment is an implicit AND. Use the named combinators when the
+boolean relationship should be explicit:
+
+```elixir
+defsegment purchasable_products do
+  all_of([:visible_products, :in_stock_products])
+end
+
+defsegment visible_products do
+  any_of do
+    segment(:active_products)
+    segment(:preorder_products)
+  end
+end
+
+defsegment non_archived_products do
+  not_segment(:archived_products)
+end
+
+defsegment neither_hidden_nor_archived do
+  nor_segments([:hidden_products, :archived_products])
+end
+
+defsegment retail_xor_wholesale do
+  xor_segments([:retail_products, :wholesale_products])
+end
+```
+
+`and_segments/1` and `or_segments/1` are explicit aliases for `all_of/1` and
+`any_of/1`. `none_of/1` aliases `nor_segments/1`, while `one_of/1` aliases the
+binary `xor_segments/1`. XOR requires exactly two segments.
+
+The library stores the operator and segment references as data. At application
+time NOR and XOR lower to the existing portable AND/OR/NOT filter AST, so they
+do not require adapter-specific SQL operators. Boolean combinators may nest by
+referencing another composed segment.
+
+## Combine projections
+
+A projection can include one or more named projections:
+
+```elixir
+defprojection product_card do
+  include_projection(:product_identity)
+  include_projections([:product_pricing, :product_availability])
+end
+```
+
+Fields are merged in stable composition order and deduplicated. Association
+branches with the same name are merged recursively, so separate projections
+can contribute different fields or nested associations to the same result
+branch.
+
+Callers can also combine definitions without declaring a wrapper projection:
+
+```elixir
+query = Selecto.apply_projection(query, [:product_identity, :product_pricing])
+```
+
+Projection references are cycle-checked before query application.
+
 ## Apply definitions
 
 Apply a definition after configuring the domain:
@@ -105,6 +179,10 @@ Named definitions add application intent; they do not weaken domain policy.
 Required filters, required selections, and required ordering remain in force.
 A segment therefore cannot remove tenant or visibility scope, and a projection
 cannot omit fields declared as required by the domain.
+
+Required filters stay outside boolean segment expressions. For example, an OR
+between two optional segments cannot accidentally turn a required tenant or
+visibility predicate into one branch of that OR.
 
 The domain contract validates definition structure, references, segment and
 ordering fields, and nested projection paths. SQL generation performs the

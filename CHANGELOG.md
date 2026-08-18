@@ -38,6 +38,8 @@
   `defordering`, and `defview` authoring, typed segment parameters, nested
   projection shapes, runtime application helpers, and domain-contract
   validation.
+- Added recursive projection composition and portable segment boolean algebra
+  with AND, OR, NOT, NOR, and binary XOR combinators.
 - Added `Selecto.Context` helpers for atom-safe map reads, single-record
   context semantics, allowlisted parameter normalization, and portable
   write-result unwrapping without adding Phoenix or Ecto dependencies.

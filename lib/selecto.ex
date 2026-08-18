@@ -397,7 +397,10 @@ defmodule Selecto do
   defdelegate apply_segment(selecto, segment_id, params \\ %{}), to: Selecto.QueryLibrary
 
   @doc "Applies a named result projection to a query."
-  @spec apply_projection(t(), Selecto.QueryLibrary.definition_id()) :: t()
+  @spec apply_projection(
+          t(),
+          Selecto.QueryLibrary.definition_id() | [Selecto.QueryLibrary.definition_id()]
+        ) :: t()
   defdelegate apply_projection(selecto, projection_id), to: Selecto.QueryLibrary
 
   @doc "Applies a named deterministic ordering to a query."
