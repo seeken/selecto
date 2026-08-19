@@ -142,8 +142,9 @@ selecto =
   )
 ```
 
-A registry may instead implement `Selecto.Domain.Registry.fetch/2` for multiple
-domains. Registry results are validated, `validate: false` is rejected, and
+A registry may instead implement the `fetch/2` callback from
+`Selecto.Domain.Registry` for multiple domains. Registry results are validated,
+`validate: false` is rejected, and
 `Selecto.domain_ref/1` returns provenance without embedding the authored map.
 The registry must authorize each name using server-owned context; choosing a
 name is not itself authorization.
@@ -291,12 +292,16 @@ Current `0.5.x` scope:
 
 ## Developer Guides
 
-- `docs/developer_contracts.md` for authored domain contracts, capabilities,
-  choice sources, published views, writes, and domain actions.
+- `docs/developer_contracts.md` for authored domain contracts, portable query
+  libraries, component-facing policy, capabilities, choice sources, published
+  views, writes, and domain actions.
+- `docs/query_library.md` for named segments, projections, orderings, views,
+  typed parameters, composition, and governance boundaries.
 - `docs/write_adapter_protocol.md` for portable write ownership, versioned
   capability preflight, and the adapter support matrix.
-- `docs/domain_schema_v1.md` for the normative authored, normalized, write,
-  projection, validation, and governance domain specification.
+- `docs/domain_schema_v1.md` for the normative authored, normalized, query,
+  component, write, projection, validation, and governance domain
+  specification used by certification.
 - `docs/expression_dsl.md` for dynamic expression helpers, macros, and sigils.
 - `docs/strict_mode.md` for sealed domains and governed query construction.
 

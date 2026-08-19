@@ -152,8 +152,10 @@ Canonical sections are part of the current domain contract:
 - `filters`
 - `functions`
 - `query_members`
+- `query_library`
 - `published_views`
 - `detail_actions`
+- `components`
 - `domain_data`
 - `extensions`
 
@@ -208,11 +210,11 @@ has this stable schema-v1 organization:
 | `domain` | Canonical authored map after version insertion and shorthand expansion. |
 | `sections` | Keys grouped as `canonical`, `projection`, `proposed`, and `unknown`. |
 | `source`, `schemas`, `joins` | Core relation and join sections. |
-| `query` | Query defaults, filters, functions, members, and published views. |
+| `query` | Query defaults, filters, functions, members, portable query-library definitions, and published views. |
 | `projection` | Display and implementation-facing projection metadata. |
 | `writes`, `actions`, `capabilities` | Mutation and governance registries. |
 | `source_relationships`, `choice_sources` | Cross-domain reference registries. |
-| `detail_actions` | Detail-row UI action metadata. |
+| `detail_actions`, `components` | Detail-row actions and canonical component-facing UI policy. |
 | `domain_data`, `extensions` | Host data and declared extension specifications. |
 
 Missing map registries normalize to `%{}` and missing list-style sections to
@@ -491,6 +493,46 @@ Invalid query-member metadata produces diagnostics such as
 `:invalid_query_member_rows`, `:invalid_query_member_join_type`,
 `:invalid_query_member_source`, or `:invalid_query_member_field`.
 
+## Query Library
+
+`query_library` is the portable registry of reusable application-query intent.
+It is a canonical schema-v1 section and MUST be a map when present. Its four
+registries are:
+
+| Registry | Purpose | Canonical entry fields |
+| --- | --- | --- |
+| `segments` | Named row-membership predicates | `filters`, `parameters`, `segments`, `segment_groups` |
+| `projections` | Named result shapes | `fields`, `associations`, `projections` |
+| `orderings` | Named deterministic ordering | `order_by` |
+| `views` | Composed query entrypoints | `segments`, `projection`, `ordering` |
+
+Registry identifiers MAY be atoms or strings. Every referenced field and
+association path MUST resolve through the domain, and every referenced segment,
+projection, or ordering MUST exist. Segment and projection reference graphs
+MUST be acyclic.
+
+Segment `parameters` are maps keyed by parameter identifier. Each parameter
+specification MUST declare a `type`; it MAY declare a `default`, and
+`required: false` makes a missing value resolve to `nil`. Without either a
+default or `required: false`, the parameter is required. Segment filters MAY
+refer to a declared parameter as `{:param, parameter_id}`. `segment_groups`
+declare composition using `and`, `or`, `not`, `nor`, or binary `xor`; `not`
+MUST reference exactly one segment and `xor` MUST reference exactly two
+distinct segments. Other groups MUST contain a non-empty segment list.
+Required domain filters remain outside these optional boolean groups and cannot
+be weakened by them.
+
+Projection `projections` recursively include other named projections. Fields
+are merged in stable order and duplicate fields are removed. Association
+branches with the same path merge recursively, allowing multiple projections
+to contribute fields and nested associations to one result shape.
+
+The normalizer MUST preserve `query_library` in the normalized query envelope
+and query-contract projection. Validation MUST reject malformed registries,
+missing definitions, invalid fields or paths, cycles, and invalid boolean-group
+arities before SQL generation. Runtime application, parameter casting, and the
+Elixir authoring DSL are documented in [Portable Query Libraries](query_library.md).
+
 ## Published Views
 
 `published_views` must be a map when present. The normalized contract validates
@@ -548,6 +590,33 @@ Invalid detail-action metadata produces diagnostics such as
 `:invalid_detail_action_name`, `:invalid_detail_action_type`,
 `:invalid_detail_action_payload`, `:missing_detail_action_url_template`,
 `:missing_detail_action_module`, or `:detail_action_field_not_found`.
+
+## Component Metadata
+
+`components` is canonical component-facing UI metadata. Core preserves it in
+the normalized envelope and includes it in the `:ui` projection. It is omitted
+from the `:query`, `:write`, `:api`, and `:query_contract` projections because
+it does not grant query, write, API, or authorization semantics.
+
+The current portable entry is `query_params`. Producers SHOULD author
+`components` as a map and `query_params` as a boolean:
+
+```elixir
+components: %{
+  query_params: false
+}
+```
+
+An absent value or `true` permits compatible UI consumers to expose editable
+explorer state in browser query parameters. `false` tells those consumers to
+keep that state out of generated URLs and ignore inbound URL state. A consumer
+handling sensitive state MUST fail closed for an authored but malformed
+`components` or `query_params` value; current core normalization preserves this
+metadata but does not validate a narrower component-package subschema.
+
+This policy reduces URL exposure. It is not an authorization decision,
+encryption mechanism, or guarantee that state will be absent from application
+logs, telemetry, browser memory, or other host-owned surfaces.
 
 ## Write Contract
 
@@ -1108,13 +1177,13 @@ The `:query_contract` projection is intentionally summary-only. It exposes:
 - selectable fields from `source`, `schemas`, and `custom_columns`
 - join summaries with target schemas and target field ids
 - query defaults and required query lists
-- filter, function, query-member, and published-view summaries
+- filter, function, query-member, query-library, and published-view summaries
 - source relationship and choice-source summaries
 - field-to-choice-source bindings
 - declared capability ids
 
-It does not include write/action/detail-action sections, raw authored unknown
-keys, or function captures from query members and published views.
+It does not include write/action/detail-action/component sections, raw authored
+unknown keys, or function captures from query members and published views.
 
 For consumers that do not need the lower-level projection API,
 `Selecto.Domain.query_contract/1` accepts either an authored domain or an
@@ -1403,6 +1472,7 @@ The public boundaries are:
 | `Selecto.Domain.project/2` | normalized envelope | Produces a named read-only consumer view. |
 | `Selecto.Domain.query_contract/1` | authored or normalized | Produces the constrained query-discovery projection. |
 | `Selecto.Domain.describe/1` | authored or normalized | Produces deterministic counts, registries, security-review entries, and sanitized hook metadata. |
+| `Selecto.Domain.Sections.sections/0` | none | Returns the finite recognized top-level vocabulary, grouped by diagnostic category, for documentation and certification coverage checks. |
 | `Selecto.Domain.WriteContract.compile/1` | authored, normalized, or configured Selecto | Produces the explicit fail-closed write contract or an error. |
 
 Compile-time modules may `use Selecto.DomainValidator, domain: domain` for a
@@ -1461,6 +1531,25 @@ domain = %{
   filters: %{
     "customer_name" => %{field: "customers.name"}
   },
+  query_library: %{
+    segments: %{
+      active_orders: %{filters: [{:status, "active"}]}
+    },
+    projections: %{
+      order_summary: %{fields: [:id, :status, :customer_id]}
+    },
+    orderings: %{
+      orders_by_id: %{order_by: [{:id, :asc}]}
+    },
+    views: %{
+      active_order_summaries: %{
+        segments: [:active_orders],
+        projection: :order_summary,
+        ordering: :orders_by_id
+      }
+    }
+  },
+  components: %{query_params: false},
   source_relationships: %{
     customer: %{
       target_domain: :customers,
@@ -1583,6 +1672,25 @@ passing JSON-derived maps to the current query runtime:
   "filters": {
     "customer_name": {"field": "customers.name"}
   },
+  "query_library": {
+    "segments": {
+      "active_orders": {"filters": [["status", "active"]]}
+    },
+    "projections": {
+      "order_summary": {"fields": ["id", "status", "customer_id"]}
+    },
+    "orderings": {
+      "orders_by_id": {"order_by": [["id", "asc"]]}
+    },
+    "views": {
+      "active_order_summaries": {
+        "segments": ["active_orders"],
+        "projection": "order_summary",
+        "ordering": "orders_by_id"
+      }
+    }
+  },
+  "components": {"query_params": false},
   "source_relationships": {
     "customer": {
       "target_domain": "customers",

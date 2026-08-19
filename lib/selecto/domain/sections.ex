@@ -59,6 +59,27 @@ defmodule Selecto.Domain.Sections do
   def categories, do: @categories
 
   @doc """
+  Returns the finite, recognized top-level domain sections grouped by category.
+
+  Section names are strings in stable order. The open-ended `:unknown`
+  diagnostic category is intentionally omitted so documentation and
+  certification tooling can compare their coverage against the complete known
+  vocabulary without creating atoms from external input.
+  """
+  @spec sections() :: %{
+          canonical: [String.t()],
+          projection: [String.t()],
+          proposed: [String.t()]
+        }
+  def sections do
+    %{
+      canonical: sorted_sections(@canonical_sections),
+      projection: sorted_sections(@projection_sections),
+      proposed: sorted_sections(@proposed_sections)
+    }
+  end
+
+  @doc """
   Classifies a single top-level domain section key.
   """
   @spec classify(term()) :: :canonical | :projection | :proposed | :unknown
@@ -117,4 +138,6 @@ defmodule Selecto.Domain.Sections do
   defp section_name(section), do: inspect(section)
 
   defp sort_value(section), do: section_name(section)
+
+  defp sorted_sections(sections), do: sections |> MapSet.to_list() |> Enum.sort()
 end

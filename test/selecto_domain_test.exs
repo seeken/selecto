@@ -170,6 +170,42 @@ defmodule Selecto.DomainTest do
       refute Map.has_key?(Domain.project(normalized, :query), :components)
     end
 
+    test "exposes the finite known section vocabulary for documentation tooling" do
+      sections = Selecto.Domain.Sections.sections()
+
+      assert "components" in sections.canonical
+      assert "query_library" in sections.canonical
+      assert "columns" in sections.projection
+      assert "writes" in sections.proposed
+
+      assert Enum.all?(Map.values(sections), fn entries ->
+               entries == Enum.sort(entries) and Enum.all?(entries, &is_binary/1)
+             end)
+    end
+
+    test "the normative schema lists every recognized top-level section" do
+      schema = File.read!(Path.expand("../docs/domain_schema_v1.md", __DIR__))
+
+      [_, top_level_sections] = String.split(schema, "## Top-Level Sections", parts: 2)
+
+      [top_level_sections, _] =
+        String.split(top_level_sections, "## Normalized Envelope", parts: 2)
+
+      documented_sections =
+        ~r/^- `([^`]+)`$/m
+        |> Regex.scan(top_level_sections, capture: :all_but_first)
+        |> List.flatten()
+        |> MapSet.new()
+
+      recognized_sections =
+        Selecto.Domain.Sections.sections()
+        |> Map.values()
+        |> List.flatten()
+        |> MapSet.new()
+
+      assert documented_sections == recognized_sections
+    end
+
     test "keeps query_members in the query registry" do
       {:ok, normalized, diagnostics} = Domain.normalize(query_member_domain())
 

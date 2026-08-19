@@ -2,9 +2,9 @@
 
 Selecto core owns the authored domain contract and the read/query projection.
 Companion packages consume that contract, but core should stay execution-neutral:
-it describes fields, joins, capabilities, actions, choices, published views, and
-write metadata; it does not decide who may use them and it does not execute
-writes.
+it describes fields, joins, reusable query definitions, component-facing UI
+policy, capabilities, actions, choices, published views, and write metadata; it
+does not decide who may use them and it does not execute writes.
 
 Use this guide when authoring or reviewing domain metadata that will be consumed
 by `selecto_components`, `selecto_updato`, generated API endpoints, or host
@@ -13,8 +13,8 @@ applications.
 ## Package Boundaries
 
 - `selecto` owns domain normalization, validation, overlays, field references,
-  query projections, capability references, choice source metadata, and published
-  view metadata.
+  portable query libraries, query projections, component-facing UI metadata,
+  capability references, choice source metadata, and published view metadata.
 - `selecto_components` owns Phoenix/LiveView UX, query-contract JSON/Markdown
   artifacts, generated action forms, export panels, scheduled-export forms,
   embed surfaces, and user-facing result/error presentation.
@@ -30,18 +30,20 @@ should not smuggle host policy or runtime execution concerns into Selecto.
 ## Authoring Flow
 
 1. Define the base read domain: `source`, `schemas`, `joins`, `filters`,
-   `functions`, `query_members`, `custom_columns`, and defaults.
-2. Add `capabilities` for the operations that host policy may need to control.
-3. Attach capability ids to fields, filters, query members, published views,
+   `functions`, `query_members`, `query_library`, `custom_columns`, and defaults.
+2. Add `components` when a UI consumer needs domain-selected state-exposure
+   policy such as `query_params: false`.
+3. Add `capabilities` for the operations that host policy may need to control.
+4. Attach capability ids to fields, filters, query members, published views,
    detail actions, choice sources, and domain actions.
-4. Add `choice_sources` and bind them from columns when generated forms or
+5. Add `choice_sources` and bind them from columns when generated forms or
    query-contract clients need constrained option selection.
-5. Add `published_views` when a stable, host-managed database view or materialized
+6. Add `published_views` when a stable, host-managed database view or materialized
    view should be advertised to consumers.
-6. Add `writes` when the domain exposes insert/update/delete/upsert surfaces.
-7. Add `actions` when the domain exposes named user workflows over the write
+7. Add `writes` when the domain exposes insert/update/delete/upsert surfaces.
+8. Add `actions` when the domain exposes named user workflows over the write
    surface.
-8. Normalize and validate the domain before shipping it to Components or Updato.
+9. Normalize and validate the domain before shipping it to Components or Updato.
 
 Recommended core checks:
 
@@ -143,6 +145,58 @@ choice values before writing.
 Use `constraint_policy: %{domain_of_interest: :fail_closed}` when a client must
 not silently accept an option outside the scoped domain.
 
+## Portable Query Libraries
+
+`query_library` keeps recurring application query intent in four named,
+portable registries: `segments`, `projections`, `orderings`, and `views`.
+
+```elixir
+query_library: %{
+  segments: %{
+    active_orders: %{filters: [{:status, "active"}]}
+  },
+  projections: %{
+    order_summary: %{fields: [:id, :customer_id, :status]}
+  },
+  orderings: %{
+    newest_first: %{order_by: [{:inserted_at, :desc}, {:id, :asc}]}
+  },
+  views: %{
+    active_order_summaries: %{
+      segments: [:active_orders],
+      projection: :order_summary,
+      ordering: :newest_first
+    }
+  }
+}
+```
+
+Core normalization and `:query_contract` projection preserve the complete
+library. Contract validation rejects malformed registries, unknown references,
+invalid field or association paths, composition cycles, and invalid boolean
+segment groups before SQL generation. Required domain filters, selections, and
+ordering remain in force after a named definition is applied.
+
+Segments are reusable query predicates, not authorization decisions. Keep
+tenant and visibility authority in required domain policy or trusted host
+context. See [Portable Query Libraries](query_library.md) for the DSL, typed
+parameters, boolean composition, recursive projection merging, and runtime APIs.
+
+## Component-Facing Policy
+
+Use canonical `components` metadata for policy consumed by compatible UI
+packages without exposing it to query, write, or API projections:
+
+```elixir
+components: %{query_params: false}
+```
+
+`query_params: false` keeps editable explorer state out of generated URLs and
+causes compatible consumers to ignore inbound URL state. Missing policy defaults
+to the shareable URL behavior. Malformed authored policy must fail closed in a
+consumer that handles sensitive state. This setting reduces URL exposure; it
+does not replace authorization or protect state on other host-owned surfaces.
+
 ## Published Views
 
 Published views advertise stable read surfaces that a host can materialize,
@@ -200,6 +254,12 @@ writes: %{
 Keep write metadata declarative. Runtime code should live in Updato adapters or
 host application modules.
 
+A query-enforced write may reuse a previously constructed Selecto query as an
+atomic update/delete eligibility guard or an insert-candidate rule. That query
+can only narrow the domain's write authority: it does not enable an operation,
+grant a field, or replace canonical tenant scope. Root identity and unsupported
+query expressions must fail closed at the write boundary.
+
 ## Domain Actions
 
 Actions are named workflows over the write contract. They are not direct writes;
@@ -246,6 +306,7 @@ query intents.
 The query contract is the correct handoff for:
 
 - frontend/query builders
+- portable named segments, projections, orderings, and views
 - generated API clients
 - exported view and scheduled export configuration
 - published view discovery
@@ -269,6 +330,10 @@ write intent validation.
 Before shipping a domain contract:
 
 - Domain normalization has no errors.
+- Query-library references resolve, composition is acyclic, and required policy
+  remains outside optional segment boolean groups.
+- Component-facing policy uses documented values and malformed sensitive-state
+  policy fails closed in the consuming package.
 - Proposed sections are intentional: `writes`, `actions`, `capabilities`,
   `source_relationships`, `choice_sources`.
 - Capability ids are declared and referenced consistently.

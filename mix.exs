@@ -33,6 +33,7 @@ defmodule Selecto.MixProject do
         extras: [
           "README.md",
           "docs/domain_schema_v1.md",
+          "docs/developer_contracts.md",
           "docs/function_verification.md",
           "docs/formal_verification.md",
           "docs/contexts.md",
@@ -147,6 +148,7 @@ defmodule Selecto.MixProject do
         "LICENSE",
         "CHANGELOG.md",
         "docs/domain_schema_v1.md",
+        "docs/developer_contracts.md",
         "docs/formal_verification.md",
         "docs/query_library.md",
         "docs/strict_mode.md",
