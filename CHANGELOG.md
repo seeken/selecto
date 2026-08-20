@@ -1,11 +1,12 @@
 
 # Selecto Library Changelog
 
-## Unreleased
--------------
+## V 0.5.0 - Adapter-Neutral Governance and Event Contracts
+------------------------------------------------------------
 
 #### Breaking
-- Raised the package version and coordinated adapter baseline to `0.5.0`.
+- Raised the package version to `0.5.0` and the coordinated adapter baseline to
+  `0.5.0`.
 - Removed heuristic automatic retargeting. Applications must now opt in with
   the explicit, validated `Selecto.retarget/3` API.
 - Removed the redundant `json_extract_path`, `json_extract_path_text`, and
@@ -40,6 +41,9 @@
   validation.
 - Added recursive projection composition and portable segment boolean algebra
   with AND, OR, NOT, NOR, and binary XOR combinators.
+- Added `Selecto.Domain.Registry`, `Selecto.configure_registered/3`, and opaque
+  domain references for resolving validated domains through a server-owned
+  registry and authorization context at request boundaries.
 - Added `Selecto.Context` helpers for atom-safe map reads, single-record
   context semantics, allowlisted parameter normalization, and portable
   write-result unwrapping without adding Phoenix or Ecto dependencies.
@@ -59,6 +63,13 @@
   policy and byte-stable timestamp-free JSON output. The task reports every
   registered overload in deterministic order and embeds the connected-proof
   boundary in both text and JSON evidence.
+- Added schema-versioned `events` domain contracts with typed payload fields,
+  required and nullable flags, enum and list validation, and an explicit
+  additional-fields policy.
+- Added validated `:event_stream` action metadata for aggregate and bounded-
+  context identity, stream-id derivation, expected-version consistency, and
+  declared possible events. Core governs this contract without deciding
+  commands or appending events.
 
 #### Fixed
 - CTE dependency validation now rejects malformed, missing, duplicate, and
