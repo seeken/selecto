@@ -43,6 +43,10 @@ defmodule Selecto.Domain.Examples.Compatibility do
         field_ids: [
           "archived_at",
           "id",
+          "owner.active",
+          "owner.id",
+          "owner.name",
+          "owner.tenant_id",
           "owner_id",
           "owners.active",
           "owners.id",
@@ -76,6 +80,10 @@ defmodule Selecto.Domain.Examples.Compatibility do
         ],
         field_ids: [
           "balance_cents",
+          "cabin.id",
+          "cabin.name",
+          "cabin.open",
+          "cabin.session_id",
           "cabin_id",
           "cabins.id",
           "cabins.name",

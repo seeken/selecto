@@ -1112,6 +1112,18 @@ defmodule Selecto.DomainTest do
                aggregate_functions: []
              } = customers_name_field = Enum.find(projection.fields, &(&1.id == "customers.name"))
 
+      assert %{
+               id: "customer.name",
+               source: :join,
+               relation: :customer,
+               field: "name",
+               type: :string,
+               detail_selectable: true,
+               filterable: true
+             } = customer_name_field = Enum.find(projection.fields, &(&1.id == "customer.name"))
+
+      assert :contains in customer_name_field.comparators
+
       assert :contains in customers_name_field.comparators
 
       assert %{
@@ -1170,6 +1182,17 @@ defmodule Selecto.DomainTest do
              } = status_filter = Enum.find(projection.filters, &(&1.id == "status_filter"))
 
       assert :contains in status_filter.comparators
+
+      assert %{
+               id: "customer.name",
+               field: "customer.name",
+               type: :string,
+               virtual?: false
+             } =
+               customer_name_filter =
+               Enum.find(projection.filters, &(&1.id == "customer.name"))
+
+      assert :contains in customer_name_filter.comparators
 
       assert [
                %{
@@ -1500,6 +1523,10 @@ defmodule Selecto.DomainTest do
       joins: %{customer: %{type: :left}},
       default_selected: [:id, "customers.name"],
       filters: %{
+        "customer.name" => %{
+          type: :string,
+          label: "Customer Name"
+        },
         "recent" => %{
           type: :boolean,
           label: "Recent"

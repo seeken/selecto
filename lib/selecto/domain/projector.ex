@@ -66,16 +66,19 @@ defmodule Selecto.Domain.Projector do
         :query_contract
       ) do
     field_choice_bindings = FieldBindings.field_choice_bindings(normalized)
+    filters = MapHelpers.map_value(query, :filters)
+    fields = query_contract_fields(normalized, field_choice_bindings)
+    field_ids = MapSet.new(fields, & &1.id)
 
     %{
       schema_version: Map.fetch!(normalized, :schema_version),
       name: MapHelpers.map_section(Map.fetch!(normalized, :domain), :name),
       projection: :query_contract,
       source: query_contract_source(normalized),
-      fields: query_contract_fields(normalized, field_choice_bindings),
+      fields: fields,
       joins: query_contract_joins(normalized),
       defaults: query_contract_defaults(query),
-      filters: query_contract_filters(MapHelpers.map_value(query, :filters)),
+      filters: query_contract_filters(filters, field_ids),
       functions: query_contract_functions(MapHelpers.map_value(query, :functions)),
       query_members: query_contract_query_members(MapHelpers.map_value(query, :query_members)),
       query_library: MapHelpers.map_value(query, :query_library) || %{},
@@ -194,6 +197,8 @@ defmodule Selecto.Domain.Projector do
         filterable_fields
       )
     )
+    |> Kernel.++(query_contract_join_fields(normalized, choice_index, filterable_fields))
+    |> Enum.uniq_by(& &1.id)
     |> Enum.sort_by(& &1.id)
   end
 
@@ -207,6 +212,59 @@ defmodule Selecto.Domain.Projector do
   end
 
   def query_contract_schema_fields(_schemas, _choice_index, _filterable_fields), do: []
+
+  def query_contract_join_fields(normalized, choice_index, filterable_fields) do
+    query_contract_join_field_tree(
+      Map.get(normalized, :joins, %{}),
+      Map.get(normalized, :source),
+      Map.get(normalized, :schemas, %{}),
+      choice_index,
+      filterable_fields
+    )
+  end
+
+  def query_contract_join_field_tree(
+        joins,
+        parent_relation,
+        schemas,
+        choice_index,
+        filterable_fields
+      )
+      when is_map(joins) do
+    joins
+    |> MapHelpers.sorted_entries()
+    |> Enum.flat_map(fn {join_id, join_config} ->
+      association = MapHelpers.relation_association(parent_relation, join_id)
+      target_schema = if is_map(association), do: MapHelpers.map_value(association, :queryable)
+
+      target_relation =
+        query_contract_join_target_relation(target_schema, parent_relation, schemas)
+
+      query_contract_relation_fields(
+        join_id,
+        target_relation,
+        :join,
+        choice_index,
+        filterable_fields
+      ) ++
+        query_contract_join_field_tree(
+          MapHelpers.map_value(join_config, :joins),
+          target_relation,
+          schemas,
+          choice_index,
+          filterable_fields
+        )
+    end)
+  end
+
+  def query_contract_join_field_tree(
+        _joins,
+        _parent_relation,
+        _schemas,
+        _choice_index,
+        _filterable_fields
+      ),
+      do: []
 
   def query_contract_relation_fields(
         relation_id,
@@ -336,16 +394,19 @@ defmodule Selecto.Domain.Projector do
     end
   end
 
-  def query_contract_filters(filters) when is_map(filters) do
+  def query_contract_filters(filters, field_ids \\ MapSet.new())
+
+  def query_contract_filters(filters, field_ids) when is_map(filters) do
     filters
     |> MapHelpers.sorted_entries()
     |> Enum.map(fn {id, filter} ->
       type = MapHelpers.map_value(filter, :type)
-      virtual? = is_nil(MapHelpers.map_value(filter, :field))
+      field = query_contract_filter_field(id, filter, field_ids)
+      virtual? = is_nil(field)
 
       %{
         id: id,
-        field: MapHelpers.field_ref_or_nil(MapHelpers.map_value(filter, :field)),
+        field: field,
         type: type,
         label: MapHelpers.field_label(filter),
         capability: MapHelpers.map_value(filter, :capability),
@@ -355,24 +416,43 @@ defmodule Selecto.Domain.Projector do
     end)
   end
 
-  def query_contract_filters(_filters), do: []
+  def query_contract_filters(_filters, _field_ids), do: []
 
   def query_contract_filterable_fields(filters) when is_map(filters) do
     filters
-    |> Map.values()
+    |> MapHelpers.sorted_entries()
     |> Enum.reduce(MapSet.new(), fn
-      filter, acc when is_map(filter) ->
-        case MapHelpers.field_ref_or_nil(MapHelpers.map_value(filter, :field)) do
+      {id, filter}, acc when is_map(filter) ->
+        case query_contract_filter_field(id, filter) do
           nil -> acc
           field -> MapSet.put(acc, field)
         end
 
-      _filter, acc ->
+      {_id, _filter}, acc ->
         acc
     end)
   end
 
   def query_contract_filterable_fields(_filters), do: MapSet.new()
+
+  defp query_contract_filter_field(id, filter, field_ids \\ nil) do
+    explicit_field =
+      filter
+      |> MapHelpers.map_value(:field)
+      |> MapHelpers.field_ref_or_nil()
+
+    case {explicit_field, field_ids} do
+      {field, _field_ids} when not is_nil(field) ->
+        field
+
+      {nil, nil} ->
+        MapHelpers.field_ref_or_nil(id)
+
+      {nil, %MapSet{} = known_field_ids} ->
+        implicit_field = MapHelpers.field_ref_or_nil(id)
+        if MapSet.member?(known_field_ids, implicit_field), do: implicit_field
+    end
+  end
 
   def query_contract_field_surface(column, id, source_kind, type, filterable_fields) do
     type_id = query_contract_type_id(type)
