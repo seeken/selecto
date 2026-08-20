@@ -9,6 +9,7 @@ defmodule Selecto.Domain.Inspector do
   @projections [:query, :write, :ui, :api, :query_contract]
   @security_review_sections [
     actions: "business command definitions and execution surfaces",
+    events: "immutable business fact schemas emitted by event-stream actions",
     capabilities: "authorization capability catalog",
     choice_sources: "cross-domain choices and constraint policy",
     detail_actions: "user-visible detail actions",
@@ -92,6 +93,7 @@ defmodule Selecto.Domain.Inspector do
         hooks: MapHelpers.map_count(MapHelpers.map_value(writes, :hooks))
       },
       actions: MapHelpers.map_count(Map.get(normalized, :actions)),
+      events: MapHelpers.map_count(Map.get(normalized, :events)),
       capabilities: MapHelpers.map_count(Map.get(normalized, :capabilities)),
       capability_usages: length(capability_usage),
       source_relationships: MapHelpers.map_count(Map.get(normalized, :source_relationships)),
@@ -116,6 +118,7 @@ defmodule Selecto.Domain.Inspector do
       query_members: MapHelpers.query_member_keys(MapHelpers.map_value(query, :query_members)),
       custom_columns: MapHelpers.sorted_keys(MapHelpers.map_value(projection, :custom_columns)),
       actions: MapHelpers.sorted_keys(Map.get(normalized, :actions)),
+      events: MapHelpers.sorted_keys(Map.get(normalized, :events)),
       capabilities: MapHelpers.sorted_keys(Map.get(normalized, :capabilities)),
       source_relationships: MapHelpers.sorted_keys(Map.get(normalized, :source_relationships)),
       choice_sources: MapHelpers.sorted_keys(Map.get(normalized, :choice_sources))

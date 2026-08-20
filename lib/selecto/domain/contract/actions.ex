@@ -3,22 +3,22 @@ defmodule Selecto.Domain.Contract.Actions do
 
   alias Selecto.Domain.Contract.Shared.Core
 
-  def validate(errors, actions, capabilities, writes, field_index) do
-    validate_actions(errors, actions, capabilities, writes, field_index)
+  def validate(errors, actions, capabilities, writes, events, field_index) do
+    validate_actions(errors, actions, capabilities, writes, events, field_index)
   end
 
-  def validate_actions(errors, actions, capabilities, writes, field_index)
+  def validate_actions(errors, actions, capabilities, writes, events, field_index)
       when is_map(actions) do
     Enum.reduce(actions, errors, fn {action_id, action}, acc ->
       path = [:actions, action_id]
 
       acc
       |> validate_action_id(action_id, path)
-      |> validate_action(action_id, action, path, capabilities, writes, field_index)
+      |> validate_action(action_id, action, path, capabilities, writes, events, field_index)
     end)
   end
 
-  def validate_actions(errors, actions, _capabilities, _writes, _field_index) do
+  def validate_actions(errors, actions, _capabilities, _writes, _events, _field_index) do
     [
       Core.error(
         :invalid_section_shape,
@@ -50,15 +50,24 @@ defmodule Selecto.Domain.Contract.Actions do
     ]
   end
 
-  def validate_action(errors, action_id, action, path, capabilities, writes, field_index)
+  def validate_action(errors, action_id, action, path, capabilities, writes, events, field_index)
       when is_map(action) do
     errors
     |> validate_action_capability(action_id, action, path, capabilities)
     |> validate_action_transition(action_id, action, path, writes, field_index)
-    |> validate_action_execution(action_id, action, path)
+    |> validate_action_execution(action_id, action, path, events)
   end
 
-  def validate_action(errors, action_id, action, path, _capabilities, _writes, _field_index) do
+  def validate_action(
+        errors,
+        action_id,
+        action,
+        path,
+        _capabilities,
+        _writes,
+        _events,
+        _field_index
+      ) do
     [
       Core.error(
         :invalid_section_shape,
@@ -276,14 +285,162 @@ defmodule Selecto.Domain.Contract.Actions do
     end
   end
 
-  def validate_action_execution(errors, action_id, action, path) do
+  def validate_action_execution(errors, action_id, action, path, events) do
     transition = Core.map_value(action, :transition)
     action_type = Core.map_value(action, :type)
+    execution = Core.map_value(action, :execution)
 
-    if is_nil(transition) and not transition_action_type?(action_type) do
+    cond do
+      is_map(execution) and event_stream_execution?(execution) ->
+        validate_event_stream_execution(errors, action_id, execution, events, path)
+
+      is_nil(transition) and not transition_action_type?(action_type) ->
+        errors
+
+      true ->
+        validate_direct_action_execution(errors, action_id, action, path)
+    end
+  end
+
+  def validate_event_stream_execution(errors, action_id, execution, events, path) do
+    errors
+    |> validate_event_stream_aggregate(action_id, execution, path)
+    |> validate_event_stream_bounded_context(action_id, execution, path)
+    |> validate_event_stream_id(action_id, execution, path)
+    |> validate_event_stream_consistency(action_id, execution, path)
+    |> validate_event_stream_possible_events(action_id, execution, events, path)
+    |> validate_event_stream_write_keys(action_id, execution, path)
+  end
+
+  def validate_event_stream_bounded_context(errors, action_id, execution, path) do
+    case Core.map_value(execution, :bounded_context) do
+      context
+      when (is_atom(context) or is_binary(context)) and context not in ["", nil] ->
+        errors
+
+      context ->
+        [
+          Core.error(
+            :invalid_event_stream_bounded_context,
+            path ++ [:execution, :bounded_context],
+            "event-stream action #{inspect(action_id)} must name a non-empty bounded context",
+            action: action_id,
+            actual: context
+          )
+          | errors
+        ]
+    end
+  end
+
+  def validate_event_stream_aggregate(errors, action_id, execution, path) do
+    case Core.map_value(execution, :aggregate) do
+      aggregate
+      when (is_atom(aggregate) or is_binary(aggregate)) and aggregate not in ["", nil] ->
+        errors
+
+      aggregate ->
+        [
+          Core.error(
+            :invalid_event_stream_aggregate,
+            path ++ [:execution, :aggregate],
+            "event-stream action #{inspect(action_id)} must name a non-empty aggregate",
+            action: action_id,
+            actual: aggregate
+          )
+          | errors
+        ]
+    end
+  end
+
+  def validate_event_stream_id(errors, action_id, execution, path) do
+    stream_id = Core.map_value(execution, :stream_id)
+
+    if valid_stream_id_spec?(stream_id) do
       errors
     else
-      validate_direct_action_execution(errors, action_id, action, path)
+      [
+        Core.error(
+          :invalid_event_stream_id,
+          path ++ [:execution, :stream_id],
+          "event-stream action #{inspect(action_id)} must declare a stream id or a target/input/context field reference",
+          action: action_id,
+          actual: stream_id
+        )
+        | errors
+      ]
+    end
+  end
+
+  def validate_event_stream_consistency(errors, action_id, execution, path) do
+    case Core.map_value(execution, :consistency) do
+      consistency when consistency in [:expected_version, "expected_version"] ->
+        errors
+
+      consistency ->
+        [
+          Core.error(
+            :invalid_event_stream_consistency,
+            path ++ [:execution, :consistency],
+            "event-stream action #{inspect(action_id)} must use expected-version consistency",
+            action: action_id,
+            expected: :expected_version,
+            actual: consistency
+          )
+          | errors
+        ]
+    end
+  end
+
+  def validate_event_stream_possible_events(errors, action_id, execution, events, path) do
+    case Core.map_value(execution, :possible_events) do
+      possible_events when is_list(possible_events) and possible_events != [] ->
+        Enum.reduce(possible_events, errors, fn event_id, acc ->
+          if valid_identifier?(event_id) and Core.fetch_key(events, event_id) != :error do
+            acc
+          else
+            [
+              Core.error(
+                :action_event_not_found,
+                path ++ [:execution, :possible_events],
+                "event-stream action #{inspect(action_id)} references an unknown event",
+                action: action_id,
+                event: event_id
+              )
+              | acc
+            ]
+          end
+        end)
+
+      possible_events ->
+        [
+          Core.error(
+            :invalid_action_possible_events,
+            path ++ [:execution, :possible_events],
+            "event-stream action #{inspect(action_id)} must declare a non-empty possible_events list",
+            action: action_id,
+            actual: possible_events
+          )
+          | errors
+        ]
+    end
+  end
+
+  def validate_event_stream_write_keys(errors, action_id, execution, path) do
+    forbidden = Enum.filter([:operation, :set], &Core.has_key?(execution, &1))
+
+    if forbidden == [] do
+      errors
+    else
+      [
+        Core.error(
+          :event_stream_execution_has_write_keys,
+          path ++ [:execution],
+          "event-stream action #{inspect(action_id)} cannot declare direct Updato write keys",
+          action: action_id,
+          keys: forbidden
+        )
+        | errors
+      ]
     end
   end
 
@@ -422,6 +579,32 @@ defmodule Selecto.Domain.Contract.Actions do
       :error -> false
     end
   end
+
+  def event_stream_execution?(execution) do
+    Core.map_value(execution, :kind) in [:event_stream, "event_stream"]
+  end
+
+  def valid_stream_id_spec?(value) when is_atom(value), do: true
+  def valid_stream_id_spec?(value) when is_binary(value), do: value != ""
+
+  def valid_stream_id_spec?({source, field}) do
+    source in [:target, :input, :context, "target", "input", "context"] and
+      valid_identifier?(field)
+  end
+
+  def valid_stream_id_spec?([source, field]) do
+    valid_stream_id_spec?({source, field})
+  end
+
+  def valid_stream_id_spec?(%{} = value) do
+    valid_stream_id_spec?({Core.map_value(value, :source), Core.map_value(value, :field)})
+  end
+
+  def valid_stream_id_spec?(_value), do: false
+
+  def valid_identifier?(value) when is_atom(value), do: true
+  def valid_identifier?(value) when is_binary(value), do: value != ""
+  def valid_identifier?(_value), do: false
 
   def state_ref?(state), do: is_atom(state) or is_binary(state)
 end

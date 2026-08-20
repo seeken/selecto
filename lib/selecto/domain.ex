@@ -40,6 +40,7 @@ defmodule Selecto.Domain do
     :retarget,
     :writes,
     :actions,
+    :events,
     :capabilities,
     :source_relationships,
     :choice_sources
@@ -277,6 +278,7 @@ defmodule Selecto.Domain do
       projection: Projector.projection_sections(canonical_domain),
       writes: MapHelpers.section(canonical_domain, :writes, %{}),
       actions: MapHelpers.section(canonical_domain, :actions, %{}),
+      events: MapHelpers.section(canonical_domain, :events, %{}),
       capabilities: MapHelpers.section(canonical_domain, :capabilities, %{}),
       source_relationships: MapHelpers.section(canonical_domain, :source_relationships, %{}),
       choice_sources: MapHelpers.section(canonical_domain, :choice_sources, %{}),

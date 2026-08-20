@@ -6,8 +6,8 @@ normalized domain contract in Selecto 0.5. Normative words such as **MUST**,
 meaning.
 
 A Selecto domain is a declarative, versioned description of the data,
-relationships, query surfaces, write permissions, actions, choices, and
-capability names that an application elects to expose. It is a governance
+relationships, query surfaces, write permissions, actions, choices, capability
+names, and event contracts that an application elects to expose. It is a governance
 contract for operational applications; it is not a database schema dump, an
 authorization decision engine, or a substitute for database roles, constraints,
 transactions, and row-level security.
@@ -183,6 +183,7 @@ planned:
 
 - `writes`
 - `actions`
+- `events`
 - `capabilities`
 - `source_relationships`
 - `choice_sources`
@@ -212,7 +213,7 @@ has this stable schema-v1 organization:
 | `source`, `schemas`, `joins` | Core relation and join sections. |
 | `query` | Query defaults, filters, functions, members, portable query-library definitions, and published views. |
 | `projection` | Display and implementation-facing projection metadata. |
-| `writes`, `actions`, `capabilities` | Mutation and governance registries. |
+| `writes`, `actions`, `events`, `capabilities` | Mutation, immutable-fact, and governance registries. |
 | `source_relationships`, `choice_sources` | Cross-domain reference registries. |
 | `detail_actions`, `components` | Detail-row actions and canonical component-facing UI policy. |
 | `domain_data`, `extensions` | Host data and declared extension specifications. |
@@ -893,6 +894,57 @@ Decision statuses are `:allow`, `:deny`, `:conditional`, and
 `:not_applicable`. Visibility recommendations are `:enabled`, `:disabled`,
 `:hidden`, and `:preview_only`.
 
+## Events And Event-Stream Actions
+
+`events` declares the immutable business facts that a host aggregate may emit.
+Each event has an explicit positive schema version and a payload field contract:
+
+```elixir
+%{
+  events: %{
+    substitution_proposed: %{
+      schema_version: 1,
+      additional_fields: false,
+      data: %{
+        unavailable_sku: %{type: :string, required: true},
+        substitute_sku: %{type: :string, required: true}
+      }
+    }
+  },
+  actions: %{
+    propose_substitution: %{
+      inputs: %{
+        expected_version: %{type: :integer, required: true},
+        unavailable_sku: %{type: :string, required: true},
+        substitute_sku: %{type: :string, required: true}
+      },
+      execution: %{
+        kind: :event_stream,
+        aggregate: :fulfillment_order,
+        bounded_context: :fulfillment,
+        stream_id: {:target, :id},
+        consistency: :expected_version,
+        possible_events: [:substitution_proposed]
+      }
+    }
+  }
+}
+```
+
+Supported event field types are `any`, `boolean`, `enum`, `integer`, `list`,
+`map`, `number`, `string`, and `uuid`. Enum fields declare `values`; fields may
+declare `required` and `nullable`; `additional_fields` is boolean.
+
+An `event_stream` execution MUST name a non-empty aggregate, a stream id or an
+explicit `target`/`input`/`context` field reference, expected-version
+consistency, and a non-empty list of events present in the domain event
+registry. It MUST NOT also declare direct Updato `operation` or `set` keys.
+
+This metadata distinguishes a command from its possible outcomes. Selecto core
+normalizes and validates the contract; it does not decide the command, append
+events, or treat an action invocation as an event. Those runtime guarantees
+belong to an authorized event-store adapter such as Selecto Ledger.
+
 ## Direct Transition Actions
 
 `actions` declares named business commands. The canonical transition action is a
@@ -931,8 +983,9 @@ Validation checks:
 - `transition` must be a map with `field`, `from`, and `to`.
 - the transition field must exist in the source, schemas, or custom columns.
 - the transition edge must exist in `writes.transitions`.
-- optional direct execution metadata currently supports only
-  `%{kind: :updato, operation: :update}`.
+- direct transition execution uses `%{kind: :updato, operation: :update}`;
+  separately, non-transition actions may use the governed `event_stream`
+  execution contract described above.
 - optional execution `set` must set the transition field to the target state.
 
 This validates that preview and execution can ask the same domain question; it

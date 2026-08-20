@@ -38,6 +38,53 @@ defmodule Selecto.DomainContractTest do
       assert {:ok, _normalized, _diagnostics} = Domain.validate(domain)
     end
 
+    test "validates an event contract and event-stream action as one portable domain" do
+      domain = event_stream_domain()
+
+      assert {:ok, normalized, diagnostics} = Domain.validate(domain)
+      assert diagnostics.errors == []
+
+      projection = Domain.project(normalized, :write)
+      assert projection.events.order_substitution_proposed.schema_version == 1
+
+      assert projection.actions.propose_substitution.execution == %{
+               kind: :event_stream,
+               aggregate: :fulfillment_order,
+               bounded_context: :fulfillment,
+               stream_id: {:target, :id},
+               consistency: :expected_version,
+               possible_events: [:order_substitution_proposed]
+             }
+    end
+
+    test "rejects invalid event schemas and unknown event-stream outcomes" do
+      domain =
+        event_stream_domain()
+        |> put_in(
+          [:events, :order_substitution_proposed, :data, :substitute_sku, :type],
+          {:unsupported, :shape}
+        )
+        |> put_in(
+          [:actions, :propose_substitution, :execution, :possible_events],
+          [:missing_event]
+        )
+        |> put_in(
+          [:actions, :propose_substitution, :execution, :bounded_context],
+          ""
+        )
+
+      assert {:error, diagnostics} = Domain.validate(domain)
+
+      assert %{code: :unsupported_event_field_type} =
+               error_for(diagnostics, :unsupported_event_field_type)
+
+      assert %{code: :action_event_not_found, event: :missing_event} =
+               error_for(diagnostics, :action_event_not_found)
+
+      assert %{code: :invalid_event_stream_bounded_context} =
+               error_for(diagnostics, :invalid_event_stream_bounded_context)
+    end
+
     test "accepts canonical ecosystem examples" do
       for {name, domain} <- canonical_examples() do
         assert {:ok, normalized, diagnostics} = Domain.validate(domain), Atom.to_string(name)
@@ -2697,6 +2744,41 @@ defmodule Selecto.DomainContractTest do
       },
       required_filters: [{"status", "open"}]
     }
+  end
+
+  defp event_stream_domain do
+    valid_domain()
+    |> Map.merge(%{
+      name: :fulfillment,
+      events: %{
+        order_substitution_proposed: %{
+          schema_version: 1,
+          additional_fields: false,
+          data: %{
+            unavailable_sku: %{type: :string, required: true},
+            substitute_sku: %{type: :string, required: true}
+          }
+        }
+      },
+      actions: %{
+        propose_substitution: %{
+          type: :detail_action,
+          inputs: %{
+            expected_version: %{type: :integer, required: true},
+            unavailable_sku: %{type: :string, required: true},
+            substitute_sku: %{type: :string, required: true}
+          },
+          execution: %{
+            kind: :event_stream,
+            aggregate: :fulfillment_order,
+            bounded_context: :fulfillment,
+            stream_id: {:target, :id},
+            consistency: :expected_version,
+            possible_events: [:order_substitution_proposed]
+          }
+        }
+      }
+    })
   end
 
   defp canonical_examples do

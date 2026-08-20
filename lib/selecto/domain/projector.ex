@@ -98,6 +98,7 @@ defmodule Selecto.Domain.Projector do
       columns: projection_section(normalized, :columns, %{}),
       writes: Map.get(normalized, :writes, %{}),
       actions: Map.get(normalized, :actions, %{}),
+      events: Map.get(normalized, :events, %{}),
       capabilities: Map.get(normalized, :capabilities, %{}),
       source_relationships: Map.get(normalized, :source_relationships, %{}),
       choice_sources: Map.get(normalized, :choice_sources, %{})
@@ -126,6 +127,7 @@ defmodule Selecto.Domain.Projector do
     |> Map.merge(%{
       writes: Map.get(normalized, :writes, %{}),
       actions: Map.get(normalized, :actions, %{}),
+      events: Map.get(normalized, :events, %{}),
       capabilities: Map.get(normalized, :capabilities, %{}),
       source_relationships: Map.get(normalized, :source_relationships, %{}),
       choice_sources: Map.get(normalized, :choice_sources, %{}),

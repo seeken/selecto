@@ -47,6 +47,7 @@ defmodule Selecto.Domain.Sections do
   @proposed_sections MapSet.new([
                        "writes",
                        "actions",
+                       "events",
                        "capabilities",
                        "source_relationships",
                        "choice_sources"

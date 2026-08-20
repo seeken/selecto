@@ -15,6 +15,7 @@ defmodule Selecto.Domain.Contract do
   alias Selecto.Domain.Contract.Capabilities
   alias Selecto.Domain.Contract.ChoiceSources
   alias Selecto.Domain.Contract.DetailActions
+  alias Selecto.Domain.Contract.Events
   alias Selecto.Domain.Contract.FieldBindings
   alias Selecto.Domain.Contract.Joins
   alias Selecto.Domain.Contract.PublishedViews
@@ -57,6 +58,7 @@ defmodule Selecto.Domain.Contract do
     writes = Map.get(normalized_domain, :writes, %{})
     capabilities = Map.get(normalized_domain, :capabilities, %{})
     actions = Map.get(normalized_domain, :actions, %{})
+    events = Map.get(normalized_domain, :events, %{})
     source_relationships = Map.get(normalized_domain, :source_relationships, %{})
     choice_sources = Map.get(normalized_domain, :choice_sources, %{})
     detail_actions = Map.get(normalized_domain, :detail_actions, %{})
@@ -73,7 +75,8 @@ defmodule Selecto.Domain.Contract do
     |> Writes.validate(writes, field_index)
     |> Capabilities.validate(capabilities)
     |> Capabilities.validate_query_references(query, detail_actions, capabilities)
-    |> Actions.validate(actions, capabilities, writes, field_index)
+    |> Events.validate(events)
+    |> Actions.validate(actions, capabilities, writes, events, field_index)
     |> SourceRelationships.validate(source_relationships, field_index)
     |> ChoiceSources.validate(choice_sources, source_relationships, capabilities)
     |> FieldBindings.validate(source, schemas, projection, choice_sources, field_index)
