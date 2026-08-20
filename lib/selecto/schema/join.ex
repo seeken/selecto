@@ -274,6 +274,9 @@ defmodule Selecto.Schema.Join do
       requires_join: parent,
       join_type: :custom,
       is_custom: true,
+      type: Map.get(config, :type, :left),
+      on: Map.get(config, :on, []),
+      param_filters: Map.get(config, :param_filters, %{}),
       filters: Map.get(config, :filters, %{}),
       fields: Map.get(config, :fields, %{})
     }
