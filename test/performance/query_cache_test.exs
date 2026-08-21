@@ -16,8 +16,17 @@ defmodule Selecto.Performance.QueryCacheTest do
     _ = Supervisor.delete_child(Selecto.Supervisor, QueryCache)
 
     case Process.whereis(QueryCache) do
-      nil -> :ok
-      alive_pid -> GenServer.stop(alive_pid)
+      nil ->
+        :ok
+
+      alive_pid ->
+        # The process can die between whereis/1 and the stop call, so
+        # tolerate exits.
+        try do
+          GenServer.stop(alive_pid)
+        catch
+          :exit, _reason -> :ok
+        end
     end
   end
 

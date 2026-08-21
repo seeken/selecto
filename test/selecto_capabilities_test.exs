@@ -242,12 +242,39 @@ defmodule Selecto.CapabilitiesTest do
       assert %Decision{status: :deny, visibility: :disabled} =
                Capabilities.normalize_decision(%{status: :ghosted, visibility: :ghosted})
 
+      # explicit false status denies even with an allow-ish visibility
+      assert {:ok, {:deny, :enabled}} =
+               Capabilities.parse_decision(%{status: false, visibility: :enabled})
+
+      assert %Decision{status: :deny} =
+               Capabilities.normalize_decision(%{"status" => false, "visibility" => :enabled})
+
       # an unrecognized visibility spelling falls back to the implied default
       assert %Decision{status: :allow, visibility: :enabled} =
                Capabilities.normalize_decision(%{status: :allow, visibility: :ghosted})
 
       assert %Decision{status: :deny, visibility: :hidden} =
                Capabilities.normalize_decision(%{status: "hidden", visibility: :ghosted})
+    end
+
+    test "malformed auxiliary fields fail closed instead of raising" do
+      assert %Decision{status: :deny, reason_code: :invalid_decision} =
+               Capabilities.normalize_decision(%{status: :allow, effects: :invalid})
+
+      assert %Decision{status: :deny, reason_code: :invalid_decision} =
+               Capabilities.normalize_decision(%{
+                 status: :allow,
+                 obligations: "not-a-list",
+                 metadata: :"not-a-map"
+               })
+
+      # valid auxiliary fields still pass through
+      assert %Decision{status: :allow, effects: [{:filter, 1}], metadata: %{x: 1}} =
+               Capabilities.normalize_decision(%{
+                 status: :allow,
+                 effects: [{:filter, 1}],
+                 metadata: %{x: 1}
+               })
     end
   end
 end

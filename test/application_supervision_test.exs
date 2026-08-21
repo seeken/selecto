@@ -87,10 +87,22 @@ defmodule Selecto.ApplicationSupervisionTest do
         :ok
 
       alive_pid ->
-        # Not managed by the app supervisor; stop it directly.
+        # Not managed by the app supervisor; stop it directly. The process
+        # can die between whereis/1 and the stop call, so tolerate exits.
         case kind do
-          :supervisor -> Supervisor.stop(alive_pid)
-          :genserver -> GenServer.stop(alive_pid)
+          :supervisor ->
+            try do
+              Supervisor.stop(alive_pid)
+            catch
+              :exit, _reason -> :ok
+            end
+
+          :genserver ->
+            try do
+              GenServer.stop(alive_pid)
+            catch
+              :exit, _reason -> :ok
+            end
         end
     end
   end

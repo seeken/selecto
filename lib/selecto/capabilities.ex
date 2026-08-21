@@ -149,7 +149,8 @@ defmodule Selecto.Capabilities do
       do: {:ok, {unquote(canonical), unquote(visibility)}}
 
     def parse_decision(status)
-        when is_binary(status) and status in unquote(spellings ++ Enum.map(spellings, &Atom.to_string/1)),
+        when is_binary(status) and
+               status in unquote(spellings ++ Enum.map(spellings, &Atom.to_string/1)),
         do: {:ok, {unquote(canonical), unquote(visibility)}}
   end
 
@@ -163,24 +164,49 @@ defmodule Selecto.Capabilities do
   def parse_decision(%{} = attrs) do
     # `status` / `decision` classify the decision. A bare `visibility`
     # spelling classifies only when no status key is present at all; a
-    # status key that is present but unrecognized fails closed.
-    raw_status = get_attr(attrs, :status) || get_attr(attrs, :decision)
+    # status key that is present but unrecognized (including `nil`) fails
+    # closed. Presence is checked explicitly so a `false` status denies
+    # instead of being treated as an absent key.
+    case status_key_value(attrs) do
+      {:found, raw_status} ->
+        case classify_status(raw_status) do
+          {:ok, {status, implied_visibility}} ->
+            {:ok, {status, override_visibility(get_attr(attrs, :visibility), implied_visibility)}}
 
-    case {raw_status, classify_status(raw_status)} do
-      {_present_or_nil, {:ok, {status, implied_visibility}}} ->
-        {:ok,
-         {status,
-          override_visibility(get_attr(attrs, :visibility), implied_visibility)}}
+          :error ->
+            :error
+        end
 
-      {nil, :error} ->
-        classify_status(get_attr(attrs, :visibility))
-
-      {_unrecognized, :error} ->
-        :error
+      :absent ->
+        classify_status(visibility_key_value(attrs))
     end
   end
 
   def parse_decision(_shape), do: :error
+
+  defp status_key_value(attrs), do: first_present(attrs, [:status, :decision])
+
+  defp visibility_key_value(attrs) do
+    case first_present(attrs, [:visibility]) do
+      {:found, value} -> value
+      :absent -> nil
+    end
+  end
+
+  defp first_present(attrs, keys) do
+    Enum.find_value(keys, :absent, fn key ->
+      cond do
+        Map.has_key?(attrs, key) ->
+          {:found, Map.fetch!(attrs, key)}
+
+        Map.has_key?(attrs, Atom.to_string(key)) ->
+          {:found, Map.fetch!(attrs, Atom.to_string(key))}
+
+        true ->
+          nil
+      end
+    end)
+  end
 
   defp override_visibility(raw_visibility, default_visibility) do
     case parse_decision(raw_visibility) do
@@ -223,7 +249,7 @@ defmodule Selecto.Capabilities do
         |> Map.put(:status, :deny)
         |> force_valid_visibility()
         |> copy_parsed_attrs(shape)
-        |> Decision.new()
+        |> safe_new_decision()
 
       :error ->
         deny(:invalid_decision)
@@ -244,7 +270,7 @@ defmodule Selecto.Capabilities do
     |> Map.put(:status, status)
     |> Map.put(:visibility, visibility)
     |> copy_parsed_attrs(attrs)
-    |> Decision.new()
+    |> safe_new_decision()
   end
 
   defp build_normalized_decision(shape, status, visibility) do
@@ -259,6 +285,15 @@ defmodule Selecto.Capabilities do
       {status, _} ->
         Decision.new(status: status, visibility: visibility)
     end
+  end
+
+  # Auxiliary decision fields (effects/obligations must be lists, metadata a
+  # map) are host-provided policy data; a malformed value fails closed to a
+  # plain deny instead of raising, matching normalize_decision's contract.
+  defp safe_new_decision(attrs) do
+    Decision.new(attrs)
+  rescue
+    ArgumentError -> deny(:invalid_decision)
   end
 
   defp copy_parsed_attrs(target, source) do
