@@ -566,21 +566,23 @@ defmodule Selecto.ConnectionPool do
   def start_manager(manager_opts) when is_list(manager_opts) do
     pool_name = Keyword.fetch!(manager_opts, :pool_name)
 
-    case DynamicSupervisor.start_child(@manager_supervisor, {__MODULE__, manager_opts}) do
-      {:ok, manager_pid} ->
-        {:ok, manager_pid, :started}
+    with :ok <- ensure_runtime_started() do
+      case DynamicSupervisor.start_child(@manager_supervisor, {__MODULE__, manager_opts}) do
+        {:ok, manager_pid} ->
+          {:ok, manager_pid, :started}
 
-      {:error, {:already_started, manager_pid}} ->
-        {:ok, manager_pid, :existing}
+        {:error, {:already_started, manager_pid}} ->
+          {:ok, manager_pid, :existing}
 
-      {:error, {:already_present, _child_id}} ->
-        case get_manager_pid_by_name(pool_name) do
-          {:ok, manager_pid} -> {:ok, manager_pid, :existing}
-          :error -> {:error, :manager_start_conflict}
-        end
+        {:error, {:already_present, _child_id}} ->
+          case get_manager_pid_by_name(pool_name) do
+            {:ok, manager_pid} -> {:ok, manager_pid, :existing}
+            :error -> {:error, :manager_start_conflict}
+          end
 
-      {:error, reason} ->
-        {:error, reason}
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   end
 

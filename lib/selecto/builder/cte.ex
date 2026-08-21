@@ -5,6 +5,10 @@ defmodule Selecto.Builder.CteSql do
   Generates SQL for both non-recursive and recursive WITH clauses,
   handling dependency ordering, column specifications, and proper
   standard CTE statement structure.
+
+  This module belongs to the SQL rendering layer (`Selecto.Builder.*`); it
+  consumes validated specs from the intent layer (`Selecto.Advanced.CTE`).
+  See `docs/architecture_layers.md`.
   """
 
   alias Selecto.Advanced.CTE.Spec

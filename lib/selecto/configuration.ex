@@ -80,11 +80,13 @@ defmodule Selecto.Configuration do
     domain = Selecto.Extensions.merge_domain_extensions(domain, extension_specs)
 
     if domain_ref do
+      # Registry validation already runs both Selecto.Domain.validate and
+      # Selecto.DomainValidator; do not validate the same domain twice.
       :ok = Selecto.Domain.Registry.validate_domain!(domain, domain_ref)
-    end
-
-    if validate? do
-      Selecto.DomainValidator.validate_domain!(domain)
+    else
+      if validate? do
+        Selecto.DomainValidator.validate_domain!(domain)
+      end
     end
 
     # Handle connection pooling

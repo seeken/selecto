@@ -25,6 +25,9 @@ defmodule Selecto.Performance.QueryCache do
     compression_threshold: 1024
   }
 
+  @register_attempts 200
+  @register_retry_delay 5
+
   @cache_table :selecto_query_cache
   @stats_ref_table :selecto_cache_stats_ref
 
@@ -67,6 +70,64 @@ defmodule Selecto.Performance.QueryCache do
   end
 
   @doc """
+  Ensures the cache process is running, starting it on demand if needed.
+
+  The cache is not started eagerly with Selecto's application; reads and
+  writes through `get/1` and `put/3` attach it to Selecto's application
+  supervisor as a dynamic permanent child, so normal application shutdown
+  reclaims it. Hosts that want their own lifecycle management should add
+  this module to their own supervision tree instead.
+  """
+  def ensure_started(opts \\ []) do
+    case Process.whereis(__MODULE__) do
+      pid when is_pid(pid) ->
+        {:ok, pid}
+
+      nil ->
+        # Blocks until the child has finished initializing.
+        case attach_to_app_supervisor(opts) do
+          :ok -> await_registered(@register_attempts)
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  defp attach_to_app_supervisor(opts) do
+    case Supervisor.start_child(Selecto.Supervisor, child_spec(opts)) do
+      {:ok, _pid} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
+      {:error, :already_present} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  rescue
+    error -> {:error, error}
+  catch
+    :exit, reason -> {:error, {:selecto_supervisor_unavailable, reason}}
+  end
+
+  defp await_registered(0), do: {:error, :query_cache_start_failed}
+
+  defp await_registered(attempts) do
+    case Process.whereis(__MODULE__) do
+      pid when is_pid(pid) ->
+        {:ok, pid}
+
+      nil ->
+        Process.sleep(@register_retry_delay)
+        await_registered(attempts - 1)
+    end
+  end
+
+  defp child_spec(opts) do
+    %{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, [opts]},
+      type: :worker,
+      restart: :permanent
+    }
+  end
+
+  @doc """
   Get a cached query result.
 
   Returns {:ok, result} if found, :miss if not in cache.
@@ -74,7 +135,10 @@ defmodule Selecto.Performance.QueryCache do
   def get(cache_key) do
     case fast_get(cache_key) do
       :no_fast_path ->
-        call_if_running({:get, cache_key}, :miss)
+        case ensure_started() do
+          {:ok, _pid} -> GenServer.call(__MODULE__, {:get, cache_key})
+          {:error, _reason} -> :miss
+        end
 
       result ->
         result
@@ -91,7 +155,10 @@ defmodule Selecto.Performance.QueryCache do
   - `:compress` - Force compression for this entry
   """
   def put(cache_key, result, options \\ []) do
-    call_if_running({:put, cache_key, result, options}, :ok)
+    case ensure_started() do
+      {:ok, _pid} -> GenServer.call(__MODULE__, {:put, cache_key, result, options})
+      {:error, _reason} -> :ok
+    end
   end
 
   @doc """
@@ -504,13 +571,19 @@ defmodule Selecto.Performance.QueryCache do
   end
 
   defp create_cache_table(:ets) do
-    :ets.new(@cache_table, [
-      :set,
-      :public,
-      :named_table,
-      read_concurrency: true,
-      write_concurrency: true
-    ])
+    case :ets.whereis(@cache_table) do
+      :undefined ->
+        :ets.new(@cache_table, [
+          :set,
+          :public,
+          :named_table,
+          read_concurrency: true,
+          write_concurrency: true
+        ])
+
+      _existing ->
+        @cache_table
+    end
   end
 
   defp create_cache_table(_backend), do: create_cache_table(:ets)

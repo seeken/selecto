@@ -32,6 +32,7 @@ defmodule Selecto.MixProject do
         main: "Selecto",
         extras: [
           "README.md",
+          "docs/architecture_layers.md",
           "docs/domain_schema_v1.md",
           "docs/developer_contracts.md",
           "docs/function_verification.md",

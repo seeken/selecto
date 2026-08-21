@@ -1,5 +1,11 @@
 defmodule Selecto.CteQuery do
-  @moduledoc false
+  @moduledoc """
+  Facade for CTE query composition (Layer 1 in `docs/architecture_layers.md`).
+
+  Delegates spec construction to `Selecto.Advanced.CTE` and SQL rendering to
+  `Selecto.Builder.CteSql`. Note: this facade predates the standard
+  `Selecto.<Feature>` naming and is kept for API stability.
+  """
 
   alias Selecto.QueryMembers
 

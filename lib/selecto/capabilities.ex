@@ -107,6 +107,182 @@ defmodule Selecto.Capabilities do
     Decision.not_applicable(reason_code, attrs)
   end
 
+  @doc """
+  Shared normalization kernel for loose host-provided capability answers.
+
+  Classifies a decision shape of any supported spelling into its canonical
+  `{status, visibility}` pair:
+
+  - booleans (`true` -> allow/enabled, `false` -> deny/disabled)
+  - canonical atoms (`:allow`, `:deny`, `:hidden`, `:conditional`,
+    `:preview_only`, `:not_applicable`)
+  - write-phase shorthand atoms (`:enabled`, `:disabled`) and their string
+    spellings
+  - `{status, reason}` tuples where the reason is a binary
+  - atom- or string-keyed maps carrying a `status`, `decision`, or
+    `visibility` key, with an optional independent `visibility` override
+
+  Returns `{:ok, {status, visibility}}` or `:error` when the shape carries no
+  recognizable status. Callers layer their own policy on top of `:error`
+  (this module fails closed; `SelectoUpdato.CapabilityDecision` returns an
+  error tuple).
+
+  This is the single vocabulary mapping shared across the Selecto ecosystem;
+  adapters and sibling libraries should normalize through it rather than
+  maintaining parallel status tables.
+  """
+  @spec parse_decision(term()) :: {:ok, {Decision.status(), Decision.visibility()}} | :error
+  def parse_decision(%Decision{} = decision),
+    do: {:ok, {decision.status, decision.visibility}}
+
+  def parse_decision(true), do: {:ok, {:allow, :enabled}}
+  def parse_decision(false), do: {:ok, {:deny, :disabled}}
+
+  for {canonical, visibility, spellings} <- [
+        {:allow, :enabled, [:allow, :enabled]},
+        {:deny, :disabled, [:deny, :disabled]},
+        {:deny, :hidden, [:hidden]},
+        {:conditional, :preview_only, [:conditional, :preview_only]},
+        {:not_applicable, :hidden, [:not_applicable]}
+      ] do
+    def parse_decision(status) when status in unquote(spellings),
+      do: {:ok, {unquote(canonical), unquote(visibility)}}
+
+    def parse_decision(status)
+        when is_binary(status) and status in unquote(spellings ++ Enum.map(spellings, &Atom.to_string/1)),
+        do: {:ok, {unquote(canonical), unquote(visibility)}}
+  end
+
+  def parse_decision({status, reason}) when is_binary(reason) do
+    case parse_decision(status) do
+      {:ok, _pair} = ok -> ok
+      :error -> :error
+    end
+  end
+
+  def parse_decision(%{} = attrs) do
+    # `status` / `decision` classify the decision. A bare `visibility`
+    # spelling classifies only when no status key is present at all; a
+    # status key that is present but unrecognized fails closed.
+    raw_status = get_attr(attrs, :status) || get_attr(attrs, :decision)
+
+    case {raw_status, classify_status(raw_status)} do
+      {_present_or_nil, {:ok, {status, implied_visibility}}} ->
+        {:ok,
+         {status,
+          override_visibility(get_attr(attrs, :visibility), implied_visibility)}}
+
+      {nil, :error} ->
+        classify_status(get_attr(attrs, :visibility))
+
+      {_unrecognized, :error} ->
+        :error
+    end
+  end
+
+  def parse_decision(_shape), do: :error
+
+  defp override_visibility(raw_visibility, default_visibility) do
+    case parse_decision(raw_visibility) do
+      {:ok, {_status, visibility}} -> visibility
+      :error -> default_visibility
+    end
+  end
+
+  @doc """
+  Normalizes any loose resolver answer into a canonical `Decision`.
+
+  Accepts everything `parse_decision/1` accepts (plus `Decision` structs,
+  `{:ok, decision}` / `{:error, reason}` tuples, and maps with extra fields
+  such as `effects` or `obligations`). Invalid shapes fail closed to a deny
+  decision rather than raising.
+  """
+  @spec normalize_decision(term()) :: Decision.t()
+  def normalize_decision({:ok, decision}), do: normalize_decision(decision)
+
+  def normalize_decision({:error, reason}) do
+    deny(:resolver_error,
+      user_message: inspect(reason),
+      metadata: %{reason: reason}
+    )
+  end
+
+  def normalize_decision(%Decision{} = decision), do: decision
+
+  def normalize_decision(nil), do: allow(:no_decision)
+
+  def normalize_decision(shape) do
+    case parse_decision(shape) do
+      {:ok, {status, visibility}} ->
+        build_normalized_decision(shape, status, visibility)
+
+      :error when is_map(shape) ->
+        # Unrecognized or missing status spelling: fail closed while keeping
+        # whatever context the resolver provided. Never raise on policy data.
+        shape
+        |> Map.put(:status, :deny)
+        |> force_valid_visibility()
+        |> copy_parsed_attrs(shape)
+        |> Decision.new()
+
+      :error ->
+        deny(:invalid_decision)
+    end
+  end
+
+  defp force_valid_visibility(attrs) do
+    case parse_decision(get_attr(attrs, :visibility)) do
+      {:ok, {_status, visibility}} -> Map.put(attrs, :visibility, visibility)
+      :error -> Map.put(attrs, :visibility, :disabled)
+    end
+  end
+
+  defp build_normalized_decision(%{} = attrs, status, visibility) do
+    # `visibility` from parse/1 already accounts for any valid explicit
+    # override; overwrite so an invalid spelling cannot reach Decision.new.
+    attrs
+    |> Map.put(:status, status)
+    |> Map.put(:visibility, visibility)
+    |> copy_parsed_attrs(attrs)
+    |> Decision.new()
+  end
+
+  defp build_normalized_decision(shape, status, visibility) do
+    case {status, shape} do
+      {_status, {status, reason}} when is_binary(reason) ->
+        Decision.new(
+          status: status,
+          visibility: visibility,
+          user_message: reason
+        )
+
+      {status, _} ->
+        Decision.new(status: status, visibility: visibility)
+    end
+  end
+
+  defp copy_parsed_attrs(target, source) do
+    user_message = get_attr(source, :user_message) || get_attr(source, :reason)
+    reason_code = get_attr(source, :reason_code) || get_attr(source, :code)
+
+    target
+    |> maybe_put_attr(:user_message, user_message)
+    |> maybe_put_attr(:reason_code, reason_code)
+    |> maybe_put_attr(:metadata, get_attr(source, :metadata))
+  end
+
+  defp maybe_put_attr(attrs, _key, nil), do: attrs
+  defp maybe_put_attr(attrs, key, value), do: Map.put_new(attrs, key, value)
+
+  defp classify_status(raw_status) do
+    # Preserve the visibility implied by the matched spelling (e.g. `hidden`
+    # implies deny + hidden); an explicit `visibility` attr may still override.
+    case parse_decision(raw_status) do
+      {:ok, {status, visibility}} -> {:ok, {status, visibility}}
+      :error -> :error
+    end
+  end
+
   defp invoke_decide(nil, _request, _context), do: allow(:no_resolver)
 
   defp invoke_decide(resolver, request, _context) when is_function(resolver, 1),
@@ -184,72 +360,6 @@ defmodule Selecto.Capabilities do
 
   defp normalize_decisions(decision, expected_count) do
     List.duplicate(normalize_decision(decision), expected_count)
-  end
-
-  defp normalize_decision({:ok, decision}), do: normalize_decision(decision)
-
-  defp normalize_decision({:error, reason}) do
-    deny(:resolver_error,
-      user_message: inspect(reason),
-      metadata: %{reason: reason}
-    )
-  end
-
-  defp normalize_decision(%Decision{} = decision), do: decision
-  defp normalize_decision(%{} = attrs), do: Decision.new(normalize_decision_attrs(attrs))
-  defp normalize_decision(true), do: allow()
-  defp normalize_decision(false), do: deny()
-  defp normalize_decision(:allow), do: allow()
-  defp normalize_decision(:deny), do: deny()
-  defp normalize_decision(:hidden), do: hidden()
-  defp normalize_decision(nil), do: allow(:no_decision)
-  defp normalize_decision(_decision), do: deny(:invalid_decision)
-
-  defp normalize_decision_attrs(attrs) do
-    status = get_attr(attrs, :status, get_attr(attrs, :visibility))
-
-    attrs
-    |> maybe_put_status_visibility(status)
-    |> maybe_copy_attr(:code, :reason_code)
-    |> maybe_copy_attr(:reason, :user_message)
-  end
-
-  defp maybe_put_status_visibility(attrs, status)
-       when status in [:enabled, :allow, "enabled", "allow"] do
-    attrs
-    |> Map.put(:status, :allow)
-    |> Map.put_new(:visibility, :enabled)
-  end
-
-  defp maybe_put_status_visibility(attrs, status)
-       when status in [:disabled, :deny, "disabled", "deny"] do
-    attrs
-    |> Map.put(:status, :deny)
-    |> Map.put_new(:visibility, :disabled)
-  end
-
-  defp maybe_put_status_visibility(attrs, status)
-       when status in [:hidden, :not_applicable, "hidden", "not_applicable"] do
-    attrs
-    |> Map.put(:status, :deny)
-    |> Map.put(:visibility, :hidden)
-  end
-
-  defp maybe_put_status_visibility(attrs, status)
-       when status in [:preview_only, :conditional, "preview_only", "conditional"] do
-    attrs
-    |> Map.put(:status, :conditional)
-    |> Map.put(:visibility, :preview_only)
-  end
-
-  defp maybe_put_status_visibility(attrs, _status), do: attrs
-
-  defp maybe_copy_attr(attrs, from, to) do
-    case {get_attr(attrs, from), get_attr(attrs, to)} do
-      {nil, _existing} -> attrs
-      {_value, existing} when not is_nil(existing) -> attrs
-      {value, nil} -> Map.put(attrs, to, value)
-    end
   end
 
   defp resolver_context(opts) when is_list(opts) do

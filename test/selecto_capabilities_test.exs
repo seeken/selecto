@@ -215,5 +215,39 @@ defmodule Selecto.CapabilitiesTest do
                user_message: ":offline"
              } = Capabilities.decide(fn _request -> {:error, :offline} end, request)
     end
+
+    test "recognizes legacy string spellings including hidden" do
+      assert %Decision{status: :deny, visibility: :hidden} =
+               Capabilities.normalize_decision(%{"status" => "hidden"})
+
+      assert {:ok, {:deny, :hidden}} = Capabilities.parse_decision("hidden")
+    end
+
+    test "decision key outranks a visibility spelling in maps" do
+      assert {:ok, {:allow, :hidden}} =
+               Capabilities.parse_decision(%{decision: :allow, visibility: :hidden})
+
+      # a bare visibility spelling still classifies when no status is given
+      assert {:ok, {:deny, :hidden}} = Capabilities.parse_decision(%{visibility: :hidden})
+    end
+
+    test "malformed map decisions fail closed instead of raising" do
+      # unrecognized status never inherits an allow from visibility
+      assert %Decision{status: :deny} =
+               Capabilities.normalize_decision(%{status: :ghosted, visibility: :enabled})
+
+      assert :error = Capabilities.parse_decision(%{status: :ghosted, visibility: :enabled})
+
+      # unrecognized status + unrecognized visibility denies without raising
+      assert %Decision{status: :deny, visibility: :disabled} =
+               Capabilities.normalize_decision(%{status: :ghosted, visibility: :ghosted})
+
+      # an unrecognized visibility spelling falls back to the implied default
+      assert %Decision{status: :allow, visibility: :enabled} =
+               Capabilities.normalize_decision(%{status: :allow, visibility: :ghosted})
+
+      assert %Decision{status: :deny, visibility: :hidden} =
+               Capabilities.normalize_decision(%{status: "hidden", visibility: :ghosted})
+    end
   end
 end

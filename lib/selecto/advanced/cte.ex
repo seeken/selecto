@@ -5,6 +5,11 @@ defmodule Selecto.Advanced.CTE do
   Provides comprehensive support for non-recursive and recursive CTEs, enabling
   hierarchical queries, query modularity, and complex data processing patterns.
 
+  This module belongs to the intent/spec layer (`Selecto.Advanced.*`): it
+  builds and validates `Spec` structs but never generates SQL. Rendering is
+  done by the SQL layer in `Selecto.Builder.CteSql`. See
+  `docs/architecture_layers.md`.
+
   ## Examples
 
       # Non-recursive CTE

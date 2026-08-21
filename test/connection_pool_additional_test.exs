@@ -3,6 +3,13 @@ defmodule Selecto.ConnectionPoolAdditionalTest do
 
   alias Selecto.ConnectionPool
 
+  setup do
+    # The pool runtime starts lazily; tests that register processes through
+    # its registry need it running.
+    {:ok, _} = Selecto.ConnectionPool.Runtime.ensure_started()
+    :ok
+  end
+
   defmodule FakeAdapter do
   end
 

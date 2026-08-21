@@ -4,24 +4,21 @@ defmodule Selecto.Performance.QueryCacheTest do
   alias Selecto.Performance.QueryCache
 
   setup do
-    case Process.whereis(QueryCache) do
-      nil ->
-        :ok
-
-      pid ->
-        if Process.alive?(pid) do
-          try do
-            GenServer.stop(pid)
-          catch
-            :exit, _reason -> :ok
-          end
-        else
-          :ok
-        end
-    end
-
+    stop_query_cache()
     {:ok, _pid} = QueryCache.start_link(max_size: 10, default_ttl: 1000)
     :ok
+  end
+
+  defp stop_query_cache do
+    # Terminate by child id: the pid-based terminate_child/2 form does not
+    # resolve dynamically attached children.
+    _ = Supervisor.terminate_child(Selecto.Supervisor, QueryCache)
+    _ = Supervisor.delete_child(Selecto.Supervisor, QueryCache)
+
+    case Process.whereis(QueryCache) do
+      nil -> :ok
+      alive_pid -> GenServer.stop(alive_pid)
+    end
   end
 
   test "generate key from SQL is stable" do
@@ -73,12 +70,18 @@ defmodule Selecto.Performance.QueryCacheTest do
     assert {:ok, ^result} = QueryCache.get(key)
   end
 
-  test "api is safe when cache is not running" do
+  test "api lazily restarts the cache and stays safe when it is stopped" do
     assert is_pid(Process.whereis(QueryCache))
-    :ok = GenServer.stop(QueryCache)
+    stop_query_cache()
 
+    # get/put lazily start the cache so `cache: true` works without supervision
     assert :miss = QueryCache.get("missing")
+    assert is_pid(Process.whereis(QueryCache))
     assert :ok = QueryCache.put("k", "v")
+    assert {:ok, "v"} = QueryCache.get("k")
+
+    # maintenance calls stay graceful when the cache is not running
+    stop_query_cache()
     assert {:ok, 0} = QueryCache.invalidate("k")
     assert {:ok, 0} = QueryCache.invalidate_by_tags(["tag"])
     assert :ok = QueryCache.clear()
@@ -100,7 +103,7 @@ defmodule Selecto.Performance.QueryCacheTest do
   end
 
   test "stats can be disabled" do
-    :ok = GenServer.stop(QueryCache)
+    stop_query_cache()
     {:ok, _pid} = QueryCache.start_link(max_size: 10, default_ttl: 1000, track_stats: false)
 
     QueryCache.put("x", "y")
