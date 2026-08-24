@@ -72,6 +72,8 @@
   commands or appending events.
 
 #### Fixed
+- Removed the Timex runtime dependency from date-range helpers so current
+  Phoenix applications can use Gettext 1.x without a dependency conflict.
 - CTE dependency validation now rejects malformed, missing, duplicate, and
   circular references distinctly, and emits acyclic CTEs in stable dependency
   order.

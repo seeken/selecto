@@ -2,16 +2,6 @@ defmodule Selecto.Helpers.DateTest do
   use ExUnit.Case
   alias Selecto.Helpers.Date
 
-  # Skip these tests if Timex is not available
-  setup do
-    try do
-      Code.ensure_loaded!(Timex)
-      :ok
-    rescue
-      ArgumentError -> :skip
-    end
-  end
-
   describe "val_to_dates/1" do
     test "handles 'today' value" do
       input = %{"value" => "today", "value2" => ""}

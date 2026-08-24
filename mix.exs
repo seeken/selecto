@@ -22,7 +22,7 @@ defmodule Selecto.MixProject do
       dialyzer: [
         plt_core_path: "priv/plts",
         plt_file: {:no_warn, "priv/plts/dialyzer.plt"},
-        plt_add_apps: [:jason, :timex, :mix],
+        plt_add_apps: [:jason, :mix],
         ignore_warnings: ".dialyzer_ignore.exs",
         list_unused_filters: true
       ],
@@ -115,7 +115,6 @@ defmodule Selecto.MixProject do
       {:db_connection, "~> 2.0"},
       {:decimal, ">= 0.0.0"},
       {:ex_doc, "~> 0.40", only: :dev, runtime: false},
-      {:timex, "~> 3.7"},
       {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:ecto_sql, "~> 3.13", optional: true},
