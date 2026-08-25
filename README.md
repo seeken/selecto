@@ -1,5 +1,10 @@
 # Selecto
 
+General owned-composition and shared/join relationship contracts are described
+in [`docs/nested_composition_contract.md`](docs/nested_composition_contract.md),
+including immutable consumer projections, compatibility, target certification,
+and migration from custom nested forms or APIs.
+
 > Alpha software. Expect API churn and breaking changes while the core package is still being hardened.
 
 Selecto includes bounded formal-verification suites for tenant query scope and

@@ -18,6 +18,8 @@ defmodule Selecto.Domain do
   alias Selecto.Domain.Inspector
   alias Selecto.Domain.Projector
   alias Selecto.Domain.Compose
+  alias Selecto.Domain.CompositionContract
+  alias Selecto.Domain.ConsumerProjectionRelease
 
   @current_schema_version 1
   @map_sections [
@@ -255,6 +257,25 @@ defmodule Selecto.Domain do
   """
   @spec project(map(), :query | :write | :ui | :api | :query_contract) :: map()
   defdelegate project(normalized, projection), to: Projector
+
+  @doc "Compiles the canonical nested relationship composition contract."
+  @spec composition_contract(term()) :: {:ok, map()} | {:error, [map()]}
+  def composition_contract(domain), do: CompositionContract.compile(domain)
+
+  @doc "Compiles an immutable projection-specific nested consumer release."
+  @spec consumer_projection_release(term(), keyword()) ::
+          {:ok, map()} | {:error, map() | [map()]}
+  def consumer_projection_release(domain, opts \\ []),
+    do: ConsumerProjectionRelease.compile(domain, opts)
+
+  @doc "Returns the published nested runtime/adapter capability matrix."
+  @spec nested_capability_matrix() :: [map()]
+  def nested_capability_matrix, do: Selecto.Domain.NestedCapabilityMatrix.profiles()
+
+  @doc "Classifies compatibility changes between nested consumer releases."
+  @spec diff_consumer_projection_releases(map(), map()) :: map()
+  def diff_consumer_projection_releases(previous, current),
+    do: ConsumerProjectionRelease.diff(previous, current)
 
   def normalized_domain(
         authored_domain,

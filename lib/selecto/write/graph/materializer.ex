@@ -90,6 +90,37 @@ defmodule Selecto.Write.Graph.Materializer do
   @spec root_returning(Graph.t()) :: :none | :all | [atom() | String.t()]
   def root_returning(%Graph{metadata: metadata}), do: Map.get(metadata, :root_returning, :all)
 
+  @doc """
+  Builds stable per-child outcomes and client-to-server identity mappings from
+  adapter graph results.
+
+  Adapters call this after every node has executed, while the complete
+  `{node_id, row_id}` result index is still available. The metadata contains no
+  adapter-specific values and is safe to expose in the portable `Result`.
+  """
+  @spec outcome_metadata(Graph.t(), map()) :: map()
+  def outcome_metadata(%Graph{} = graph, results) when is_map(results) do
+    outcomes =
+      graph.nodes
+      |> Enum.reject(&(&1.id == elem(graph.root, 0)))
+      |> Enum.flat_map(fn node ->
+        Enum.map(node.rows, fn row -> row_outcome(node, row, results) end)
+      end)
+
+    mappings =
+      outcomes
+      |> Enum.filter(&(not is_nil(&1.client_identity)))
+      |> Enum.map(fn outcome ->
+        %{
+          path: outcome.path,
+          client_identity: outcome.client_identity,
+          identity: outcome.identity
+        }
+      end)
+
+    %{nested_outcomes: outcomes, identity_mappings: mappings}
+  end
+
   defp materialize_rows(rows, results) do
     Enum.reduce_while(rows, {:ok, []}, fn row, {:ok, materialized} ->
       case materialize_row(row, results) do
@@ -258,4 +289,33 @@ defmodule Selecto.Write.Graph.Materializer do
       nil -> :error
     end
   end
+
+  defp row_outcome(node, row, results) do
+    result = Map.get(results, {node.id, row.id})
+
+    %{
+      path: row.path,
+      node_id: node.id,
+      row_id: row.id,
+      operation: Map.get(row.metadata, :semantic_operation, result_operation(result)),
+      affected_rows: result_affected_rows(result),
+      client_identity: Map.get(row.metadata, :client_identity),
+      identity: result_identity(result, node.identity_fields)
+    }
+  end
+
+  defp result_identity(%Result{rows: [data | _]}, fields) do
+    Enum.reduce(fields, %{}, fn field, identity ->
+      case fetch_result_value(data, field) do
+        {:ok, value} -> Map.put(identity, to_string(field), value)
+        :error -> identity
+      end
+    end)
+  end
+
+  defp result_identity(_result, _fields), do: %{}
+  defp result_operation(%Result{operation: operation}), do: operation
+  defp result_operation(_result), do: nil
+  defp result_affected_rows(%Result{affected_rows: affected_rows}), do: affected_rows
+  defp result_affected_rows(_result), do: 0
 end

@@ -37,7 +37,20 @@ defmodule Selecto.Domain.Contract.Writes do
 
   @known_field_flags [:insertable, :updatable, :immutable, :write_once, :server_managed]
   @known_relationship_cardinality [:one, :many]
-  @known_ownership [:owned, :shared_reference, :join_only]
+  @known_ownership [
+    :composition,
+    :shared_association,
+    :join_association,
+    :derived,
+    :deferred,
+    # Compatibility aliases used by the delivered NestedGraph contract.
+    :owned,
+    :shared_reference,
+    :join_only
+  ]
+  @known_mutation_modes [:append_only, :delta, :full_set, :replace_one, :link_delta]
+  @known_omission_policies [:unchanged, :delete_missing, :reject_missing, :retain_missing]
+  @known_tenant_policies [:recursive, :membership, :explicit, :none]
 
   defp validate_operations(errors, nil, _field_index), do: errors
 
@@ -427,6 +440,15 @@ defmodule Selecto.Domain.Contract.Writes do
   defp validate_relationships(errors, nil), do: errors
 
   defp validate_relationships(errors, relationships) when is_map(relationships) do
+    errors =
+      reject_normalized_registry_duplicates(
+        errors,
+        relationships,
+        [:writes, :relationships],
+        :duplicate_write_relationship_id,
+        "write relationship"
+      )
+
     Enum.reduce(relationships, errors, fn {relationship, spec}, acc ->
       path = [:writes, :relationships, relationship]
 
@@ -449,6 +471,19 @@ defmodule Selecto.Domain.Contract.Writes do
         |> validate_relationship_field_ref(relationship, spec, path, :child_key)
         |> validate_relationship_field_ref(relationship, spec, path, :parent_key)
         |> validate_relationship_domain(relationship, spec, path)
+        |> validate_relationship_path_id(relationship, spec, path)
+        |> validate_relationship_read_policy(relationship, spec, path)
+        |> validate_relationship_write_contract(relationship, spec, path)
+        |> validate_relationship_capabilities(relationship, spec, path)
+        |> validate_relationship_tenant_policy(relationship, spec, path)
+        |> validate_relationship_policy_map(relationship, spec, path, :ordering)
+        |> validate_relationship_policy_map(relationship, spec, path, :conflict)
+        |> validate_relationship_policy_map(relationship, spec, path, :idempotency)
+        |> validate_relationship_policy_map(relationship, spec, path, :offline)
+        |> validate_relationship_policy_map(relationship, spec, path, :validation)
+        |> validate_relationship_policy_map(relationship, spec, path, :assurance)
+        |> validate_relationship_policy_map(relationship, spec, path, :output)
+        |> validate_relationship_semantics(relationship, spec, path)
         |> require_relationship_write_policy(relationship, spec, path)
         |> reject_unsafe_terms(spec, path)
       else
@@ -480,7 +515,13 @@ defmodule Selecto.Domain.Contract.Writes do
   end
 
   defp require_relationship_write_policy(errors, relationship, spec, path) do
-    if Core.map_value(spec, :writable) == true or Core.map_value(spec, :enabled) == true do
+    write = Core.map_value(spec, :write)
+
+    writable? =
+      Core.map_value(spec, :writable) == true or Core.map_value(spec, :enabled) == true or
+        (is_map(write) and List.wrap(Core.map_value(write, :modes)) != [])
+
+    if writable? do
       errors
       |> require_relationship_option(relationship, spec, path, :cardinality)
       |> require_relationship_option(relationship, spec, path, :ownership)
@@ -669,6 +710,677 @@ defmodule Selecto.Domain.Contract.Writes do
         ]
     end
   end
+
+  defp validate_relationship_path_id(errors, relationship, spec, path) do
+    case Core.map_value(spec, :path_id) do
+      nil ->
+        errors
+
+      value when is_binary(value) ->
+        if String.trim(value) == "" do
+          relationship_option_error(
+            errors,
+            relationship,
+            path ++ [:path_id],
+            :path_id,
+            value,
+            "must be a non-empty string"
+          )
+        else
+          errors
+        end
+
+      value ->
+        relationship_option_error(
+          errors,
+          relationship,
+          path ++ [:path_id],
+          :path_id,
+          value,
+          "must be a non-empty string"
+        )
+    end
+  end
+
+  defp validate_relationship_read_policy(errors, relationship, spec, path) do
+    case Core.map_value(spec, :read) do
+      nil ->
+        errors
+
+      read when is_map(read) ->
+        errors
+        |> validate_relationship_policy_boolean(relationship, read, path ++ [:read], :allowed)
+        |> validate_relationship_policy_non_negative_integer(
+          relationship,
+          read,
+          path ++ [:read],
+          :default_depth
+        )
+        |> validate_relationship_policy_positive_integer(
+          relationship,
+          read,
+          path ++ [:read],
+          :max_depth
+        )
+        |> validate_relationship_policy_positive_integer(
+          relationship,
+          read,
+          path ++ [:read],
+          :max_rows
+        )
+        |> validate_relationship_policy_positive_integer(
+          relationship,
+          read,
+          path ++ [:read],
+          :max_bytes
+        )
+        |> validate_relationship_policy_positive_integer(
+          relationship,
+          read,
+          path ++ [:read],
+          :max_complexity
+        )
+
+      value ->
+        relationship_option_error(
+          errors,
+          relationship,
+          path ++ [:read],
+          :read,
+          value,
+          "must be a map"
+        )
+    end
+  end
+
+  defp validate_relationship_write_contract(errors, relationship, spec, path) do
+    case Core.map_value(spec, :write) do
+      nil ->
+        validate_legacy_relationship_bounds(errors, relationship, spec, path)
+
+      write when is_map(write) ->
+        errors
+        |> validate_relationship_mutation_modes(relationship, write, path ++ [:write])
+        |> validate_relationship_policy_enum(
+          relationship,
+          write,
+          path ++ [:write],
+          :omission,
+          @known_omission_policies
+        )
+        |> validate_relationship_policy_booleans(
+          relationship,
+          write,
+          path ++ [:write],
+          [:create, :update, :delete, :reorder, :link, :unlink]
+        )
+        |> validate_relationship_policy_non_negative_integer(
+          relationship,
+          write,
+          path ++ [:write],
+          :min_items
+        )
+        |> validate_relationship_policy_positive_integer(
+          relationship,
+          write,
+          path ++ [:write],
+          :max_items
+        )
+        |> validate_relationship_policy_positive_integer(
+          relationship,
+          write,
+          path ++ [:write],
+          :max_mutations
+        )
+        |> validate_relationship_bounds(relationship, write, path ++ [:write])
+
+      value ->
+        relationship_option_error(
+          errors,
+          relationship,
+          path ++ [:write],
+          :write,
+          value,
+          "must be a map"
+        )
+    end
+  end
+
+  defp validate_relationship_mutation_modes(errors, relationship, write, path) do
+    case Core.map_value(write, :modes) do
+      nil ->
+        errors
+
+      modes when is_list(modes) and modes != [] ->
+        Enum.reduce(modes, errors, fn mode, acc ->
+          if Core.enum_value?(mode, @known_mutation_modes) do
+            acc
+          else
+            relationship_option_error(
+              acc,
+              relationship,
+              path ++ [:modes],
+              :modes,
+              mode,
+              "contains an unsupported mutation mode"
+            )
+          end
+        end)
+
+      modes ->
+        relationship_option_error(
+          errors,
+          relationship,
+          path ++ [:modes],
+          :modes,
+          modes,
+          "must be a non-empty list"
+        )
+    end
+  end
+
+  defp validate_relationship_capabilities(errors, relationship, spec, path) do
+    case Core.map_value(spec, :capabilities) do
+      nil ->
+        errors
+
+      capabilities when is_map(capabilities) ->
+        Enum.reduce(capabilities, errors, fn {operation, capability}, acc ->
+          if valid_policy_identifier?(operation) and valid_policy_identifier?(capability) do
+            acc
+          else
+            relationship_option_error(
+              acc,
+              relationship,
+              path ++ [:capabilities, operation],
+              :capabilities,
+              capability,
+              "must map operation identifiers to non-empty capability identifiers"
+            )
+          end
+        end)
+
+      value ->
+        relationship_option_error(
+          errors,
+          relationship,
+          path ++ [:capabilities],
+          :capabilities,
+          value,
+          "must be a map"
+        )
+    end
+  end
+
+  defp validate_relationship_tenant_policy(errors, relationship, spec, path) do
+    case Core.map_value(spec, :tenant_scope) do
+      nil ->
+        errors
+
+      value when is_map(value) ->
+        validate_relationship_policy_enum(
+          errors,
+          relationship,
+          value,
+          path ++ [:tenant_scope],
+          :mode,
+          @known_tenant_policies
+        )
+
+      value ->
+        if Core.enum_value?(value, @known_tenant_policies) do
+          errors
+        else
+          relationship_option_error(
+            errors,
+            relationship,
+            path ++ [:tenant_scope],
+            :tenant_scope,
+            value,
+            "must be a known tenant policy or a policy map"
+          )
+        end
+    end
+  end
+
+  defp validate_relationship_policy_map(errors, relationship, spec, path, key) do
+    case Core.map_value(spec, key) do
+      nil ->
+        errors
+
+      value when is_map(value) ->
+        errors
+
+      value ->
+        relationship_option_error(
+          errors,
+          relationship,
+          path ++ [key],
+          key,
+          value,
+          "must be a map"
+        )
+    end
+  end
+
+  defp validate_relationship_semantics(errors, relationship, spec, path) do
+    ownership = canonical_ownership(Core.map_value(spec, :ownership))
+    cardinality = canonical_enum(Core.map_value(spec, :cardinality))
+    write = Core.map_value(spec, :write)
+
+    # The delivered NestedGraph vocabulary predates the general composition
+    # contract. Preserve that compatibility surface; the stricter semantic
+    # checks apply when an author opts into the explicit `write` policy map.
+    if is_map(write) do
+      modes = mutation_modes(spec, write)
+      operations = relationship_operations(spec, write)
+      identity_fields = Core.map_value(spec, :identity_fields) |> List.wrap()
+      read = Core.map_value(spec, :read)
+      offline = Core.map_value(spec, :offline)
+      idempotency = Core.map_value(spec, :idempotency)
+      conflict = Core.map_value(spec, :conflict)
+
+      errors
+      |> reject_shared_target_mutation(relationship, ownership, operations, path)
+      |> reject_read_only_mutation(relationship, ownership, modes, operations, path)
+      |> reject_invalid_link_modes(relationship, ownership, modes, path)
+      |> reject_invalid_cardinality_modes(relationship, cardinality, modes, path)
+      |> require_stable_identity(relationship, identity_fields, modes, operations, path)
+      |> require_explicit_omission(relationship, spec, write, modes, path)
+      |> require_read_bounds(relationship, read, path)
+      |> require_offline_controls(
+        relationship,
+        offline,
+        idempotency,
+        conflict,
+        modes,
+        path
+      )
+    else
+      errors
+    end
+  end
+
+  defp reject_shared_target_mutation(errors, relationship, ownership, operations, path) do
+    if ownership in [:shared_association, :join_association] and
+         Enum.any?(operations, &(&1 in [:create, :update, :delete])) do
+      [
+        Core.error(
+          :shared_relationship_target_mutation,
+          path ++ [:write],
+          "shared and join associations may only link or unlink existing targets",
+          relationship: relationship,
+          ownership: ownership,
+          operations: operations
+        )
+        | errors
+      ]
+    else
+      errors
+    end
+  end
+
+  defp reject_read_only_mutation(errors, relationship, ownership, modes, operations, path) do
+    if ownership == :derived and (modes != [] or operations != []) do
+      [
+        Core.error(
+          :read_only_relationship_mutation,
+          path ++ [:write],
+          "derived relationships are read-only unless exposed by a separately named Operation",
+          relationship: relationship
+        )
+        | errors
+      ]
+    else
+      errors
+    end
+  end
+
+  defp reject_invalid_link_modes(errors, relationship, ownership, modes, path) do
+    cond do
+      :link_delta in modes and ownership not in [:shared_association, :join_association] ->
+        [
+          Core.error(
+            :invalid_link_delta_ownership,
+            path ++ [:write, :modes],
+            "link_delta is only valid for shared or join associations",
+            relationship: relationship,
+            ownership: ownership
+          )
+          | errors
+        ]
+
+      ownership in [:shared_association, :join_association] and
+          Enum.any?(modes, &(&1 != :link_delta)) ->
+        [
+          Core.error(
+            :invalid_association_mutation_mode,
+            path ++ [:write, :modes],
+            "shared and join associations only accept link_delta",
+            relationship: relationship,
+            ownership: ownership,
+            modes: modes
+          )
+          | errors
+        ]
+
+      true ->
+        errors
+    end
+  end
+
+  defp reject_invalid_cardinality_modes(errors, relationship, cardinality, modes, path) do
+    invalid? =
+      (cardinality == :one and Enum.any?(modes, &(&1 in [:append_only, :full_set]))) or
+        (cardinality == :many and :replace_one in modes)
+
+    if invalid? do
+      [
+        Core.error(
+          :invalid_relationship_cardinality_mode,
+          path ++ [:write, :modes],
+          "relationship mutation mode is incompatible with its cardinality",
+          relationship: relationship,
+          cardinality: cardinality,
+          modes: modes
+        )
+        | errors
+      ]
+    else
+      errors
+    end
+  end
+
+  defp require_stable_identity(errors, relationship, identity_fields, modes, operations, path) do
+    identity_required? =
+      Enum.any?(modes, &(&1 in [:delta, :full_set, :replace_one, :link_delta])) or
+        Enum.any?(operations, &(&1 in [:update, :delete, :link, :unlink]))
+
+    if identity_required? and identity_fields == [] do
+      [
+        Core.error(
+          :nested_identity_required,
+          path ++ [:identity_fields],
+          "nested update, replacement, and link semantics require stable identity fields",
+          relationship: relationship,
+          modes: modes,
+          operations: operations
+        )
+        | errors
+      ]
+    else
+      errors
+    end
+  end
+
+  defp require_explicit_omission(errors, relationship, spec, write, modes, path) do
+    omission = if is_map(write), do: Core.map_value(write, :omission)
+    legacy_delete_missing = Core.map_value(spec, :delete_missing)
+
+    if :full_set in modes and is_nil(omission) and is_nil(legacy_delete_missing) do
+      [
+        Core.error(
+          :nested_omission_policy_required,
+          path ++ [:write, :omission],
+          "full_set mutation requires an explicit omitted-child policy",
+          relationship: relationship
+        )
+        | errors
+      ]
+    else
+      errors
+    end
+  end
+
+  defp require_read_bounds(errors, relationship, read, path) when is_map(read) do
+    if Core.map_value(read, :allowed) == true and
+         (is_nil(Core.map_value(read, :max_depth)) or is_nil(Core.map_value(read, :max_rows))) do
+      [
+        Core.error(
+          :nested_read_bounds_required,
+          path ++ [:read],
+          "nested reads require explicit max_depth and max_rows bounds",
+          relationship: relationship
+        )
+        | errors
+      ]
+    else
+      errors
+    end
+  end
+
+  defp require_read_bounds(errors, _relationship, _read, _path), do: errors
+
+  defp require_offline_controls(
+         errors,
+         relationship,
+         offline,
+         idempotency,
+         conflict,
+         modes,
+         path
+       )
+       when is_map(offline) do
+    if Core.map_value(offline, :eligible) == true and modes != [] and
+         (not is_map(idempotency) or not is_map(conflict)) do
+      [
+        Core.error(
+          :offline_nested_controls_required,
+          path ++ [:offline],
+          "offline nested mutation requires explicit idempotency and conflict policies",
+          relationship: relationship
+        )
+        | errors
+      ]
+    else
+      errors
+    end
+  end
+
+  defp require_offline_controls(
+         errors,
+         _relationship,
+         _offline,
+         _idempotency,
+         _conflict,
+         _modes,
+         _path
+       ),
+       do: errors
+
+  defp validate_legacy_relationship_bounds(errors, relationship, spec, path) do
+    errors
+    |> validate_relationship_policy_non_negative_integer(relationship, spec, path, :min_items)
+    |> validate_relationship_policy_positive_integer(relationship, spec, path, :max_items)
+    |> validate_relationship_bounds(relationship, spec, path)
+  end
+
+  defp validate_relationship_bounds(errors, relationship, policy, path) do
+    minimum = Core.map_value(policy, :min_items)
+    maximum = Core.map_value(policy, :max_items)
+
+    if is_integer(minimum) and is_integer(maximum) and maximum < minimum do
+      relationship_option_error(
+        errors,
+        relationship,
+        path ++ [:max_items],
+        :max_items,
+        maximum,
+        "must be greater than or equal to min_items"
+      )
+    else
+      errors
+    end
+  end
+
+  defp validate_relationship_policy_booleans(errors, relationship, policy, path, keys) do
+    Enum.reduce(keys, errors, fn key, acc ->
+      validate_relationship_policy_boolean(acc, relationship, policy, path, key)
+    end)
+  end
+
+  defp validate_relationship_policy_boolean(errors, relationship, policy, path, key) do
+    case Core.map_value(policy, key) do
+      nil ->
+        errors
+
+      value when is_boolean(value) ->
+        errors
+
+      value ->
+        relationship_option_error(
+          errors,
+          relationship,
+          path ++ [key],
+          key,
+          value,
+          "must be boolean"
+        )
+    end
+  end
+
+  defp validate_relationship_policy_non_negative_integer(
+         errors,
+         relationship,
+         policy,
+         path,
+         key
+       ) do
+    case Core.map_value(policy, key) do
+      nil ->
+        errors
+
+      value when is_integer(value) and value >= 0 ->
+        errors
+
+      value ->
+        relationship_option_error(
+          errors,
+          relationship,
+          path ++ [key],
+          key,
+          value,
+          "must be a non-negative integer"
+        )
+    end
+  end
+
+  defp validate_relationship_policy_positive_integer(
+         errors,
+         relationship,
+         policy,
+         path,
+         key
+       ) do
+    case Core.map_value(policy, key) do
+      nil ->
+        errors
+
+      value when is_integer(value) and value > 0 ->
+        errors
+
+      value ->
+        relationship_option_error(
+          errors,
+          relationship,
+          path ++ [key],
+          key,
+          value,
+          "must be a positive integer"
+        )
+    end
+  end
+
+  defp validate_relationship_policy_enum(errors, relationship, policy, path, key, allowed) do
+    case Core.map_value(policy, key) do
+      nil ->
+        errors
+
+      value ->
+        if Core.enum_value?(value, allowed) do
+          errors
+        else
+          relationship_option_error(
+            errors,
+            relationship,
+            path ++ [key],
+            key,
+            value,
+            "contains an unsupported value"
+          )
+        end
+    end
+  end
+
+  defp relationship_option_error(errors, relationship, path, option, value, suffix) do
+    [
+      Core.error(
+        :invalid_write_relationship_option,
+        path,
+        "write relationship #{inspect(relationship)} option #{inspect(option)} #{suffix}",
+        relationship: relationship,
+        option: option,
+        value: value
+      )
+      | errors
+    ]
+  end
+
+  defp mutation_modes(_spec, write) do
+    write
+    |> Core.map_value(:modes)
+    |> List.wrap()
+    |> Enum.map(&canonical_enum/1)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp relationship_operations(spec, write) do
+    explicit =
+      if is_map(write) do
+        [:create, :update, :delete, :reorder, :link, :unlink]
+        |> Enum.filter(&(Core.map_value(write, &1) == true))
+      else
+        []
+      end
+
+    legacy =
+      spec
+      |> Core.map_value(:allowed_ops)
+      |> List.wrap()
+      |> Enum.map(fn
+        value when value in [:insert, "insert", :nested_insert, "nested_insert"] -> :create
+        value when value in [:update, "update", :nested_update, "nested_update"] -> :update
+        value when value in [:delete, "delete"] -> :delete
+        _ -> nil
+      end)
+      |> Enum.reject(&is_nil/1)
+
+    Enum.uniq(explicit ++ legacy)
+  end
+
+  defp canonical_ownership(value) do
+    case canonical_enum(value) do
+      :owned -> :composition
+      :shared_reference -> :shared_association
+      :join_only -> :join_association
+      other -> other
+    end
+  end
+
+  defp canonical_enum(value) when is_atom(value), do: value
+
+  defp canonical_enum(value) when is_binary(value) do
+    Enum.find(
+      @known_ownership ++ @known_mutation_modes ++ @known_relationship_cardinality,
+      &(Atom.to_string(&1) == value)
+    )
+  end
+
+  defp canonical_enum(_value), do: nil
+
+  defp valid_policy_identifier?(value) when is_atom(value), do: true
+  defp valid_policy_identifier?(value) when is_binary(value), do: String.trim(value) != ""
+  defp valid_policy_identifier?(_value), do: false
 
   defp validate_constraints(errors, nil, _field_index), do: errors
 
