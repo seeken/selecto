@@ -8,6 +8,7 @@ defmodule Selecto.WriteProtocolTest do
     Batch,
     Capabilities,
     Command,
+    CommittedEffectSink,
     Error,
     Graph,
     Preview,
@@ -73,6 +74,32 @@ defmodule Selecto.WriteProtocolTest do
     def supports?(_feature), do: false
   end
 
+  defmodule EffectAdapter do
+    @behaviour Selecto.DB.Adapter
+    @behaviour Selecto.DB.WriteAdapter
+
+    def name, do: :effect_test
+    def connect(connection), do: {:ok, connection}
+    def execute(_connection, _query, _params, _opts), do: {:ok, %{rows: [], columns: []}}
+    def placeholder(index), do: ["$", Integer.to_string(index)]
+    def quote_identifier(identifier), do: ~s("#{identifier}")
+    def supports?(_feature), do: false
+
+    def write_capabilities(_connection),
+      do: %{
+        protocol_version: 1,
+        insert: true,
+        committed_effect_sink: true
+      }
+
+    def preview_write(_connection, _command, _opts), do: {:ok, %Preview{statements: []}}
+
+    def execute_write(agent, command, opts) do
+      Agent.update(agent, &[opts | &1])
+      {:ok, %Result{operation: command.operation, affected_rows: 1}}
+    end
+  end
+
   defmodule MissingProtocolAdapter do
     @behaviour Selecto.DB.Adapter
     @behaviour Selecto.DB.WriteAdapter
@@ -133,6 +160,73 @@ defmodule Selecto.WriteProtocolTest do
              Write.preview(selecto, command)
 
     assert {:ok, %{atomic_batch: true}} = Write.capabilities(selecto)
+  end
+
+  test "requires an explicit atomic committed-effect capability before dispatch" do
+    sink = fn _connection, _result, _context -> :ok end
+    selecto = %Selecto{adapter: WriteAdapter, connection: :connection}
+
+    assert {:error,
+            %Error{
+              type: :write_capability_missing,
+              details: %{missing: [:committed_effect_sink]}
+            }} = Write.execute(selecto, command!(:insert), committed_effect_sink: sink)
+  end
+
+  test "passes a committed-effect sink only to an adapter that declares support" do
+    {:ok, agent} = Agent.start_link(fn -> [] end)
+    sink = fn _connection, _result, _context -> :ok end
+    selecto = %Selecto{adapter: EffectAdapter, connection: agent}
+
+    assert {:ok, %Result{operation: :insert}} =
+             Write.execute(selecto, command!(:insert), committed_effect_sink: sink)
+
+    assert [[committed_effect_sink: ^sink]] = Agent.get(agent, & &1)
+  end
+
+  test "committed-effect sink normalizes failures without exposing values" do
+    assert :ok = CommittedEffectSink.invoke(nil, :connection, :result, %{})
+
+    assert {:error, %Error{type: :committed_effect_failed, details: %{reason: "sink_error"}}} =
+             CommittedEffectSink.invoke(
+               fn _, _, _ -> {:error, {:database, "private payload"}} end,
+               :connection,
+               :result,
+               %{}
+             )
+
+    assert {:error,
+            %Error{
+              type: :committed_effect_failed,
+              details: %{reason: "write_error:private_sink_failure"}
+            } = nested_error} =
+             CommittedEffectSink.invoke(
+               fn _, _, _ ->
+                 {:error,
+                  Error.new(:private_sink_failure, "private payload",
+                    details: %{payload: "private payload"}
+                  )}
+               end,
+               :connection,
+               :result,
+               %{}
+             )
+
+    refute inspect(nested_error) =~ "private payload"
+
+    assert {:error,
+            %Error{
+              type: :committed_effect_failed,
+              details: %{reason: "exception:RuntimeError"}
+            } = error} =
+             CommittedEffectSink.invoke(
+               fn _, _, _ -> raise "private payload" end,
+               :connection,
+               :result,
+               %{}
+             )
+
+    refute inspect(error) =~ "private payload"
   end
 
   test "fails before dispatch when the adapter omits or cannot preserve protocol capabilities" do

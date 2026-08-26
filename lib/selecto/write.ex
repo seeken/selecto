@@ -18,7 +18,8 @@ defmodule Selecto.Write do
     with :ok <- validate_command(command),
          :ok <- ensure_callback(adapter, :execute_write, 3),
          {:ok, capabilities} <- adapter_capabilities(adapter, connection),
-         :ok <- Capabilities.require(capabilities, command) do
+         :ok <- Capabilities.require(capabilities, command),
+         :ok <- require_committed_effect_sink(capabilities, opts) do
       adapter.execute_write(connection, command, opts)
     end
   end
@@ -90,5 +91,19 @@ defmodule Selecto.Write do
      Error.new(:write_not_supported, "configured Selecto value has no write-capable adapter",
        details: %{adapter: adapter, callback: {callback, arity}}
      )}
+  end
+
+  defp require_committed_effect_sink(capabilities, opts) do
+    if Keyword.has_key?(opts, :committed_effect_sink) and
+         not Capabilities.supported?(capabilities, :committed_effect_sink) do
+      {:error,
+       Error.new(
+         :write_capability_missing,
+         "configured adapter cannot atomically install committed effects",
+         details: %{required: [:committed_effect_sink], missing: [:committed_effect_sink]}
+       )}
+    else
+      :ok
+    end
   end
 end
