@@ -8,11 +8,11 @@ sql_literal_pattern='[$][0-9]+|[$][#][{]|ARRAY\[|(^|[^[:alnum:]_])(ILIKE|TO_CHAR
 if command -v rg >/dev/null 2>&1; then
   production_matches="$(rg -n -i "$boundary_pattern|$native_type_pattern" lib || true)"
   sql_literal_matches="$(rg -n -i "$sql_literal_pattern" lib/selecto/builder lib/selecto/sql/functions.ex lib/selecto/sql/formatter.ex || true)"
-  dependency_matches="$(rg -n -i 'SelectoDBPostgreSQL|selecto_db_postgresql|Postgrex|postgrex' mix.exs | rg -v 'only: :test' || true)"
+  dependency_matches="$(rg -n -i 'SelectoDB(PostgreSQL|SQLite|MySQL|MariaDB|MSSQL|DuckDB)|selecto_db_(postgresql|sqlite|mysql|mariadb|mssql|duckdb)|Postgrex|postgrex|Exqlite|exqlite|MyXQL|myxql|Tds|DuckDB' mix.exs | rg -v 'only: :test' || true)"
 else
   production_matches="$(grep -RniE "$boundary_pattern|$native_type_pattern" lib || true)"
   sql_literal_matches="$(grep -RniE "$sql_literal_pattern" lib/selecto/builder lib/selecto/sql/functions.ex lib/selecto/sql/formatter.ex || true)"
-  dependency_matches="$(grep -niE 'SelectoDBPostgreSQL|selecto_db_postgresql|Postgrex|postgrex' mix.exs | grep -v 'only: :test' || true)"
+  dependency_matches="$(grep -niE 'SelectoDB(PostgreSQL|SQLite|MySQL|MariaDB|MSSQL|DuckDB)|selecto_db_(postgresql|sqlite|mysql|mariadb|mssql|duckdb)|Postgrex|postgrex|Exqlite|exqlite|MyXQL|myxql|Tds|DuckDB' mix.exs | grep -v 'only: :test' || true)"
 fi
 
 matches="${production_matches}${sql_literal_matches:+$'\n'}${sql_literal_matches}${dependency_matches:+$'\n'}${dependency_matches}"

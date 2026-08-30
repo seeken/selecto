@@ -30,6 +30,40 @@ defmodule Selecto.DB.Adapter do
     it and return `false` for `supports?(:stream)`.
   """
 
+  @contract_version 1
+
+  @doc """
+  Returns the public adapter contract version implemented by this Selecto release.
+
+  Adapter packages compile against this public behaviour and contract version;
+  they do not need to live in the Selecto repository or be registered in core.
+  """
+  @spec contract_version() :: pos_integer()
+  def contract_version, do: @contract_version
+
+  @doc """
+  Validates an adapter's declared contract version when it supplies one.
+
+  The callback remains optional for compatibility with adapters released before
+  contract versioning. New and independently distributed adapters should
+  implement `adapter_contract_version/0`; an explicit mismatch fails during
+  `Selecto.configure/3`, before connection initialization or query execution.
+  """
+  @spec validate_contract!(module()) :: :ok
+  def validate_contract!(adapter) when is_atom(adapter) do
+    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :adapter_contract_version, 0) do
+      actual = adapter.adapter_contract_version()
+
+      unless actual == @contract_version do
+        raise ArgumentError,
+              "adapter #{inspect(adapter)} declares contract version #{inspect(actual)}; " <>
+                "Selecto requires #{@contract_version}"
+      end
+    end
+
+    :ok
+  end
+
   @type connection_options :: keyword() | map() | term()
   @type connection :: term()
   @type query :: String.t() | iodata()
@@ -46,6 +80,7 @@ defmodule Selecto.DB.Adapter do
   @type function_verification_result :: {:ok, map()} | {:error, Selecto.Error.t()}
 
   @callback name() :: atom()
+  @callback adapter_contract_version() :: pos_integer()
   @callback connect(connection_options()) :: {:ok, connection()} | {:error, term()}
   @callback disconnect(connection()) :: :ok | {:error, term()}
 
@@ -105,7 +140,8 @@ defmodule Selecto.DB.Adapter do
   @callback rollup_sort_fix(connection()) :: boolean()
   @callback supports?(atom()) :: boolean()
 
-  @optional_callbacks stream: 4,
+  @optional_callbacks adapter_contract_version: 0,
+                      stream: 4,
                       disconnect: 1,
                       normalize_execution_result: 1,
                       normalize_error: 1,

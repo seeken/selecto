@@ -147,6 +147,7 @@ defmodule Selecto.Configuration do
 
     case configured_adapter do
       adapter when is_atom(adapter) and not is_nil(adapter) ->
+        Selecto.DB.Adapter.validate_contract!(adapter)
         adapter
 
       _ ->

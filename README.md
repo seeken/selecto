@@ -46,6 +46,25 @@ def deps do
 end
 ```
 
+Adapter selection is explicit. Import the adapter package and pass its module
+to `Selecto.configure/3`; importing `selecto` does not install or initialize a
+database driver. Third-party packages can implement the public
+`Selecto.DB.Adapter` behaviour (contract version
+`Selecto.DB.Adapter.contract_version/0`), return that value from
+`adapter_contract_version/0`, and use exactly the same path without a change to
+Selecto core:
+
+```elixir
+selecto =
+  Selecto.configure(domain, connection,
+    adapter: Acme.SelectoDB.AnalyticsAdapter
+  )
+```
+
+Adapters own their driver and connection semantics. Importing an adapter must
+not open a connection or change a process-global default; the host passes the
+connection input explicitly.
+
 ## Quick Start
 
 Define a domain:

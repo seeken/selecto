@@ -130,11 +130,15 @@ defmodule Selecto.MixProject do
         "compile --warnings-as-errors",
         "format --check-formatted",
         "cmd scripts/check_postgresql_boundary.sh",
+        "adapter.external",
         "credo",
         "credo.atom_audit",
         "test",
         "selecto.verify",
         "xref graph --format cycles --label compile-connected --fail-above 0"
+      ],
+      "adapter.external": [
+        "cmd scripts/check_external_adapter_package.sh"
       ]
     ]
   end
