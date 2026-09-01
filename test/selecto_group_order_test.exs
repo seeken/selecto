@@ -131,4 +131,43 @@ defmodule Selecto.GroupOrderTest do
     assert sql =~ "rollup"
     assert sql =~ "(selecto_root.city, selecto_root.state)"
   end
+
+  test "ROLLUP positional ordering preserves explicit directions" do
+    domain = %{
+      source: %{
+        source_table: "sales",
+        primary_key: :id,
+        fields: [:id, :region, :city, :amount],
+        redact_fields: [],
+        columns: %{
+          id: %{type: :integer},
+          region: %{type: :string},
+          city: %{type: :string},
+          amount: %{type: :decimal}
+        },
+        associations: %{}
+      },
+      schemas: %{},
+      joins: %{},
+      name: "Sales"
+    }
+
+    selecto =
+      Selecto.configure(domain, :mock_connection,
+        adapter: SelectoDBPostgreSQL.Adapter,
+        rollup_sort_fix: true,
+        validate: false
+      )
+      |> Selecto.select(["region", "city", {:sum, "amount"}])
+      |> Selecto.group_by(rollup: ["region", "city"])
+      |> Selecto.order_by([
+        {"region", :asc_nulls_last},
+        {"city", :desc_nulls_first}
+      ])
+
+    {sql, _aliases, _params} = Selecto.gen_sql(selecto, [])
+    sql = String.downcase(sql)
+
+    assert sql =~ "order by 1 asc nulls last, 2 desc nulls first"
+  end
 end

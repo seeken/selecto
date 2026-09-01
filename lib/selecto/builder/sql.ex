@@ -297,8 +297,8 @@ defmodule Selecto.Builder.Sql do
               rollup_order_parts =
                 selecto.set.order_by
                 |> Enum.with_index(1)
-                |> Enum.map(fn {_order_spec, index} ->
-                  rollup_literal_order_sql(selecto, index)
+                |> Enum.map(fn {order_spec, index} ->
+                  rollup_literal_order_sql(selecto, order_spec, index)
                 end)
                 |> Enum.join(", ")
 
@@ -436,7 +436,9 @@ defmodule Selecto.Builder.Sql do
             rollup_order_parts =
               selecto.set.order_by
               |> Enum.with_index(1)
-              |> Enum.map(fn {_order_spec, index} -> rollup_literal_order_sql(selecto, index) end)
+              |> Enum.map(fn {order_spec, index} ->
+                rollup_literal_order_sql(selecto, order_spec, index)
+              end)
               |> Enum.join(", ")
 
             if rollup_order_parts == "", do: {"", []}, else: {rollup_order_parts, []}
@@ -453,11 +455,45 @@ defmodule Selecto.Builder.Sql do
 
   defp rollup_sort_fix_enabled?(_), do: true
 
-  defp rollup_literal_order_sql(selecto, index) do
-    selecto
-    |> AdapterSQL.rollup_literal_order(index)
-    |> IO.iodata_to_binary()
+  @order_directions [
+    :asc,
+    :desc,
+    :asc_nulls_first,
+    :asc_nulls_last,
+    :desc_nulls_first,
+    :desc_nulls_last
+  ]
+
+  defp rollup_literal_order_sql(selecto, order_spec, index) do
+    case rollup_order_direction(order_spec) do
+      nil ->
+        selecto
+        |> AdapterSQL.rollup_literal_order(index)
+        |> IO.iodata_to_binary()
+
+      direction ->
+        {_joins, order_iodata, []} =
+          Selecto.Builder.Sql.Order.order(
+            selecto,
+            {{:literal_position, index}, direction}
+          )
+
+        {order_sql, []} =
+          Params.finalize(order_iodata,
+            adapter: Map.get(selecto, :adapter, Selecto.AdapterSupport.default_adapter())
+          )
+
+        order_sql
+    end
   end
+
+  defp rollup_order_direction({direction, _order}) when direction in @order_directions,
+    do: direction
+
+  defp rollup_order_direction({_order, direction}) when direction in @order_directions,
+    do: direction
+
+  defp rollup_order_direction(_order_spec), do: nil
 
   defp json_builder_opts(selecto) do
     adapter = Map.get(selecto, :adapter, Selecto.AdapterSupport.default_adapter())
