@@ -277,6 +277,60 @@ defmodule Selecto.Executor do
   end
 
   @doc """
+  Execute an exact count of the rows produced by an unpaginated Selecto query.
+
+  The compiled query is wrapped as a derived table so Detail, Aggregate, and
+  grouped queries all share the same count semantics. The returned metadata
+  contains the wrapped SQL, bound parameters, and execution time.
+  """
+  @spec execute_count_with_metadata(Selecto.Types.t(), Selecto.Types.execute_options()) ::
+          {:ok, non_neg_integer(), map()} | {:error, Selecto.Error.t()}
+  def execute_count_with_metadata(selecto, opts \\ []) do
+    start_time = System.monotonic_time(:millisecond)
+
+    with :ok <- Selecto.Tenant.validate_scope(selecto, opts) do
+      try do
+        {query, _aliases, params} = Selecto.gen_sql(selecto, opts)
+
+        count_query =
+          "SELECT COUNT(*) AS selecto_total_count FROM (" <>
+            String.trim_trailing(query, ";") <> ") AS selecto_count_source"
+
+        result = execute_for_context(selecto, count_query, params, ["selecto_total_count"])
+        duration = System.monotonic_time(:millisecond) - start_time
+        metadata = %{sql: count_query, params: params, execution_time: duration}
+
+        case result do
+          {:ok, {[[count]], _columns, _aliases}} when is_integer(count) and count >= 0 ->
+            {:ok, count, metadata}
+
+          {:ok, other} ->
+            {:error,
+             Selecto.Error.query_error(
+               "Count query returned an invalid result",
+               count_query,
+               params,
+               %{result: inspect(other)}
+             )}
+
+          error ->
+            error
+        end
+      rescue
+        error -> {:error, Selecto.Error.from_reason(error)}
+      catch
+        :exit, reason ->
+          {:error,
+           Selecto.Error.connection_error("Database count execution failed", %{
+             exit_reason: reason
+           })}
+      end
+    else
+      {:error, %Selecto.Error{} = error} -> {:error, error}
+    end
+  end
+
+  @doc """
   Execute a query as a stream of `{row, columns, aliases}` tuples.
 
   Streaming is available only when the configured adapter advertises stream

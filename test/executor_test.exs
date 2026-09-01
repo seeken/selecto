@@ -389,6 +389,18 @@ defmodule Selecto.ExecutorTest do
     assert is_integer(metadata.execution_time)
   end
 
+  test "execute_count_with_metadata wraps the unpaginated query and reports timing" do
+    assert {:ok, 1, metadata} =
+             Executor.execute_count_with_metadata(selecto_for(:single),
+               analyze_complexity: false
+             )
+
+    assert metadata.sql =~ "SELECT COUNT(*) AS selecto_total_count FROM ("
+    assert metadata.sql =~ ") AS selecto_count_source"
+    assert is_list(metadata.params)
+    assert is_integer(metadata.execution_time)
+  end
+
   test "validate_connection delegates pid lifecycle checks to the adapter" do
     pid = spawn(fn -> Process.sleep(:infinity) end)
 

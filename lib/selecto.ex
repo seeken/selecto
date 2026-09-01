@@ -1076,6 +1076,23 @@ defmodule Selecto do
   end
 
   @doc """
+  Execute an exact count of the rows produced by an unpaginated query.
+
+  This preserves the query's filters and grouping by counting its compiled SQL
+  as a derived table. Metadata includes the count SQL, parameters, and timing.
+  """
+  @spec execute_count_with_metadata(Selecto.Types.t(), Selecto.Types.execute_options()) ::
+          {:ok, non_neg_integer(), map()} | {:error, Selecto.Error.t()}
+  def execute_count_with_metadata(selecto, opts \\ []) do
+    Selecto.OptionsValidator.validate_execute_opts!(opts)
+
+    Selecto.Executor.execute_count_with_metadata(
+      selecto,
+      Selecto.Tenant.merge_execution_opts(selecto, opts)
+    )
+  end
+
+  @doc """
   Execute a query as a database-backed stream.
 
   Returns a stream of `{row, columns, aliases}` tuples for incremental result
