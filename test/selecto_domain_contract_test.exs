@@ -1630,6 +1630,10 @@ defmodule Selecto.DomainContractTest do
             target: :order,
             scope: :row,
             capability: "order.complete",
+            preconditions: [
+              {:eq, :customer_id, 42},
+              %{field: :status, comparator: :neq, value: "cancelled"}
+            ],
             transition: %{
               field: :status,
               from: "ready",
@@ -1687,6 +1691,18 @@ defmodule Selecto.DomainContractTest do
           },
           invalid_state: %{
             transition: %{field: :status, from: 789, to: "complete"}
+          },
+          invalid_preconditions: %{
+            preconditions: %{status: "ready"}
+          },
+          missing_precondition_field: %{
+            preconditions: [{:eq, :missing, true}]
+          },
+          invalid_precondition_comparator: %{
+            preconditions: [{:contains, :status, "ready"}]
+          },
+          invalid_in_precondition: %{
+            preconditions: [{:in, :status, []}]
           },
           bad_execution: %{
             transition: %{field: :status, from: "ready", to: "complete"},
@@ -1758,6 +1774,27 @@ defmodule Selecto.DomainContractTest do
                state_key: :from,
                path: [:actions, :invalid_state, :transition, :from]
              } = error_for(diagnostics, :invalid_action_transition_state)
+
+      assert %{
+               code: :invalid_action_preconditions,
+               path: [:actions, :invalid_preconditions, :preconditions]
+             } = error_for(diagnostics, :invalid_action_preconditions)
+
+      assert %{
+               code: :action_precondition_field_not_found,
+               field: "missing",
+               path: [:actions, :missing_precondition_field, :preconditions, 0, :field]
+             } = error_for(diagnostics, :action_precondition_field_not_found)
+
+      assert %{
+               code: :invalid_action_precondition_comparator,
+               path: [:actions, :invalid_precondition_comparator, :preconditions, 0, :comparator]
+             } = error_for(diagnostics, :invalid_action_precondition_comparator)
+
+      assert %{
+               code: :invalid_action_precondition_value,
+               path: [:actions, :invalid_in_precondition, :preconditions, 0, :value]
+             } = error_for(diagnostics, :invalid_action_precondition_value)
 
       assert %{
                code: :invalid_action_execution_kind,

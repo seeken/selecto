@@ -957,6 +957,10 @@ row action that directly references a `writes.transitions` edge:
       target: :order,
       scope: :row,
       capability: "order.complete",
+      preconditions: [
+        {:eq, :balance_cents, 0},
+        %{field: :waiver_received, comparator: :eq, value: true}
+      ],
       transition: %{
         field: :status,
         from: "ready",
@@ -979,6 +983,14 @@ Validation checks:
 - each action entry must be a map.
 - `capability`, when present, must be an atom or string and must exist in the
   domain capability catalog.
+- `preconditions`, when present, must be a list of portable filter predicates.
+  Supported forms are `{field, value}`, `{comparator, field, value}`, their
+  JSON-safe array equivalents, and maps with `field`, `comparator`, and `value`.
+  Predicates are combined with `AND`; supported comparators are `eq`, `neq`,
+  `gt`, `gte`, `lt`, `lte`, and non-empty `in`.
+- Every precondition field must be declared by the domain. Preconditions are
+  server-owned constraints: action callers may add target or scope filters but
+  cannot remove the declared predicates.
 - actions with `type: :transition` must declare a direct transition map.
 - `transition` must be a map with `field`, `from`, and `to`.
 - the transition field must exist in the source, schemas, or custom columns.
@@ -990,6 +1002,12 @@ Validation checks:
 
 This validates that preview and execution can ask the same domain question; it
 does not execute actions.
+
+Updato enforces filter preconditions on direct update/delete actions using
+source-row fields, including read-only source fields. Insert, upsert, and
+event-stream action planning rejects relational filter preconditions. Joined
+or computed fields and filters outside the portable comparator set are not
+supported by the current portable mutation path.
 
 ## Source Relationships And Choice Sources
 

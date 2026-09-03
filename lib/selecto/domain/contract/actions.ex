@@ -1,6 +1,7 @@
 defmodule Selecto.Domain.Contract.Actions do
   @moduledoc false
 
+  alias Selecto.Domain.ActionPreconditions
   alias Selecto.Domain.Contract.Shared.Core
 
   def validate(errors, actions, capabilities, writes, events, field_index) do
@@ -54,6 +55,7 @@ defmodule Selecto.Domain.Contract.Actions do
       when is_map(action) do
     errors
     |> validate_action_capability(action_id, action, path, capabilities)
+    |> validate_action_preconditions(action_id, action, path, field_index)
     |> validate_action_transition(action_id, action, path, writes, field_index)
     |> validate_action_execution(action_id, action, path, events)
   end
@@ -112,6 +114,41 @@ defmodule Selecto.Domain.Contract.Actions do
             actual: Core.value_type(capability),
             action: action_id,
             capability: capability
+          )
+          | errors
+        ]
+    end
+  end
+
+  def validate_action_preconditions(errors, action_id, action, path, field_index) do
+    case ActionPreconditions.normalize(Core.map_value(action, :preconditions)) do
+      {:ok, preconditions} ->
+        preconditions
+        |> Enum.with_index()
+        |> Enum.reduce(errors, fn {precondition, index}, acc ->
+          if Core.known_field?(field_index, precondition.field) do
+            acc
+          else
+            [
+              Core.error(
+                :action_precondition_field_not_found,
+                path ++ [:preconditions, index, :field],
+                "action #{inspect(action_id)} precondition field #{inspect(precondition.field)} is not defined in source, schemas, or custom columns",
+                action: action_id,
+                field: precondition.field
+              )
+              | acc
+            ]
+          end
+        end)
+
+      {:error, error} ->
+        [
+          Core.error(
+            error.code,
+            path ++ [:preconditions] ++ error.path,
+            "action #{inspect(action_id)}: #{error.message}",
+            action: action_id
           )
           | errors
         ]
