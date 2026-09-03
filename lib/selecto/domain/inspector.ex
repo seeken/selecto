@@ -12,6 +12,7 @@ defmodule Selecto.Domain.Inspector do
     events: "immutable business fact schemas emitted by event-stream actions",
     capabilities: "authorization capability catalog",
     choice_sources: "cross-domain choices and constraint policy",
+    co_domains: "host-resolved governed cross-domain lookups",
     detail_actions: "user-visible detail actions",
     source_relationships: "cross-domain source bindings",
     writes:
@@ -40,6 +41,7 @@ defmodule Selecto.Domain.Inspector do
       source_relationships:
         inspect_source_relationships(Map.get(normalized, :source_relationships, %{})),
       choice_sources: inspect_choice_sources(Map.get(normalized, :choice_sources, %{})),
+      co_domains: inspect_co_domains(Map.get(normalized, :co_domains, %{})),
       field_choice_bindings: field_choice_bindings
     }
     |> MapHelpers.maybe_put(:domain_version, Map.get(normalized, :domain_version))
@@ -98,6 +100,7 @@ defmodule Selecto.Domain.Inspector do
       capability_usages: length(capability_usage),
       source_relationships: MapHelpers.map_count(Map.get(normalized, :source_relationships)),
       choice_sources: MapHelpers.map_count(Map.get(normalized, :choice_sources)),
+      co_domains: MapHelpers.map_count(Map.get(normalized, :co_domains)),
       field_choice_bindings: length(field_choice_bindings),
       warnings: length(diagnostics.warnings),
       errors: length(diagnostics.errors)
@@ -121,7 +124,8 @@ defmodule Selecto.Domain.Inspector do
       events: MapHelpers.sorted_keys(Map.get(normalized, :events)),
       capabilities: MapHelpers.sorted_keys(Map.get(normalized, :capabilities)),
       source_relationships: MapHelpers.sorted_keys(Map.get(normalized, :source_relationships)),
-      choice_sources: MapHelpers.sorted_keys(Map.get(normalized, :choice_sources))
+      choice_sources: MapHelpers.sorted_keys(Map.get(normalized, :choice_sources)),
+      co_domains: MapHelpers.sorted_keys(Map.get(normalized, :co_domains))
     }
   end
 
@@ -625,4 +629,25 @@ defmodule Selecto.Domain.Inspector do
   end
 
   def inspect_choice_sources(_choice_sources), do: []
+
+  def inspect_co_domains(co_domains) when is_map(co_domains) do
+    co_domains
+    |> MapHelpers.sorted_entries()
+    |> Enum.map(fn {id, definition} ->
+      %{
+        id: id,
+        domain: MapHelpers.map_value(definition, :domain),
+        view: MapHelpers.map_value(definition, :view),
+        projection: MapHelpers.map_value(definition, :projection),
+        search_fields:
+          definition |> MapHelpers.map_value(:search) |> MapHelpers.map_value(:fields),
+        value_field:
+          definition |> MapHelpers.map_value(:result) |> MapHelpers.map_value(:value_field),
+        label_field:
+          definition |> MapHelpers.map_value(:result) |> MapHelpers.map_value(:label_field)
+      }
+    end)
+  end
+
+  def inspect_co_domains(_co_domains), do: []
 end

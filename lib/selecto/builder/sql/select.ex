@@ -296,6 +296,10 @@ defmodule Selecto.Builder.Sql.Select do
   end
 
   # Phase 4: iodata-based prep_selector/3 functions
+  def prep_selector(_selecto, {:param, value}, _retarget_aliases) do
+    {{:param, value}, :selecto_root, [value]}
+  end
+
   def prep_selector(selecto, {:custom_sql, sql_template, field_mappings}, _retarget_aliases)
       when is_binary(sql_template) or is_list(sql_template) do
     prep_selector(selecto, {:custom_sql, sql_template, field_mappings})
@@ -963,6 +967,25 @@ defmodule Selecto.Builder.Sql.Select do
     {sel_iodata, join, param} = prep_selector(selecto, selector, retarget_aliases)
     func_call_iodata = ["COUNT(DISTINCT ", sel_iodata, ")"]
     {func_call_iodata, join, param}
+  end
+
+  def prep_selector(selecto, {:computed_predicate, expression}, _retarget_aliases) do
+    filter = Selecto.Domain.Contract.ComputedPredicates.to_filter(expression)
+    {joins, predicate, params} = Selecto.Builder.Sql.Where.build(selecto, filter)
+
+    if AdapterSupport.adapter_name(selecto.adapter) == :mssql do
+      scalar = [
+        "(CASE WHEN ",
+        predicate,
+        " THEN CAST(1 AS BIT) WHEN NOT (",
+        predicate,
+        ") THEN CAST(0 AS BIT) ELSE NULL END)"
+      ]
+
+      {scalar, joins, params ++ params}
+    else
+      {["(", predicate, ")"], joins, params}
+    end
   end
 
   def prep_selector(selecto, {func, selector}, retarget_aliases) when is_atom(func) do

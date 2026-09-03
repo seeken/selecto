@@ -45,7 +45,8 @@ defmodule Selecto.Domain do
     :events,
     :capabilities,
     :source_relationships,
-    :choice_sources
+    :choice_sources,
+    :co_domains
   ]
   @list_sections [
     :default_selected,
@@ -303,6 +304,7 @@ defmodule Selecto.Domain do
       capabilities: MapHelpers.section(canonical_domain, :capabilities, %{}),
       source_relationships: MapHelpers.section(canonical_domain, :source_relationships, %{}),
       choice_sources: MapHelpers.section(canonical_domain, :choice_sources, %{}),
+      co_domains: MapHelpers.section(canonical_domain, :co_domains, %{}),
       detail_actions: MapHelpers.section(canonical_domain, :detail_actions, %{}),
       components: MapHelpers.section(canonical_domain, :components, %{}),
       domain_data: MapHelpers.section(canonical_domain, :domain_data, %{}),

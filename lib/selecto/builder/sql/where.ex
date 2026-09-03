@@ -1103,7 +1103,8 @@ defmodule Selecto.Builder.Sql.Where do
         end),
       selectors: selectors,
       query: value,
-      mode: mode
+      mode: mode,
+      configuration: Keyword.get(opts, :configuration)
     }
 
     case Selecto.DialectSupport.render_text_search_predicate(adapter, fragment, selecto) do

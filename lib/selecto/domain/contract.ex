@@ -14,6 +14,7 @@ defmodule Selecto.Domain.Contract do
   alias Selecto.Domain.Contract.Actions
   alias Selecto.Domain.Contract.Capabilities
   alias Selecto.Domain.Contract.ChoiceSources
+  alias Selecto.Domain.Contract.CoDomains
   alias Selecto.Domain.Contract.DetailActions
   alias Selecto.Domain.Contract.Events
   alias Selecto.Domain.Contract.FieldBindings
@@ -61,6 +62,7 @@ defmodule Selecto.Domain.Contract do
     events = Map.get(normalized_domain, :events, %{})
     source_relationships = Map.get(normalized_domain, :source_relationships, %{})
     choice_sources = Map.get(normalized_domain, :choice_sources, %{})
+    co_domains = Map.get(normalized_domain, :co_domains, %{})
     detail_actions = Map.get(normalized_domain, :detail_actions, %{})
     field_index = Core.field_index(source, schemas, projection, joins)
 
@@ -76,9 +78,10 @@ defmodule Selecto.Domain.Contract do
     |> Capabilities.validate(capabilities)
     |> Capabilities.validate_query_references(query, detail_actions, capabilities)
     |> Events.validate(events)
-    |> Actions.validate(actions, capabilities, writes, events, field_index)
+    |> Actions.validate(actions, capabilities, writes, events, field_index, source)
     |> SourceRelationships.validate(source_relationships, field_index)
     |> ChoiceSources.validate(choice_sources, source_relationships, capabilities)
+    |> CoDomains.validate(co_domains)
     |> FieldBindings.validate(source, schemas, projection, choice_sources, field_index)
     |> Enum.reverse()
   end

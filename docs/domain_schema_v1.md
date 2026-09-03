@@ -187,6 +187,7 @@ planned:
 - `capabilities`
 - `source_relationships`
 - `choice_sources`
+- `co_domains`
 
 ### Unknown
 
@@ -214,7 +215,7 @@ has this stable schema-v1 organization:
 | `query` | Query defaults, filters, functions, members, portable query-library definitions, and published views. |
 | `projection` | Display and implementation-facing projection metadata. |
 | `writes`, `actions`, `events`, `capabilities` | Mutation, immutable-fact, and governance registries. |
-| `source_relationships`, `choice_sources` | Cross-domain reference registries. |
+| `source_relationships`, `choice_sources`, `co_domains` | Cross-domain reference and governed lookup registries. |
 | `detail_actions`, `components` | Detail-row actions and canonical component-facing UI policy. |
 | `domain_data`, `extensions` | Host data and declared extension specifications. |
 
@@ -533,6 +534,66 @@ and query-contract projection. Validation MUST reject malformed registries,
 missing definitions, invalid fields or paths, cycles, and invalid boolean-group
 arities before SQL generation. Runtime application, parameter casting, and the
 Elixir authoring DSL are documented in [Portable Query Libraries](query_library.md).
+
+## Co-Domain Lookups
+
+Working-tree draft: this section and predicate-computed fields below describe
+unpublished local ports. See [Governed lookups](governed-lookups.md) for the
+host API, adapter boundary, and executable fixture.
+
+`co_domains` declares bounded lookups owned by another domain. The host resolves
+the named target domain and supplies its tenant/authorization scope; the
+portable declaration never contains a connection or caller-selected engine.
+
+```elixir
+co_domains: %{
+  carriers: %{
+    domain: :client,
+    view: :carrier_lookup,
+    search: %{fields: [:id, :co_name, :city], mode: :prefix, rank: true},
+    result: %{
+      value_field: :id,
+      label_field: :co_name,
+      description_fields: [:city, :state]
+    }
+  }
+}
+```
+
+Each entry requires exactly one of `view` or `projection`. A view cannot be
+combined with `segments` or `ordering`; projection form may declare both.
+Search fields are non-empty governed field paths. Modes are `plain`, `phrase`,
+`websearch`, or `prefix`; `rank` is boolean. Result mappings require value and
+label fields and may declare description fields. Parameters are data. Unknown
+keys, raw SQL, invalid identifiers, and ambiguous shapes fail closed.
+
+## Predicate-Computed Boolean Fields
+
+A source column may expose a query-computed boolean using the portable filter
+AST. This provides SQL-backed row eligibility without per-row host calls:
+
+```elixir
+ready_for_dispatch: %{
+  type: :boolean,
+  internal: true,
+  computed: %{
+    kind: :predicate,
+    expression: [:and, [
+      [:in, :status, ["A", "O"]],
+      [:eq, :has_payload, true]
+    ]]
+  }
+}
+```
+
+Predicate expressions support `and`, `or`, `not`, `eq`, `ne`, `gt`, `gte`,
+`lt`, `lte`, `in`, `between`, `is_null`, and `not_null`. Values are bound
+literals; `["field", field_id]` is the explicit field-reference form. Fields
+must be governed root columns, the declared column type must be boolean, and
+dependencies between computed predicates must be acyclic. `internal: true`
+marks presentation-only data for consumers that honor the hint; it is not a
+permission or secrecy boundary. Integrated pickers omit the field, while the
+frontend can still select it as hidden row data for eligibility presentation.
 
 ## Published Views
 
@@ -999,9 +1060,16 @@ Validation checks:
   separately, non-transition actions may use the governed `event_stream`
   execution contract described above.
 - optional execution `set` must set the transition field to the target state.
+- `selection.eligibility_field`, when present, must name a direct boolean source
+  field. Component hosts select it with the primary result query and omit row
+  selection controls when it is false or null.
 
 This validates that preview and execution can ask the same domain question; it
 does not execute actions.
+
+Eligibility is presentation metadata, not mutation authorization. Final
+execution must independently enforce action preconditions, tenant scope,
+capabilities, and cardinality.
 
 Updato enforces filter preconditions on direct update/delete actions using
 source-row fields, including read-only source fields. Insert, upsert, and

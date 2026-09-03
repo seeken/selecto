@@ -3,12 +3,14 @@ defmodule Selecto.Domain.Contract.Relations do
 
   use Selecto.Domain.Constants
   alias Selecto.Domain.Contract.Shared.Core
+  alias Selecto.Domain.Contract.ComputedPredicates
 
   @relation_required_keys [:source_table, :primary_key, :fields, :columns]
 
   def validate(errors, source, schemas) do
     errors
     |> validate_relation(:source, source, [:source])
+    |> ComputedPredicates.validate(source)
     |> validate_schemas(schemas)
   end
 

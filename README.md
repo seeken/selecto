@@ -1,5 +1,9 @@
 # Selecto
 
+Unreleased co-domain lookups and SQL-backed selection eligibility are
+documented in the [lookup guide](docs/governed-lookups.md). They require
+matching source revisions and are not an all-adapter or all-frontend claim.
+
 General owned-composition and shared/join relationship contracts are described
 in [`docs/nested_composition_contract.md`](docs/nested_composition_contract.md),
 including immutable consumer projections, compatibility, target certification,

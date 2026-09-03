@@ -26,7 +26,8 @@ defmodule Selecto.Domain.Compose do
     :actions,
     :capabilities,
     :source_relationships,
-    :choice_sources
+    :choice_sources,
+    :co_domains
   ]
   @known_sections [
     :schema_version,
@@ -48,7 +49,8 @@ defmodule Selecto.Domain.Compose do
     :actions,
     :capabilities,
     :source_relationships,
-    :choice_sources
+    :choice_sources,
+    :co_domains
   ]
 
   @spec compose(map(), list(), (map() -> {:ok, map(), map()} | {:error, map()})) ::

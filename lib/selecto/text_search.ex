@@ -23,7 +23,8 @@ defmodule Selecto.TextSearch do
       query: Keyword.get(opts, :query),
       alias: opts |> Keyword.get(:as, "fts_rank") |> to_string(),
       mode: mode,
-      weights: Keyword.get(opts, :weights, [])
+      weights: Keyword.get(opts, :weights, []),
+      configuration: Keyword.get(opts, :configuration)
     }
 
     case Selecto.DialectSupport.render_text_search_rank(adapter, rank, selecto) do

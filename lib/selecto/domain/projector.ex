@@ -87,6 +87,7 @@ defmodule Selecto.Domain.Projector do
       source_relationships:
         query_contract_source_relationships(Map.get(normalized, :source_relationships, %{})),
       choice_sources: query_contract_choice_sources(Map.get(normalized, :choice_sources, %{})),
+      co_domains: Map.get(normalized, :co_domains, %{}),
       field_choice_bindings: query_contract_choice_bindings(field_choice_bindings),
       capability_ids: MapHelpers.sorted_keys(Map.get(normalized, :capabilities, %{}))
     }
@@ -104,7 +105,8 @@ defmodule Selecto.Domain.Projector do
       events: Map.get(normalized, :events, %{}),
       capabilities: Map.get(normalized, :capabilities, %{}),
       source_relationships: Map.get(normalized, :source_relationships, %{}),
-      choice_sources: Map.get(normalized, :choice_sources, %{})
+      choice_sources: Map.get(normalized, :choice_sources, %{}),
+      co_domains: Map.get(normalized, :co_domains, %{})
     })
   end
 
@@ -118,7 +120,8 @@ defmodule Selecto.Domain.Projector do
       components: Map.get(normalized, :components, %{}),
       actions: Map.get(normalized, :actions, %{}),
       capabilities: Map.get(normalized, :capabilities, %{}),
-      choice_sources: Map.get(normalized, :choice_sources, %{})
+      choice_sources: Map.get(normalized, :choice_sources, %{}),
+      co_domains: Map.get(normalized, :co_domains, %{})
     })
   end
 
@@ -134,6 +137,7 @@ defmodule Selecto.Domain.Projector do
       capabilities: Map.get(normalized, :capabilities, %{}),
       source_relationships: Map.get(normalized, :source_relationships, %{}),
       choice_sources: Map.get(normalized, :choice_sources, %{}),
+      co_domains: Map.get(normalized, :co_domains, %{}),
       detail_actions: Map.get(normalized, :detail_actions, %{})
     })
   end

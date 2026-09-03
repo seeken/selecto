@@ -1,6 +1,13 @@
 
 # Selecto Library Changelog
 
+## Unreleased
+
+- Added validated co-domain declarations, host-scoped governed lookups, and
+  SQL-backed boolean predicate columns for action selection eligibility.
+- Selection eligibility is presentation metadata, not a replacement for
+  atomic action preconditions. Lookup execution requires adapter support.
+
 ## V 0.5.0 - Adapter-Neutral Governance and Event Contracts
 ------------------------------------------------------------
 

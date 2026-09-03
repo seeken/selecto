@@ -141,6 +141,7 @@ defmodule Selecto.Schema.Column do
       colid: colid,
       field: field,
       name: display_name,
+      label: Map.get(config, :label, Map.get(source_col, :label)),
       type: source_col.type,
       requires_join: join,
       format: Map.get(config, :format),
@@ -157,6 +158,24 @@ defmodule Selecto.Schema.Column do
         Map.get(config, :datetime_storage, Map.get(source_col, :datetime_storage)),
       epoch_storage: Map.get(config, :epoch_storage, Map.get(source_col, :epoch_storage))
     }
+
+    base_col =
+      case Map.get(source_col, :computed) do
+        computed when is_map(computed) ->
+          case Map.get(computed, :kind, Map.get(computed, "kind")) do
+            kind when kind in [:predicate, "predicate"] ->
+              expression = Map.get(computed, :expression, Map.get(computed, "expression"))
+              Map.put(base_col, :select, {:computed_predicate, expression})
+
+            _ ->
+              base_col
+          end
+
+        _ ->
+          base_col
+      end
+
+    base_col = Map.put(base_col, :internal, Map.get(source_col, :internal, false))
 
     {
       colid,

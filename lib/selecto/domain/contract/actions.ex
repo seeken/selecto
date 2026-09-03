@@ -4,22 +4,31 @@ defmodule Selecto.Domain.Contract.Actions do
   alias Selecto.Domain.ActionPreconditions
   alias Selecto.Domain.Contract.Shared.Core
 
-  def validate(errors, actions, capabilities, writes, events, field_index) do
-    validate_actions(errors, actions, capabilities, writes, events, field_index)
+  def validate(errors, actions, capabilities, writes, events, field_index, source) do
+    validate_actions(errors, actions, capabilities, writes, events, field_index, source)
   end
 
-  def validate_actions(errors, actions, capabilities, writes, events, field_index)
+  def validate_actions(errors, actions, capabilities, writes, events, field_index, source)
       when is_map(actions) do
     Enum.reduce(actions, errors, fn {action_id, action}, acc ->
       path = [:actions, action_id]
 
       acc
       |> validate_action_id(action_id, path)
-      |> validate_action(action_id, action, path, capabilities, writes, events, field_index)
+      |> validate_action(
+        action_id,
+        action,
+        path,
+        capabilities,
+        writes,
+        events,
+        field_index,
+        source
+      )
     end)
   end
 
-  def validate_actions(errors, actions, _capabilities, _writes, _events, _field_index) do
+  def validate_actions(errors, actions, _capabilities, _writes, _events, _field_index, _source) do
     [
       Core.error(
         :invalid_section_shape,
@@ -51,11 +60,22 @@ defmodule Selecto.Domain.Contract.Actions do
     ]
   end
 
-  def validate_action(errors, action_id, action, path, capabilities, writes, events, field_index)
+  def validate_action(
+        errors,
+        action_id,
+        action,
+        path,
+        capabilities,
+        writes,
+        events,
+        field_index,
+        source
+      )
       when is_map(action) do
     errors
     |> validate_action_capability(action_id, action, path, capabilities)
     |> validate_action_preconditions(action_id, action, path, field_index)
+    |> validate_action_eligibility_field(action_id, action, path, source)
     |> validate_action_transition(action_id, action, path, writes, field_index)
     |> validate_action_execution(action_id, action, path, events)
   end
@@ -68,7 +88,8 @@ defmodule Selecto.Domain.Contract.Actions do
         _capabilities,
         _writes,
         _events,
-        _field_index
+        _field_index,
+        _source
       ) do
     [
       Core.error(
@@ -81,6 +102,47 @@ defmodule Selecto.Domain.Contract.Actions do
       )
       | errors
     ]
+  end
+
+  def validate_action_eligibility_field(errors, action_id, action, path, source) do
+    selection = Core.map_value(action, :selection)
+    field = if is_map(selection), do: Core.map_value(selection, :eligibility_field)
+
+    cond do
+      is_nil(field) ->
+        errors
+
+      not (is_atom(field) or is_binary(field)) or String.contains?(to_string(field), ".") ->
+        [
+          Core.error(
+            :invalid_action_eligibility_field,
+            path ++ [:selection, :eligibility_field],
+            "action #{inspect(action_id)} eligibility_field must name a direct source field"
+          )
+          | errors
+        ]
+
+      true ->
+        columns = Core.map_value(source, :columns) || %{}
+
+        column =
+          Enum.find_value(columns, fn {key, value} ->
+            if Core.field_id(key) == Core.field_id(field), do: value
+          end)
+
+        if is_map(column) and Core.map_value(column, :type) in [:boolean, "boolean"] do
+          errors
+        else
+          [
+            Core.error(
+              :invalid_action_eligibility_field,
+              path ++ [:selection, :eligibility_field],
+              "action #{inspect(action_id)} eligibility_field must reference a boolean source field"
+            )
+            | errors
+          ]
+        end
+    end
   end
 
   def validate_action_capability(errors, action_id, action, path, capabilities) do

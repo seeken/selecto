@@ -149,12 +149,15 @@ defmodule Selecto.QueryLibrary do
     library
   end
 
-  defp apply_segments(selecto, [], params) do
+  @doc "Applies a set of named segments with one combined parameter contract."
+  def apply_segments(selecto, segment_ids, params \\ %{})
+
+  def apply_segments(selecto, [], params) do
     ensure_no_params!(params)
     selecto
   end
 
-  defp apply_segments(selecto, segment_ids, params) when is_list(segment_ids) do
+  def apply_segments(selecto, segment_ids, params) when is_list(segment_ids) do
     library = checked_library(selecto)
 
     resolved =
@@ -174,7 +177,7 @@ defmodule Selecto.QueryLibrary do
     Enum.reduce(resolved.ids, selecto, &record_application(&2, :segment, &1))
   end
 
-  defp apply_segments(_selecto, segment_ids, _params) do
+  def apply_segments(_selecto, segment_ids, _params) do
     raise ArgumentError, "view segments must be a list, got: #{inspect(segment_ids)}"
   end
 
