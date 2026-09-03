@@ -108,6 +108,8 @@ defmodule Selecto.MixProject do
     [
       {:postgrex, "~> 0.22", only: :test},
       {:exqlite, "~> 0.35", only: :test},
+      {:myxql, "~> 0.6", only: :test},
+      {:tds, "~> 2.3", only: :test},
       {:jason, "~> 1.2"},
       {:nimble_options, "~> 1.1"},
       {:uuid, "~> 1.1"},

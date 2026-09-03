@@ -1,5 +1,9 @@
+Code.require_file("support/cross_db_live_adapters.exs", __DIR__)
+
 defmodule Selecto.CrossDBBaselineTest do
   use ExUnit.Case, async: false
+
+  alias Selecto.TestLiveAdapter.{MySQL, MariaDB, MSSQL}
 
   @moduletag :requires_db
   @moduletag timeout: 120_000
@@ -20,43 +24,43 @@ defmodule Selecto.CrossDBBaselineTest do
   @tag :mysql
   test "mysql adapter executes baseline query" do
     assert {:ok, conn} =
-             connect_with_retry(fn -> SelectoDBMySQL.Adapter.connect(mysql_opts()) end)
+             connect_with_retry(fn -> MySQL.connect(mysql_opts()) end)
 
     on_exit(fn ->
       close_connection(conn)
     end)
 
-    assert_single_value_query(SelectoDBMySQL.Adapter, conn, "SELECT 1 AS value")
-    assert_query_shape_suite(SelectoDBMySQL.Adapter, conn)
-    assert_stream_capability_error(SelectoDBMySQL.Adapter, conn)
+    assert_single_value_query(MySQL, conn, "SELECT 1 AS value")
+    assert_query_shape_suite(MySQL, conn)
+    assert_stream_capability_error(MySQL, conn)
   end
 
   @tag :mariadb
   test "mariadb adapter executes baseline query" do
     assert {:ok, conn} =
-             connect_with_retry(fn -> SelectoDBMariaDB.Adapter.connect(mariadb_opts()) end)
+             connect_with_retry(fn -> MariaDB.connect(mariadb_opts()) end)
 
     on_exit(fn ->
       close_connection(conn)
     end)
 
-    assert_single_value_query(SelectoDBMariaDB.Adapter, conn, "SELECT 1 AS value")
-    assert_query_shape_suite(SelectoDBMariaDB.Adapter, conn)
-    assert_stream_capability_error(SelectoDBMariaDB.Adapter, conn)
+    assert_single_value_query(MariaDB, conn, "SELECT 1 AS value")
+    assert_query_shape_suite(MariaDB, conn)
+    assert_stream_capability_error(MariaDB, conn)
   end
 
   @tag :mssql
   test "mssql adapter executes baseline query" do
     assert {:ok, conn} =
-             connect_with_retry(fn -> SelectoDBMSSQL.Adapter.connect(mssql_opts()) end)
+             connect_with_retry(fn -> MSSQL.connect(mssql_opts()) end)
 
     on_exit(fn ->
       close_connection(conn)
     end)
 
-    assert_single_value_query(SelectoDBMSSQL.Adapter, conn, "SELECT CAST(1 AS INT) AS value")
-    assert_query_shape_suite(SelectoDBMSSQL.Adapter, conn)
-    assert_stream_capability_error(SelectoDBMSSQL.Adapter, conn)
+    assert_single_value_query(MSSQL, conn, "SELECT CAST(1 AS INT) AS value")
+    assert_query_shape_suite(MSSQL, conn)
+    assert_stream_capability_error(MSSQL, conn)
   end
 
   @tag :sqlite
@@ -125,7 +129,7 @@ defmodule Selecto.CrossDBBaselineTest do
     assert details[:adapter_contract] == :supports_stream
   end
 
-  defp query_shape_sql(SelectoDBMSSQL.Adapter) do
+  defp query_shape_sql(MSSQL) do
     """
     SELECT id, name, bucket
     FROM (

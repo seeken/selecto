@@ -161,6 +161,8 @@ defmodule SelectoTest do
   test "generated pool names register and release real Postgrex pools", %{
     connection: connection
   } do
+    assert {:ok, _runtime} = Selecto.ConnectionPool.Runtime.ensure_started()
+
     pool_name =
       Selecto.ConnectionPool.generate_pool_name(%{
         adapter: SelectoDBPostgreSQL.Adapter,
