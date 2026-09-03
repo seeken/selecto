@@ -38,7 +38,14 @@ defmodule Selecto.Domain.ActionPreconditions do
   defp normalize_predicate([comparator, field, value]), do: predicate(field, comparator, value)
 
   defp normalize_predicate(spec) when is_map(spec) and not is_struct(spec) do
-    comparator = get(spec, :comparator) || get(spec, :operator) || get(spec, :op) || :eq
+    comparator =
+      Enum.reduce_while([:comparator, :operator, :op], :eq, fn key, default ->
+        case get(spec, key) do
+          nil -> {:cont, default}
+          value -> {:halt, value}
+        end
+      end)
+
     predicate(get(spec, :field), comparator, get(spec, :value))
   end
 
