@@ -44,8 +44,10 @@ defmodule Selecto.CoDomainComputedEligibilityTest do
   end
 
   test "canonical contract preserves governed co-domains and validates eligibility" do
-    assert {:ok, normalized, _diagnostics} = Selecto.Domain.validate(domain())
+    assert {:ok, normalized, diagnostics} = Selecto.Domain.validate(domain())
     assert normalized.co_domains.carriers.search.mode == :prefix
+    assert :co_domains in diagnostics.canonical_sections
+    refute :co_domains in diagnostics.proposed_sections
     assert Selecto.Domain.project(normalized, :ui).co_domains == normalized.co_domains
   end
 
@@ -67,6 +69,12 @@ defmodule Selecto.CoDomainComputedEligibilityTest do
     invalid_lookup = put_in(domain(), [:co_domains, :carriers, :search, :raw_sql], "1=1")
     assert {:error, diagnostics} = Selecto.Domain.validate(invalid_lookup)
     assert Enum.any?(diagnostics.errors, &(&1.code == :unknown_co_domain_key))
+
+    invalid_configuration =
+      put_in(domain(), [:co_domains, :carriers, :search, :configuration], "")
+
+    assert {:error, diagnostics} = Selecto.Domain.validate(invalid_configuration)
+    assert Enum.any?(diagnostics.errors, &(&1.code == :invalid_co_domain_search_configuration))
 
     invalid_eligibility =
       put_in(domain(), [:actions, :dispatch, :selection, :eligibility_field], :status)

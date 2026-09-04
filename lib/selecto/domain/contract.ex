@@ -5,8 +5,9 @@ defmodule Selecto.Domain.Contract do
   This module validates the normalized shape produced by `Selecto.Domain`,
   including relations, joins, query metadata, query members, published views,
   detail actions, writes, capabilities, actions, source relationships, choice
-  sources, and field bindings. Runtime configuration separately validates the
-  authored map unless a caller explicitly requests normalized validation.
+  sources, co-domains, domain dependencies, consumer operation and experience
+  registries, and field bindings. Runtime configuration separately validates
+  the authored map unless a caller explicitly requests normalized validation.
   """
 
   use Selecto.Domain.Constants
@@ -15,7 +16,9 @@ defmodule Selecto.Domain.Contract do
   alias Selecto.Domain.Contract.Capabilities
   alias Selecto.Domain.Contract.ChoiceSources
   alias Selecto.Domain.Contract.CoDomains
+  alias Selecto.Domain.Contract.ConsumerRegistries
   alias Selecto.Domain.Contract.DetailActions
+  alias Selecto.Domain.Contract.DomainDependencies
   alias Selecto.Domain.Contract.Events
   alias Selecto.Domain.Contract.FieldBindings
   alias Selecto.Domain.Contract.Joins
@@ -63,6 +66,9 @@ defmodule Selecto.Domain.Contract do
     source_relationships = Map.get(normalized_domain, :source_relationships, %{})
     choice_sources = Map.get(normalized_domain, :choice_sources, %{})
     co_domains = Map.get(normalized_domain, :co_domains, %{})
+    domain_dependencies = Map.get(normalized_domain, :domain_dependencies, [])
+    operations = Map.get(normalized_domain, :operations, %{})
+    experiences = Map.get(normalized_domain, :experiences, %{})
     detail_actions = Map.get(normalized_domain, :detail_actions, %{})
     field_index = Core.field_index(source, schemas, projection, joins)
 
@@ -82,6 +88,9 @@ defmodule Selecto.Domain.Contract do
     |> SourceRelationships.validate(source_relationships, field_index)
     |> ChoiceSources.validate(choice_sources, source_relationships, capabilities)
     |> CoDomains.validate(co_domains)
+    |> DomainDependencies.validate(domain_dependencies)
+    |> ConsumerRegistries.validate(:operations, operations)
+    |> ConsumerRegistries.validate(:experiences, experiences)
     |> FieldBindings.validate(source, schemas, projection, choice_sources, field_index)
     |> Enum.reverse()
   end

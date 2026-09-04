@@ -3,8 +3,9 @@
 Selecto core owns the authored domain contract and the read/query projection.
 Companion packages consume that contract, but core should stay execution-neutral:
 it describes fields, joins, reusable query definitions, component-facing UI
-policy, capabilities, actions, choices, published views, and write metadata; it
-does not decide who may use them and it does not execute writes.
+policy, capabilities, actions, choices, published views, domain dependencies,
+application operation and experience registries, and write metadata; it does
+not decide who may use them and it does not execute writes.
 
 Use this guide when authoring or reviewing domain metadata that will be consumed
 by `selecto_components`, `selecto_updato`, generated API endpoints, or host
@@ -43,12 +44,17 @@ should not smuggle host policy or runtime execution concerns into Selecto.
 7. Add `writes` when the domain exposes insert/update/delete/upsert surfaces.
 8. Add `actions` when the domain exposes named user workflows over the write
    surface.
-9. Normalize and validate the domain before shipping it to Components or Updato.
+9. Add `domain_dependencies` when this domain consumes a named published
+   provider contract.
+10. Add top-level `operations` and `experiences` when a projection-specific
+    consumer release needs those application registries.
+11. Normalize and validate the domain before shipping it to Components or
+    Updato.
 
 Recommended core checks:
 
 ```elixir
-{:ok, normalized, diagnostics} = Selecto.Domain.normalize(domain)
+{:ok, normalized, diagnostics} = Selecto.Domain.validate(domain)
 projection = Selecto.Domain.project(normalized, :query_contract)
 ```
 
@@ -334,8 +340,13 @@ Before shipping a domain contract:
   remains outside optional segment boolean groups.
 - Component-facing policy uses documented values and malformed sensitive-state
   policy fails closed in the consuming package.
-- Proposed sections are intentional: `writes`, `actions`, `capabilities`,
-  `source_relationships`, `choice_sources`.
+- Sections in the retained `:proposed` diagnostic category are intentional:
+  `writes`, `actions`, `events`, `capabilities`, `source_relationships`, and
+  `choice_sources`. `co_domains`, `domain_dependencies`, `operations`, and
+  `experiences` are canonical.
+- Domain dependencies use the canonical `contract` and nested `uses` keys; no
+  alternate spellings or flattened references remain.
+- Operation and experience registry ids are non-empty and every entry is a map.
 - Capability ids are declared and referenced consistently.
 - Choice-source fields have membership validation in the host path.
 - Published views have explicit capabilities when they reveal aggregate or

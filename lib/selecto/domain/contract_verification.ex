@@ -378,13 +378,7 @@ defmodule Selecto.Domain.ContractVerification do
 
   defp consumer_dependencies(normalized) do
     normalized
-    |> Map.fetch!(:domain)
-    |> map_get(:domain_dependencies, [])
-    |> case do
-      dependencies when is_list(dependencies) -> dependencies
-      dependencies when is_map(dependencies) -> Map.values(dependencies)
-      _dependencies -> []
-    end
+    |> Map.get(:domain_dependencies, [])
     |> Enum.filter(&is_map/1)
   end
 
@@ -397,27 +391,28 @@ defmodule Selecto.Domain.ContractVerification do
 
   defp dependency_provider(dependency), do: dependency |> map_get(:provider) |> id_string()
 
-  defp dependency_contract_id(dependency) do
-    (map_get(dependency, :contract) || map_get(dependency, :surface) || map_get(dependency, :name))
-    |> id_string()
-  end
+  defp dependency_contract_id(dependency), do: dependency |> map_get(:contract) |> id_string()
 
   defp dependency_uses(dependency) do
     uses = map_get(dependency, :uses, %{})
 
     %{
-      fields: map_get(uses, :fields, map_get(dependency, :fields, [])),
-      filters: map_get(uses, :filters, map_get(dependency, :filters, [])),
-      query_members: map_get(uses, :query_members, map_get(dependency, :query_members, []))
+      fields: map_get(uses, :fields, []),
+      filters: map_get(uses, :filters, []),
+      query_members: map_get(uses, :query_members, [])
     }
     |> Map.new(fn {key, values} -> {key, normalize_id_list(values)} end)
   end
 
-  defp normalize_input(%{schema_version: _schema_version, domain: %{}, query: %{}} = normalized),
-    do: {:ok, normalized}
+  defp normalize_input(%{schema_version: _schema_version, domain: %{}, query: %{}} = normalized) do
+    case Selecto.Domain.Contract.validate(normalized) do
+      :ok -> {:ok, normalized}
+      {:error, errors} -> {:error, %{errors: errors}}
+    end
+  end
 
   defp normalize_input(domain) do
-    case Domain.normalize(domain) do
+    case Domain.validate(domain) do
       {:ok, normalized, _diagnostics} -> {:ok, normalized}
       {:error, diagnostics} -> {:error, diagnostics}
     end

@@ -17,7 +17,7 @@ executable client surface.
     adapter: "web"
   )
 
-diff = Selecto.Domain.compare_consumer_projections(previous, release)
+diff = Selecto.Domain.diff_consumer_projection_releases(previous, release)
 matrix = Selecto.Domain.nested_capability_matrix()
 ```
 
@@ -42,9 +42,9 @@ Every relationship declares one ownership kind:
 - `deferred`: attachment/submission authority and eventual lifecycle live
   outside the local graph transaction.
 
-The delivered aliases `owned`, `shared_reference`, and `join_only` normalize
-to the corresponding canonical meanings. They remain accepted so existing
-Domains do not silently change behavior.
+The input aliases `owned`, `shared_reference`, and `join_only` normalize
+directly to the corresponding canonical meanings. Compiled contracts contain
+only `composition`, `shared_association`, and `join_association`.
 
 ## Required policy
 
@@ -87,7 +87,7 @@ or converted.
 
 ## Compatibility and coexistence
 
-`compare_consumer_projections/2` classifies changes by stable relationship
+`diff_consumer_projection_releases/2` classifies changes by stable relationship
 path. Ownership, cardinality, identity, tenant, capability, ordering,
 validation, conflict, idempotency, Assurance, omission, or removal changes are
 breaking. Removing a

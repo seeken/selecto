@@ -10,6 +10,8 @@ defmodule Selecto.Domain.Inspector do
   @security_review_sections [
     actions: "business command definitions and execution surfaces",
     events: "immutable business fact schemas emitted by event-stream actions",
+    experiences: "consumer experience definitions included in projection releases",
+    operations: "application operation definitions included in projection releases",
     capabilities: "authorization capability catalog",
     choice_sources: "cross-domain choices and constraint policy",
     co_domains: "host-resolved governed cross-domain lookups",
@@ -101,6 +103,9 @@ defmodule Selecto.Domain.Inspector do
       source_relationships: MapHelpers.map_count(Map.get(normalized, :source_relationships)),
       choice_sources: MapHelpers.map_count(Map.get(normalized, :choice_sources)),
       co_domains: MapHelpers.map_count(Map.get(normalized, :co_domains)),
+      domain_dependencies: MapHelpers.list_count(Map.get(normalized, :domain_dependencies)),
+      operations: MapHelpers.map_count(Map.get(normalized, :operations)),
+      experiences: MapHelpers.map_count(Map.get(normalized, :experiences)),
       field_choice_bindings: length(field_choice_bindings),
       warnings: length(diagnostics.warnings),
       errors: length(diagnostics.errors)
@@ -125,7 +130,9 @@ defmodule Selecto.Domain.Inspector do
       capabilities: MapHelpers.sorted_keys(Map.get(normalized, :capabilities)),
       source_relationships: MapHelpers.sorted_keys(Map.get(normalized, :source_relationships)),
       choice_sources: MapHelpers.sorted_keys(Map.get(normalized, :choice_sources)),
-      co_domains: MapHelpers.sorted_keys(Map.get(normalized, :co_domains))
+      co_domains: MapHelpers.sorted_keys(Map.get(normalized, :co_domains)),
+      operations: MapHelpers.sorted_keys(Map.get(normalized, :operations)),
+      experiences: MapHelpers.sorted_keys(Map.get(normalized, :experiences))
     }
   end
 

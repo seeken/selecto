@@ -189,6 +189,35 @@ defmodule Selecto.Domain.CompositionContractTest do
     assert first["fingerprint"] =~ "sha256:"
   end
 
+  test "consumer releases publish canonical operation and experience registries" do
+    domain =
+      CompositionFixtures.order_document()
+      |> Map.put(:operations, %{
+        approve: %{version: "1.0.0", fingerprint: "sha256:approve"}
+      })
+      |> Map.put(:experiences, %{
+        "order-editor" => %{operation: :approve, layout: :document}
+      })
+
+    assert {:ok, release} = ConsumerProjectionRelease.compile(domain)
+
+    assert release["operations"] == %{
+             "approve" => %{"fingerprint" => "sha256:approve", "version" => "1.0.0"}
+           }
+
+    assert release["experiences"] == %{
+             "order-editor" => %{"layout" => "document", "operation" => "approve"}
+           }
+
+    assert release["dependencies"]["operations"] == [
+             %{
+               "fingerprint" => "sha256:approve",
+               "id" => "approve",
+               "version" => "1.0.0"
+             }
+           ]
+  end
+
   test "published capability profiles name finite live evidence and proof boundaries" do
     profiles = Domain.nested_capability_matrix()
 

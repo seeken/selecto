@@ -1,8 +1,8 @@
 # Governed lookups and SQL-backed eligibility
 
-Unreleased source implementation (2026-09-03), not in older tagged packages. The
-declarations are described in [Domain schema v1](domain_schema_v1.md#co-domain-lookups);
-they do not imply all-runtime, all-adapter, or all-frontend support.
+`co_domains` is an implemented canonical schema-v1 section. The declarations
+are defined in [Domain schema v1](domain_schema_v1.md#co-domain-lookups).
+Runtime, adapter, and frontend claims remain profile-specific.
 
 ## Host-owned target and scope
 

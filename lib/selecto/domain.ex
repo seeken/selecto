@@ -30,6 +30,8 @@ defmodule Selecto.Domain do
     :functions,
     :query_members,
     :query_library,
+    :operations,
+    :experiences,
     :published_views,
     :detail_actions,
     :components,
@@ -54,6 +56,7 @@ defmodule Selecto.Domain do
     :required_filters,
     :required_order_by,
     :required_group_by,
+    :domain_dependencies,
     :redact_fields,
     :extensions
   ]
@@ -77,8 +80,9 @@ defmodule Selecto.Domain do
     authoring errors rather than choosing precedence
   - classifies authored top-level sections as canonical, projection, proposed,
     or unknown
-  - exposes current query, write, action, capability, relationship, and choice
-    registries without rewriting existing runtime behavior
+  - exposes current query, write, action, capability, relationship, choice,
+    dependency, operation, and experience registries without rewriting existing
+    runtime behavior
 
   Returns `{:ok, normalized, diagnostics}` for maps and `{:error, diagnostics}`
   for non-map inputs.
@@ -305,6 +309,9 @@ defmodule Selecto.Domain do
       source_relationships: MapHelpers.section(canonical_domain, :source_relationships, %{}),
       choice_sources: MapHelpers.section(canonical_domain, :choice_sources, %{}),
       co_domains: MapHelpers.section(canonical_domain, :co_domains, %{}),
+      domain_dependencies: MapHelpers.section(canonical_domain, :domain_dependencies, []),
+      operations: MapHelpers.section(canonical_domain, :operations, %{}),
+      experiences: MapHelpers.section(canonical_domain, :experiences, %{}),
       detail_actions: MapHelpers.section(canonical_domain, :detail_actions, %{}),
       components: MapHelpers.section(canonical_domain, :components, %{}),
       domain_data: MapHelpers.section(canonical_domain, :domain_data, %{}),

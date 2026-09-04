@@ -174,13 +174,83 @@ defmodule Selecto.DomainTest do
       sections = Selecto.Domain.Sections.sections()
 
       assert "components" in sections.canonical
+      assert "co_domains" in sections.canonical
+      assert "domain_dependencies" in sections.canonical
+      assert "experiences" in sections.canonical
+      assert "operations" in sections.canonical
       assert "query_library" in sections.canonical
       assert "columns" in sections.projection
       assert "writes" in sections.proposed
+      refute "co_domains" in sections.proposed
 
       assert Enum.all?(Map.values(sections), fn entries ->
                entries == Enum.sort(entries) and Enum.all?(entries, &is_binary/1)
              end)
+    end
+
+    test "normalizes and validates canonical consumer contract registries" do
+      domain =
+        minimal_query_domain()
+        |> Map.merge(%{
+          domain_dependencies: [
+            %{
+              provider: :billing,
+              contract: "invoice_summary_v1",
+              accepts: "~> 1.0",
+              expected_fingerprint: "sha256:surface",
+              uses: %{
+                fields: [:invoice_id],
+                filters: ["status_picker"],
+                query_members: [:recent_invoices]
+              },
+              satisfies: [:tenant_id]
+            }
+          ],
+          operations: %{approve: %{version: "1.0.0"}},
+          experiences: %{"order-editor" => %{kind: :form}}
+        })
+
+      assert {:ok, normalized, diagnostics} = Domain.validate(domain)
+      assert diagnostics.unknown_sections == []
+      assert normalized.domain_dependencies == domain.domain_dependencies
+      assert normalized.operations == domain.operations
+      assert normalized.experiences == domain.experiences
+
+      assert {:ok, inspection, _diagnostics} = Domain.describe(normalized)
+      assert inspection.counts.domain_dependencies == 1
+      assert inspection.counts.operations == 1
+      assert inspection.counts.experiences == 1
+      assert inspection.registries.operations == [:approve]
+      assert inspection.registries.experiences == ["order-editor"]
+    end
+
+    test "rejects malformed canonical consumer contract registries" do
+      domain =
+        minimal_query_domain()
+        |> Map.merge(%{
+          domain_dependencies: [
+            %{
+              provider: "",
+              contract: nil,
+              surface: :retired_alias,
+              uses: %{fields: :invoice_id, future: []},
+              satisfies: [123]
+            }
+          ],
+          operations: %{"" => :approve},
+          experiences: []
+        })
+
+      assert {:error, diagnostics} = Domain.validate(domain)
+      codes = MapSet.new(diagnostics.errors, & &1.code)
+
+      assert MapSet.member?(codes, :invalid_domain_dependency_identifier)
+      assert MapSet.member?(codes, :unknown_domain_dependency_key)
+      assert MapSet.member?(codes, :invalid_domain_dependency_reference_list)
+      assert MapSet.member?(codes, :invalid_domain_dependency_reference)
+      assert MapSet.member?(codes, :invalid_consumer_registry_id)
+      assert MapSet.member?(codes, :invalid_consumer_registry_entry)
+      assert MapSet.member?(codes, :invalid_section_shape)
     end
 
     test "the normative schema lists every recognized top-level section" do

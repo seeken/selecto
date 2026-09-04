@@ -153,11 +153,15 @@ Canonical sections are part of the current domain contract:
 - `functions`
 - `query_members`
 - `query_library`
+- `domain_dependencies`
+- `operations`
+- `experiences`
 - `published_views`
 - `detail_actions`
 - `components`
 - `domain_data`
 - `extensions`
+- `co_domains`
 
 ### Projection
 
@@ -187,7 +191,6 @@ planned:
 - `capabilities`
 - `source_relationships`
 - `choice_sources`
-- `co_domains`
 
 ### Unknown
 
@@ -216,6 +219,8 @@ has this stable schema-v1 organization:
 | `projection` | Display and implementation-facing projection metadata. |
 | `writes`, `actions`, `events`, `capabilities` | Mutation, immutable-fact, and governance registries. |
 | `source_relationships`, `choice_sources`, `co_domains` | Cross-domain reference and governed lookup registries. |
+| `domain_dependencies` | Consumer requirements against named provider contracts. |
+| `operations`, `experiences` | Application-operation and consumer-experience registries carried by dedicated consumer releases. |
 | `detail_actions`, `components` | Detail-row actions and canonical component-facing UI policy. |
 | `domain_data`, `extensions` | Host data and declared extension specifications. |
 
@@ -537,9 +542,9 @@ Elixir authoring DSL are documented in [Portable Query Libraries](query_library.
 
 ## Co-Domain Lookups
 
-Working-tree draft: this section and predicate-computed fields below describe
-unpublished local ports. See [Governed lookups](governed-lookups.md) for the
-host API, adapter boundary, and executable fixture.
+`co_domains` is a canonical, implemented schema-v1 section. See
+[Governed lookups](governed-lookups.md) for the host API, adapter boundary, and
+executable fixture.
 
 `co_domains` declares bounded lookups owned by another domain. The host resolves
 the named target domain and supplies its tenant/authorization scope; the
@@ -562,10 +567,19 @@ co_domains: %{
 
 Each entry requires exactly one of `view` or `projection`. A view cannot be
 combined with `segments` or `ordering`; projection form may declare both.
-Search fields are non-empty governed field paths. Modes are `plain`, `phrase`,
-`websearch`, or `prefix`; `rank` is boolean. Result mappings require value and
-label fields and may declare description fields. Parameters are data. Unknown
-keys, raw SQL, invalid identifiers, and ambiguous shapes fail closed.
+The `search` and `result` maps are required. Search fields are non-empty governed
+field paths. Modes are `plain`, `phrase`, `websearch`, or `prefix`; `rank` is
+boolean. `configuration` is an optional non-empty text-search configuration
+name and defaults to `"simple"`. Result mappings require value and label fields
+and may declare description fields. Parameters are data. Unknown keys, raw SQL,
+invalid identifiers, and ambiguous shapes fail closed.
+
+`Selecto.CoDomain.definition/2` returns a validated declaration without
+resolving the target. `plan/5` accepts non-empty lookup text of at most 200
+characters and a limit from 1 through 100, conjoins host scope, checks the target
+adapter's governed text-search capability, and returns a bounded query.
+`lookup/5` executes that query and returns only scalar value, label, and optional
+description data.
 
 ## Predicate-Computed Boolean Fields
 
@@ -621,6 +635,28 @@ Invalid published-view metadata produces diagnostics such as
 `:invalid_published_view_database_name`, `:invalid_published_view_kind`,
 `:invalid_published_view_query`, `:invalid_published_view_columns`,
 `:invalid_published_view_index_columns`, or `:invalid_published_view_refresh`.
+
+## Domain Dependencies
+
+`domain_dependencies` is the canonical consumer-side registry for requirements
+against named provider contracts. It MUST be a list of maps. Every dependency
+requires non-empty `provider` and `contract` identifiers and may declare:
+
+- `accepts`, a non-empty version requirement string;
+- `expected_fingerprint`, a non-empty provider or surface fingerprint;
+- `uses`, a map containing lists of `fields`, `filters`, and `query_members`;
+- `satisfies`, a list of provider-required filters supplied by trusted consumer
+  context.
+
+All referenced ids MUST be non-empty atoms or strings. Unknown dependency or
+`uses` keys fail validation. Alternate spellings for `contract` and top-level
+shortcuts for `uses` are not part of schema v1.
+
+`Selecto.Domain.ContractVerification.verify/3` checks these dependencies against
+the provider's `published_views`. `published_surfaces/2` builds the provider
+projection, `snapshot/2` emits its deterministic snapshot, and
+`diff_snapshots/2` classifies additive and breaking changes. These functions do
+not fetch domains, publish artifacts, or replace host-controlled rollout policy.
 
 ## Detail Actions
 
@@ -679,6 +715,25 @@ metadata but does not validate a narrower component-package subschema.
 This policy reduces URL exposure. It is not an authorization decision,
 encryption mechanism, or guarantee that state will be absent from application
 logs, telemetry, browser memory, or other host-owned surfaces.
+
+## Application Operations And Experiences
+
+`operations` and `experiences` are canonical top-level registries for named
+application operations and consumer experiences. They are distinct from the
+database mutation policies in `writes.operations` and from the executable
+action registry in `actions`.
+
+Each registry MUST be a map. Registry ids MUST be non-empty atoms or strings,
+and every registry entry MUST be a map. Core validates this portable envelope
+and preserves the entry data. The consumer that defines an Operation or
+Experience vocabulary owns its deeper schema and execution rules; core does not
+infer authority or execute either registry.
+
+`Selecto.Domain.consumer_projection_release/2` includes the exact normalized
+registries in its immutable release and fingerprints them with the nested
+composition contract. Generic `:query`, `:write`, `:ui`, `:api`, and
+`:query_contract` projections do not expose these registries. Consumers that
+need them MUST use a projection-specific consumer release.
 
 ## Write Contract
 
@@ -749,12 +804,74 @@ Each `writes.relationships` entry MUST be a map. A writable/enabled relationship
 MUST explicitly declare:
 
 - `cardinality`: `:one` or `:many`;
-- `ownership`: `:owned`, `:shared_reference`, or `:join_only`.
+- `ownership`: `:composition`, `:shared_association`, `:join_association`,
+  `:derived`, or `:deferred`.
 
-It MAY also declare `allowed_ops`, `strategy: :sync`, non-empty
-`identity_fields`, `parent_key`, `child_key`, `domain`, `delete_missing`, and
-other consumer-specific nested-write policy. `allowed_ops` uses the same four
-operation ids as `writes.operations`. A nested `domain` MUST itself be a map.
+The input aliases `:owned`, `:shared_reference`, and `:join_only` normalize to
+`:composition`, `:shared_association`, and `:join_association`. Consumer release
+artifacts always use the canonical names.
+
+A relationship may declare a stable non-empty `path_id`, `target`,
+`parent_key`, `child_key`, `foreign_key`, `physical_provenance`, non-empty
+`identity_fields`, `child_identity`, `client_identity`, a nested `domain`, and
+child `relationships`. A nested `domain` MUST itself be a map. Physical keys and
+database foreign keys provide provenance only; they never grant ownership,
+write authority, tenant inheritance, or delete authority.
+
+The optional `read` map accepts:
+
+- boolean `allowed`;
+- non-negative `default_depth`;
+- positive `max_depth`, `max_rows`, `max_bytes`, and `max_complexity`.
+
+A relationship with `read.allowed: true` MUST declare both `max_depth` and
+`max_rows`.
+
+The optional `write` map accepts a non-empty `modes` list containing
+`append_only`, `delta`, `full_set`, `replace_one`, or `link_delta`; boolean
+`create`, `update`, `delete`, `reorder`, `link`, and `unlink` operation flags;
+an `omission` policy of `unchanged`, `delete_missing`, `reject_missing`, or
+`retain_missing`; non-negative `min_items`; and positive `max_items` and
+`max_mutations`. When both item bounds are present, `max_items` MUST be greater
+than or equal to `min_items`.
+
+The mutation representations have distinct meanings:
+
+- `append_only` adds children and never updates or removes existing children;
+- `delta` carries explicit create, update, and delete groups while omission is
+  unchanged;
+- `full_set` carries the complete desired collection and MUST declare its
+  omission policy;
+- `replace_one` carries one explicit create, update, or delete intent for a
+  to-one relationship;
+- `link_delta` links and unlinks identities for shared or join associations.
+
+`append_only` and `full_set` are invalid for `cardinality: :one`;
+`replace_one` is invalid for `cardinality: :many`. Shared and join associations
+may use only `link_delta` and may not create, update, or delete the independently
+owned target. Derived relationships are read-only unless a separate named
+Operation supplies write meaning. Delta, full-set, replacement, update, delete,
+link, and unlink semantics require stable `identity_fields`.
+
+`tenant_scope` is either `recursive`, `membership`, `explicit`, or `none`, or a
+map whose `mode` uses one of those values. `capabilities` maps operation ids to
+non-empty capability ids. `ordering`, `conflict`, `idempotency`, `offline`,
+`validation`, `assurance`, and `output` MUST be maps when present. An offline
+writable relationship MUST declare both conflict and idempotency policy.
+
+The earlier flat fields `allowed_ops`, `strategy: :sync`, `delete_missing`,
+`min_items`, and `max_items` remain valid input shorthand and compile into the
+same canonical composition contract. `allowed_ops` uses the four
+`writes.operations` ids. New contracts SHOULD author the explicit `read` and
+`write` maps because their omission and bounds are unambiguous.
+
+`Selecto.Domain.composition_contract/1` compiles these declarations into the
+deterministic `selecto.composition_contract.v1` shape. Unknown relationship
+concepts are retained under its `extensions` map. Executable consumer releases
+fail closed unless their target explicitly advertises every required feature;
+`preserve_only: true` is limited to non-executable archival projections. See
+[Nested Composition Contract](nested_composition_contract.md) for the complete
+release and certification workflow.
 
 ### Constraints
 
@@ -1321,8 +1438,40 @@ The `:query_contract` projection is intentionally summary-only. It exposes:
 - field-to-choice-source bindings
 - declared capability ids
 
+Each field entry identifies `id`, `source`, `relation`, `field`, `type`, `label`,
+`capability`, `capability_target`, and `choice_source`, together with this stable
+query surface:
+
+| Key | Meaning |
+| --- | --- |
+| `detail_selectable` | Whether detail selection may expose the field. Defaults to `true`. |
+| `filterable` | Whether predicates may use the field. Source/schema fields and fields named by a declared filter default to `true`; other computed fields default to `false`. |
+| `sortable` | Whether ordering may use the field. Defaults by portable type. |
+| `groupable` | Whether grouping may use the field. Defaults by portable type. |
+| `aggregatable` | Whether numeric aggregation may use the field. Defaults to `true` for selectable integer, float, and decimal fields. |
+| `comparators` | Exact comparator ids permitted for this field. |
+| `aggregate_functions` | Exact aggregate ids permitted for this field. |
+| `default_grouping` | Optional authored analytic grouping default. |
+| `default_aggregate` | Optional authored analytic aggregate default. |
+
+Sortable types are integer, float, decimal, date/time variants, string/text,
+boolean, UUID, and enum. Groupable types use the same set except free-form
+`text`. Default comparator sets are type-specific: numeric and temporal fields
+support equality, ordering, range, membership, and null predicates; string/text
+fields support equality, contains, prefix, suffix, membership, and null
+predicates; boolean, UUID, and enum fields use equality, membership, and null
+predicates. The default aggregate set for an aggregatable field is `count`,
+`count_distinct`, `sum`, `avg`, `min`, and `max`.
+
+Column metadata may override these values with canonical boolean keys and exact
+lists. `operators` is accepted as an input spelling for `comparators`, and
+`aggregates` for `aggregate_functions`; projected output always uses the
+canonical names above. Filter summaries likewise include their resolved field,
+type, capability, virtual status, and exact comparator list.
+
 It does not include write/action/detail-action/component sections, raw authored
-unknown keys, or function captures from query members and published views.
+unknown keys, top-level application Operations or Experiences, or function
+captures from query members and published views.
 
 For consumers that do not need the lower-level projection API,
 `Selecto.Domain.query_contract/1` accepts either an authored domain or an
@@ -1454,9 +1603,11 @@ The inspection output includes:
 
 - section categories and normalization diagnostics summary
 - counts for source fields, registries, writes, actions, capabilities,
-  source relationships, choice sources, and field choice bindings
+  source relationships, choice sources, co-domains, domain dependencies,
+  operations, experiences, and field choice bindings
 - sorted registry ids for filters, functions, query members, joins, schemas,
-  actions, capabilities, source relationships, and choice sources
+  actions, capabilities, source relationships, choice sources, co-domains,
+  operations, and experiences
 - compact summaries of `writes`, actions, capabilities, source relationships,
   choice sources, and field-to-choice-source bindings
 
@@ -1525,10 +1676,11 @@ choice_sources: %{
 }
 ```
 
-The policy is carried on membership and option-list requests. A resolver can
-use `:fail_closed` to reject a request when server-owned Domain-of-Interest
-filters are present but cannot be enforced. The default is best-effort when no
-policy is declared.
+The supported constraint keys are `source_relationship`, `choice_source`, and
+`domain_of_interest`. Each value MUST be `best_effort` or `fail_closed`. The
+policy is carried on membership and option-list requests. A resolver uses
+`fail_closed` to reject a request when the corresponding server-owned constraint
+cannot be enforced. The default is `best_effort` when no policy is declared.
 
 ## Choice Option Lists
 
@@ -1613,6 +1765,17 @@ The public boundaries are:
 | `Selecto.Domain.describe/1` | authored or normalized | Produces deterministic counts, registries, security-review entries, and sanitized hook metadata. |
 | `Selecto.Domain.Sections.sections/0` | none | Returns the finite recognized top-level vocabulary, grouped by diagnostic category, for documentation and certification coverage checks. |
 | `Selecto.Domain.WriteContract.compile/1` | authored, normalized, or configured Selecto | Produces the explicit fail-closed write contract or an error. |
+| `Selecto.Domain.composition_contract/1` | authored or normalized | Compiles deterministic `selecto.composition_contract.v1` nested relationship metadata. |
+| `Selecto.Domain.consumer_projection_release/2` | authored or normalized plus target options | Produces an immutable, fingerprinted nested consumer release and rejects unsupported target features. |
+| `Selecto.Domain.diff_consumer_projection_releases/2` | two consumer releases | Classifies relationship additions, removals, narrowed bounds, and policy changes as compatible or breaking. |
+| `Selecto.Domain.nested_capability_matrix/0` | none | Returns current runtime/adapter features and their finite evidence boundaries. |
+| `Selecto.Domain.ContractVerification.verify/3` | provider and consumer domains | Verifies canonical `domain_dependencies` against provider published surfaces. |
+| `Selecto.Domain.ContractVerification.published_surfaces/2` | provider domain | Projects named published query surfaces and validates their references. |
+| `Selecto.Domain.ContractVerification.snapshot/2` | provider domain | Produces a deterministic published-surface snapshot. |
+| `Selecto.Domain.ContractVerification.diff_snapshots/2` | two snapshots | Classifies additive, review-required, and breaking published-surface changes. |
+| `Selecto.CoDomain.definition/2` | source domain and co-domain id | Returns a validated governed-lookup declaration. |
+| `Selecto.CoDomain.plan/5` | source domain, configured target, id, text, options | Builds a bounded, host-scoped governed lookup query. |
+| `Selecto.CoDomain.lookup/5` | source domain, configured target, id, text, options | Executes the planned query and returns normalized presentation results. |
 
 Compile-time modules may `use Selecto.DomainValidator, domain: domain` for a
 static authored domain. Generated artifacts SHOULD also record `schema_version`,

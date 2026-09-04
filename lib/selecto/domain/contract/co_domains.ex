@@ -133,13 +133,27 @@ defmodule Selecto.Domain.Contract.CoDomains do
 
     rank = Core.map_value(search, :rank)
 
-    if is_nil(rank) or is_boolean(rank),
+    errors =
+      if is_nil(rank) or is_boolean(rank),
+        do: errors,
+        else: [
+          Core.error(
+            :invalid_co_domain_search_rank,
+            path ++ [:rank],
+            "co-domain search rank must be boolean"
+          )
+          | errors
+        ]
+
+    configuration = Core.map_value(search, :configuration)
+
+    if is_nil(configuration) or Core.non_empty_string?(configuration),
       do: errors,
       else: [
         Core.error(
-          :invalid_co_domain_search_rank,
-          path ++ [:rank],
-          "co-domain search rank must be boolean"
+          :invalid_co_domain_search_configuration,
+          path ++ [:configuration],
+          "co-domain search configuration must be a non-empty string"
         )
         | errors
       ]

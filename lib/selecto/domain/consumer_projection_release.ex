@@ -28,7 +28,6 @@ defmodule Selecto.Domain.ConsumerProjectionRelease do
       projection_id = Keyword.get(opts, :projection_id, "default") |> to_string()
       version = Keyword.get(opts, :version, Map.get(normalized, :domain_version))
       consumer = Keyword.get(opts, :consumer, projection_id) |> to_string()
-      authored = Map.fetch!(normalized, :domain)
 
       release = %{
         "schema" => @schema,
@@ -41,11 +40,11 @@ defmodule Selecto.Domain.ConsumerProjectionRelease do
         "dependencies" => %{
           "domain_version" => Map.get(normalized, :domain_version),
           "domain_fingerprint" => Map.get(normalized, :domain_fingerprint),
-          "operations" => registry_dependencies(authored, :operations)
+          "operations" => registry_dependencies(normalized, :operations)
         },
         "composition" => composition,
-        "experiences" => registry(authored, :experiences),
-        "operations" => registry(authored, :operations),
+        "experiences" => registry(normalized, :experiences),
+        "operations" => registry(normalized, :operations),
         "required_features" => required_features
       }
 
