@@ -101,9 +101,15 @@ defmodule Selecto.Write.Capabilities do
   end
 
   defp command_requirements(command, include_returning?) do
-    [command.operation | command.required_capabilities]
+    ([command.operation | command.required_capabilities] ++ document_requirements(command))
     |> maybe_require_returning(command, include_returning?)
+    |> Enum.uniq()
   end
+
+  defp document_requirements(%Command{metadata: %{document: _document}}),
+    do: Selecto.Write.DocumentMutation.capabilities()
+
+  defp document_requirements(_command), do: []
 
   defp maybe_require_returning(requirements, %Command{returning: :none}, _include?),
     do: requirements

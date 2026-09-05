@@ -1,0 +1,498 @@
+defmodule Selecto.Document.ShapeRelease do
+  @moduledoc """
+  Reviewed, versioned document shapes and virtual relations. All artifact keys
+  are strings. Approval is an explicit authoring step and never inferred from
+  sampled documents. A digest detects mutation; it is not an authorization signature.
+  """
+  alias Selecto.Document.{Canonical, Missing, Path}
+
+  @types ~w(string integer float boolean object array binary)
+  @scalar_types ~w(string integer float boolean binary)
+  @field_keys ~w(path type required nullable missing filterable sortable server_managed)
+
+  @spec new(map()) :: {:ok, map()} | {:error, list()}
+  def new(%{"status" => "approved"}),
+    do: {:error, ["approved releases cannot be redrafted in place; author a new release version"]}
+
+  def new(input) when is_map(input) and not is_struct(input) do
+    draft = input |> Map.put("status", "draft") |> Map.drop(["digest", "approval"])
+
+    case validate(draft) do
+      :ok -> {:ok, draft}
+      error -> error
+    end
+  end
+
+  def new(_), do: {:error, ["release must be a map"]}
+
+  @spec approve(map(), keyword()) :: {:ok, map()} | {:error, list()}
+  def approve(draft, opts \\ []) do
+    reviewer = Keyword.get(opts, :approved_by)
+
+    with :ok <- validate(draft),
+         true <- draft["status"] == "draft",
+         true <- is_binary(reviewer) and byte_size(reviewer) in 1..128 and String.valid?(reviewer) do
+      release =
+        draft
+        |> Map.put("status", "approved")
+        |> Map.put("approval", %{"approved_by" => reviewer})
+        |> Map.delete("digest")
+
+      {:ok, Map.put(release, "digest", Canonical.digest(release))}
+    else
+      false -> {:error, ["approval requires a draft and a bounded approved_by string"]}
+      error -> error
+    end
+  end
+
+  @spec validate(term(), keyword()) :: :ok | {:error, list()}
+  def validate(release, opts \\ []) do
+    errors = check_release(release, Keyword.get(opts, :require_approved, false))
+    if errors == [], do: :ok, else: {:error, Enum.uniq(errors)}
+  rescue
+    _ -> {:error, ["malformed document release"]}
+  end
+
+  @doc "Fetch a relation with its artifact id attached."
+  def relation(release, id) when is_map(release) and is_binary(id) do
+    case get_in(release, ["relations", id]) do
+      value when is_map(value) -> {:ok, Map.put(value, "id", id)}
+      _ -> {:error, :unknown_virtual_relation}
+    end
+  end
+
+  def relation(_, _), do: {:error, :unknown_virtual_relation}
+
+  @doc "Resolve only a field published by the specified relation."
+  def field(release, relation, id) when is_binary(relation) do
+    with {:ok, definition} <- relation(release, relation), do: field(release, definition, id)
+  end
+
+  def field(release, %{"kind" => "root", "fields" => published}, id) do
+    if is_list(published) and id in published do
+      case get_in(release, ["shape", "fields", id]) do
+        value when is_map(value) -> {:ok, Map.put(value, "id", id)}
+        _ -> {:error, :unknown_document_field}
+      end
+    else
+      {:error, :unpublished_document_field}
+    end
+  end
+
+  def field(_release, %{"kind" => "array", "fields" => fields}, id) do
+    case Map.fetch(fields, id) do
+      {:ok, value} -> {:ok, Map.put(value, "id", id)}
+      :error -> {:error, :unknown_document_field}
+    end
+  end
+
+  def field(_, _, _), do: {:error, :unknown_document_field}
+
+  @doc "Validate one fetched document, including variant and identified-child semantics."
+  def validate_document(release, document) do
+    with :ok <- validate(release, require_approved: true) do
+      errors =
+        if is_map(document) and not is_struct(document) do
+          validate_values(release["shape"]["fields"], document, "root") ++
+            validate_variant(release["shape"]["variants"], document) ++
+            validate_children(release, document)
+        else
+          ["document must be a string-keyed map"]
+        end
+
+      if errors == [], do: :ok, else: {:error, errors}
+    end
+  end
+
+  defp check_release(release, require_approved) when is_map(release) and not is_struct(release) do
+    source = release["source"]
+    shape = release["shape"]
+    relations = release["relations"]
+
+    errors =
+      check_keys(
+        release,
+        ~w(schema_version id status source shape relations approval digest inference_digest),
+        "release"
+      ) ++
+        error_unless(
+          is_nil(release["inference_digest"]) or digest?(release["inference_digest"]),
+          "invalid inference digest"
+        ) ++
+        error_unless(release["schema_version"] == 1, "schema_version must be 1") ++
+        error_unless(safe_release_id?(release["id"]), "invalid release id") ++
+        error_unless(release["status"] in ["draft", "approved"], "invalid release status") ++
+        error_unless(
+          not require_approved or release["status"] == "approved",
+          "release is not approved"
+        ) ++
+        check_source(source) ++ check_shape(shape) ++ check_relations(relations, source, shape)
+
+    if errors == [] and release["status"] == "approved" do
+      approval = release["approval"]
+
+      errors ++
+        error_unless(
+          is_map(approval) and map_size(approval) == 1 and
+            is_binary(approval["approved_by"]) and byte_size(approval["approved_by"]) in 1..128,
+          "invalid approval metadata"
+        ) ++
+        error_unless(
+          release["digest"] == Canonical.digest(Map.delete(release, "digest")),
+          "release digest mismatch"
+        )
+    else
+      errors
+    end
+  end
+
+  defp check_release(_, _), do: ["release must be a string-keyed map"]
+
+  defp check_source(source) when is_map(source) and not is_struct(source) do
+    check_keys(
+      source,
+      ~w(id kind collection sql_table identity_path tenant_path version_path),
+      "source"
+    ) ++
+      error_unless(Path.safe_key?(source["id"]), "invalid source id") ++
+      error_unless(source["kind"] == "document_collection", "unsupported source kind") ++
+      error_unless(Path.safe_key?(source["collection"]), "invalid source collection") ++
+      error_unless(
+        is_nil(source["sql_table"]) or Path.safe_key?(source["sql_table"]),
+        "invalid SQL control table"
+      ) ++
+      Enum.flat_map(~w(identity_path tenant_path version_path), fn key ->
+        error_unless(match?({:ok, _}, Path.parse(source[key])), "invalid source #{key}")
+      end) ++
+      error_unless(
+        length(Enum.uniq(Enum.map(~w(identity_path tenant_path version_path), &source[&1]))) == 3,
+        "identity, tenant, and version paths must differ"
+      )
+  end
+
+  defp check_source(_), do: ["source must be a map"]
+
+  defp check_shape(shape) when is_map(shape) and not is_struct(shape) do
+    check_keys(shape, ~w(fields variants unknown_field_policy), "shape") ++
+      check_fields(shape["fields"], "shape") ++
+      check_variants(shape["variants"], shape["fields"]) ++
+      error_unless(
+        shape["unknown_field_policy"] == "ignore",
+        "V1 unknown_field_policy must be ignore"
+      )
+  end
+
+  defp check_shape(_), do: ["shape must be a map"]
+
+  defp check_fields(fields, context)
+       when is_map(fields) and not is_struct(fields) and map_size(fields) in 1..256 do
+    Enum.flat_map(fields, fn {id, field} ->
+      error_unless(Path.safe_key?(id), "#{context}: invalid field id") ++
+        check_field(field, "#{context}.#{safe_label(id)}")
+    end) ++
+      error_unless(
+        fields
+        |> Map.values()
+        |> Enum.map(fn field -> if is_map(field), do: field["path"] end)
+        |> Enum.uniq()
+        |> length() == map_size(fields),
+        "#{context}: duplicate field paths"
+      )
+  end
+
+  defp check_fields(_, context), do: ["#{context}: fields must contain 1..256 entries"]
+
+  defp check_field(field, context) when is_map(field) and not is_struct(field) do
+    scalar? = field["type"] in @scalar_types
+
+    check_keys(field, @field_keys, context) ++
+      error_unless(match?({:ok, _}, Path.parse(field["path"])), "#{context}: invalid path") ++
+      error_unless(field["type"] in @types, "#{context}: unsupported type") ++
+      error_unless(is_boolean(field["required"]), "#{context}: required must be explicit") ++
+      error_unless(is_boolean(field["nullable"]), "#{context}: nullable must be explicit") ++
+      error_unless(
+        field["missing"] in ["preserve", "reject"],
+        "#{context}: invalid missing policy"
+      ) ++
+      error_unless(
+        field["required"] != true or field["missing"] == "reject",
+        "#{context}: required fields reject missing"
+      ) ++
+      Enum.flat_map(~w(filterable sortable server_managed), fn key ->
+        error_unless(
+          not Map.has_key?(field, key) or is_boolean(field[key]),
+          "#{context}: #{key} must be boolean"
+        )
+      end) ++
+      error_unless(
+        scalar? or (field["filterable"] == false and field["sortable"] == false),
+        "#{context}: opaque fields must disable filtering and sorting"
+      )
+
+    # Coercions, defaults, arbitrary subpaths, and executable metadata have no V1 syntax.
+  end
+
+  defp check_field(_, context), do: ["#{context}: field must be a map"]
+
+  defp check_variants(variants, fields) when is_map(variants) and is_map(fields) do
+    values = variants["values"]
+
+    discriminator =
+      Enum.find_value(fields, fn {_, field} ->
+        if is_map(field) and field["path"] == variants["path"], do: field
+      end)
+
+    check_keys(variants, ~w(path values unknown_policy), "variants") ++
+      error_unless(match?({:ok, _}, Path.parse(variants["path"])), "invalid variant path") ++
+      error_unless(
+        is_list(values) and length(values) in 1..64 and
+          Enum.all?(values, &Path.safe_key?/1) and length(Enum.uniq(values)) == length(values),
+        "variants require 1..64 distinct bounded string values"
+      ) ++
+      error_unless(variants["unknown_policy"] == "reject", "V1 unknown variants must be rejected") ++
+      error_unless(
+        is_map(discriminator) and discriminator["required"] == true and
+          discriminator["nullable"] == false and discriminator["type"] == "string",
+        "variant discriminator must be a required non-null string field"
+      )
+  end
+
+  defp check_variants(_, _),
+    do: ["variants must explicitly declare path, values, and unknown_policy"]
+
+  defp check_relations(relations, source, shape)
+       when is_map(relations) and not is_struct(relations) and map_size(relations) in 1..32 and
+              is_map(source) and is_map(shape) do
+    roots = Enum.filter(relations, fn {_, rel} -> is_map(rel) and rel["kind"] == "root" end)
+
+    error_unless(length(roots) == 1, "exactly one root relation is required") ++
+      Enum.flat_map(relations, fn {id, rel} ->
+        error_unless(Path.safe_key?(id), "invalid relation id") ++
+          check_relation(rel, id, relations, source, shape)
+      end) ++ check_source_fields(source, shape["fields"])
+  end
+
+  defp check_relations(_, _, _), do: ["relations require 1..32 entries and a valid source/shape"]
+
+  defp check_relation(%{"kind" => "root"} = rel, id, _relations, source, shape) do
+    fields = rel["fields"]
+    shape_fields = shape["fields"]
+
+    check_keys(
+      rel,
+      ~w(kind source fields identity_path access_patterns),
+      "relation #{safe_label(id)}"
+    ) ++
+      error_unless(rel["source"] == source["id"], "root source mismatch") ++
+      error_unless(rel["identity_path"] == source["identity_path"], "root identity mismatch") ++
+      error_unless(
+        is_list(fields) and length(fields) in 1..256 and is_map(shape_fields) and
+          length(Enum.uniq(fields)) == length(fields) and
+          Enum.all?(fields, &Map.has_key?(shape_fields, &1)),
+        "root must publish distinct declared fields"
+      ) ++ check_access_patterns(rel["access_patterns"], fields)
+  end
+
+  defp check_relation(%{"kind" => "array"} = rel, id, relations, source, shape) do
+    parent = relations[rel["parent"]]
+    fields = rel["fields"]
+
+    array_field =
+      if is_map(shape["fields"]),
+        do:
+          Enum.find_value(shape["fields"], fn {_, field} ->
+            if is_map(field) and field["path"] == rel["path"], do: field
+          end)
+
+    check_keys(
+      rel,
+      ~w(kind source parent path identity_path max_elements fields ordering duplicates access_patterns),
+      "relation #{safe_label(id)}"
+    ) ++
+      error_unless(rel["source"] == source["id"], "child source mismatch") ++
+      error_unless(is_map(parent) and parent["kind"] == "root", "child parent must be the root") ++
+      error_unless(match?({:ok, _}, Path.parse(rel["path"])), "invalid child array path") ++
+      error_unless(
+        is_map(array_field) and array_field["type"] == "array",
+        "child path must be declared as array"
+      ) ++
+      error_unless(
+        is_integer(rel["max_elements"]) and rel["max_elements"] in 1..1000,
+        "child max_elements must be 1..1000"
+      ) ++
+      error_unless(rel["ordering"] == "source", "child ordering must be source") ++
+      error_unless(
+        rel["duplicates"] == "reject_identity",
+        "duplicate child identities must be rejected"
+      ) ++
+      check_fields(fields, "child #{safe_label(id)}") ++
+      error_unless(
+        is_list(rel["path"]) and is_map(fields) and
+          Enum.all?(fields, fn {_, field} ->
+            is_map(field) and is_list(field["path"]) and
+              length(rel["path"]) + 1 + length(field["path"]) <= 32
+          end),
+        "combined child paths must fit the 32-step document path bound"
+      ) ++
+      check_identity_field(fields, rel["identity_path"], "child identity") ++
+      check_access_patterns(rel["access_patterns"], if(is_map(fields), do: Map.keys(fields)))
+  end
+
+  defp check_relation(_, _, _, _, _), do: ["unsupported virtual relation kind"]
+
+  defp check_access_patterns(patterns, fields)
+       when is_map(patterns) and not is_struct(patterns) and map_size(patterns) in 1..16 and
+              is_list(fields) do
+    Enum.flat_map(patterns, fn {id, pattern} ->
+      if is_map(pattern) do
+        check_keys(pattern, ~w(index keys), "access pattern") ++
+          error_unless(
+            Path.safe_key?(id) and Path.safe_key?(pattern["index"]),
+            "invalid access pattern/index id"
+          ) ++
+          error_unless(
+            is_list(pattern["keys"]) and length(pattern["keys"]) in 1..16 and
+              length(Enum.uniq(pattern["keys"])) == length(pattern["keys"]) and
+              Enum.all?(pattern["keys"], &(&1 in fields)),
+            "access pattern keys must name distinct published fields"
+          )
+      else
+        ["access pattern must be a map"]
+      end
+    end)
+  end
+
+  defp check_access_patterns(_, _), do: ["access_patterns must declare 1..16 index requirements"]
+
+  defp check_source_fields(source, fields) when is_map(fields) do
+    Enum.flat_map(~w(identity_path tenant_path version_path), fn key ->
+      check_identity_field(fields, source[key], "source #{key}") ++
+        error_unless(
+          Enum.any?(fields, fn {_, field} ->
+            is_map(field) and field["path"] == source[key] and field["server_managed"] == true
+          end),
+          "source #{key} must be marked server_managed"
+        )
+    end) ++
+      error_unless(
+        Enum.any?(fields, fn {_, field} ->
+          is_map(field) and field["path"] == source["version_path"] and field["type"] == "integer"
+        end),
+        "source version field must be integer"
+      ) ++
+      error_unless(
+        Enum.any?(fields, fn {_, field} ->
+          is_map(field) and field["path"] == source["tenant_path"] and field["type"] == "string"
+        end),
+        "source tenant field must be string"
+      )
+  end
+
+  defp check_source_fields(_, _), do: ["source metadata must resolve to shape fields"]
+
+  defp check_identity_field(fields, path, context) when is_map(fields) do
+    error_unless(
+      match?({:ok, _}, Path.parse(path)) and
+        Enum.any?(fields, fn {_, field} ->
+          is_map(field) and field["path"] == path and field["required"] == true and
+            field["nullable"] == false and field["type"] in ["string", "integer"]
+        end),
+      "#{context} must resolve to a required non-null string/integer field"
+    )
+  end
+
+  defp check_identity_field(_, _, context), do: ["#{context} is invalid"]
+
+  defp validate_values(fields, document, context) do
+    Enum.flat_map(fields, fn {id, field} ->
+      value = Path.fetch(document, field["path"])
+
+      cond do
+        Missing.missing?(value) ->
+          error_unless(field["missing"] == "preserve", "#{context}.#{id}: missing field")
+
+        is_nil(value) ->
+          error_unless(field["nullable"], "#{context}.#{id}: null is not allowed")
+
+        true ->
+          error_unless(type_matches?(value, field["type"]), "#{context}.#{id}: type mismatch")
+      end
+    end)
+  end
+
+  defp validate_variant(variants, document),
+    do:
+      error_unless(
+        Path.fetch(document, variants["path"]) in variants["values"],
+        "unknown document variant"
+      )
+
+  defp validate_children(release, document) do
+    Enum.flat_map(release["relations"], fn
+      {id, %{"kind" => "array"} = rel} ->
+        case Path.fetch(document, rel["path"]) do
+          %Missing{} ->
+            []
+
+          nil ->
+            []
+
+          elements when is_list(elements) ->
+            # Take one over the bound so no validation traverses an unbounded array.
+            bounded = Enum.take(elements, rel["max_elements"] + 1)
+
+            if length(bounded) > rel["max_elements"] do
+              ["#{id}: fan-out bound exceeded"]
+            else
+              identities = Enum.map(bounded, &Path.fetch(&1, rel["identity_path"]))
+
+              error_unless(
+                length(Enum.uniq(identities)) == length(identities),
+                "#{id}: duplicate element identity"
+              ) ++
+                Enum.flat_map(bounded, fn element ->
+                  if is_map(element) and not is_struct(element),
+                    do: validate_values(rel["fields"], element, id),
+                    else: ["#{id}: child element must be an object"]
+                end)
+            end
+
+          _ ->
+            ["#{id}: child path must be an array"]
+        end
+
+      _ ->
+        []
+    end)
+  end
+
+  defp type_matches?(v, "string"), do: is_binary(v) and String.valid?(v)
+  defp type_matches?(v, "binary"), do: is_binary(v)
+  defp type_matches?(v, "integer"), do: is_integer(v)
+  defp type_matches?(v, "float"), do: is_float(v)
+  defp type_matches?(v, "boolean"), do: is_boolean(v)
+  defp type_matches?(v, "array"), do: is_list(v)
+  defp type_matches?(v, "object"), do: is_map(v) and not is_struct(v)
+  defp type_matches?(_, _), do: false
+
+  defp check_keys(map, keys, context) do
+    error_unless(
+      Enum.all?(Map.keys(map), &(is_binary(&1) and &1 in keys)),
+      "#{context}: unknown or non-string keys"
+    )
+  end
+
+  defp safe_release_id?(id) when is_binary(id) and byte_size(id) in 1..128,
+    do: String.valid?(id) and Regex.match?(~r/\A[A-Za-z_][A-Za-z0-9_\/-]*\z/, id)
+
+  defp safe_release_id?(_), do: false
+  defp digest?(value) when is_binary(value), do: Regex.match?(~r/\A[a-f0-9]{64}\z/, value)
+  defp digest?(_), do: false
+
+  defp safe_label(value) when is_binary(value),
+    do: binary_part(value, 0, min(64, byte_size(value)))
+
+  defp safe_label(_), do: "invalid"
+  defp error_unless(true, _), do: []
+  defp error_unless(_, message), do: [message]
+end

@@ -3,6 +3,13 @@
 
 ## Unreleased
 
+- Added an experimental document source seam with reviewed ShapeReleases,
+  bounded structural inference, typed query plans, signed tenant-bound cursors,
+  and explicit missing/null values. MongoDB and SQLite JSON control adapters
+  consume the public source-query behavior independently.
+- Added typed single-document action mutation and receipt contracts while
+  retaining the existing write capability and authorization boundary.
+
 - Added validated co-domain declarations, host-scoped governed lookups, and
   SQL-backed boolean predicate columns for action selection eligibility.
 - Selection eligibility is presentation metadata, not a replacement for

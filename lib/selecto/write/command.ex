@@ -69,7 +69,8 @@ defmodule Selecto.Write.Command do
          :ok <- validate_cardinality(command.expected_cardinality),
          :ok <- validate_returning(command.returning),
          :ok <- validate_capabilities(command.required_capabilities),
-         :ok <- validate_metadata(command.metadata) do
+         :ok <- validate_metadata(command.metadata),
+         :ok <- validate_document(command) do
       :ok
     end
   end
@@ -78,6 +79,23 @@ defmodule Selecto.Write.Command do
     {:error,
      Error.new(:invalid_command, "expected Selecto.Write.Command", details: %{actual: other})}
   end
+
+  defp validate_document(%{metadata: %{document: document}} = command) do
+    with :ok <- Selecto.Write.DocumentMutation.validate(document) do
+      if command.operation == :update and command.assignments == [] and
+           command.expected_cardinality == {:exactly, 1} do
+        :ok
+      else
+        {:error,
+         Error.new(
+           :invalid_command,
+           "Document actions require one update without scalar assignments"
+         )}
+      end
+    end
+  end
+
+  defp validate_document(_command), do: :ok
 
   defp validate_operation(operation) when operation in @operations, do: :ok
 

@@ -2705,4 +2705,21 @@ defmodule Selecto do
   """
   def array_manipulate(selecto, array_operations, opts \\ []),
     do: Selecto.ArrayQuery.manipulate(selecto, array_operations, opts)
+
+  @doc """
+  Build backend-neutral query intent from an approved document ShapeRelease.
+
+  The host supplies `trusted_context: %{tenant_id: ...}` and, for continuation
+  tokens, `cursor_secret:`. SQL query builders retain their established API.
+  """
+  def to_plan(release, relation, query \\ %{}, opts \\ []),
+    do: Selecto.Query.Plan.new(release, relation, query, opts)
+
+  @doc "Execute a validated source plan through an explicitly injected query adapter."
+  def execute_plan(plan, adapter, connection, opts \\ []),
+    do: Selecto.Query.Runtime.execute(plan, adapter, connection, opts)
+
+  @doc "Preview source operations and enforced bounds without exposing values."
+  def preview_plan(plan, adapter, connection, opts \\ []),
+    do: Selecto.Query.Runtime.preview(plan, adapter, connection, opts)
 end
