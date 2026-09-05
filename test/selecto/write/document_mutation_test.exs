@@ -127,6 +127,95 @@ defmodule Selecto.Write.DocumentMutationTest do
     end
   end
 
+  test "owned object and combined shape refinements cannot bypass capability checks" do
+    for features <- [["object_relation"], ["object_relation", "scalar_array"]] do
+      mutation = %{mutation() | shape_features: features}
+      assert :ok = DocumentMutation.validate(mutation)
+      command = %{command() | metadata: %{document: mutation}}
+      assert :document_object_relation in Capabilities.requirements(command)
+
+      capabilities =
+        Map.new(DocumentMutation.capabilities(mutation), &{&1, true})
+        |> Map.merge(%{protocol_version: 1, update: true})
+
+      assert :ok = Capabilities.require(capabilities, command)
+
+      assert {:error, _} =
+               Capabilities.require(Map.delete(capabilities, :document_object_relation), command)
+    end
+
+    for features <- [
+          ["object_relation", "object_relation"],
+          ["scalar_array", "object_relation"],
+          ["object_relation", "unknown"]
+        ] do
+      assert {:error, _} = DocumentMutation.validate(%{mutation() | shape_features: features})
+    end
+  end
+
+  test "explicit ObjectId selectors require their feature and preserve the existing tenant boundary" do
+    alias Selecto.Document.Fixtures
+    original = mutation()
+    [element] = original.mutations
+
+    value = %{
+      original
+      | identity: %{original.identity | value: Fixtures.object_id(1)},
+        mutations: [%{element | identity: %{element.identity | value: Fixtures.object_id(101)}}],
+        shape_features: ["object_id"]
+    }
+
+    assert :ok = DocumentMutation.validate(value)
+    command = %{command() | metadata: %{document: value}}
+    assert :document_object_id in Capabilities.requirements(command)
+
+    capabilities =
+      Map.new(DocumentMutation.capabilities(value), &{&1, true})
+      |> Map.merge(%{protocol_version: 1, update: true})
+
+    assert :ok = Capabilities.require(capabilities, command)
+
+    assert {:error, _} =
+             Capabilities.require(Map.delete(capabilities, :document_object_id), command)
+
+    assert {:error, _} = DocumentMutation.validate(%{value | shape_features: []})
+
+    assert {:error, _} =
+             DocumentMutation.validate(%{
+               value
+               | tenant: %{value.tenant | value: Fixtures.object_id(9)}
+             })
+
+    assert :ok =
+             DocumentMutation.validate(%{
+               value
+               | shape_features: ["object_id", "object_relation", "scalar_array"]
+             })
+
+    assert {:error, _} =
+             DocumentMutation.validate(%{
+               value
+               | shape_features: ["object_relation", "object_id"]
+             })
+
+    assert {:error, _} =
+             DocumentMutation.validate(%{value | shape_features: ["object_id", "object_id"]})
+
+    for sample <- Enum.reject(Fixtures.object_id_cases(), & &1.valid), is_map(sample.value) do
+      assert {:error, _} =
+               DocumentMutation.validate(%{
+                 value
+                 | identity: %{value.identity | value: sample.value}
+               })
+    end
+
+    # A typed declaration also requires support when no selected value uses it.
+    assert :document_object_id in DocumentMutation.capabilities(%{
+             original
+             | shape_features: ["object_id"]
+           })
+  end
+
   test "metadata selectors, version and child identity remain protected" do
     [entry] = mutation().mutations
 

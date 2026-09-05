@@ -16,7 +16,7 @@ defmodule Selecto.Query.Cursor do
         "expires" => now(opts) + min(max(Keyword.get(opts, :cursor_ttl, 900), 1), 3600)
       }
 
-      body = payload |> Jason.encode!() |> Base.url_encode64(padding: false)
+      body = payload |> Selecto.Document.Canonical.encode() |> Base.url_encode64(padding: false)
       {:ok, body <> "." <> sign(body, secret)}
     end
   end

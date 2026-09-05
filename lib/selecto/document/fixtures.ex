@@ -1,6 +1,6 @@
 defmodule Selecto.Document.Fixtures do
   @moduledoc "Independently authored synthetic work orders for the document reference slice."
-  alias Selecto.Document.ShapeRelease
+  alias Selecto.Document.{ObjectId, ShapeRelease}
 
   def work_orders do
     [
@@ -156,6 +156,217 @@ defmodule Selecto.Document.Fixtures do
     {:ok, release} = ShapeRelease.approve(draft, approved_by: "synthetic-fixture-author")
     release
   end
+
+  @doc "An optional owned schedule object with inherited parent identity; older releases are unchanged."
+  def object_relation_shape do
+    shape = aggregate_shape()
+
+    object =
+      opaque(["schedule"], "object")
+      |> Map.merge(%{"required" => false, "nullable" => true, "missing" => "preserve"})
+
+    relation = %{
+      "kind" => "object",
+      "source" => "work_orders_docs",
+      "parent" => "work_orders",
+      "path" => ["schedule"],
+      "identity" => "parent",
+      "cardinality" => "zero_or_one",
+      "fields" => %{
+        "due_at" => scalar(["due_at"], "string", false, nullable: true),
+        "timezone" => scalar(["timezone"], "string", false),
+        "duration_minutes" => scalar(["duration_minutes"], "integer", false, nullable: true)
+      },
+      "access_patterns" => shape["relations"]["work_orders"]["access_patterns"]
+    }
+
+    shape
+    |> Map.put("id", "work-orders/owned-object-v1")
+    |> put_in(["shape", "fields", "schedule"], object)
+    |> update_in(["relations", "work_orders", "fields"], &Enum.sort(["schedule" | &1]))
+    |> put_in(["relations", "work_order_schedule"], relation)
+  end
+
+  def object_relation_release do
+    {:ok, draft} = ShapeRelease.new(object_relation_shape())
+    {:ok, release} = ShapeRelease.approve(draft, approved_by: "synthetic-fixture-author")
+    release
+  end
+
+  @doc "Valid shared owned-object documents; all documents remain synthetic."
+  def object_relation_documents,
+    do: object_relation_cases() |> Enum.filter(& &1.valid) |> Enum.map(& &1.document)
+
+  @doc "Shared ownership/presence/type corpus. Rows use due_at, timezone, duration_minutes in that order; invalid parents require errors before child filtering."
+  def object_relation_cases do
+    missing = %Selecto.Document.Missing{}
+    [base | _] = work_orders()
+
+    cases = [
+      {"missing", missing, true, [], {false, false, false, false}},
+      {"null", nil, true, [], {false, false, false, false}},
+      {"empty", %{}, true, [[missing, missing, missing]], {false, true, false, false}},
+      {"utc", %{"timezone" => "UTC", "duration_minutes" => 15}, true, [[missing, "UTC", 15]],
+       {true, false, false, true}},
+      {"other_timezone", %{"timezone" => "America/Denver", "duration_minutes" => 0}, true,
+       [[missing, "America/Denver", 0]], {false, false, false, false}},
+      {"nullable_due_at", %{"due_at" => nil, "timezone" => "UTC", "duration_minutes" => nil},
+       true, [[nil, "UTC", nil]], {true, false, false, false}},
+      {"present_due_at", %{"due_at" => "2026-08-26T12:00:00Z"}, true,
+       [["2026-08-26T12:00:00Z", missing, missing]], {false, true, false, false}},
+      {"scalar", "UTC", false, nil, nil},
+      {"array", [], false, nil, nil},
+      {"number", 1, false, nil, nil},
+      {"boolean", true, false, nil, nil},
+      {"wrong_timezone_type", %{"timezone" => 1}, false, nil, nil},
+      {"null_timezone", %{"timezone" => nil}, false, nil, nil},
+      {"wrong_duration_type", %{"duration_minutes" => "15"}, false, nil, nil}
+    ]
+
+    compiled =
+      Enum.map(cases, fn {id, value, valid, rows, predicates} ->
+        document = Map.put(base, "_id", "object-" <> id)
+
+        document =
+          if Selecto.Document.Missing.missing?(value),
+            do: Map.delete(document, "schedule"),
+            else: Map.put(document, "schedule", value)
+
+        %{
+          id: id,
+          document: document,
+          valid: valid,
+          rows: rows,
+          predicates: object_predicate_answers(predicates)
+        }
+      end)
+
+    compiled ++
+      [
+        %{
+          id: "invalid_parent_title",
+          document: base |> Map.put("_id", "object-invalid_parent_title") |> Map.delete("title"),
+          valid: false,
+          rows: nil,
+          predicates: nil
+        },
+        %{
+          id: "invalid_parent_variant",
+          document:
+            base |> Map.put("_id", "object-invalid_parent_variant") |> Map.put("kind", "unknown"),
+          valid: false,
+          rows: nil,
+          predicates: nil
+        }
+      ]
+  end
+
+  @doc "Native-query inputs corresponding to object_relation_cases/0 predicate answers."
+  def object_relation_predicates do
+    %{
+      timezone_eq_utc: %{"op" => "eq", "field" => "timezone", "value" => "UTC"},
+      timezone_missing: %{"op" => "missing", "field" => "timezone"},
+      timezone_is_null: %{"op" => "is_null", "field" => "timezone"},
+      duration_gt_zero: %{"op" => "gt", "field" => "duration_minutes", "value" => 0}
+    }
+  end
+
+  @doc "Explicit ObjectId root/array identities and nullable reference fields; prior releases are unchanged."
+  def object_id_shape do
+    object_relation_shape()
+    |> Map.put("id", "work-orders/object-id-v1")
+    |> put_in(["shape", "fields", "id", "type"], "object_id")
+    |> put_in(["relations", "work_order_parts", "fields", "part_id", "type"], "object_id")
+    |> put_in(
+      ["shape", "fields", "customer_id"],
+      scalar(["customer_id"], "object_id", false, nullable: true)
+    )
+    |> update_in(["relations", "work_orders", "fields"], &Enum.sort(["customer_id" | &1]))
+    |> put_in(
+      ["relations", "work_order_schedule", "fields", "owner_id"],
+      scalar(["owner_id"], "object_id", false, nullable: true)
+    )
+  end
+
+  def object_id_release do
+    {:ok, draft} = ShapeRelease.new(object_id_shape())
+    {:ok, release} = ShapeRelease.approve(draft, approved_by: "synthetic-fixture-author")
+    release
+  end
+
+  @doc "Three synthetic tenants/work orders with canonical tagged identities."
+  def object_id_documents do
+    work_orders()
+    |> Enum.with_index(1)
+    |> Enum.map(fn {document, index} ->
+      document =
+        document
+        |> Map.put("_id", object_id(index))
+        |> Map.update!("parts", fn parts ->
+          Enum.with_index(parts, 1)
+          |> Enum.map(fn {part, part_index} ->
+            Map.put(part, "part_id", object_id(100 + part_index))
+          end)
+        end)
+
+      case index do
+        1 ->
+          document
+          |> Map.put("customer_id", object_id(201))
+          |> put_in(["schedule", "owner_id"], object_id(301))
+
+        2 ->
+          document |> Map.put("customer_id", nil) |> put_in(["schedule", "owner_id"], nil)
+
+        _ ->
+          document
+      end
+    end)
+  end
+
+  def object_id_work_orders, do: object_id_documents()
+
+  @doc "Deterministic explicitly constructed synthetic ObjectId (positive fixture integer)."
+  def object_id(number) when is_integer(number) and number >= 0 and number < 1_000_000 do
+    hex = number |> Integer.to_string(16) |> String.pad_leading(24, "0")
+    {:ok, value} = ObjectId.new(hex)
+    value
+  end
+
+  @doc "Portable value validity corpus; ordinary strings/maps are never implicitly coerced."
+  def object_id_cases do
+    valid = %{"$bson" => "object_id", "value" => "abcdef0123456789abcdef01"}
+
+    [
+      %{id: "canonical", value: valid, valid: true},
+      %{id: "zero", value: object_id(0), valid: true},
+      %{id: "raw_hex_string", value: valid["value"], valid: false},
+      %{
+        id: "uppercase",
+        value: Map.put(valid, "value", String.upcase(valid["value"])),
+        valid: false
+      },
+      %{id: "extra_key", value: Map.put(valid, "extra", true), valid: false},
+      %{id: "atom_keys", value: %{bson: "object_id", value: valid["value"]}, valid: false},
+      %{id: "extended_json", value: %{"$oid" => valid["value"]}, valid: false},
+      %{id: "wrong_tag", value: Map.put(valid, "$bson", "binary"), valid: false},
+      %{id: "short", value: Map.put(valid, "value", "abcdef"), valid: false},
+      %{id: "non_hex", value: Map.put(valid, "value", String.duplicate("g", 24)), valid: false},
+      %{id: "number", value: 1, valid: false},
+      %{id: "null", value: nil, valid: false},
+      %{id: "missing", value: %Selecto.Document.Missing{}, valid: false}
+    ]
+  end
+
+  defp object_predicate_answers(nil), do: nil
+
+  defp object_predicate_answers({equal, missing, null, positive}),
+    do: %{
+      timezone_eq_utc: equal,
+      timezone_missing: missing,
+      timezone_is_null: null,
+      duration_gt_zero: positive
+    }
 
   @doc "Separate authored scalar-array grants for root fields and identified child fields."
   def scalar_array_shape do

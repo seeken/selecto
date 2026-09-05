@@ -13,13 +13,21 @@ defmodule Selecto.Document.Drift do
       evidence = Map.new(report["paths"], &{&1["path"], &1})
 
       observed_findings =
-        Enum.flat_map(declared, fn {path, field} ->
-          compare_field(path, field, evidence[path], report)
+        Enum.flat_map(declared, fn {path, fields} ->
+          Enum.flat_map(fields, &compare_field(path, &1, evidence[path], report))
         end)
+        |> Enum.uniq()
 
       new_findings =
         report["paths"]
         |> Enum.reject(&Map.has_key?(declared, &1["path"]))
+        |> Enum.reject(fn evidence ->
+          Enum.any?(declared, fn {path, fields} ->
+            length(evidence["path"]) > length(path) and
+              Enum.take(evidence["path"], length(path)) == path and
+              Enum.any?(fields, &(&1["type"] == "object_id"))
+          end)
+        end)
         |> Enum.map(&new_path/1)
 
       result = %{
@@ -32,14 +40,23 @@ defmodule Selecto.Document.Drift do
         "sample_truncated" => report["truncated"],
         "contract_changed" => false,
         "findings" => (observed_findings ++ new_findings) |> Enum.sort_by(&Canonical.encode/1),
-        "not_evaluated" => [
-          "discriminator_values",
-          "unique_identity_values",
-          "reference_integrity",
-          "index_presence",
-          "live_authorization",
-          "semantic_datetime_validity"
-        ]
+        "not_evaluated" =>
+          [
+            "discriminator_values",
+            "unique_identity_values",
+            "reference_integrity",
+            "index_presence",
+            "live_authorization",
+            "semantic_datetime_validity"
+          ] ++
+            if("object_relation" in ShapeRelease.features(release),
+              do: ["owned_object_child_requiredness"],
+              else: []
+            ) ++
+            if("object_id" in ShapeRelease.features(release),
+              do: ["native_object_id_identity"],
+              else: []
+            )
       }
 
       {:ok, Map.put(result, "digest", Canonical.digest(result))}
@@ -47,12 +64,19 @@ defmodule Selecto.Document.Drift do
   end
 
   defp declared_fields(release) do
-    root = Map.new(release["shape"]["fields"], fn {_, field} -> {field["path"], field} end)
+    root = Map.new(release["shape"]["fields"], fn {_, field} -> {field["path"], [field]} end)
 
     Enum.reduce(release["relations"], root, fn
       {_, %{"kind" => "array"} = relation}, fields ->
         Enum.reduce(relation["fields"], fields, fn {_, field}, fields ->
-          Map.put(fields, relation["path"] ++ [%{"each" => true}] ++ field["path"], field)
+          Map.put(fields, relation["path"] ++ [%{"each" => true}] ++ field["path"], [field])
+        end)
+
+      {_, %{"kind" => "object"} = relation}, fields ->
+        Enum.reduce(relation["fields"], fields, fn {_, field}, fields ->
+          path = relation["path"] ++ field["path"]
+          refinement = Map.put(field, "_owned_object_child", true)
+          Map.update(fields, path, [refinement], &[refinement | &1])
         end)
 
       _, fields ->
@@ -67,7 +91,9 @@ defmodule Selecto.Document.Drift do
     unexpected =
       evidence["types"]
       |> Map.keys()
-      |> Enum.reject(&(&1 in [field["type"], "null"]))
+      |> Enum.reject(
+        &(&1 in [field["type"], "null"] or (field["type"] == "object_id" and &1 == "object"))
+      )
       |> Enum.sort()
 
     type_findings =
@@ -86,12 +112,25 @@ defmodule Selecto.Document.Drift do
     # Array-child presence is measured per document, not per array element; it
     # cannot establish required-child violations and must remain unclaimed.
     missing_findings =
-      if field["required"] and not Enum.any?(path, &is_map/1) and not report["truncated"] and
+      if field["required"] and field["_owned_object_child"] != true and
+           not Enum.any?(path, &is_map/1) and not report["truncated"] and
            evidence["present_documents"] < report["sample"]["documents_sampled"],
          do: [finding(path, "required_field_missing", "breaking", "observed_in_sample")],
          else: []
 
-    type_findings ++ null_findings ++ missing_findings
+    typed_findings =
+      if field["type"] == "object_id" and Map.has_key?(evidence["types"], "object"),
+        do: [
+          finding(
+            path,
+            "object_id_requires_typed_validation",
+            "inconclusive",
+            "structural_object_only"
+          )
+        ],
+        else: []
+
+    type_findings ++ typed_findings ++ null_findings ++ missing_findings
   end
 
   defp new_path(evidence) do

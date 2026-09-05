@@ -4,10 +4,10 @@ defmodule Selecto.Document.ShapeRelease do
   are strings. Approval is an explicit authoring step and never inferred from
   sampled documents. A digest detects mutation; it is not an authorization signature.
   """
-  alias Selecto.Document.{Canonical, Missing, Path}
+  alias Selecto.Document.{Canonical, Missing, ObjectId, Path}
 
-  @types ~w(string integer float boolean object array binary)
-  @scalar_types ~w(string integer float boolean binary)
+  @types ~w(string integer float boolean object array binary object_id)
+  @scalar_types ~w(string integer float boolean binary object_id)
   @field_keys ~w(path type required nullable missing filterable sortable server_managed aggregate_ops scalar_array)
   @array_predicates ~w(contains contains_any contains_all)
 
@@ -80,7 +80,8 @@ defmodule Selecto.Document.ShapeRelease do
     end
   end
 
-  def field(_release, %{"kind" => "array", "fields" => fields}, id) do
+  def field(_release, %{"kind" => kind, "fields" => fields}, id)
+      when kind in ["array", "object"] do
     case Map.fetch(fields, id) do
       {:ok, value} -> {:ok, Map.put(value, "id", id)}
       :error -> {:error, :unknown_document_field}
@@ -94,10 +95,34 @@ defmodule Selecto.Document.ShapeRelease do
     fields =
       Map.values(release["shape"]["fields"]) ++
         Enum.flat_map(release["relations"], fn {_id, relation} ->
-          if relation["kind"] == "array", do: Map.values(relation["fields"]), else: []
+          if relation["kind"] in ["array", "object"], do: Map.values(relation["fields"]), else: []
         end)
 
-    if Enum.any?(fields, &Map.has_key?(&1, "scalar_array")), do: ["scalar_array"], else: []
+    scalar_array =
+      if Enum.any?(fields, &Map.has_key?(&1, "scalar_array")), do: ["scalar_array"], else: []
+
+    object_relation =
+      if Enum.any?(release["relations"], fn {_, rel} -> rel["kind"] == "object" end),
+        do: ["object_relation"],
+        else: []
+
+    object_id = if Enum.any?(fields, &(&1["type"] == "object_id")), do: ["object_id"], else: []
+    object_id ++ object_relation ++ scalar_array
+  end
+
+  @doc "Validate the complete parent before returning zero or one owned object row. This helper does not authorize source access."
+  def object_rows(release, relation_id, document) do
+    with :ok <- validate_document(release, document),
+         {:ok, %{"kind" => "object"} = relation} <- relation(release, relation_id) do
+      case Path.fetch(document, relation["path"]) do
+        %Missing{} -> {:ok, []}
+        nil -> {:ok, []}
+        object when is_map(object) and not is_struct(object) -> {:ok, [object]}
+      end
+    else
+      {:error, _} = error -> error
+      _ -> {:error, ["an owned object relation is required"]}
+    end
   end
 
   @doc "Validate one fetched document, including variant and identified-child semantics."
@@ -163,6 +188,11 @@ defmodule Selecto.Document.ShapeRelease do
         ) ++
         check_source(source) ++ check_shape(shape) ++ check_relations(relations, source, shape)
 
+    # Local checks establish bounded, parsed paths before constructing the
+    # release-wide physical-path index. All relation views share one native
+    # document and cannot reinterpret an atomic value's wire representation.
+    errors = if errors == [], do: check_physical_paths(shape, relations), else: errors
+
     if errors == [] and release["status"] == "approved" do
       approval = release["approval"]
 
@@ -182,6 +212,57 @@ defmodule Selecto.Document.ShapeRelease do
   end
 
   defp check_release(_, _), do: ["release must be a string-keyed map"]
+
+  defp check_physical_paths(shape, relations) do
+    fields = Enum.map(shape["fields"], fn {_, field} -> {field["path"], field["type"]} end)
+
+    fields =
+      Enum.reduce(relations, fields, fn
+        {_, %{"kind" => "array"} = relation}, fields ->
+          Enum.reduce(relation["fields"], fields, fn {_, field}, fields ->
+            [{relation["path"] ++ [%{"each" => true}] ++ field["path"], field["type"]} | fields]
+          end)
+
+        {_, %{"kind" => "object"} = relation}, fields ->
+          Enum.reduce(relation["fields"], fields, fn {_, field}, fields ->
+            [{relation["path"] ++ field["path"], field["type"]} | fields]
+          end)
+
+        _, fields ->
+          fields
+      end)
+
+    object_ids =
+      Enum.reduce(fields, MapSet.new(), fn
+        {path, "object_id"}, paths -> MapSet.put(paths, path)
+        _, paths -> paths
+      end)
+
+    conflicting_types =
+      Enum.any?(fields, fn {path, type} ->
+        type != "object_id" and MapSet.member?(object_ids, path)
+      end)
+
+    descendants = Enum.any?(fields, fn {path, _} -> object_id_ancestor?(path, [], object_ids) end)
+
+    error_unless(
+      not conflicting_types,
+      "ObjectId physical paths cannot have conflicting field types"
+    ) ++
+      error_unless(
+        not descendants,
+        "ObjectId fields are atomic and cannot publish descendant paths"
+      )
+  end
+
+  # At most 32 parsed steps are visited per field; no pairwise field scan is
+  # needed. Check proper prefixes only so repeated ObjectId views stay valid.
+  defp object_id_ancestor?([], _prefix, _object_ids), do: false
+
+  defp object_id_ancestor?([step | rest], prefix, object_ids),
+    do:
+      MapSet.member?(object_ids, prefix) or
+        object_id_ancestor?(rest, prefix ++ [step], object_ids)
 
   defp check_source(source) when is_map(source) and not is_struct(source) do
     check_keys(
@@ -412,6 +493,65 @@ defmodule Selecto.Document.ShapeRelease do
       check_access_patterns(rel["access_patterns"], if(is_map(fields), do: Map.keys(fields)))
   end
 
+  defp check_relation(%{"kind" => "object"} = rel, id, relations, source, shape) do
+    parent = relations[rel["parent"]]
+    fields = rel["fields"]
+    shape_fields = shape["fields"]
+
+    object_field =
+      if is_map(shape_fields),
+        do:
+          Enum.find_value(shape_fields, fn {_, field} ->
+            if is_map(field) and field["path"] == rel["path"], do: field
+          end)
+
+    check_keys(
+      rel,
+      ~w(kind source parent path identity cardinality fields access_patterns),
+      "object relation #{safe_label(id)}"
+    ) ++
+      error_unless(rel["source"] == source["id"], "object source mismatch") ++
+      error_unless(is_map(parent) and parent["kind"] == "root", "object parent must be the root") ++
+      error_unless(match?({:ok, _}, Path.parse(rel["path"])), "invalid owned object path") ++
+      error_unless(
+        is_map(object_field) and object_field["type"] == "object",
+        "owned object path must be declared as object"
+      ) ++
+      error_unless(
+        rel["identity"] == "parent",
+        "owned object identity must be inherited from parent"
+      ) ++
+      error_unless(
+        rel["cardinality"] == "zero_or_one",
+        "owned object cardinality must be zero_or_one"
+      ) ++
+      error_unless(
+        is_map(shape_fields) and
+          Enum.any?(shape_fields, fn {_, field} ->
+            is_map(field) and field["path"] == source["identity_path"] and
+              field["type"] in ["string", "object_id"]
+          end),
+        "owned object parent identity must be a reviewed string or object_id"
+      ) ++
+      check_fields(fields, "object #{safe_label(id)}") ++
+      error_unless(
+        is_list(rel["path"]) and is_map(fields) and
+          Enum.all?(fields, fn {_, field} ->
+            is_map(field) and is_list(field["path"]) and
+              length(rel["path"]) + length(field["path"]) <= 32
+          end),
+        "combined owned object paths must fit the 32-step document path bound"
+      ) ++
+      check_access_patterns(rel["access_patterns"], if(is_map(parent), do: parent["fields"])) ++
+      error_unless(
+        is_map(parent) and is_map(parent["access_patterns"]) and is_map(rel["access_patterns"]) and
+          Enum.all?(rel["access_patterns"], fn {name, pattern} ->
+            parent["access_patterns"][name] == pattern
+          end),
+        "owned object access patterns must exactly reuse named parent index requirements"
+      )
+  end
+
   defp check_relation(_, _, _, _, _), do: ["unsupported virtual relation kind"]
 
   defp check_aggregate_ops(contract, supported, context) do
@@ -479,9 +619,9 @@ defmodule Selecto.Document.ShapeRelease do
       match?({:ok, _}, Path.parse(path)) and
         Enum.any?(fields, fn {_, field} ->
           is_map(field) and field["path"] == path and field["required"] == true and
-            field["nullable"] == false and field["type"] in ["string", "integer"]
+            field["nullable"] == false and field["type"] in ["string", "integer", "object_id"]
         end),
-      "#{context} must resolve to a required non-null string/integer field"
+      "#{context} must resolve to a required non-null string/integer/object_id field"
     )
   end
 
@@ -550,12 +690,28 @@ defmodule Selecto.Document.ShapeRelease do
             ["#{id}: child path must be an array"]
         end
 
+      {id, %{"kind" => "object"} = rel} ->
+        case Path.fetch(document, rel["path"]) do
+          %Missing{} ->
+            []
+
+          nil ->
+            []
+
+          value when is_map(value) and not is_struct(value) ->
+            validate_values(rel["fields"], value, id)
+
+          _ ->
+            ["#{id}: owned child must be an object"]
+        end
+
       _ ->
         []
     end)
   end
 
   defp type_matches?(v, "string"), do: is_binary(v) and String.valid?(v)
+  defp type_matches?(v, "object_id"), do: ObjectId.valid?(v)
   defp type_matches?(v, "binary"), do: is_binary(v)
   defp type_matches?(v, "integer"), do: is_integer(v)
   defp type_matches?(v, "float"), do: is_float(v)

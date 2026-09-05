@@ -3,6 +3,15 @@
 
 ## Unreleased
 
+- Added explicitly authored ObjectId fields with canonical portable values, typed
+  identities, predicates, signed cursors and results, atomic path validation, and
+  release-wide query/write capability gates. Native inference remains separate.
+
+- Added optional owned one-to-one object relations with inherited parent identity,
+  explicit zero-or-one results, whole-parent validation, shared adapter fixtures,
+  and release-wide query/write capability requirements. Drift recognizes object
+  fields while keeping conditional child requiredness explicitly inconclusive.
+
 - Added explicitly granted, bounded scalar-array contains/any/all predicates
   for strings, exact integers and booleans, with complete-array type validation
   and release-wide query/write capability requirements for shape refinements.

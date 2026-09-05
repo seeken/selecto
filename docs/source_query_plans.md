@@ -43,6 +43,28 @@ declares a maximum expansion and rejects duplicate element identities. Native
 joins, unrestricted arrays, offsets, grouped aggregation, arbitrary vendor types and
 residual query execution are outside this initial profile.
 
+Explicit `object_id` fields accept only canonical portable tagged maps. Construct
+one deliberately with `Selecto.Document.ObjectId.new/1`; a 24-hex string remains
+a string. The type supports existing exact comparisons, `in`, presence/null
+predicates, required-non-null ordering, and stable root/child identity. Array and
+owned-object parent scopes resolve the declared root identity type and require
+the same tagged value when it is ObjectId. Numeric aggregation and scalar-array
+ObjectId membership are not enabled by this type.
+
+Signed cursor payloads use canonical JSON and preserve ObjectId tags. Cursor
+validation checks the tag and binds it to the release, tenant, parent, and query;
+there is no BSON driver object in the token. Projected ObjectId values and
+inherited parent metadata retain the portable tag. A declared optional field may
+still return its permitted missing sentinel or null, and `Result.validate/2`
+rejects other representations.
+
+The plan requires `document.object_id` for every release containing any ObjectId
+field, including unselected root fields, child-only declarations and root counts.
+This is a separate capability from `document.object_relation` and
+`document.scalar_array`; supporting one does not imply the others. A native
+adapter owns explicit BSON conversion and native type guards. SQL controls that
+have not certified this family reject the release before execution.
+
 The default query bounds are 100 returned rows, 1 MiB of results, 5 seconds of
 backend operation time and 32 predicates. Hard maxima are 1,000 rows, 16 MiB,
 30 seconds and 128 predicates, with depth capped at 8. Connected adapters may
@@ -162,6 +184,38 @@ query or projection that does not expose the refined field. This prevents an
 older native adapter from silently ignoring new shape invariants.
 
 ## Cursors, results, and adapter execution
+
+Owned object relations use the same query entry point with an explicit parent:
+
+```elixir
+Plan.new(release, "work_order_schedule", %{
+  "parent_identity" => "wo-1",
+  "select" => ["due_at", "timezone", "duration_minutes"],
+  "where" => %{"op" => "eq", "field" => "timezone", "value" => "UTC"}
+}, trusted_context: %{tenant_id: "tenant-a"})
+```
+
+The result has zero or one row. The only accepted explicit `limit` is integer 1;
+ordering, cursor, and aggregate options are rejected, including empty or null
+options. Child field paths are object-relative and governed predicate grants,
+types, byte/time bounds, and trusted tenant scope still apply. The adapter must
+detect duplicate matched parents, validate the complete matched parent before
+considering the child predicate, and preserve missing/null semantics. This
+profile performs no join, pagination, recursive traversal, or object mutation.
+
+Both empty and single-row object results include the exact string-keyed metadata
+`metadata["relation_identity"] = %{"kind" => "parent", "parent_relation" =>
+"work_orders", "parent_identity" => "wo-1"}` and have `next_cursor: nil`.
+`Result.relation_identity_metadata(plan)` supplies this metadata value;
+`Result.validate/2` rejects missing or altered inherited identity. The identity
+is result metadata and is not silently injected as a projected data column.
+
+Every query consuming an owned-object release requires
+`document.object_relation`, including a root projection or count that does not
+select the object. Refined scalar arrays in object fields additionally require
+`document.scalar_array`. A governed action against the release similarly needs
+`:document_object_relation`; this gate protects complete shape validation and
+does not authorize a new mutation operation.
 
 The cursor key is a host secret of at least 32 bytes and is never stored in the
 plan. Tokens bind the tenant, release digest, relation/parent, predicate,

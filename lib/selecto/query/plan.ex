@@ -6,7 +6,7 @@ defmodule Selecto.Query.Plan do
   Tenant values come exclusively from the host's `:trusted_context`. The first
   version is strict: unsupported operations have no client-side fallback.
   """
-  alias Selecto.Document.{Missing, Path, ShapeRelease}
+  alias Selecto.Document.{Missing, ObjectId, Path, ShapeRelease}
   alias Selecto.Error
 
   @derive [Jason.Encoder, {Inspect, only: [:version, :required_capabilities, :bounds]}]
@@ -51,7 +51,8 @@ defmodule Selecto.Query.Plan do
     with :ok <- approved(release),
          :ok <- query_input(query),
          {:ok, relation} <- ShapeRelease.relation(release, relation_id),
-         {:ok, relation} <- parent_scope(relation, query),
+         {:ok, relation} <- parent_scope(release, relation, query),
+         :ok <- object_query_options(relation, query),
          {:ok, tenant} <- tenant(opts),
          {:ok, aggregates} <- aggregates(release, relation_id, relation, query),
          {:ok, bounds} <- bounds(Map.get(query, "bounds", %{}), aggregates),
@@ -60,7 +61,7 @@ defmodule Selecto.Query.Plan do
          {:ok, predicates} <- predicate(release, relation_id, Map.get(query, "where"), 0),
          :ok <- predicate_bound(predicates, bounds),
          {:ok, ordering} <- query_ordering(release, relation_id, relation, query, aggregates),
-         {:ok, page} <- query_page(query, bounds, aggregates),
+         {:ok, page} <- query_page(query, bounds, aggregates, relation),
          {:ok, access} <- access_pattern(relation, query) do
       plan = %__MODULE__{
         release: release,
@@ -116,6 +117,9 @@ defmodule Selecto.Query.Plan do
   def cursor_values(%{aggregates: [_ | _]}, _),
     do: error("Aggregate queries do not support cursors")
 
+  def cursor_values(%{relation: %{"kind" => "object"}}, _),
+    do: error("Owned object relations do not support cursors")
+
   def cursor_values(plan, values) when is_list(values) do
     valid =
       length(values) == length(plan.ordering) and
@@ -137,6 +141,7 @@ defmodule Selecto.Query.Plan do
   def typed?("number", v), do: (is_float(v) or is_integer(v)) and abs(v) <= 9_007_199_254_740_991
   def typed?("float", v), do: is_float(v)
   def typed?("boolean", v), do: is_boolean(v)
+  def typed?("object_id", v), do: ObjectId.valid?(v)
   def typed?(_, _), do: false
 
   @doc "Largest absolute integer input supported by an aggregate's exact arithmetic contract."
@@ -262,12 +267,20 @@ defmodule Selecto.Query.Plan do
   defp query_projection(_release, _id, _query, _relation, aggregates),
     do: {:ok, Enum.map(aggregates, &Map.take(&1, ~w(id type nullable)))}
 
+  defp query_ordering(_release, _id, %{"kind" => "object"}, _query, []), do: {:ok, []}
+
   defp query_ordering(release, id, relation, query, []),
     do: ordering(release, id, relation, query)
 
   defp query_ordering(_release, _id, _relation, _query, _aggregates), do: {:ok, []}
-  defp query_page(query, bounds, []), do: page(query, bounds)
-  defp query_page(_query, _bounds, _aggregates), do: {:ok, %{"limit" => 1, "after" => nil}}
+
+  defp query_page(_query, _bounds, [], %{"kind" => "object"}),
+    do: {:ok, %{"limit" => 1, "after" => nil}}
+
+  defp query_page(query, bounds, [], _relation), do: page(query, bounds)
+
+  defp query_page(_query, _bounds, _aggregates, _relation),
+    do: {:ok, %{"limit" => 1, "after" => nil}}
 
   defp projection(release, id, query, relation) do
     defaults =
@@ -430,7 +443,8 @@ defmodule Selecto.Query.Plan do
   defp orderable?(field),
     do:
       field["sortable"] == true and field["required"] == true and
-        field["nullable"] == false and field["type"] in ~w(string integer number float boolean)
+        field["nullable"] == false and
+        field["type"] in ~w(string integer number float boolean object_id)
 
   defp page(query, bounds) do
     limit = Map.get(query, "limit", bounds["max_rows"])
@@ -440,21 +454,44 @@ defmodule Selecto.Query.Plan do
       else: error("Invalid page limit")
   end
 
-  defp parent_scope(%{"kind" => "array"} = relation, query) do
-    case query["parent_identity"] do
-      value when is_binary(value) and byte_size(value) in 1..256 ->
-        {:ok, Map.put(relation, "parent_identity", value)}
+  defp parent_scope(release, %{"kind" => kind} = relation, query)
+       when kind in ["array", "object"] do
+    value = query["parent_identity"]
 
-      _ ->
-        error("Array relations require a parent identity within trusted tenant scope")
-    end
+    identity =
+      Enum.find_value(release["shape"]["fields"], fn {_, field} ->
+        if field["path"] == release["source"]["identity_path"], do: field
+      end)
+
+    valid =
+      case identity["type"] do
+        "string" -> is_binary(value) and byte_size(value) in 1..256
+        "object_id" -> typed?("object_id", value)
+        _ -> false
+      end
+
+    if valid,
+      do: {:ok, Map.put(relation, "parent_identity", value)},
+      else: error("Child relations require a typed parent identity within trusted tenant scope")
   end
 
-  defp parent_scope(relation, query) do
+  defp parent_scope(_release, relation, query) do
     if Map.has_key?(query, "parent_identity"),
       do: error("Parent identity applies only to child relations"),
       else: {:ok, relation}
   end
+
+  defp object_query_options(%{"kind" => "object"}, query) do
+    if Enum.any?(~w(cursor order_by aggregate), &Map.has_key?(query, &1)) or
+         Map.get(query, "limit", 1) !== 1,
+       do:
+         error(
+           "Owned object relations accept only limit 1 and do not support ordering, cursors, or aggregates"
+         ),
+       else: :ok
+  end
+
+  defp object_query_options(_, _), do: :ok
 
   defp access_pattern(relation, query) do
     patterns = Map.get(relation, "access_patterns", %{})
@@ -486,6 +523,16 @@ defmodule Selecto.Query.Plan do
 
     (["document.root"] ++
        Enum.map(plan.aggregates, &("query.aggregate." <> &1["op"])) ++
+       nested ++ shape_requirements(plan.release) ++ predicate_requirements(plan.predicates))
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp requirements(%{relation: %{"kind" => "object"}} = plan) do
+    nested =
+      if Enum.any?(plan.projection, &(length(&1["path"]) > 1)), do: ["document.nested"], else: []
+
+    (["document.object_relation", "query.limit"] ++
        nested ++ shape_requirements(plan.release) ++ predicate_requirements(plan.predicates))
     |> Enum.uniq()
     |> Enum.sort()

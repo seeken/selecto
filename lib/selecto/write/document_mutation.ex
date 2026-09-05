@@ -10,6 +10,7 @@ defmodule Selecto.Write.DocumentMutation do
   """
 
   alias Selecto.Write.Error
+  alias Selecto.Document.ObjectId
 
   @capabilities [
     :document_mutations,
@@ -40,6 +41,14 @@ defmodule Selecto.Write.DocumentMutation do
   @doc "Required write capabilities include the attached release's shape refinements."
   def capabilities(%__MODULE__{shape_features: features}) do
     @capabilities ++
+      if(is_list(features) and "object_id" in features,
+        do: [:document_object_id],
+        else: []
+      ) ++
+      if(is_list(features) and "object_relation" in features,
+        do: [:document_object_relation],
+        else: []
+      ) ++
       if(is_list(features) and "scalar_array" in features,
         do: [:document_scalar_array],
         else: []
@@ -49,7 +58,7 @@ defmodule Selecto.Write.DocumentMutation do
   @doc "Validate the portable mutation independently of adapter support."
   def validate(%__MODULE__{} = mutation) do
     with :ok <- selector(mutation.identity),
-         :ok <- selector(mutation.tenant),
+         :ok <- tenant_selector(mutation.tenant),
          :ok <- version(mutation.version),
          :ok <- validate_mutations(mutation),
          true <- valid_name?(mutation.action),
@@ -59,8 +68,13 @@ defmodule Selecto.Write.DocumentMutation do
          true <- valid_digest?(mutation.scope_digest),
          true <- valid_digest?(mutation.shape_digest),
          true <-
-           is_list(mutation.shape_features) and length(mutation.shape_features) <= 1 and
-             Enum.all?(mutation.shape_features, &(&1 == "scalar_array")),
+           is_list(mutation.shape_features) and length(mutation.shape_features) <= 3 and
+             Enum.sort(Enum.uniq(mutation.shape_features)) == mutation.shape_features and
+             Enum.all?(
+               mutation.shape_features,
+               &(&1 in ["object_id", "object_relation", "scalar_array"])
+             ),
+         true <- not object_id_selectors?(mutation) or "object_id" in mutation.shape_features,
          true <-
            is_list(mutation.effects) and length(mutation.effects) in 1..16 and
              Enum.uniq(mutation.effects) == mutation.effects and
@@ -86,12 +100,27 @@ defmodule Selecto.Write.DocumentMutation do
   end
 
   defp selector(%{path: path, value: value}) do
-    if valid_path?(path) and (is_binary(value) or is_integer(value)) and value != "",
-      do: :ok,
-      else: invalid(:invalid_document_selector)
+    if valid_path?(path) and (is_binary(value) or is_integer(value) or ObjectId.valid?(value)) and
+         value != "",
+       do: :ok,
+       else: invalid(:invalid_document_selector)
   end
 
   defp selector(_), do: invalid(:invalid_document_selector)
+
+  # The ObjectId milestone extends document/element identities, not trusted
+  # tenant types. Preserve the pre-existing string/integer tenant contract.
+  defp tenant_selector(%{value: value} = selector) when is_binary(value) or is_integer(value),
+    do: selector(selector)
+
+  defp tenant_selector(_), do: invalid(:invalid_document_selector)
+
+  defp object_id_selectors?(mutation) do
+    Enum.any?(
+      [mutation.identity, mutation.tenant | Enum.map(mutation.mutations, & &1.identity)],
+      &ObjectId.valid?(&1.value)
+    )
+  end
 
   defp version(%{path: path, expected: expected}) do
     if valid_path?(path) and is_integer(expected) and expected in 0..9_223_372_036_854_775_806,

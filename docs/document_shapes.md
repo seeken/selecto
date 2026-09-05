@@ -144,8 +144,9 @@ and all three source metadata fields are marked `server_managed`.
 Every field explicitly declares a parsed path, one type, requiredness, nullability,
 and `missing: "preserve" | "reject"`. Required fields reject missing. Opaque
 `object`/`array` fields disable filtering and sorting; subpaths must be authored
-as separate fields. Scalar types are `string`, `integer`, `float`, `boolean`, and
-`binary`; each adapter still has to declare which it can execute losslessly.
+as separate fields. Scalar types are `string`, `integer`, `float`, `boolean`,
+`binary`, and explicitly authored `object_id`; each adapter still has to declare
+which it can execute losslessly.
 There is no coercion, raw native expression, executable metadata, automatic
 default, arbitrary dynamic-key expansion, or implicit write permission.
 
@@ -187,8 +188,8 @@ refinement remain unchanged, as do the original fixture artifacts.
 `ShapeRelease.scalar_array_valid?/2` checks a descriptor and stored value using
 at most `max_elements + 1` elements. `scalar_array_element?/2` checks an exact
 element family. `validate_document/2` enforces these refinements on every
-fetched document and identified child. `ShapeRelease.features/1` returns
-`["scalar_array"]` when any root or child field declares a refinement, even
+fetched document and child. `ShapeRelease.features/1` includes
+`"scalar_array"` when any root or child field declares a refinement, even
 when no membership operation is granted. Adapters must support the refinement
 whenever they consume the release. `Fixtures.scalar_array_release/0` and
 `scalar_array_work_orders/0` provide a separately approved synthetic example.
@@ -223,6 +224,129 @@ required/null/type rules, known variants, child fan-out, object elements, and
 unique stable child identities against an approved release. This is an
 executable per-document check, not a proof about every document in a collection.
 
+## Optional owned object relations
+
+An approved object field can also be published as an owned one-to-one relation.
+The root object remains governed by its existing missing/null policy. The new
+relation declares object-relative fields and inherits the parent's identity:
+
+```elixir
+%{
+  "kind" => "object",
+  "source" => "work_orders_docs",
+  "parent" => "work_orders",
+  "path" => ["schedule"],
+  "identity" => "parent",
+  "cardinality" => "zero_or_one",
+  "fields" => %{
+    "timezone" => %{
+      "path" => ["timezone"], "type" => "string",
+      "required" => false, "nullable" => false, "missing" => "preserve",
+      "filterable" => true, "sortable" => true
+    }
+  },
+  "access_patterns" => %{
+    "by_tenant_id" => %{"index" => "tenant_identity", "keys" => ["tenant_id", "id"]}
+  }
+}
+```
+
+The parent must be the root relation, with a reviewed string or ObjectId identity
+in this profile. The path must name a declared `object` field. The relation's named
+access patterns must exactly reuse a nonempty subset of the parent's reviewed
+index/key definitions. The object has no independently writable identity,
+ordinality, ordering rule, duplicate policy, or expansion bound. Its combined
+parent/object-relative field paths still fit the 32-step path limit.
+
+An absent or null object produces zero child rows only when the root object
+field permits that state. A present empty object produces one row if the child
+field contracts permit missing values. A required child field applies only when
+its owning object exists. A wrong container or invalid child field fails
+whole-parent validation; a nonmatching child predicate cannot hide that failure.
+Root reads, root counts, and governed writes also validate all declared object
+child fields. This extends validation, not mutation authority: it does not grant
+object replacement, object-field updates, cross-document joins, or recursive
+relation traversal.
+
+`ShapeRelease.features/1` includes `"object_relation"` for every release with an
+owned object relation, plus `"scalar_array"` when such a child's field carries
+that refinement. Query and write capability checks require the corresponding
+feature even when the object is not selected. Old releases and their digests
+remain unchanged. `Fixtures.object_relation_release/0` adds the optional schedule
+to the aggregate fixture while retaining the identified parts relation.
+`object_relation_cases/0` and `object_relation_predicates/0` are the shared,
+independently authored presence/type/filter corpus for native adapter tests.
+
+`ShapeRelease.object_rows/3` validates the entire supplied parent and returns
+`{:ok, []}` or `{:ok, [object]}`. It is a structural helper, not an authorization
+or source-fetch API. The adapter must additionally enforce trusted tenant scope,
+the requested parent identity, and uniqueness of that matched parent.
+
+## Explicit ObjectId fields
+
+An ObjectId field has the published type `"object_id"`. Its portable value is
+exactly the plain, string-keyed map
+`%{"$bson" => "object_id", "value" => "abcdef0123456789abcdef01"}`. The value
+contains 24 lowercase hexadecimal digits and no other keys. This authored type
+is distinct from a string containing the same digits and from an ordinary
+document/map. Vendor structs, atom-keyed maps, extended JSON `$oid` objects,
+uppercase tags, and extra keys are invalid portable values.
+
+`Selecto.Document.ObjectId.new/1` explicitly constructs a tagged value from a
+24-digit hexadecimal string; it accepts upper/lowercase input and canonicalizes
+to lowercase. `ObjectId.valid?/1` accepts only the exact canonical tagged map.
+There is no automatic cast in query, cursor, action, or result validation, and
+the core helper has no BSON driver dependency.
+
+ObjectIds are atomic values. Their tagged JSON representation is a transport
+format, so paths such as `["_id", "value"]` or a child's `["owner_id", "value"]`
+cannot be published as fields. Release validation compares canonical physical
+paths across root fields, owned objects, and array elements and rejects all
+ObjectId descendants. It also rejects another field type at the same physical
+ObjectId path, such as a root `object` view and a child `object_id` view of
+`schedule.owner_id`. Multiple `object_id` views at the same path remain valid,
+as do ordinary object ancestors such as `schedule` containing an ObjectId field.
+Existing non-ObjectId overlapping type refinements retain their prior behavior.
+The validation uses path indexes and bounded prefix lookups rather than a
+pairwise scan of every field.
+
+Required non-null root and identified-array element identities may use this
+type. Optional nullable fields follow their existing presence rules. Owned
+object identity metadata inherits the canonical parent tag. Child query parent
+scope accepts only the value family declared for the root identity: strings or
+ObjectIds in the current child profile. This milestone does not extend tenant
+identity types or permit ObjectId scalar-array descriptors, numeric aggregation,
+UUID/date/Decimal/native-binary families, generated identities, or arbitrary BSON
+values.
+
+Every consuming query and governed write requires ObjectId support when any
+published root, array-child, or object-child field declares it, including
+unselected fields and root count queries. `ShapeRelease.features/1` adds
+`"object_id"`; required capabilities are `document.object_id` and
+`:document_object_id`. Tagged document/element mutation selectors must also
+carry that shape feature. The canonical sorted feature list can combine
+ObjectIds, owned objects, and scalar arrays. Older release contents and digests
+remain unchanged.
+
+The reference adapter must verify the native BSON type before turning a value
+into this portable representation; an ordinary native object that looks like
+the portable tag must not satisfy a declared native ObjectId field. Conversely,
+an adapter must only convert query/action tags at explicitly typed value
+positions, never by recursively treating every tag-looking application map as
+native syntax. Query results retain tagged maps, and result validation rejects
+plain strings or malformed ObjectId projections.
+
+Inference intentionally does not infer ObjectId from ordinary map-shaped JSON.
+An author can approve the explicit field type after independent source review.
+Value-free drift evidence that only sees an object is inconclusive for ObjectId
+semantics and requests typed validation; observed plain strings remain
+incompatible. ObjectId representation internals are not proposed as separately
+published drift fields. `Fixtures.object_id_release/0` and
+`object_id_documents/0` provide a separate synthetic release with root/element
+identities and nullable references; `object_id_cases/0` is the shared strict-value
+corpus. This fixture evidence is not certification of every BSON family or
+backend.
+
 `Path.fetch/2` returns `%Selecto.Document.Missing{}` for an absent path, `nil` for
 present null, and the actual value otherwise. JSON encoding of that sentinel is
 `{"$selecto":"missing"}`. Consumers must treat the tag as result metadata;
@@ -234,7 +358,9 @@ missing must not be collapsed into null before predicate or mutation planning.
 observed incompatible types/nulls as breaking sample evidence and new unexposed
 paths as additive review candidates. Unseen fields are inconclusive. Required
 root-field absence is reported only when the sample was not truncated; child
-presence counts do not prove per-element requiredness. Discriminator values,
+presence counts do not prove per-element requiredness or requiredness conditional
+on an optional owning object's presence. Object-child published paths and their
+observed type/null constraints participate in drift comparison. Discriminator values,
 identity uniqueness, indexes, references, live authorization, and datetime
 meaning are explicitly listed as unevaluated.
 
