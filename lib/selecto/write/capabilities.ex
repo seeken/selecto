@@ -106,6 +106,11 @@ defmodule Selecto.Write.Capabilities do
     |> Enum.uniq()
   end
 
+  defp document_requirements(%Command{
+         metadata: %{document: %Selecto.Write.DocumentMutation{} = document}
+       }),
+       do: Selecto.Write.DocumentMutation.capabilities(document)
+
   defp document_requirements(%Command{metadata: %{document: _document}}),
     do: Selecto.Write.DocumentMutation.capabilities()
 

@@ -3,6 +3,10 @@
 
 ## Unreleased
 
+- Added explicitly granted, bounded scalar-array contains/any/all predicates
+  for strings, exact integers and booleans, with complete-array type validation
+  and release-wide query/write capability requirements for shape refinements.
+
 - Added explicitly granted root count and integer sum/min/max source queries,
   with bounded input, exact arithmetic, and one-row normalized results.
 

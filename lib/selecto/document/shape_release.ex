@@ -8,7 +8,8 @@ defmodule Selecto.Document.ShapeRelease do
 
   @types ~w(string integer float boolean object array binary)
   @scalar_types ~w(string integer float boolean binary)
-  @field_keys ~w(path type required nullable missing filterable sortable server_managed aggregate_ops)
+  @field_keys ~w(path type required nullable missing filterable sortable server_managed aggregate_ops scalar_array)
+  @array_predicates ~w(contains contains_any contains_all)
 
   @spec new(map()) :: {:ok, map()} | {:error, list()}
   def new(%{"status" => "approved"}),
@@ -88,6 +89,17 @@ defmodule Selecto.Document.ShapeRelease do
 
   def field(_, _, _), do: {:error, :unknown_document_field}
 
+  @doc "Features required to preserve all refinements in an approved release, including child fields."
+  def features(release) do
+    fields =
+      Map.values(release["shape"]["fields"]) ++
+        Enum.flat_map(release["relations"], fn {_id, relation} ->
+          if relation["kind"] == "array", do: Map.values(relation["fields"]), else: []
+        end)
+
+    if Enum.any?(fields, &Map.has_key?(&1, "scalar_array")), do: ["scalar_array"], else: []
+  end
+
   @doc "Validate one fetched document, including variant and identified-child semantics."
   def validate_document(release, document) do
     with :ok <- validate(release, require_approved: true) do
@@ -103,6 +115,29 @@ defmodule Selecto.Document.ShapeRelease do
       if errors == [], do: :ok, else: {:error, errors}
     end
   end
+
+  @doc "Check an entire bounded scalar array; invalid arrays never match a typed membership predicate."
+  def scalar_array_valid?(%{"element_type" => type, "max_elements" => maximum}, value)
+      when type in ~w(string integer boolean) and is_integer(maximum) and maximum in 1..1000 and
+             is_list(value) do
+    bounded = Enum.take(value, maximum + 1)
+
+    length(bounded) <= maximum and Enum.all?(bounded, &scalar_array_element?(type, &1))
+  rescue
+    _ -> false
+  end
+
+  def scalar_array_valid?(_, _), do: false
+
+  @doc "Exact supported scalar-array element families; null elements and coercions are excluded."
+  def scalar_array_element?("string", value),
+    do: is_binary(value) and byte_size(value) <= 16_384 and String.valid?(value)
+
+  def scalar_array_element?("integer", value),
+    do: is_integer(value) and value in -9_007_199_254_740_991..9_007_199_254_740_991
+
+  def scalar_array_element?("boolean", value), do: is_boolean(value)
+  def scalar_array_element?(_, _), do: false
 
   defp check_release(release, require_approved) when is_map(release) and not is_struct(release) do
     source = release["source"]
@@ -232,12 +267,44 @@ defmodule Selecto.Document.ShapeRelease do
         field,
         if(field["type"] == "integer", do: ~w(sum min max), else: []),
         context
-      )
+      ) ++ check_scalar_array(field, context)
 
     # Coercions, defaults, arbitrary subpaths, and executable metadata have no V1 syntax.
   end
 
   defp check_field(_, context), do: ["#{context}: field must be a map"]
+
+  defp check_scalar_array(%{"scalar_array" => descriptor} = field, context)
+       when is_map(descriptor) and not is_struct(descriptor) do
+    operations = descriptor["predicate_ops"]
+
+    check_keys(
+      descriptor,
+      ~w(element_type max_elements predicate_ops),
+      context <> ".scalar_array"
+    ) ++
+      error_unless(field["type"] == "array", "#{context}: scalar_array requires an array field") ++
+      error_unless(
+        descriptor["element_type"] in ~w(string integer boolean),
+        "#{context}: unsupported scalar array element type"
+      ) ++
+      error_unless(
+        is_integer(descriptor["max_elements"]) and descriptor["max_elements"] in 1..1000,
+        "#{context}: scalar array max_elements must be 1..1000"
+      ) ++
+      error_unless(
+        is_list(operations) and length(operations) <= 3 and Enum.uniq(operations) == operations and
+          Enum.all?(operations, &(&1 in @array_predicates)),
+        "#{context}: scalar array predicates must be distinct supported operations"
+      )
+  end
+
+  defp check_scalar_array(field, context) do
+    error_unless(
+      not Map.has_key?(field, "scalar_array"),
+      "#{context}: scalar_array must be an explicit descriptor"
+    )
+  end
 
   defp check_variants(variants, fields) when is_map(variants) and is_map(fields) do
     values = variants["values"]
@@ -432,7 +499,12 @@ defmodule Selecto.Document.ShapeRelease do
           error_unless(field["nullable"], "#{context}.#{id}: null is not allowed")
 
         true ->
-          error_unless(type_matches?(value, field["type"]), "#{context}.#{id}: type mismatch")
+          error_unless(type_matches?(value, field["type"]), "#{context}.#{id}: type mismatch") ++
+            error_unless(
+              not Map.has_key?(field, "scalar_array") or
+                scalar_array_valid?(field["scalar_array"], value),
+              "#{context}.#{id}: invalid bounded scalar array"
+            )
       end
     end)
   end

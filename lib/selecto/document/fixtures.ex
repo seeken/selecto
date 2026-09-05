@@ -157,6 +157,92 @@ defmodule Selecto.Document.Fixtures do
     release
   end
 
+  @doc "Separate authored scalar-array grants for root fields and identified child fields."
+  def scalar_array_shape do
+    aggregate_shape()
+    |> Map.put("id", "work-orders/scalar-arrays-v1")
+    |> put_in(["shape", "fields", "tags"], scalar_array(["tags"], "string"))
+    |> put_in(["shape", "fields", "ratings"], scalar_array(["ratings"], "integer"))
+    |> put_in(["shape", "fields", "flags"], scalar_array(["flags"], "boolean"))
+    |> update_in(["relations", "work_orders", "fields"], &Enum.sort(&1 ++ ["ratings", "flags"]))
+    |> put_in(
+      ["relations", "work_order_parts", "fields", "labels"],
+      scalar_array(["labels"], "string")
+    )
+  end
+
+  def scalar_array_release do
+    {:ok, draft} = ShapeRelease.new(scalar_array_shape())
+    {:ok, release} = ShapeRelease.approve(draft, approved_by: "synthetic-fixture-author")
+    release
+  end
+
+  def scalar_array_work_orders do
+    Enum.map(work_orders(), fn document ->
+      document
+      |> Map.put("ratings", if(document["_id"] == "wo-1", do: [1, 2, 2], else: []))
+      |> Map.put("flags", if(document["_id"] == "wo-1", do: [true, false], else: []))
+      |> Map.update!("parts", fn parts ->
+        Enum.map(parts, fn part ->
+          Map.put(part, "labels", if(part["part_id"] == "part-1", do: ["critical"], else: []))
+        end)
+      end)
+    end)
+  end
+
+  @doc "Synthetic membership truth cases shared by native adapter tests; the descriptor bound is 8."
+  def scalar_array_cases(type) when type in ~w(string integer boolean) do
+    {first, second, wrong} =
+      case type do
+        "string" -> {"alpha", "beta", 1}
+        "integer" -> {1, 2, "1"}
+        "boolean" -> {true, false, 1}
+      end
+
+    %{
+      "contains" => first,
+      "contains_any" => [first, second],
+      "contains_all" => [first, second],
+      "cases" => [
+        %{id: "empty", value: [], valid: true, expected: [false, false, false]},
+        %{id: "first", value: [first], valid: true, expected: [true, true, false]},
+        %{id: "second", value: [second], valid: true, expected: [false, true, false]},
+        %{id: "both", value: [first, second], valid: true, expected: [true, true, true]},
+        %{id: "duplicates", value: [first, first], valid: true, expected: [true, true, false]},
+        %{id: "mixed", value: [first, wrong], valid: false, expected: [false, false, false]},
+        %{id: "null_item", value: [first, nil], valid: false, expected: [false, false, false]},
+        %{
+          id: "over_bound",
+          value: List.duplicate(first, 9),
+          valid: false,
+          expected: [false, false, false]
+        },
+        %{id: "null", value: nil, valid: false, expected: [false, false, false]},
+        %{
+          id: "missing",
+          value: %Selecto.Document.Missing{},
+          valid: false,
+          expected: [false, false, false]
+        },
+        %{id: "container", value: first, valid: false, expected: [false, false, false]}
+      ]
+    }
+  end
+
+  defp scalar_array(path, type) do
+    opaque(path, "array")
+    |> Map.merge(%{
+      "required" => false,
+      "nullable" => true,
+      "missing" => "preserve",
+      "scalar_array" => %{
+        "element_type" => type,
+        "max_elements" => 8,
+        "predicate_ops" => ~w(contains contains_any contains_all)
+      }
+    })
+  end
+
   defp scalar(path, type, required, opts \\ []) do
     %{
       "path" => path,

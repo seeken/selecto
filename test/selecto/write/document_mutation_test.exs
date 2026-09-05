@@ -61,6 +61,43 @@ defmodule Selecto.Write.DocumentMutationTest do
     end
   end
 
+  test "shape features require adapter support while original mutation capabilities remain unchanged" do
+    original = mutation()
+    assert original.shape_features == []
+    assert DocumentMutation.capabilities(original) == DocumentMutation.capabilities()
+
+    refined = %{original | shape_features: ["scalar_array"]}
+    assert :ok = DocumentMutation.validate(refined)
+    assert :document_scalar_array in DocumentMutation.capabilities(refined)
+    command = %{command() | metadata: %{document: refined}}
+    assert :ok = Command.validate(command)
+
+    original_capabilities =
+      Map.new(DocumentMutation.capabilities(), &{&1, true})
+      |> Map.merge(%{protocol_version: 1, update: true})
+
+    assert {:error, %{type: :write_capability_missing}} =
+             Capabilities.require(original_capabilities, command)
+
+    assert :ok =
+             Capabilities.require(
+               Map.put(original_capabilities, :document_scalar_array, true),
+               command
+             )
+
+    for features <- [
+          nil,
+          "scalar_array",
+          [:scalar_array],
+          ["unknown"],
+          ["scalar_array", "scalar_array"]
+        ] do
+      invalid = %{original | shape_features: features}
+      assert {:error, _} = DocumentMutation.validate(invalid)
+      assert {:error, _} = Command.validate(%{command | metadata: %{document: invalid}})
+    end
+  end
+
   test "finite path and amount matrix rejects protected, raw, positional and unsupported mutations" do
     paths = [
       ["parts"],

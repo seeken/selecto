@@ -29,6 +29,7 @@ defmodule Selecto.Query.Plan do
   @type t :: %__MODULE__{}
   @operators ~w(eq ne gt gte lt lte in exists missing is_null is_not_null)
   @unary ~w(exists missing is_null is_not_null)
+  @array_predicates ~w(contains contains_any contains_all)
   @bounds %{
     "max_rows" => 100,
     "max_bytes" => 1_048_576,
@@ -311,6 +312,19 @@ defmodule Selecto.Query.Plan do
   end
 
   defp predicate(release, relation, %{"op" => op, "field" => id} = input, _)
+       when op in @array_predicates do
+    with true <- Enum.sort(Map.keys(input)) == ~w(field op value),
+         {:ok, field} <- field(release, relation, id),
+         %{"predicate_ops" => grants, "element_type" => type} <- field["scalar_array"],
+         true <- op in grants,
+         true <- scalar_array_operand?(op, type, input["value"]) do
+      {:ok, Map.put(input, "field", field)}
+    else
+      _ -> error("Scalar array predicate requires an explicit typed grant and bounded operand")
+    end
+  end
+
+  defp predicate(release, relation, %{"op" => op, "field" => id} = input, _)
        when op in @operators do
     expected = if op in @unary, do: ~w(field op), else: ~w(field op value)
 
@@ -325,6 +339,15 @@ defmodule Selecto.Query.Plan do
   end
 
   defp predicate(_, _, _, _), do: error("Invalid portable predicate")
+
+  defp scalar_array_operand?("contains", type, value),
+    do: ShapeRelease.scalar_array_element?(type, value)
+
+  defp scalar_array_operand?(op, type, values)
+       when op in ~w(contains_any contains_all) and is_list(values) and length(values) <= 100,
+       do: Enum.all?(values, &ShapeRelease.scalar_array_element?(type, &1))
+
+  defp scalar_array_operand?(_, _, _), do: false
 
   defp predicate_value(op, _, _) when op in @unary, do: :ok
 
@@ -463,7 +486,7 @@ defmodule Selecto.Query.Plan do
 
     (["document.root"] ++
        Enum.map(plan.aggregates, &("query.aggregate." <> &1["op"])) ++
-       nested ++ predicate_requirements(plan.predicates))
+       nested ++ shape_requirements(plan.release) ++ predicate_requirements(plan.predicates))
     |> Enum.uniq()
     |> Enum.sort()
   end
@@ -478,9 +501,13 @@ defmodule Selecto.Query.Plan do
     Enum.sort(
       Enum.uniq(
         [source, "query.ordering", "query.cursor", "query.limit"] ++
-          nested ++ predicate_requirements(plan.predicates)
+          nested ++ shape_requirements(plan.release) ++ predicate_requirements(plan.predicates)
       )
     )
+  end
+
+  defp shape_requirements(release) do
+    Enum.map(ShapeRelease.features(release), &("document." <> &1))
   end
 
   defp predicate_requirements(nil), do: []

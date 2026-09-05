@@ -48,6 +48,23 @@ reason categories. Driver exception structs, connection handles, SQL text, and
 bound values are not retained in `Selecto.Write.Error.details`; adapters should
 add portable constraint codes deliberately rather than forwarding driver data.
 
+### Document shape refinements
+
+The experimental single-document action profile attaches a typed
+`Selecto.Write.DocumentMutation` to `Command.metadata.document`. The existing
+identified-element increment remains the only mutation in that profile.
+`DocumentMutation.capabilities/0` preserves the original required capability
+list. `capabilities/1` also derives requirements from the mutation's optional
+`shape_features`, which defaults to `[]` for existing shapes.
+
+An approved release with any root or child scalar-array refinement contributes
+`"scalar_array"` through `ShapeRelease.features/1`. Updato carries that exact
+list into the governed mutation; core then requires `:document_scalar_array`
+from the write adapter. The adapter must compare the declared features with
+the actual approved release and preserve those shape checks atomically. This
+closes a compatibility gap for writes targeting newer shapes; it grants no new
+write operation or writable path. Unknown or duplicate feature names are invalid.
+
 ## Default-branch capability matrix
 
 This table summarizes the executable `write_capabilities/1` reports and suites

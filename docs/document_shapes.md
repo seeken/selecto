@@ -159,6 +159,40 @@ separately from the unchanged initial fixture. Query planning currently permits
 only root aggregates, with numeric and empty-input rules in
 [`source_query_plans.md`](source_query_plans.md#root-aggregates).
 
+An array field can additionally declare an explicit `scalar_array` refinement:
+
+```elixir
+"scalar_array" => %{
+  "element_type" => "string",
+  "max_elements" => 8,
+  "predicate_ops" => ["contains", "contains_any", "contains_all"]
+}
+```
+
+Supported element families are UTF-8 strings of at most 16,384 bytes, integers
+within ±9,007,199,254,740,991, and booleans. `max_elements` is an authored bound
+from 1–1,000; it does not truncate the stored value. Null elements, mixed types,
+objects, nested arrays and floating-point elements are excluded. Duplicates and
+source order remain intact when projected; membership predicates have set
+semantics. The enclosing field's existing missing/null policy applies to the
+whole value. Optional null or missing arrays remain distinct from empty arrays.
+
+`predicate_ops` must explicitly list a distinct subset of the three operations,
+including an empty list when only shape validation is wanted. This grant is
+independent of generic `filterable`; array fields continue to set `filterable`
+and `sortable` to false. Inference never creates these grants. Root and identified
+child fields use the same descriptor. Opaque arrays without this optional
+refinement remain unchanged, as do the original fixture artifacts.
+
+`ShapeRelease.scalar_array_valid?/2` checks a descriptor and stored value using
+at most `max_elements + 1` elements. `scalar_array_element?/2` checks an exact
+element family. `validate_document/2` enforces these refinements on every
+fetched document and identified child. `ShapeRelease.features/1` returns
+`["scalar_array"]` when any root or child field declares a refinement, even
+when no membership operation is granted. Adapters must support the refinement
+whenever they consume the release. `Fixtures.scalar_array_release/0` and
+`scalar_array_work_orders/0` provide a separately approved synthetic example.
+
 Paths contain 1–32 string key segments, each 1–128 bytes in the portable alphabet
 `[A-Za-z_][A-Za-z0-9_-]*`. Dotted strings, dollar-prefixed operators, NULs, numeric
 array offsets, and arbitrary atoms are rejected. Inference array steps use the

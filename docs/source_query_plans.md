@@ -113,6 +113,54 @@ predicate capabilities. Aggregation must run natively. Bounded input evidence
 for shape validation may be returned only with explicit residual metadata and
 byte checks; it does not authorize client-side aggregation.
 
+## Bounded scalar-array membership
+
+A published array field with an approved `scalar_array` descriptor can grant
+three typed predicates through its `predicate_ops` list:
+
+```elixir
+%{"op" => "contains", "field" => "tags", "value" => "urgent"}
+%{"op" => "contains_any", "field" => "tags", "value" => ["urgent", "routine"]}
+%{"op" => "contains_all", "field" => "ratings", "value" => [1, 2]}
+```
+
+`contains` requires one exact element-family literal. `contains_any` and
+`contains_all` require 0–100 exact typed literals. Operand duplicates have no
+additional effect. Matching is case-sensitive and uses exact types without
+number/string/boolean coercion. The only supported element families are string,
+portable 53-bit integer, and boolean; strings must be valid UTF-8 and at most
+16,384 bytes. Native operators, arbitrary paths, null operands and nested values
+are rejected during planning. The grant is separate from generic filtering;
+it does not enable ordering or generic comparisons on an array value.
+
+The predicate is true only when the **entire stored array** is within its
+authored element bound, every element has the exact declared type, and the
+membership condition holds. Missing, null, wrong containers, mixed types, null
+elements and oversized arrays are nonmatches. A valid-looking prefix of an
+invalid or oversized array never matches. This is the same typed-guard rule
+used by scalar comparisons; it is not a promise to report every invalid source
+document encountered while filtering.
+
+For an empty operand list, `contains_any` is false. `contains_all` is true for a
+present, fully valid array, including an empty array, and false otherwise.
+Stored duplicates and source order do not affect membership. Whole-document
+validation remains mandatory: an unfiltered read/count or another successful
+`or` branch that selects a malformed array-bearing document fails its approved
+shape check. It must not return that document or count it successfully.
+
+Root and existing identified-child fields share the contract. Child queries
+still require the parent identity and trusted tenant. Boolean composition,
+signed pagination and root aggregates retain their existing boundaries.
+Membership executes natively over at most `max_elements + 1` inspected elements;
+this does not authorize unnesting, client-side filtering, new relationships or
+array writes.
+
+Each operation requires its `predicate.contains`, `predicate.contains_any` or
+`predicate.contains_all` capability. Every query consuming a release with any
+scalar-array descriptor also requires `document.scalar_array`, even a count
+query or projection that does not expose the refined field. This prevents an
+older native adapter from silently ignoring new shape invariants.
+
 ## Cursors, results, and adapter execution
 
 The cursor key is a host secret of at least 32 bytes and is never stored in the

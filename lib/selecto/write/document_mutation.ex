@@ -31,11 +31,20 @@ defmodule Selecto.Write.DocumentMutation do
     :shape_digest,
     :effects
   ]
-  defstruct @enforce_keys
+  defstruct @enforce_keys ++ [shape_features: []]
 
   @type t :: %__MODULE__{}
 
   def capabilities, do: @capabilities
+
+  @doc "Required write capabilities include the attached release's shape refinements."
+  def capabilities(%__MODULE__{shape_features: features}) do
+    @capabilities ++
+      if(is_list(features) and "scalar_array" in features,
+        do: [:document_scalar_array],
+        else: []
+      )
+  end
 
   @doc "Validate the portable mutation independently of adapter support."
   def validate(%__MODULE__{} = mutation) do
@@ -49,6 +58,9 @@ defmodule Selecto.Write.DocumentMutation do
          true <- valid_digest?(mutation.payload_digest),
          true <- valid_digest?(mutation.scope_digest),
          true <- valid_digest?(mutation.shape_digest),
+         true <-
+           is_list(mutation.shape_features) and length(mutation.shape_features) <= 1 and
+             Enum.all?(mutation.shape_features, &(&1 == "scalar_array")),
          true <-
            is_list(mutation.effects) and length(mutation.effects) in 1..16 and
              Enum.uniq(mutation.effects) == mutation.effects and
