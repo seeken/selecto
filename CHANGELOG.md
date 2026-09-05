@@ -3,6 +3,9 @@
 
 ## Unreleased
 
+- Added explicitly granted root count and integer sum/min/max source queries,
+  with bounded input, exact arithmetic, and one-row normalized results.
+
 - Added an experimental document source seam with reviewed ShapeReleases,
   bounded structural inference, typed query plans, signed tenant-bound cursors,
   and explicit missing/null values. MongoDB and SQLite JSON control adapters

@@ -149,6 +149,16 @@ as separate fields. Scalar types are `string`, `integer`, `float`, `boolean`, an
 There is no coercion, raw native expression, executable metadata, automatic
 default, arbitrary dynamic-key expansion, or implicit write permission.
 
+Root relations can explicitly grant `aggregate_ops: ["count"]`. Integer fields
+can grant any distinct subset of `aggregate_ops: ["sum", "min", "max"]`; other
+field types cannot grant numeric aggregation. Missing grants mean an empty
+permission set and leave existing release artifacts valid without changing
+their digest. Inference does not infer these grants. A new authored release
+must approve their addition; `Fixtures.aggregate_shape/0` demonstrates this
+separately from the unchanged initial fixture. Query planning currently permits
+only root aggregates, with numeric and empty-input rules in
+[`source_query_plans.md`](source_query_plans.md#root-aggregates).
+
 Paths contain 1–32 string key segments, each 1–128 bytes in the portable alphabet
 `[A-Za-z_][A-Za-z0-9_-]*`. Dotted strings, dollar-prefixed operators, NULs, numeric
 array offsets, and arbitrary atoms are rejected. Inference array steps use the

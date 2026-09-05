@@ -6,7 +6,7 @@ defmodule Selecto.Query.Plan do
   Tenant values come exclusively from the host's `:trusted_context`. The first
   version is strict: unsupported operations have no client-side fallback.
   """
-  alias Selecto.Document.ShapeRelease
+  alias Selecto.Document.{Missing, Path, ShapeRelease}
   alias Selecto.Error
 
   @derive [Jason.Encoder, {Inspect, only: [:version, :required_capabilities, :bounds]}]
@@ -15,6 +15,7 @@ defmodule Selecto.Query.Plan do
             source: nil,
             relation: nil,
             projection: [],
+            aggregates: [],
             predicates: nil,
             ordering: [],
             page: %{},
@@ -40,7 +41,9 @@ defmodule Selecto.Query.Plan do
     "timeout_ms" => 30_000,
     "max_predicates" => 128
   }
-  @query_keys ~w(select where order_by limit cursor bounds access_pattern parent_identity)
+  @query_keys ~w(select where order_by limit cursor bounds access_pattern parent_identity aggregate)
+  @aggregate_ops ~w(count sum min max)
+  @portable_integer 9_007_199_254_740_991
 
   @doc "Build validated intent; the host supplies trusted tenant scope and cursor signing keys."
   def new(release, relation_id, query \\ %{}, opts \\ []) do
@@ -49,19 +52,21 @@ defmodule Selecto.Query.Plan do
          {:ok, relation} <- ShapeRelease.relation(release, relation_id),
          {:ok, relation} <- parent_scope(relation, query),
          {:ok, tenant} <- tenant(opts),
-         {:ok, bounds} <- bounds(Map.get(query, "bounds", %{})),
+         {:ok, aggregates} <- aggregates(release, relation_id, relation, query),
+         {:ok, bounds} <- bounds(Map.get(query, "bounds", %{}), aggregates),
          :ok <- input_tree_bound(Map.get(query, "where"), bounds["max_predicates"]),
-         {:ok, projection} <- projection(release, relation_id, query, relation),
+         {:ok, projection} <- query_projection(release, relation_id, query, relation, aggregates),
          {:ok, predicates} <- predicate(release, relation_id, Map.get(query, "where"), 0),
          :ok <- predicate_bound(predicates, bounds),
-         {:ok, ordering} <- ordering(release, relation_id, relation, query),
-         {:ok, page} <- page(query, bounds),
+         {:ok, ordering} <- query_ordering(release, relation_id, relation, query, aggregates),
+         {:ok, page} <- query_page(query, bounds, aggregates),
          {:ok, access} <- access_pattern(relation, query) do
       plan = %__MODULE__{
         release: release,
         source: release["source"],
         relation: Map.put(relation, "id", relation_id),
         projection: projection,
+        aggregates: aggregates,
         predicates: predicates,
         ordering: ordering,
         page: page,
@@ -107,6 +112,9 @@ defmodule Selecto.Query.Plan do
   @doc false
   def cursor_values(_plan, nil), do: :ok
 
+  def cursor_values(%{aggregates: [_ | _]}, _),
+    do: error("Aggregate queries do not support cursors")
+
   def cursor_values(plan, values) when is_list(values) do
     valid =
       length(values) == length(plan.ordering) and
@@ -129,6 +137,21 @@ defmodule Selecto.Query.Plan do
   def typed?("float", v), do: is_float(v)
   def typed?("boolean", v), do: is_boolean(v)
   def typed?(_, _), do: false
+
+  @doc "Largest absolute integer input supported by an aggregate's exact arithmetic contract."
+  def aggregate_input_limit(plan, %{"op" => "sum"}),
+    do: div(@portable_integer, plan.bounds["max_input_rows"])
+
+  def aggregate_input_limit(_plan, %{"op" => op}) when op in ~w(min max),
+    do: @portable_integer
+
+  @doc "Validate a numeric aggregate input after independent ShapeRelease validation."
+  def aggregate_input?(_plan, %{"op" => "count"}, _value), do: true
+  def aggregate_input?(_plan, _aggregate, %Missing{}), do: true
+  def aggregate_input?(_plan, _aggregate, nil), do: true
+
+  def aggregate_input?(plan, aggregate, value),
+    do: is_integer(value) and abs(value) <= aggregate_input_limit(plan, aggregate)
 
   defp approved(release) do
     case ShapeRelease.validate(release, require_approved: true) do
@@ -158,17 +181,92 @@ defmodule Selecto.Query.Plan do
       else: error("Trusted tenant context is required")
   end
 
-  defp bounds(overrides) when is_map(overrides) do
+  defp bounds(overrides, aggregates) when is_map(overrides) and not is_struct(overrides) do
+    defaults =
+      if aggregates == [], do: @bounds, else: Map.put(@bounds, "max_input_rows", 1000)
+
+    maxima =
+      if aggregates == [], do: @hard_bounds, else: Map.put(@hard_bounds, "max_input_rows", 10_000)
+
     valid =
       Enum.all?(overrides, fn {key, value} ->
-        Map.has_key?(@hard_bounds, key) and is_integer(value) and value > 0 and
-          value <= @hard_bounds[key]
+        Map.has_key?(maxima, key) and is_integer(value) and value > 0 and
+          value <= maxima[key]
       end)
 
-    if valid, do: {:ok, Map.merge(@bounds, overrides)}, else: error("Invalid execution bounds")
+    if valid, do: {:ok, Map.merge(defaults, overrides)}, else: error("Invalid execution bounds")
   end
 
-  defp bounds(_), do: error("Invalid execution bounds")
+  defp bounds(_, _), do: error("Invalid execution bounds")
+
+  defp aggregates(release, relation_id, relation, query) do
+    if Map.has_key?(query, "aggregate") do
+      input = query["aggregate"]
+
+      with true <- relation["kind"] == "root",
+           false <- Enum.any?(~w(select order_by limit cursor), &Map.has_key?(query, &1)),
+           true <- is_list(input) and length(input) in 1..16,
+           {:ok, values} <- map_ok(input, &aggregate(release, relation_id, relation, &1)),
+           aliases = Enum.map(values, & &1["id"]),
+           true <- Enum.uniq(aliases) == aliases do
+        {:ok, values}
+      else
+        _ -> error("Invalid aggregate query or incompatible row-query options")
+      end
+    else
+      {:ok, []}
+    end
+  end
+
+  defp aggregate(release, relation_id, relation, %{"op" => op, "as" => id} = input)
+       when op in @aggregate_ops do
+    expected = if op == "count", do: ~w(as op), else: ~w(as field op)
+
+    with true <- Enum.sort(Map.keys(input)) == expected and Path.safe_key?(id),
+         {:ok, field} <- aggregate_field(release, relation_id, relation, input) do
+      {:ok,
+       %{
+         "op" => op,
+         "id" => id,
+         "field" => field,
+         "type" => "integer",
+         "nullable" => op != "count"
+       }}
+    else
+      _ ->
+        error("Aggregate must name an explicitly granted operation and published integer field")
+    end
+  end
+
+  defp aggregate(_, _, _, _), do: error("Invalid aggregate operation")
+
+  defp aggregate_field(_release, _id, relation, %{"op" => "count"}) do
+    if "count" in Map.get(relation, "aggregate_ops", []),
+      do: {:ok, nil},
+      else: error("Relation does not grant count")
+  end
+
+  defp aggregate_field(release, relation_id, _relation, %{"op" => op, "field" => id}) do
+    with {:ok, field} <- field(release, relation_id, id),
+         true <- field["type"] == "integer" and op in Map.get(field, "aggregate_ops", []) do
+      {:ok, field}
+    else
+      _ -> error("Field does not grant the typed aggregate")
+    end
+  end
+
+  defp query_projection(release, id, query, relation, []),
+    do: projection(release, id, query, relation)
+
+  defp query_projection(_release, _id, _query, _relation, aggregates),
+    do: {:ok, Enum.map(aggregates, &Map.take(&1, ~w(id type nullable)))}
+
+  defp query_ordering(release, id, relation, query, []),
+    do: ordering(release, id, relation, query)
+
+  defp query_ordering(_release, _id, _relation, _query, _aggregates), do: {:ok, []}
+  defp query_page(query, bounds, []), do: page(query, bounds)
+  defp query_page(_query, _bounds, _aggregates), do: {:ok, %{"limit" => 1, "after" => nil}}
 
   defp projection(release, id, query, relation) do
     defaults =
@@ -353,6 +451,21 @@ defmodule Selecto.Query.Plan do
       _ ->
         error("A declared access pattern is required")
     end
+  end
+
+  defp requirements(%{aggregates: [_ | _]} = plan) do
+    nested =
+      if Enum.any?(plan.aggregates, fn aggregate ->
+           aggregate["field"] && length(aggregate["field"]["path"]) > 1
+         end),
+         do: ["document.nested"],
+         else: []
+
+    (["document.root"] ++
+       Enum.map(plan.aggregates, &("query.aggregate." <> &1["op"])) ++
+       nested ++ predicate_requirements(plan.predicates))
+    |> Enum.uniq()
+    |> Enum.sort()
   end
 
   defp requirements(plan) do

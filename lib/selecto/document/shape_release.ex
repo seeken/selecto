@@ -8,7 +8,7 @@ defmodule Selecto.Document.ShapeRelease do
 
   @types ~w(string integer float boolean object array binary)
   @scalar_types ~w(string integer float boolean binary)
-  @field_keys ~w(path type required nullable missing filterable sortable server_managed)
+  @field_keys ~w(path type required nullable missing filterable sortable server_managed aggregate_ops)
 
   @spec new(map()) :: {:ok, map()} | {:error, list()}
   def new(%{"status" => "approved"}),
@@ -227,6 +227,11 @@ defmodule Selecto.Document.ShapeRelease do
       error_unless(
         scalar? or (field["filterable"] == false and field["sortable"] == false),
         "#{context}: opaque fields must disable filtering and sorting"
+      ) ++
+      check_aggregate_ops(
+        field,
+        if(field["type"] == "integer", do: ~w(sum min max), else: []),
+        context
       )
 
     # Coercions, defaults, arbitrary subpaths, and executable metadata have no V1 syntax.
@@ -280,7 +285,7 @@ defmodule Selecto.Document.ShapeRelease do
 
     check_keys(
       rel,
-      ~w(kind source fields identity_path access_patterns),
+      ~w(kind source fields identity_path access_patterns aggregate_ops),
       "relation #{safe_label(id)}"
     ) ++
       error_unless(rel["source"] == source["id"], "root source mismatch") ++
@@ -290,7 +295,9 @@ defmodule Selecto.Document.ShapeRelease do
           length(Enum.uniq(fields)) == length(fields) and
           Enum.all?(fields, &Map.has_key?(shape_fields, &1)),
         "root must publish distinct declared fields"
-      ) ++ check_access_patterns(rel["access_patterns"], fields)
+      ) ++
+      check_aggregate_ops(rel, ["count"], "root #{safe_label(id)}") ++
+      check_access_patterns(rel["access_patterns"], fields)
   end
 
   defp check_relation(%{"kind" => "array"} = rel, id, relations, source, shape) do
@@ -339,6 +346,16 @@ defmodule Selecto.Document.ShapeRelease do
   end
 
   defp check_relation(_, _, _, _, _), do: ["unsupported virtual relation kind"]
+
+  defp check_aggregate_ops(contract, supported, context) do
+    operations = Map.get(contract, "aggregate_ops", [])
+
+    error_unless(
+      is_list(operations) and length(operations) <= length(supported) and
+        Enum.uniq(operations) == operations and Enum.all?(operations, &(&1 in supported)),
+      "#{context}: aggregate_ops must contain distinct supported operations"
+    )
+  end
 
   defp check_access_patterns(patterns, fields)
        when is_map(patterns) and not is_struct(patterns) and map_size(patterns) in 1..16 and

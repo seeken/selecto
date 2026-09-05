@@ -142,6 +142,21 @@ defmodule Selecto.Document.Fixtures do
     release
   end
 
+  @doc "A separately authored root aggregate release; the initial release stays unchanged."
+  def aggregate_shape do
+    shape()
+    |> Map.put("id", "work-orders/aggregates-v1")
+    |> put_in(["relations", "work_orders", "aggregate_ops"], ["count"])
+    |> put_in(["shape", "fields", "priority", "aggregate_ops"], ~w(sum min max))
+    |> put_in(["shape", "fields", "priority", "nullable"], true)
+  end
+
+  def aggregate_release do
+    {:ok, draft} = ShapeRelease.new(aggregate_shape())
+    {:ok, release} = ShapeRelease.approve(draft, approved_by: "synthetic-fixture-author")
+    release
+  end
+
   defp scalar(path, type, required, opts \\ []) do
     %{
       "path" => path,

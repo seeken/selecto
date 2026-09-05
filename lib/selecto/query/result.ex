@@ -15,7 +15,8 @@ defmodule Selecto.Query.Result do
     valid =
       result.columns == columns and is_list(result.rows) and
         length(result.rows) <= plan.page["limit"] and
-        Enum.all?(result.rows, &(is_list(&1) and length(&1) == length(columns)))
+        Enum.all?(result.rows, &(is_list(&1) and length(&1) == length(columns))) and
+        aggregate_result?(result, plan)
 
     if valid and :erlang.external_size(result.rows) <= plan.bounds["max_bytes"],
       do: :ok,
@@ -25,4 +26,17 @@ defmodule Selecto.Query.Result do
   end
 
   def validate(_, _), do: {:error, Selecto.Error.validation_error("Invalid adapter result")}
+
+  defp aggregate_result?(_result, %{aggregates: []}), do: true
+
+  defp aggregate_result?(%{rows: [row], next_cursor: nil}, plan) do
+    Enum.all?(Enum.zip(plan.aggregates, row), fn {aggregate, value} ->
+      case aggregate["op"] do
+        "count" -> is_integer(value) and value >= 0 and value <= plan.bounds["max_input_rows"]
+        _ -> is_nil(value) or Selecto.Query.Plan.typed?("integer", value)
+      end
+    end)
+  end
+
+  defp aggregate_result?(_result, _plan), do: false
 end

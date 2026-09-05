@@ -40,7 +40,7 @@ index and reject unsupported sorting or scanning.
 An array relation query must also specify `"parent_identity"`. Child identity
 is unique within that parent and the trusted tenant. The approved child relation
 declares a maximum expansion and rejects duplicate element identities. Native
-joins, unrestricted arrays, offsets, aggregation, arbitrary vendor types and
+joins, unrestricted arrays, offsets, grouped aggregation, arbitrary vendor types and
 residual query execution are outside this initial profile.
 
 The default query bounds are 100 returned rows, 1 MiB of results, 5 seconds of
@@ -49,6 +49,71 @@ backend operation time and 32 predicates. Hard maxima are 1,000 rows, 16 MiB,
 impose lower limits. Adapters fetch one extra row to decide whether a next
 page exists. Bounds apply to fetched material as well as normalized output;
 the extra row may cause an otherwise near-limit request to fail explicitly.
+
+## Root aggregates
+
+An independently approved release can grant root `count` and integer-field
+`sum`, `min`, and `max`. The original fixture release has no aggregate grants;
+`Fixtures.aggregate_release/0` is a separately authored example.
+
+```elixir
+{:ok, plan} = Selecto.to_plan(
+  Selecto.Document.Fixtures.aggregate_release(),
+  "work_orders",
+  %{
+    "aggregate" => [
+      %{"op" => "count", "as" => "total"},
+      %{"op" => "sum", "as" => "priority_sum", "field" => "priority"},
+      %{"op" => "min", "as" => "priority_min", "field" => "priority"},
+      %{"op" => "max", "as" => "priority_max", "field" => "priority"}
+    ],
+    "where" => %{"op" => "eq", "field" => "state", "value" => "open"},
+    "bounds" => %{"max_input_rows" => 1000}
+  },
+  trusted_context: %{tenant_id: authorized_tenant_id}
+)
+```
+
+The `aggregate` list contains 1–16 strict objects with unique aliases from the
+portable field-id alphabet. `count` counts matching documents and has no field
+argument; it requires `aggregate_ops: ["count"]` on the root relation. Numeric
+operations name published integer fields whose explicit `aggregate_ops` list
+grants that operation. An absent grant means unsupported. Aggregate queries
+reject `select`, `order_by`, `limit`, and `cursor`, including empty values. Array
+aggregates, grouping, distinct, averages, and native expressions have no syntax.
+Tenant scope, typed predicates and declared access patterns remain required.
+
+Every successful aggregate returns exactly one row, columns in requested alias
+order, and no cursor. Empty input yields `count = 0` and `sum/min/max = nil`.
+Missing and null numeric inputs are excluded when their ShapeRelease policy
+permits those states; an all-missing/null field produces `nil`, including for
+`sum`. Invalid document shapes or input types cause failure, not coercion or
+silent exclusion. These empty-value rules are portable contract decisions.
+
+Aggregate plans add a `max_input_rows` bound, default 1,000 and maximum 10,000.
+Adapters must detect one additional matching document and reject overflow;
+truncated totals are never successful results. This bounds matching inputs,
+not all documents a backend may examine while finding matches. Index evidence,
+backend timeout and result-byte limits still apply. Row queries keep their
+existing bounds and do not require an aggregate input limit.
+
+Numeric results and `min/max` inputs must be exact integers within
+±9,007,199,254,740,991. Each `sum` input has the stricter absolute limit
+`div(9_007_199_254_740_991, max_input_rows)`. This guarantees every intermediate
+sum fits that exact range even with mixed signs. Values exceeding the declared
+input limit fail even when cancellation would make the final total fit.
+`Plan.aggregate_input_limit/2` and `aggregate_input?/3` expose that arithmetic
+contract to adapters; whole-document shape validation remains independent.
+
+Normalized plans store aggregate descriptors in `aggregates`, output
+`id/type/nullable` descriptors in `projection`, an empty `ordering`, and a
+one-row page. Required capabilities are `query.aggregate.count/sum/min/max`
+for the requested operations, plus the applicable source, nested-field and
+predicate capabilities. Aggregation must run natively. Bounded input evidence
+for shape validation may be returned only with explicit residual metadata and
+byte checks; it does not authorize client-side aggregation.
+
+## Cursors, results, and adapter execution
 
 The cursor key is a host secret of at least 32 bytes and is never stored in the
 plan. Tokens bind the tenant, release digest, relation/parent, predicate,
