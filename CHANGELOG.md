@@ -3,6 +3,13 @@
 
 ## Unreleased
 
+- Added the database-native `Selecto.DB.SubscriptionPublisher` boundary and a
+  fail-closed preflight for gap-free Domain Subscription snapshot/change feeds.
+
+- Added approved collection access-pattern metadata for constrained
+  Firestore-style collection queries, with explicit scope, tenant, identity,
+  stable ordering, filter fields, index identity, and finite document/page bounds.
+
 - Added approved physical source namespaces and explicit JSON-number semantics,
   with digest-bound cursors, normalized declared integer fields and capability
   gates. Added strict value-free native statistical inference evidence that

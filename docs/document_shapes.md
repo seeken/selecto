@@ -413,3 +413,17 @@ uncertainty are explicit. Native sample values and flavor labels are excluded.
 The report is not automatically accepted by Draft or Drift; field selection and
 semantics require author review. Couchbase's independent adapter implements this
 bounded native evidence importer.
+
+### Named collection access patterns
+
+Adapters for indexed document collections may require an access pattern with a
+`collection_schema`. Its exact contract declares `scope` (`collection` or
+`collection_group`), published `tenant` and `identity` fields, and an `order`
+list ending in identity. The enclosing pattern also declares its reviewed
+`index`, allowed non-tenant `filter_fields`, `max_documents`, and `max_pages`.
+
+Approved releases containing this metadata derive the
+`document.collection_access_pattern` capability. Adapters without that exact
+feature must reject the release. The metadata authorizes a bounded portable
+plan; it does not prove a production index, billing behavior, security rules,
+or native query payloads.

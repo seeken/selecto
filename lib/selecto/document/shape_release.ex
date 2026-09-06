@@ -122,8 +122,23 @@ defmodule Selecto.Document.ShapeRelease do
          do: ["key_access_pattern"],
          else: []
 
+    collection_access_pattern =
+      if Enum.any?(release["relations"], fn {_id, relation} ->
+           Enum.any?(relation["access_patterns"], fn {_name, pattern} ->
+             Map.has_key?(pattern, "collection_schema")
+           end)
+         end),
+         do: ["collection_access_pattern"],
+         else: []
+
     Enum.sort(
-      object_id ++ object_relation ++ scalar_array ++ namespace ++ numeric ++ key_access_pattern
+      object_id ++
+        object_relation ++
+        scalar_array ++
+        namespace ++
+        numeric ++
+        key_access_pattern ++
+        collection_access_pattern
     )
   end
 
@@ -604,10 +619,16 @@ defmodule Selecto.Document.ShapeRelease do
     Enum.flat_map(patterns, fn {id, pattern} ->
       if is_map(pattern) do
         expected_keys =
-          if Map.has_key?(pattern, "key_schema"),
-            do:
-              ~w(consistent_read filter_fields index key_schema keys max_evaluated_items max_pages),
-            else: ~w(index keys)
+          cond do
+            Map.has_key?(pattern, "key_schema") ->
+              ~w(consistent_read filter_fields index key_schema keys max_evaluated_items max_pages)
+
+            Map.has_key?(pattern, "collection_schema") ->
+              ~w(collection_schema filter_fields index keys max_documents max_pages)
+
+            true ->
+              ~w(index keys)
+          end
 
         check_keys(pattern, expected_keys, "access pattern") ++
           error_unless(
@@ -619,7 +640,9 @@ defmodule Selecto.Document.ShapeRelease do
               length(Enum.uniq(pattern["keys"])) == length(pattern["keys"]) and
               Enum.all?(pattern["keys"], &(&1 in fields)),
             "access pattern keys must name distinct published fields"
-          ) ++ check_key_access_pattern(pattern, fields)
+          ) ++
+          check_key_access_pattern(pattern, fields) ++
+          check_collection_access_pattern(pattern, fields)
       else
         ["access pattern must be a map"]
       end
@@ -662,6 +685,46 @@ defmodule Selecto.Document.ShapeRelease do
 
   defp check_key_access_pattern(pattern, _fields) do
     error_unless(not Map.has_key?(pattern, "key_schema"), "incomplete key access pattern")
+  end
+
+  defp check_collection_access_pattern(%{"collection_schema" => schema} = pattern, fields) do
+    tenant = if is_map(schema), do: schema["tenant"]
+    identity = if is_map(schema), do: schema["identity"]
+    order = if is_map(schema), do: schema["order"]
+
+    check_keys(schema, ~w(identity order scope tenant), "collection schema") ++
+      error_unless(
+        schema["scope"] in ["collection", "collection_group"],
+        "invalid collection scope"
+      ) ++
+      error_unless(tenant in fields, "collection tenant must name a published field") ++
+      error_unless(identity in fields, "collection identity must name a published field") ++
+      error_unless(
+        is_list(order) and length(order) in 1..4 and Enum.uniq(order) == order and
+          Enum.all?(order, &(&1 in fields)) and List.last(order) == identity,
+        "collection order must end in identity"
+      ) ++
+      error_unless(
+        is_list(pattern["filter_fields"]) and length(pattern["filter_fields"]) <= 16 and
+          Enum.uniq(pattern["filter_fields"]) == pattern["filter_fields"] and
+          Enum.all?(pattern["filter_fields"], &(&1 in fields and &1 != tenant)),
+        "collection filter_fields must be distinct published non-tenant fields"
+      ) ++
+      error_unless(
+        is_integer(pattern["max_documents"]) and pattern["max_documents"] in 1..10_000,
+        "max_documents must be 1..10000"
+      ) ++
+      error_unless(
+        is_integer(pattern["max_pages"]) and pattern["max_pages"] in 1..100,
+        "max_pages must be 1..100"
+      )
+  end
+
+  defp check_collection_access_pattern(pattern, _fields) do
+    error_unless(
+      not Map.has_key?(pattern, "collection_schema"),
+      "incomplete collection access pattern"
+    )
   end
 
   defp check_source_fields(source, fields) when is_map(fields) do

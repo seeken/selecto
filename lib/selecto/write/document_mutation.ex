@@ -61,6 +61,10 @@ defmodule Selecto.Write.DocumentMutation do
       if(is_list(features) and "key_access_pattern" in features,
         do: [:document_key_access_pattern],
         else: []
+      ) ++
+      if(is_list(features) and "collection_access_pattern" in features,
+        do: [:document_collection_access_pattern],
+        else: []
       )
   end
 
@@ -77,12 +81,13 @@ defmodule Selecto.Write.DocumentMutation do
          true <- valid_digest?(mutation.scope_digest),
          true <- valid_digest?(mutation.shape_digest),
          true <-
-           is_list(mutation.shape_features) and length(mutation.shape_features) <= 6 and
+           is_list(mutation.shape_features) and length(mutation.shape_features) <= 7 and
              Enum.sort(Enum.uniq(mutation.shape_features)) == mutation.shape_features and
              Enum.all?(
                mutation.shape_features,
                &(&1 in [
                    "json_number",
+                   "collection_access_pattern",
                    "key_access_pattern",
                    "object_id",
                    "object_relation",
