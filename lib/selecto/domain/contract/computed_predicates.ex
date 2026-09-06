@@ -7,6 +7,9 @@ defmodule Selecto.Domain.Contract.ComputedPredicates do
 
   def validate(errors, source) when is_map(source) do
     columns = Core.map_value(source, :columns) || %{}
+    # Relations reports the registry shape error; do not enumerate malformed
+    # columns while collecting additional computed-predicate diagnostics.
+    columns = if is_map(columns), do: columns, else: %{}
     fields = MapSet.new(Core.relation_fields(source))
 
     {errors, graph} =

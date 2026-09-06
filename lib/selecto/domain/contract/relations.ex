@@ -22,6 +22,8 @@ defmodule Selecto.Domain.Contract.Relations do
     |> validate_relation_columns(relation_id, relation, path)
     |> validate_relation_primary_key(relation_id, relation, path)
     |> validate_relation_field_columns(relation_id, relation, path)
+    |> validate_relation_source_kind(relation_id, relation, path)
+    |> validate_relation_readonly(relation_id, relation, path)
   end
 
   def validate_relation(errors, relation_id, relation, path) do
@@ -59,11 +61,12 @@ defmodule Selecto.Domain.Contract.Relations do
   end
 
   def validate_relation_source_table(errors, relation_id, relation, path) do
-    case Core.map_value(relation, :source_table) do
-      nil ->
+    case Core.fetch_map_value(relation, :source_table) do
+      :__missing__ ->
         errors
 
-      source_table when is_binary(source_table) or is_atom(source_table) ->
+      source_table
+      when is_binary(source_table) or (is_atom(source_table) and not is_nil(source_table)) ->
         errors
 
       source_table ->
@@ -82,8 +85,8 @@ defmodule Selecto.Domain.Contract.Relations do
   end
 
   def validate_relation_fields(errors, relation_id, relation, path) do
-    case Core.map_value(relation, :fields) do
-      nil ->
+    case Core.fetch_map_value(relation, :fields) do
+      :__missing__ ->
         errors
 
       fields when is_list(fields) ->
@@ -105,12 +108,28 @@ defmodule Selecto.Domain.Contract.Relations do
   end
 
   def validate_relation_columns(errors, relation_id, relation, path) do
-    case Core.map_value(relation, :columns) do
-      nil ->
+    case Core.fetch_map_value(relation, :columns) do
+      :__missing__ ->
         errors
 
       columns when is_map(columns) ->
-        errors
+        Enum.reduce(columns, errors, fn {field, definition}, acc ->
+          if is_map(definition) do
+            acc
+          else
+            [
+              Core.error(
+                :invalid_column_definition,
+                path ++ [:columns, field],
+                "domain relation #{inspect(relation_id)} column #{inspect(field)} must be a map",
+                relation: relation_id,
+                expected: :map,
+                actual: Core.value_type(definition)
+              )
+              | acc
+            ]
+          end
+        end)
 
       columns ->
         [
@@ -132,13 +151,17 @@ defmodule Selecto.Domain.Contract.Relations do
     primary_key = Core.map_value(relation, :primary_key)
 
     cond do
-      is_nil(primary_key) or not is_list(fields) ->
+      not Core.has_key?(relation, :primary_key) ->
         errors
 
-      Core.field_ref?(primary_key) and Core.field_in_list?(fields, primary_key) ->
+      not is_nil(primary_key) and Core.field_ref?(primary_key) and not is_list(fields) ->
         errors
 
-      Core.field_ref?(primary_key) ->
+      not is_nil(primary_key) and Core.field_ref?(primary_key) and
+          Core.field_in_list?(fields, primary_key) ->
+        errors
+
+      not is_nil(primary_key) and Core.field_ref?(primary_key) ->
         [
           Core.error(
             :primary_key_not_found,
@@ -191,6 +214,49 @@ defmodule Selecto.Domain.Contract.Relations do
 
   def field_missing_column_code(:source), do: :source_field_missing_column
   def field_missing_column_code(_relation_id), do: :schema_field_missing_column
+
+  defp validate_relation_source_kind(errors, relation_id, relation, path) do
+    case Core.fetch_map_value(relation, :source_kind) do
+      :__missing__ ->
+        errors
+
+      kind ->
+        if Core.enum_value?(kind, [:table, :view, :materialized_view]) do
+          errors
+        else
+          [
+            Core.error(
+              :invalid_source_kind,
+              path ++ [:source_kind],
+              "domain relation #{inspect(relation_id)} source_kind must be table, view, or materialized_view",
+              relation: relation_id
+            )
+            | errors
+          ]
+        end
+    end
+  end
+
+  defp validate_relation_readonly(errors, relation_id, relation, path) do
+    case Core.fetch_map_value(relation, :readonly) do
+      :__missing__ ->
+        errors
+
+      readonly when is_boolean(readonly) ->
+        errors
+
+      _ ->
+        [
+          Core.error(
+            :invalid_readonly,
+            path ++ [:readonly],
+            "domain relation #{inspect(relation_id)} readonly must be boolean",
+            relation: relation_id
+          )
+          | errors
+        ]
+    end
+  end
 
   def validate_schemas(errors, schemas) when is_map(schemas) do
     Enum.reduce(schemas, errors, fn {schema_id, schema}, acc ->

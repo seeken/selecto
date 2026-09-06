@@ -136,7 +136,32 @@ defmodule Selecto.DomainValidator do
     end
   end
 
-  defp validate_authored_domain(domain) do
+  defp validate_authored_domain(domain) when is_map(domain) do
+    # Reject malformed relation values before legacy validators use map/list
+    # operations. Reuse the portable contract's structural rules and diagnostics.
+    shape_errors =
+      Selecto.Domain.Contract.Relations.validate(
+        [],
+        Map.get(domain, :source, %{}),
+        Map.get(domain, :schemas, %{})
+      )
+      |> Enum.filter(fn error ->
+        error.code in [
+          :invalid_section_shape,
+          :invalid_source_table,
+          :invalid_fields,
+          :invalid_columns,
+          :invalid_column_definition,
+          :invalid_primary_key
+        ]
+      end)
+
+    if shape_errors == [], do: validate_authored_structure(domain), else: {:error, shape_errors}
+  end
+
+  defp validate_authored_domain(_domain), do: {:error, [{:domain_invalid_shape, :map_required}]}
+
+  defp validate_authored_structure(domain) do
     errors = []
 
     # Validate top-level structure
@@ -264,8 +289,8 @@ defmodule Selecto.DomainValidator do
   end
 
   defp validate_relation_source_kind(errors, relation_name, relation) do
-    case normalize_relation_source_kind(map_value(relation, :source_kind)) do
-      nil ->
+    case normalize_relation_source_kind(fetch_map_value(relation, :source_kind)) do
+      :__missing__ ->
         errors
 
       {:ok, _kind} ->
@@ -280,8 +305,8 @@ defmodule Selecto.DomainValidator do
   end
 
   defp validate_relation_readonly(errors, relation_name, relation) do
-    case map_value(relation, :readonly) do
-      nil ->
+    case fetch_map_value(relation, :readonly) do
+      :__missing__ ->
         errors
 
       readonly when is_boolean(readonly) ->
@@ -295,7 +320,7 @@ defmodule Selecto.DomainValidator do
     end
   end
 
-  defp normalize_relation_source_kind(nil), do: nil
+  defp normalize_relation_source_kind(:__missing__), do: :__missing__
   defp normalize_relation_source_kind(:table), do: {:ok, :table}
   defp normalize_relation_source_kind(:view), do: {:ok, :view}
   defp normalize_relation_source_kind(:materialized_view), do: {:ok, :materialized_view}
