@@ -107,9 +107,16 @@ defmodule Selecto.Write.Capabilities do
   end
 
   defp document_requirements(%Command{
-         metadata: %{document: %Selecto.Write.DocumentMutation{} = document}
-       }),
-       do: Selecto.Write.DocumentMutation.capabilities(document)
+         metadata: %{document: %Selecto.Write.DocumentMutation{} = document},
+         returning: returning
+       }) do
+    postimage =
+      if Selecto.Write.DocumentMutation.root_patch?(document) and is_list(returning),
+        do: [:document_postimage, {:returning, :update}],
+        else: []
+
+    Selecto.Write.DocumentMutation.capabilities(document) ++ postimage
+  end
 
   defp document_requirements(%Command{metadata: %{document: _document}}),
     do: Selecto.Write.DocumentMutation.capabilities()

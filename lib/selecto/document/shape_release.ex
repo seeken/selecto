@@ -4,7 +4,7 @@ defmodule Selecto.Document.ShapeRelease do
   are strings. Approval is an explicit authoring step and never inferred from
   sampled documents. A digest detects mutation; it is not an authorization signature.
   """
-  alias Selecto.Document.{Canonical, Missing, ObjectId, Path}
+  alias Selecto.Document.{Canonical, Missing, Numeric, ObjectId, Path}
 
   @types ~w(string integer float boolean object array binary object_id)
   @scalar_types ~w(string integer float boolean binary object_id)
@@ -107,7 +107,24 @@ defmodule Selecto.Document.ShapeRelease do
         else: []
 
     object_id = if Enum.any?(fields, &(&1["type"] == "object_id")), do: ["object_id"], else: []
-    object_id ++ object_relation ++ scalar_array
+
+    namespace =
+      if Map.has_key?(release["source"], "namespace"), do: ["source_namespace"], else: []
+
+    numeric = if Numeric.json_number?(release), do: ["json_number"], else: []
+
+    key_access_pattern =
+      if Enum.any?(release["relations"], fn {_id, relation} ->
+           Enum.any?(relation["access_patterns"], fn {_name, pattern} ->
+             Map.has_key?(pattern, "key_schema")
+           end)
+         end),
+         do: ["key_access_pattern"],
+         else: []
+
+    Enum.sort(
+      object_id ++ object_relation ++ scalar_array ++ namespace ++ numeric ++ key_access_pattern
+    )
   end
 
   @doc "Validate the complete parent before returning zero or one owned object row. This helper does not authorize source access."
@@ -130,7 +147,7 @@ defmodule Selecto.Document.ShapeRelease do
     with :ok <- validate(release, require_approved: true) do
       errors =
         if is_map(document) and not is_struct(document) do
-          validate_values(release["shape"]["fields"], document, "root") ++
+          validate_values(release["shape"]["fields"], document, "root", release) ++
             validate_variant(release["shape"]["variants"], document) ++
             validate_children(release, document)
         else
@@ -267,9 +284,20 @@ defmodule Selecto.Document.ShapeRelease do
   defp check_source(source) when is_map(source) and not is_struct(source) do
     check_keys(
       source,
-      ~w(id kind collection sql_table identity_path tenant_path version_path),
+      ~w(id kind collection sql_table identity_path tenant_path version_path namespace numeric_semantics),
       "source"
     ) ++
+      error_unless(
+        not Map.has_key?(source, "numeric_semantics") or
+          source["numeric_semantics"] == "json_number",
+        "unsupported numeric semantics"
+      ) ++
+      error_unless(
+        not Map.has_key?(source, "namespace") or
+          (is_list(source["namespace"]) and length(source["namespace"]) in 1..8 and
+             Enum.all?(source["namespace"], &Path.safe_key?/1)),
+        "invalid source namespace"
+      ) ++
       error_unless(Path.safe_key?(source["id"]), "invalid source id") ++
       error_unless(source["kind"] == "document_collection", "unsupported source kind") ++
       error_unless(Path.safe_key?(source["collection"]), "invalid source collection") ++
@@ -490,7 +518,13 @@ defmodule Selecto.Document.ShapeRelease do
         "combined child paths must fit the 32-step document path bound"
       ) ++
       check_identity_field(fields, rel["identity_path"], "child identity") ++
-      check_access_patterns(rel["access_patterns"], if(is_map(fields), do: Map.keys(fields)))
+      check_access_patterns(
+        rel["access_patterns"],
+        if(is_map(fields) and is_map(parent),
+          do: Enum.uniq(Map.keys(fields) ++ parent["fields"]),
+          else: []
+        )
+      )
   end
 
   defp check_relation(%{"kind" => "object"} = rel, id, relations, source, shape) do
@@ -569,7 +603,13 @@ defmodule Selecto.Document.ShapeRelease do
               is_list(fields) do
     Enum.flat_map(patterns, fn {id, pattern} ->
       if is_map(pattern) do
-        check_keys(pattern, ~w(index keys), "access pattern") ++
+        expected_keys =
+          if Map.has_key?(pattern, "key_schema"),
+            do:
+              ~w(consistent_read filter_fields index key_schema keys max_evaluated_items max_pages),
+            else: ~w(index keys)
+
+        check_keys(pattern, expected_keys, "access pattern") ++
           error_unless(
             Path.safe_key?(id) and Path.safe_key?(pattern["index"]),
             "invalid access pattern/index id"
@@ -579,7 +619,7 @@ defmodule Selecto.Document.ShapeRelease do
               length(Enum.uniq(pattern["keys"])) == length(pattern["keys"]) and
               Enum.all?(pattern["keys"], &(&1 in fields)),
             "access pattern keys must name distinct published fields"
-          )
+          ) ++ check_key_access_pattern(pattern, fields)
       else
         ["access pattern must be a map"]
       end
@@ -587,6 +627,42 @@ defmodule Selecto.Document.ShapeRelease do
   end
 
   defp check_access_patterns(_, _), do: ["access_patterns must declare 1..16 index requirements"]
+
+  defp check_key_access_pattern(%{"key_schema" => schema} = pattern, fields) do
+    partition = if is_map(schema), do: schema["partition"]
+    sort = if is_map(schema), do: schema["sort"]
+
+    check_keys(schema, ~w(partition sort), "key schema") ++
+      error_unless(partition in fields, "partition key must name a published field") ++
+      error_unless(
+        is_nil(sort) or sort in fields,
+        "sort key must be nil or name a published field"
+      ) ++
+      error_unless(
+        pattern["consistent_read"] in ["strong", "eventual"],
+        "consistent_read must be strong or eventual"
+      ) ++
+      error_unless(
+        is_list(pattern["filter_fields"]) and
+          length(pattern["filter_fields"]) <= 16 and
+          Enum.uniq(pattern["filter_fields"]) == pattern["filter_fields"] and
+          Enum.all?(pattern["filter_fields"], &(&1 in fields and &1 not in [partition, sort])),
+        "filter_fields must be distinct non-key published fields"
+      ) ++
+      error_unless(
+        is_integer(pattern["max_evaluated_items"]) and
+          pattern["max_evaluated_items"] in 1..10_000,
+        "max_evaluated_items must be 1..10000"
+      ) ++
+      error_unless(
+        is_integer(pattern["max_pages"]) and pattern["max_pages"] in 1..100,
+        "max_pages must be 1..100"
+      )
+  end
+
+  defp check_key_access_pattern(pattern, _fields) do
+    error_unless(not Map.has_key?(pattern, "key_schema"), "incomplete key access pattern")
+  end
 
   defp check_source_fields(source, fields) when is_map(fields) do
     Enum.flat_map(~w(identity_path tenant_path version_path), fn key ->
@@ -627,9 +703,9 @@ defmodule Selecto.Document.ShapeRelease do
 
   defp check_identity_field(_, _, context), do: ["#{context} is invalid"]
 
-  defp validate_values(fields, document, context) do
+  defp validate_values(fields, document, context, release) do
     Enum.flat_map(fields, fn {id, field} ->
-      value = Path.fetch(document, field["path"])
+      value = Numeric.normalize(release, field, Path.fetch(document, field["path"]))
 
       cond do
         Missing.missing?(value) ->
@@ -639,7 +715,10 @@ defmodule Selecto.Document.ShapeRelease do
           error_unless(field["nullable"], "#{context}.#{id}: null is not allowed")
 
         true ->
-          error_unless(type_matches?(value, field["type"]), "#{context}.#{id}: type mismatch") ++
+          error_unless(
+            Numeric.valid?(release, field, value) and type_matches?(value, field["type"]),
+            "#{context}.#{id}: type mismatch"
+          ) ++
             error_unless(
               not Map.has_key?(field, "scalar_array") or
                 scalar_array_valid?(field["scalar_array"], value),
@@ -673,7 +752,20 @@ defmodule Selecto.Document.ShapeRelease do
             if length(bounded) > rel["max_elements"] do
               ["#{id}: fan-out bound exceeded"]
             else
-              identities = Enum.map(bounded, &Path.fetch(&1, rel["identity_path"]))
+              identity_field =
+                Enum.find_value(rel["fields"], fn {_, f} ->
+                  if f["path"] == rel["identity_path"], do: f
+                end)
+
+              identities =
+                Enum.map(
+                  bounded,
+                  &Numeric.normalize(
+                    release,
+                    identity_field,
+                    Path.fetch(&1, rel["identity_path"])
+                  )
+                )
 
               error_unless(
                 length(Enum.uniq(identities)) == length(identities),
@@ -681,7 +773,7 @@ defmodule Selecto.Document.ShapeRelease do
               ) ++
                 Enum.flat_map(bounded, fn element ->
                   if is_map(element) and not is_struct(element),
-                    do: validate_values(rel["fields"], element, id),
+                    do: validate_values(rel["fields"], element, id, release),
                     else: ["#{id}: child element must be an object"]
                 end)
             end
@@ -699,7 +791,7 @@ defmodule Selecto.Document.ShapeRelease do
             []
 
           value when is_map(value) and not is_struct(value) ->
-            validate_values(rel["fields"], value, id)
+            validate_values(rel["fields"], value, id, release)
 
           _ ->
             ["#{id}: owned child must be an object"]

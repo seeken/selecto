@@ -51,6 +51,232 @@ defmodule Selecto.Write.DocumentMutationTest do
     assert :ok = Capabilities.require(capabilities, command)
   end
 
+  test "legacy increment struct and deterministic digest remain unchanged" do
+    assert DocumentMutation.digest(mutation()) ==
+             "0acd852ec0877979bc80246a47bd70b3def99681d5211142ef3f08f801b0db8a"
+
+    refute DocumentMutation.root_patch?(mutation())
+    assert DocumentMutation.capabilities(mutation()) == DocumentMutation.capabilities()
+  end
+
+  defp root_patch(entries), do: %{mutation() | mutations: entries}
+
+  test "root scalar patches have exact entries, portable values, and operation-derived capabilities" do
+    values = ["", "a\n\"\\é", 0, -9_007_199_254_740_991, 9_007_199_254_740_991, true, false, nil]
+
+    for value <- values do
+      patch = root_patch([%{op: :set, path: ["title"], value: value}])
+      assert DocumentMutation.scalar_value?(value)
+      assert DocumentMutation.root_patch?(patch)
+      assert :ok = DocumentMutation.validate(patch)
+      assert :document_set in DocumentMutation.capabilities(patch)
+      refute :document_unset in DocumentMutation.capabilities(patch)
+      refute :document_update_element in DocumentMutation.capabilities(patch)
+    end
+
+    unset = root_patch([%{op: :unset, path: ["schedule", "due_at"]}])
+    assert :ok = DocumentMutation.validate(unset)
+    assert :document_unset in DocumentMutation.capabilities(unset)
+    refute :document_set in DocumentMutation.capabilities(unset)
+
+    both = root_patch([%{op: :set, path: ["title"], value: "new"} | unset.mutations])
+    assert :ok = DocumentMutation.validate(both)
+    command = %{command() | metadata: %{document: both}, required_capabilities: []}
+    assert :ok = Command.validate(command)
+    requirements = Capabilities.requirements(command)
+    assert :document_set in requirements and :document_unset in requirements
+
+    capabilities =
+      Map.new(DocumentMutation.capabilities(both), &{&1, true})
+      |> Map.merge(%{protocol_version: 1, update: true})
+
+    assert :ok = Capabilities.require(capabilities, command)
+
+    for capability <- [:document_set, :document_unset] do
+      assert {:error, %{type: :write_capability_missing}} =
+               Capabilities.require(Map.delete(capabilities, capability), command)
+    end
+  end
+
+  test "root patch strings and aggregate value bytes are bounded independently" do
+    largest = String.duplicate("x", 16_384)
+    entries = for index <- 1..4, do: %{op: :set, path: ["field#{index}"], value: largest}
+    assert {:ok, 16_384} = DocumentMutation.scalar_value_bytes(largest)
+    assert :ok = DocumentMutation.validate(root_patch(entries))
+
+    assert {:error, _} =
+             DocumentMutation.validate(
+               root_patch(entries ++ [%{op: :set, path: ["extra"], value: 0}])
+             )
+
+    for invalid <- [
+          largest <> "x",
+          <<255>>,
+          9_007_199_254_740_992,
+          -9_007_199_254_740_992,
+          1.0,
+          :value,
+          [],
+          %{},
+          %Selecto.Document.Missing{},
+          fn -> nil end
+        ] do
+      refute DocumentMutation.scalar_value?(invalid)
+      assert {:error, :invalid_document_scalar} = DocumentMutation.scalar_value_bytes(invalid)
+
+      assert {:error, _} =
+               DocumentMutation.validate(
+                 root_patch([%{op: :set, path: ["title"], value: invalid}])
+               )
+    end
+
+    assert {:ok, 2} = DocumentMutation.scalar_value_bytes("é")
+    assert {:ok, 4} = DocumentMutation.scalar_value_bytes(nil)
+    assert {:ok, 5} = DocumentMutation.scalar_value_bytes(false)
+  end
+
+  test "root patch ObjectId values require the feature even when all selectors remain strings" do
+    value = Selecto.Document.Fixtures.object_id(8)
+    patch = root_patch([%{op: :set, path: ["customer_id"], value: value}])
+    assert {:error, _} = DocumentMutation.validate(patch)
+    patch = %{patch | shape_features: ["object_id"]}
+    assert :ok = DocumentMutation.validate(patch)
+    assert :document_object_id in DocumentMutation.capabilities(patch)
+
+    assert {:ok, bytes} = DocumentMutation.scalar_value_bytes(value)
+    assert bytes == byte_size(Selecto.Document.Canonical.encode(value))
+
+    for invalid <- [
+          Map.put(value, "extra", true),
+          Map.put(value, "value", String.upcase("abcdef0123456789abcdef01"))
+        ] do
+      assert {:error, _} =
+               DocumentMutation.validate(%{
+                 patch
+                 | mutations: [%{op: :set, path: ["customer_id"], value: invalid}]
+               })
+    end
+  end
+
+  test "root patches reject overlapping and protected paths, mixed profiles, and extra native syntax" do
+    [element] = mutation().mutations
+    valid = %{op: :set, path: ["title"], value: "new"}
+
+    for entries <- [
+          [],
+          [valid, valid],
+          [valid, %{op: :unset, path: ["title", "child"]}],
+          [valid, %{op: :unset, path: ["title"]}],
+          [valid, element],
+          [Map.put(valid, :native, %{"$set" => %{}})],
+          [Map.delete(valid, :value)],
+          [%{op: :unset, path: ["title"], value: nil}],
+          [%{op: :set, path: ["title"], value: nil, __struct__: Date}],
+          [%{"op" => "set", "path" => ["title"], "value" => "new"}],
+          [nil],
+          [1 | :invalid],
+          for(index <- 1..9, do: %{op: :unset, path: ["field#{index}"]})
+        ] do
+      assert {:error, _} = DocumentMutation.validate(root_patch(entries))
+    end
+
+    eight = for index <- 1..8, do: %{op: :unset, path: ["field#{index}"]}
+    assert :ok = DocumentMutation.validate(root_patch(eight))
+
+    for path <- [
+          ["_id"],
+          ["tenant_id"],
+          ["version"],
+          ["_selecto_receipts"],
+          ["_id", "value"],
+          ["_selecto_receipts", "receipt"],
+          ["$title"],
+          ["a.b"],
+          ["a", 0],
+          [],
+          "title"
+        ] do
+      assert {:error, _} = DocumentMutation.validate(root_patch([%{valid | path: path}]))
+    end
+
+    nested_version = %{
+      root_patch([%{op: :unset, path: ["meta"]}])
+      | version: %{path: ["meta", "version"], expected: 1}
+    }
+
+    assert {:error, _} = DocumentMutation.validate(nested_version)
+
+    assert :ok = DocumentMutation.validate(root_patch([%{valid | path: ["_id_suffix"]}]))
+
+    for invalid <- [nil, %{}, [], %{mutations: [valid]}, %{mutation() | mutations: nil}],
+        do: refute(DocumentMutation.root_patch?(invalid))
+  end
+
+  test "root selected returning is bounded and cannot omit postimage or returning support" do
+    patch = root_patch([%{op: :set, path: ["title"], value: "new"}])
+    command = %{command() | metadata: %{document: patch}, returning: ["title", "due_at"]}
+    assert :ok = Command.validate(command)
+    required = Capabilities.requirements(command)
+    assert :document_postimage in required
+    assert {:returning, :update} in required
+
+    # A graph's suppression of its overall returned row cannot suppress the
+    # requirements of a selected postimage persisted by an inner command.
+    alias Selecto.Write.Graph
+    alias Selecto.Write.Graph.{Node, Row}
+
+    graph = %Graph{
+      nodes: [
+        %Node{
+          id: "root",
+          path: [],
+          relation: "work_orders",
+          strategy: :ordered,
+          rows: [%Row{id: "one", path: [], command: command}]
+        }
+      ],
+      root: {"root", "one"},
+      metadata: %{root_returning: :none}
+    }
+
+    assert :ok = Graph.validate(graph)
+    assert :document_postimage in Capabilities.requirements(graph)
+    assert {:returning, :update} in Capabilities.requirements(graph)
+
+    capabilities =
+      Map.new(DocumentMutation.capabilities(patch), &{&1, true})
+      |> Map.merge(%{
+        protocol_version: 1,
+        update: true,
+        document_postimage: true,
+        returning: %{update: true}
+      })
+
+    assert :ok = Capabilities.require(capabilities, command)
+
+    for capability <- [:document_postimage, :returning] do
+      assert {:error, %{type: :write_capability_missing}} =
+               Capabilities.require(Map.delete(capabilities, capability), command)
+    end
+
+    for returning <- [
+          :all,
+          [],
+          [:title],
+          ["title", "title"],
+          ["$title"],
+          ["a.b"],
+          Enum.map(1..17, &"field#{&1}")
+        ] do
+      assert {:error, _} = Command.validate(%{command | returning: returning})
+    end
+
+    assert :ok = Command.validate(%{command | returning: Enum.map(1..16, &"field#{&1}")})
+    refute :document_postimage in Capabilities.requirements(%{command | returning: :none})
+    assert :ok = Command.validate(%{command | returning: :none})
+    assert :ok = Command.validate(%{command() | returning: :all})
+  end
+
   test "document commands cannot weaken cardinality or combine scalar mutations" do
     for invalid <- [
           %{command() | operation: :delete},

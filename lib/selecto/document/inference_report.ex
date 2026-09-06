@@ -1,9 +1,12 @@
 defmodule Selecto.Document.InferenceReport do
-  @moduledoc "Validation for structural evidence exchanged by document authoring tools."
+  @moduledoc "Validation for exact fixture observations and separate native statistical evidence."
   alias Selecto.Document.{Canonical, Path}
 
   @types ~w(null string integer float boolean object array)
   @warnings ~w(max_documents timeout max_fields max_flavors max_bytes max_document_bytes input_depth_limit unsupported_document_value document_must_be_object unsafe_field_name max_depth max_array_elements max_report_bytes)
+
+  def validate(%{"kind" => "document_native_inference"} = report),
+    do: Selecto.Document.NativeInferenceReport.validate(report)
 
   def validate(report) do
     with true <- plain?(report),

@@ -81,7 +81,8 @@ defmodule Selecto.Write.Command do
   end
 
   defp validate_document(%{metadata: %{document: document}} = command) do
-    with :ok <- Selecto.Write.DocumentMutation.validate(document) do
+    with :ok <- Selecto.Write.DocumentMutation.validate(document),
+         :ok <- validate_document_returning(document, command.returning) do
       if command.operation == :update and command.assignments == [] and
            command.expected_cardinality == {:exactly, 1} do
         :ok
@@ -96,6 +97,26 @@ defmodule Selecto.Write.Command do
   end
 
   defp validate_document(_command), do: :ok
+
+  defp validate_document_returning(document, returning) do
+    if Selecto.Write.DocumentMutation.root_patch?(document) and
+         not valid_document_returning?(returning) do
+      {:error,
+       Error.new(
+         :invalid_command,
+         "Root document patches require none or 1–16 selected field IDs"
+       )}
+    else
+      :ok
+    end
+  end
+
+  defp valid_document_returning?(:none), do: true
+
+  defp valid_document_returning?(fields) when is_list(fields) and length(fields) in 1..16,
+    do: Enum.all?(fields, &Selecto.Document.Path.safe_key?/1)
+
+  defp valid_document_returning?(_), do: false
 
   defp validate_operation(operation) when operation in @operations, do: :ok
 

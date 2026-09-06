@@ -352,6 +352,24 @@ present null, and the actual value otherwise. JSON encoding of that sentinel is
 `{"$selecto":"missing"}`. Consumers must treat the tag as result metadata;
 missing must not be collapsed into null before predicate or mutation planning.
 
+## Governed root scalar patches
+
+`Fixtures.patch_shape/0`, `patch_release/0`, and `patch_documents/0` provide a
+separate synthetic work-order fixture with ObjectId identities, owned schedule
+validation, and an optional boolean `expedited` field. Existing fixture release
+contents and digests are unchanged. An explicitly governed action may set or
+unset approved root scalar fields, including published nested paths; the action
+must grant the exact fields and the adapter must validate the whole parent
+before and after mutation. Publishing a field or owned relation supplies no
+write authority by itself.
+
+The [portable write protocol](write_adapter_protocol.md#root-scalar-patches-and-selected-postimages)
+defines the bounded patch representation and selected durable postimage codec.
+It preserves missing versus null, restricts scalar value families, protects
+source metadata, and requires operation and returning capabilities. Object/array
+replacement, implicit intermediate-object creation, and identified-element
+postimages are outside this root-patch profile.
+
 ## Drift and proof limits
 
 `Drift.compare/2` leaves both inputs unchanged and links their digests. It reports
@@ -371,3 +389,27 @@ monitoring, change streams, Couchbase, and other database families remain outsid
 these core contracts. The focused tests cover deterministic synthetic evidence,
 bounds, safe paths, malformed artifacts, approval/digest checks, drift semantics,
 and work-order validation; live adapter behavior requires its own database tests.
+
+### Explicit source namespace and JSON numeric semantics
+
+A source may declare `namespace: ["bucket", "scope"]`. Its physical namespace is
+part of the approved release digest and therefore signed cursor scope. Adapters
+must advertise `document.source_namespace` and bind every component to the host
+connection before dispatch. Existing MongoDB and SQLite control adapters reject
+this profile rather than ignoring the locator.
+
+The optional source policy `numeric_semantics: "json_number"` addresses stores
+that do not preserve JSON integer/float spelling. Under this reviewed policy,
+integral JSON numbers normalize to integers for declared integer fields, including
+scalar-array elements and identified child fields. Values outside safe-53 magnitude
+remain invalid. Strings, booleans, missing and null are never numeric coercions.
+Releases without the policy retain strict integer/float behavior. Query and write
+preflight derive explicit `document.json_number` / `document_json_number` gates.
+
+Native statistical inference uses `document_native_inference` evidence, validated
+separately from exact fixture inference. Its source-wide authorization, statistical
+scope, unavailable counters, unresolved number families and native truncation
+uncertainty are explicit. Native sample values and flavor labels are excluded.
+The report is not automatically accepted by Draft or Drift; field selection and
+semantics require author review. Couchbase's independent adapter implements this
+bounded native evidence importer.

@@ -9,6 +9,9 @@ defmodule Selecto.Document.Draft do
   @doc "Build an advisory field patch. The result is deliberately not a runnable ShapeRelease."
   def from_report(report, opts \\ [])
 
+  def from_report(%{"kind" => "document_native_inference"}, _opts),
+    do: {:error, :native_evidence_requires_authored_selection}
+
   def from_report(report, opts) do
     with :ok <- InferenceReport.validate(report),
          true <- opts == [] do
@@ -43,6 +46,9 @@ defmodule Selecto.Document.Draft do
   end
 
   @doc "Attach evidence provenance to a fully authored draft without changing its policy."
+  def build(%{"kind" => "document_native_inference"}, _authored),
+    do: {:error, :native_evidence_requires_authored_selection}
+
   def build(report, authored) do
     with :ok <- InferenceReport.validate(report),
          true <- is_map(authored) and not is_struct(authored),

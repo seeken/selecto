@@ -3,6 +3,15 @@
 
 ## Unreleased
 
+- Added approved physical source namespaces and explicit JSON-number semantics,
+  with digest-bound cursors, normalized declared integer fields and capability
+  gates. Added strict value-free native statistical inference evidence that
+  requires authored selection before draft or drift processing.
+
+- Added bounded document scalar set/unset contracts and ordered receipt
+  postimages, with explicit missing/null cells, portable scalar and size bounds,
+  and operation-derived write capabilities. Legacy increment hashes are preserved.
+
 - Added explicitly authored ObjectId fields with canonical portable values, typed
   identities, predicates, signed cursors and results, atomic path validation, and
   release-wide query/write capability gates. Native inference remains separate.

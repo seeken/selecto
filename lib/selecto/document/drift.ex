@@ -6,6 +6,9 @@ defmodule Selecto.Document.Drift do
   """
   alias Selecto.Document.{Canonical, InferenceReport, ShapeRelease}
 
+  def compare(_release, %{"kind" => "document_native_inference"}),
+    do: {:error, :native_evidence_requires_authored_selection}
+
   def compare(release, report) do
     with :ok <- ShapeRelease.validate(release, require_approved: true),
          :ok <- InferenceReport.validate(report) do

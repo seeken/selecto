@@ -326,6 +326,25 @@ defmodule Selecto.Document.Fixtures do
 
   def object_id_work_orders, do: object_id_documents()
 
+  @doc "Separate root-patch fixture with optional boolean input and existing ObjectId/object refinements."
+  def patch_shape do
+    object_id_shape()
+    |> Map.put("id", "work-orders/root-patches-v1")
+    |> put_in(["shape", "fields", "expedited"], scalar(["expedited"], "boolean", false))
+    |> update_in(["relations", "work_orders", "fields"], &Enum.sort(["expedited" | &1]))
+  end
+
+  def patch_release do
+    {:ok, draft} = ShapeRelease.new(patch_shape())
+    {:ok, release} = ShapeRelease.approve(draft, approved_by: "synthetic-fixture-author")
+    release
+  end
+
+  def patch_documents do
+    [first, second, third] = object_id_documents()
+    [Map.put(first, "expedited", false), Map.put(second, "expedited", true), third]
+  end
+
   @doc "Deterministic explicitly constructed synthetic ObjectId (positive fixture integer)."
   def object_id(number) when is_integer(number) and number >= 0 and number < 1_000_000 do
     hex = number |> Integer.to_string(16) |> String.pad_leading(24, "0")

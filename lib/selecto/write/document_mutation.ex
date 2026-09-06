@@ -2,8 +2,8 @@ defmodule Selecto.Write.DocumentMutation do
   @moduledoc """
   Portable, single-document action intent attached to `Command.metadata.document`.
 
-  The first profile supports one identified array object and one positive integer
-  increment. Paths are parsed object-key lists; positional indices and native
+  Profiles support either one identified array object and one positive integer
+  increment, or 1–8 root scalar set/unset patches. Paths are parsed object-key lists; positional indices and native
   expressions are not accepted. Missing, null, non-integer, or duplicate element
   matches must fail atomically. Adapters also increment the protected version and
   persist the idempotency receipt and effect records in the same document write.
@@ -39,8 +39,8 @@ defmodule Selecto.Write.DocumentMutation do
   def capabilities, do: @capabilities
 
   @doc "Required write capabilities include the attached release's shape refinements."
-  def capabilities(%__MODULE__{shape_features: features}) do
-    @capabilities ++
+  def capabilities(%__MODULE__{shape_features: features} = mutation) do
+    operation_capabilities(mutation) ++
       if(is_list(features) and "object_id" in features,
         do: [:document_object_id],
         else: []
@@ -51,6 +51,15 @@ defmodule Selecto.Write.DocumentMutation do
       ) ++
       if(is_list(features) and "scalar_array" in features,
         do: [:document_scalar_array],
+        else: []
+      ) ++
+      if(is_list(features) and "json_number" in features, do: [:document_json_number], else: []) ++
+      if(is_list(features) and "source_namespace" in features,
+        do: [:document_source_namespace],
+        else: []
+      ) ++
+      if(is_list(features) and "key_access_pattern" in features,
+        do: [:document_key_access_pattern],
         else: []
       )
   end
@@ -68,13 +77,20 @@ defmodule Selecto.Write.DocumentMutation do
          true <- valid_digest?(mutation.scope_digest),
          true <- valid_digest?(mutation.shape_digest),
          true <-
-           is_list(mutation.shape_features) and length(mutation.shape_features) <= 3 and
+           is_list(mutation.shape_features) and length(mutation.shape_features) <= 6 and
              Enum.sort(Enum.uniq(mutation.shape_features)) == mutation.shape_features and
              Enum.all?(
                mutation.shape_features,
-               &(&1 in ["object_id", "object_relation", "scalar_array"])
+               &(&1 in [
+                   "json_number",
+                   "key_access_pattern",
+                   "object_id",
+                   "object_relation",
+                   "scalar_array",
+                   "source_namespace"
+                 ])
              ),
-         true <- not object_id_selectors?(mutation) or "object_id" in mutation.shape_features,
+         true <- not object_id_values?(mutation) or "object_id" in mutation.shape_features,
          true <-
            is_list(mutation.effects) and length(mutation.effects) in 1..16 and
              Enum.uniq(mutation.effects) == mutation.effects and
@@ -90,6 +106,41 @@ defmodule Selecto.Write.DocumentMutation do
 
   @doc "Validate parsed object keys without accepting textual native paths."
   def valid_path?(path), do: match?({:ok, _}, Selecto.Document.Path.parse(path))
+
+  @doc "Whether intent uses only the root set/unset profile; does not replace validation."
+  def root_patch?(%__MODULE__{mutations: mutations})
+      when is_list(mutations) and length(mutations) in 1..8 do
+    Enum.all?(mutations, fn
+      %{op: op} = entry when not is_struct(entry) -> op in [:set, :unset]
+      _ -> false
+    end)
+  end
+
+  def root_patch?(_), do: false
+
+  @doc "The bounded, driver-free scalar family accepted by root patches and postimages."
+  def scalar_value?(value) when is_binary(value),
+    do: byte_size(value) <= 16_384 and String.valid?(value)
+
+  def scalar_value?(value) when is_integer(value),
+    do: value in -9_007_199_254_740_991..9_007_199_254_740_991
+
+  def scalar_value?(value) when is_boolean(value) or is_nil(value), do: true
+  def scalar_value?(value), do: ObjectId.valid?(value)
+
+  @doc "Patch accounting: raw UTF-8 string bytes, canonical JSON bytes for other scalars."
+  def scalar_value_bytes(value) do
+    if scalar_value?(value) do
+      bytes =
+        if is_binary(value),
+          do: byte_size(value),
+          else: byte_size(Selecto.Document.Canonical.encode(value))
+
+      {:ok, bytes}
+    else
+      {:error, :invalid_document_scalar}
+    end
+  end
 
   @doc "Stable digest of portable data; it contains no original scope values."
   def digest(value) do
@@ -115,11 +166,24 @@ defmodule Selecto.Write.DocumentMutation do
 
   defp tenant_selector(_), do: invalid(:invalid_document_selector)
 
-  defp object_id_selectors?(mutation) do
-    Enum.any?(
-      [mutation.identity, mutation.tenant | Enum.map(mutation.mutations, & &1.identity)],
-      &ObjectId.valid?(&1.value)
-    )
+  defp operation_capabilities(mutation) do
+    if root_patch?(mutation) do
+      Enum.reject(@capabilities, &(&1 == :document_update_element)) ++
+        Enum.flat_map([{:set, :document_set}, {:unset, :document_unset}], fn {op, capability} ->
+          if Enum.any?(mutation.mutations, &(&1.op == op)), do: [capability], else: []
+        end)
+    else
+      @capabilities
+    end
+  end
+
+  defp object_id_values?(mutation) do
+    ObjectId.valid?(mutation.identity.value) or
+      Enum.any?(mutation.mutations, fn
+        %{op: :update_element, identity: %{value: value}} -> ObjectId.valid?(value)
+        %{op: :set, value: value} -> ObjectId.valid?(value)
+        _ -> false
+      end)
   end
 
   defp version(%{path: path, expected: expected}) do
@@ -161,7 +225,47 @@ defmodule Selecto.Write.DocumentMutation do
     end
   end
 
+  defp validate_mutations(%__MODULE__{mutations: mutations} = mutation)
+       when is_list(mutations) and length(mutations) in 1..8 do
+    protected = [
+      mutation.identity.path,
+      mutation.tenant.path,
+      mutation.version.path,
+      ["_selecto_receipts"]
+    ]
+
+    with true <- Enum.all?(mutations, &valid_root_entry?/1),
+         paths = Enum.map(mutations, & &1.path),
+         true <- disjoint?(protected ++ paths),
+         true <- patch_value_bytes(mutations) <= 65_536 do
+      :ok
+    else
+      _ -> invalid(:unsupported_document_mutation)
+    end
+  end
+
   defp validate_mutations(_), do: invalid(:unsupported_document_mutation)
+
+  defp valid_root_entry?(%{op: :set, path: path, value: value} = entry)
+       when not is_struct(entry) and map_size(entry) == 3,
+       do: valid_path?(path) and scalar_value?(value)
+
+  defp valid_root_entry?(%{op: :unset, path: path} = entry)
+       when not is_struct(entry) and map_size(entry) == 2,
+       do: valid_path?(path)
+
+  defp valid_root_entry?(_), do: false
+
+  defp patch_value_bytes(mutations) do
+    Enum.reduce(mutations, 0, fn
+      %{op: :set, value: value}, total ->
+        {:ok, bytes} = scalar_value_bytes(value)
+        total + bytes
+
+      %{op: :unset}, total ->
+        total
+    end)
+  end
 
   defp overlap?(left, right),
     do: Enum.take(left, length(right)) == right or Enum.take(right, length(left)) == left
