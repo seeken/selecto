@@ -67,11 +67,13 @@ the second loader observes the first writer's committed state. Optimistic child
 fields remain in the emitted write predicate; a stale value causes exact
 cardinality failure and transaction rollback.
 
-This capability covers writers that invoke the candidate loader. A full-set or
-other membership-changing path that does not invoke it must still take the same
-parent lock before the adapter may claim serialization against candidate
-writers. Database-native constraints remain a separate strategy and capability
-claim.
+This capability also covers a prepared governed nested update or delete whose
+portable graph carries `membership_parent_lock`. PostgreSQL locks that graph's
+scoped root before execution even if its rules never invoke the candidate
+loader. That gives graph-backed full-set, replacement, append, delete, link,
+and unlink forms the same membership mutex as candidate writers. Raw portable
+graphs, direct SQL, and other bypassing writers remain outside this guarantee.
+Database-native constraints remain a separate strategy and capability claim.
 
 ### Document shape refinements
 

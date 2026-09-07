@@ -850,10 +850,12 @@ inside one adapter-owned transaction.
 
 The PostgreSQL strategy locks exactly one parent selected by the complete
 governed predicate before loading children by the authored relationship key.
-Candidate writers using this strategy serialize on that parent lock. Other
-membership-changing write shapes must acquire the same lock before a Domain or
-adapter can claim full collection-writer race safety. Direct SQL and other
-bypassing writers remain outside the governed guarantee.
+Candidate writers using this strategy serialize on that parent lock. A prepared
+governed nested update or delete also carries a `membership_parent_lock`
+obligation, so PostgreSQL locks the same parent even when no candidate rule
+loads children. This covers the graph-backed full-set, replacement, append,
+delete, link, and unlink forms that Updato compiles through that boundary.
+Direct SQL and other bypassing writers remain outside the governed guarantee.
 
 Nested stale-write protection is part of relationship policy. A relationship
 `conflict` map may identify `child_field` or `child_fields`; submitted update
