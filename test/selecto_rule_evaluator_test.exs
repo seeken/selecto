@@ -108,6 +108,38 @@ defmodule Selecto.Rule.EvaluatorTest do
              )
   end
 
+  test "validates a bounded structured object with explicit unknown-key policy" do
+    assert {:ok, test} =
+             Contract.compile_test(%{
+               op: "object.shape",
+               required: [:vin, :year],
+               properties: %{
+                 vin: %{
+                   op: "text.pattern",
+                   profile: "ascii_v1",
+                   pattern: "[A-Z0-9]{17}",
+                   match: "full"
+                 },
+                 year: %{op: "number.range", min: 1886, max: 9999}
+               },
+               additional: false
+             })
+
+    assert :passed = Evaluator.evaluate_test(test, %{vin: "1HGCM82633A004352", year: 2026})
+
+    assert {:failed, %{code: :missing_object_key}} =
+             Evaluator.evaluate_test(test, %{vin: "1HGCM82633A004352"})
+
+    assert {:failed, %{code: :unknown_object_key}} =
+             Evaluator.evaluate_test(test, %{vin: "1HGCM82633A004352", year: 2026, trim: "EX"})
+
+    assert {:failed, %{code: :numeric_range, object_key: "year"}} =
+             Evaluator.evaluate_test(test, %{vin: "1HGCM82633A004352", year: 1700})
+
+    assert {:error, %{code: :invalid_object_shape_rule}} =
+             Contract.compile_test(%{op: "object.shape", properties: %{}, additional: true})
+  end
+
   test "returns required transaction and evidence checks as pending obligations" do
     assert {:ok, contract} = Contract.compile(obligation_domain())
 

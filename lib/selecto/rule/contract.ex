@@ -25,6 +25,7 @@ defmodule Selecto.Rule.Contract do
     text.length text.pattern text.prefix text.suffix text.contains
     number.gt number.gte number.lt number.lte number.range number.integer number.multiple_of
     membership.in membership.not_in collection.count collection.unique_by
+    object.shape
     value.eq value.neq value.compare_path
     temporal.date temporal.time temporal.instant temporal.compare_path
     all any not
@@ -477,6 +478,9 @@ defmodule Selecto.Rule.Contract do
       op == "collection.unique_by" ->
         compile_unique_by(test, path)
 
+      op == "object.shape" ->
+        compile_object_shape(test, path, depth)
+
       op in ["text.prefix", "text.suffix", "text.contains"] ->
         compile_text_operand(test, path)
 
@@ -658,6 +662,59 @@ defmodule Selecto.Rule.Contract do
          )}
     end
   end
+
+  defp compile_object_shape(test, path, depth) do
+    with :ok <- known_keys(test, ~w(op required properties additional), path),
+         required when is_list(required) <- value(test, :required, []),
+         true <- Enum.all?(required, &object_key?/1),
+         properties when is_map(properties) <- value(test, :properties, %{}),
+         false <- is_struct(properties),
+         true <- map_size(properties) > 0,
+         additional when is_boolean(additional) <- value(test, :additional),
+         {:ok, compiled_properties} <- compile_object_properties(properties, path, depth),
+         true <- Enum.all?(required, &Map.has_key?(compiled_properties, to_string(&1))) do
+      {:ok,
+       %{
+         "op" => "object.shape",
+         "required" => required |> Enum.map(&to_string/1) |> Enum.sort(),
+         "properties" => compiled_properties,
+         "additional" => additional
+       }}
+    else
+      _ ->
+        {:error,
+         error(
+           :invalid_object_shape_rule,
+           path,
+           "object.shape requires declared properties, required keys within them, and an explicit additional policy"
+         )}
+    end
+  end
+
+  defp compile_object_properties(properties, path, depth) do
+    if map_size(properties) <= 64 and
+         Enum.all?(Map.keys(properties), &object_key?/1) and
+         Map.keys(properties) |> Enum.map(&to_string/1) |> Enum.uniq() |> length() ==
+           map_size(properties) do
+      properties
+      |> Enum.sort_by(fn {key, _test} -> to_string(key) end)
+      |> Enum.reduce_while({:ok, %{}}, fn {key, property_test}, {:ok, acc} ->
+        case compile_test(property_test, path ++ [:properties, to_string(key)], depth + 1) do
+          {:ok, compiled} -> {:cont, {:ok, Map.put(acc, to_string(key), compiled)}}
+          {:error, error} -> {:halt, {:error, error}}
+        end
+      end)
+    else
+      {:error,
+       error(
+         :invalid_object_shape_rule,
+         path ++ [:properties],
+         "object properties must be at most 64 unique non-empty keys"
+       )}
+    end
+  end
+
+  defp object_key?(value), do: is_atom(value) or (is_binary(value) and String.trim(value) != "")
 
   defp compile_text_operand(test, path) do
     with :ok <- known_keys(test, ~w(op text), path),

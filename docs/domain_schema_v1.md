@@ -800,6 +800,15 @@ path and comparison; both values must parse as that same kind. Relative-time,
 duration, zone-policy, and stored-state update semantics remain later-stage
 obligations.
 
+`object.shape` validates a bounded structured object without executing host
+code. It declares non-empty `properties` whose values are ordinary rule tests,
+lists any `required` property names, and declares `additional: true` or
+`false`. When additional keys are forbidden, keys outside `properties` fail.
+Declared optional properties are evaluated only when present. The profile caps
+one object shape at 64 properties and reuses the ordinary bounded rule nesting
+limit; cross-field object logic and database JSON-schema enforcement remain
+separate adapter obligations.
+
 `presence.required` means the path must exist; explicit null remains distinct.
 Use `presence.non_null` when null is forbidden and `text.nonblank` when empty or
 whitespace-only text is forbidden. Unknown operators, options, subject paths,

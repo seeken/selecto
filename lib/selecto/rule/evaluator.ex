@@ -335,6 +335,26 @@ defmodule Selecto.Rule.Evaluator do
   defp do_evaluate(%{"op" => "collection.unique_by"}, _value, _opts),
     do: failed(:invalid_type, "value must be a collection")
 
+  defp do_evaluate(%{"op" => "object.shape"} = test, value, opts) when is_map(value) do
+    keys = Map.keys(value) |> Enum.map(&to_string/1)
+    required = test["required"]
+    properties = test["properties"]
+
+    cond do
+      Enum.any?(required, &(&1 not in keys)) ->
+        failed(:missing_object_key, "object is missing a required key")
+
+      not test["additional"] and Enum.any?(keys, &(not Map.has_key?(properties, &1))) ->
+        failed(:unknown_object_key, "object contains an undeclared key")
+
+      true ->
+        evaluate_object_properties(properties, value, opts)
+    end
+  end
+
+  defp do_evaluate(%{"op" => "object.shape"}, _value, _opts),
+    do: failed(:invalid_type, "value must be an object")
+
   defp do_evaluate(%{"op" => "value.eq", "value" => expected}, value, _opts),
     do:
       if(value == expected,
@@ -439,6 +459,24 @@ defmodule Selecto.Rule.Evaluator do
       errored(:rule_evaluation_error, "rule evaluation failed safely",
         exception: Exception.message(error)
       )
+  end
+
+  defp evaluate_object_properties(properties, value, opts) do
+    properties
+    |> Enum.sort_by(fn {key, _test} -> key end)
+    |> Enum.reduce_while(:passed, fn {key, property_test}, :passed ->
+      case fetch_path(value, [key]) do
+        @missing ->
+          {:cont, :passed}
+
+        property_value ->
+          case do_evaluate(property_test, property_value, opts) do
+            :passed -> {:cont, :passed}
+            {:failed, details} -> {:halt, {:failed, Map.put(details, :object_key, key)}}
+            {:error, details} -> {:halt, {:error, Map.put(details, :object_key, key)}}
+          end
+      end
+    end)
   end
 
   defp safe_normalize_step(step, value) do
