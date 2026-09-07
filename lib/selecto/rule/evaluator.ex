@@ -80,7 +80,8 @@ defmodule Selecto.Rule.Evaluator do
 
         with :passed <- evaluate_condition(binding.condition, values, opts),
              {:ok, normalized} <- apply_normalizer(normalizer, value),
-             result <- safe_evaluate(definition.test, normalized, opts) do
+             result <-
+               safe_evaluate(definition.test, normalized, Keyword.put(opts, :values, values)) do
           updated =
             if normalizer && value != @missing,
               do: put_path(values, binding.subject.path, normalized),
@@ -348,6 +349,19 @@ defmodule Selecto.Rule.Evaluator do
         else: failed(:equal_to_excluded, "value equals its excluded value")
       )
 
+  defp do_evaluate(
+         %{"op" => "value.compare_path", "comparison" => comparison, "path" => path},
+         value,
+         opts
+       ) do
+    related = fetch_path(Keyword.get(opts, :values, %{}), path)
+
+    case compare_related(value, related, comparison) do
+      :passed -> :passed
+      {:failed, _details} = failed -> failed
+    end
+  end
+
   defp do_evaluate(%{"op" => "all", "rules" => rules}, value, opts) do
     results = Enum.map(rules, &do_evaluate(&1, value, opts))
 
@@ -462,6 +476,36 @@ defmodule Selecto.Rule.Evaluator do
   defp compare(left, right, :gte), do: Decimal.compare(left, right) in [:gt, :eq]
   defp compare(left, right, :lt), do: Decimal.compare(left, right) == :lt
   defp compare(left, right, :lte), do: Decimal.compare(left, right) in [:lt, :eq]
+
+  defp compare_related(_value, @missing, _comparison),
+    do: failed(:missing_related_value, "related comparison value is missing")
+
+  defp compare_related(left, right, comparison) when comparison in ["eq", "neq"] do
+    valid = if comparison == "eq", do: left == right, else: left != right
+
+    if valid,
+      do: :passed,
+      else: failed(:related_value_comparison, "value violates its related-field comparison")
+  end
+
+  defp compare_related(left, right, comparison) do
+    with {:ok, left} <- decimal(left),
+         {:ok, right} <- decimal(right) do
+      valid =
+        case comparison do
+          "gt" -> compare(left, right, :gt)
+          "gte" -> compare(left, right, :gte)
+          "lt" -> compare(left, right, :lt)
+          "lte" -> compare(left, right, :lte)
+        end
+
+      if valid,
+        do: :passed,
+        else: failed(:related_value_comparison, "value violates its related-field comparison")
+    else
+      :error -> failed(:invalid_related_value_type, "related comparison requires exact numbers")
+    end
+  end
 
   defp decimal(value) when is_integer(value), do: {:ok, Decimal.new(value)}
   defp decimal(%Decimal{} = value), do: {:ok, value}

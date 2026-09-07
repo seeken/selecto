@@ -786,9 +786,12 @@ rules: %{
 
 The first pure profile includes presence and explicit non-null checks, portable
 types, text length/content and bounded ASCII patterns, exact numeric bounds and
-multiples, membership, collection count and uniqueness, literal equality, and
-`all`/`any`/`not`. Numeric floats are not exact literals. Use integers, decimal
-strings, or `Decimal` values at the Elixir evaluator boundary.
+multiples, membership, collection count and uniqueness, literal equality,
+numeric `value.compare_path`, and `all`/`any`/`not`. `value.compare_path`
+compares its subject with an authored semantic path using `gt`, `gte`, `lt`,
+`lte`, `eq`, or `neq`; missing related values fail closed. Numeric floats are
+not exact literals. Use integers, decimal strings, or `Decimal` values at the
+Elixir evaluator boundary.
 
 `presence.required` means the path must exist; explicit null remains distinct.
 Use `presence.non_null` when null is forbidden and `text.nonblank` when empty or

@@ -25,7 +25,7 @@ defmodule Selecto.Rule.Contract do
     text.length text.pattern text.prefix text.suffix text.contains
     number.gt number.gte number.lt number.lte number.range number.integer number.multiple_of
     membership.in membership.not_in collection.count collection.unique_by
-    value.eq value.neq all any not
+    value.eq value.neq value.compare_path all any not
   )
 
   @enforce_keys [:definitions, :normalizers, :bindings]
@@ -481,6 +481,9 @@ defmodule Selecto.Rule.Contract do
       op in ["value.eq", "value.neq"] ->
         compile_literal_operand(test, path)
 
+      op == "value.compare_path" ->
+        compile_compare_path(test, path)
+
       true ->
         compile_leaf(test, path, ~w(op))
     end
@@ -667,6 +670,23 @@ defmodule Selecto.Rule.Contract do
       {:ok, %{"op" => value(test, :op), "value" => value(test, :value)}}
     else
       _ -> {:error, error(:invalid_value_rule, path, "value comparison requires a value")}
+    end
+  end
+
+  defp compile_compare_path(test, path) do
+    with :ok <- known_keys(test, ~w(op comparison path), path),
+         comparison when comparison in ["gt", "gte", "lt", "lte", "eq", "neq"] <-
+           value(test, :comparison),
+         {:ok, related_path} <- semantic_path(value(test, :path), path ++ [:path]) do
+      {:ok, %{"op" => "value.compare_path", "comparison" => comparison, "path" => related_path}}
+    else
+      _ ->
+        {:error,
+         error(
+           :invalid_related_value_rule,
+           path,
+           "value.compare_path requires gt/gte/lt/lte/eq/neq and a non-empty semantic path"
+         )}
     end
   end
 

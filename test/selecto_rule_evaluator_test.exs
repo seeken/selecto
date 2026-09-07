@@ -56,6 +56,26 @@ defmodule Selecto.Rule.EvaluatorTest do
     assert {:failed, %{code: :invalid_type}} = Evaluator.evaluate_test(test, 0.11)
   end
 
+  test "compares a value with a related field using exact numeric semantics" do
+    assert {:ok, test} =
+             Contract.compile_test(%{op: "value.compare_path", comparison: "gt", path: [:start]})
+
+    assert :passed = Evaluator.evaluate_test(test, "2.00", values: %{start: "1.50"})
+
+    assert {:failed, %{code: :related_value_comparison}} =
+             Evaluator.evaluate_test(test, "1.50", values: %{start: "1.50"})
+
+    assert {:failed, %{code: :missing_related_value}} =
+             Evaluator.evaluate_test(test, "2.00", values: %{})
+
+    assert {:error, %{code: :invalid_related_value_rule}} =
+             Contract.compile_test(%{
+               op: "value.compare_path",
+               comparison: "greater",
+               path: [:start]
+             })
+  end
+
   test "returns required transaction and evidence checks as pending obligations" do
     assert {:ok, contract} = Contract.compile(obligation_domain())
 
