@@ -101,6 +101,44 @@ defmodule Selecto.Rule.ContractTest do
     end
   end
 
+  test "resolves canonical rules bound to writable relationship collections" do
+    relationship = %{
+      enabled: true,
+      cardinality: :many,
+      allowed_ops: [:insert],
+      ownership: :owned,
+      child_key: :order_id,
+      parent_key: :id,
+      identity_fields: [:id],
+      domain: domain()
+    }
+
+    nested =
+      domain()
+      |> put_in([:writes], %{
+        operations: %{insert: %{enabled: true}},
+        fields: %{quantity: %{insertable: true}, reference: %{insertable: true}},
+        relationships: %{items: relationship}
+      })
+      |> put_in([:rules, :definitions, :three_items], %{
+        version: 1,
+        test: %{op: "collection.count", exact: 3}
+      })
+      |> put_in([:rules, :bindings, :three_items], %{
+        subject: %{scope: :input, path: [:items]},
+        operations: [:insert],
+        rule: %{id: :three_items, version: 1}
+      })
+
+    assert {:ok, contract} = Contract.compile(nested)
+    assert contract.bindings["three_items"].subject.path == ["items"]
+
+    assert {:error, [%{code: :unresolved_rule_subject}]} =
+             nested
+             |> put_in([:rules, :bindings, :three_items, :subject, :path], [:missing_items])
+             |> Contract.compile()
+  end
+
   test "semantic fingerprints use stable canonical JSON bytes" do
     domain = %{
       source: %{

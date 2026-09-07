@@ -738,23 +738,31 @@ defmodule Selecto.Rule.Contract do
   end
 
   defp known_subject?(%{scope: "input", path: [field | _]}, normalized) do
-    normalized
-    |> Map.get(:writes, %{})
-    |> value(:fields, %{})
-    |> entry_ids()
-    |> MapSet.member?(field)
+    known_write_subject?(normalized, field)
   end
 
   defp known_subject?(%{scope: scope, path: [field | _]}, normalized)
        when scope in ["candidate", "transaction", "evidence"] do
-    normalized
-    |> Map.get(:source, %{})
-    |> Core.relation_fields()
-    |> MapSet.new()
-    |> MapSet.member?(field)
+    field in Core.relation_fields(Map.get(normalized, :source, %{})) or
+      known_relationship_subject?(normalized, field)
   end
 
   defp known_subject?(_subject, _normalized), do: false
+
+  defp known_write_subject?(normalized, field) do
+    writes = Map.get(normalized, :writes, %{})
+
+    field in entry_ids(value(writes, :fields, %{})) or
+      field in entry_ids(value(writes, :relationships, %{}))
+  end
+
+  defp known_relationship_subject?(normalized, field) do
+    normalized
+    |> Map.get(:writes, %{})
+    |> value(:relationships, %{})
+    |> entry_ids()
+    |> MapSet.member?(field)
+  end
 
   defp action_input_ids(nil), do: MapSet.new()
 
