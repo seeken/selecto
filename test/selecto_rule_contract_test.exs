@@ -34,6 +34,8 @@ defmodule Selecto.Rule.ContractTest do
     assert projection["schema"] == "selecto.data_rules.v1"
     assert String.starts_with?(projection["fingerprint"], "sha256:")
     assert Map.keys(projection["bindings"]) == ["quantity_on_write", "reference_on_write"]
+    assert projection["bindings"]["quantity_on_write"]["normalizer"] == nil
+    assert projection["bindings"]["quantity_on_write"]["condition"] == nil
     assert projection["definitions"]["positive_quantity"]["test"]["bound"]["decimal"] == "0"
     assert projection["evaluation"]["client_results_authoritative"] == false
     assert projection["evaluation"]["server_revalidation_required"] == true
@@ -69,6 +71,14 @@ defmodule Selecto.Rule.ContractTest do
              domain()
              |> put_in([:rules, :normalizers, :reference, :steps, Access.at(0), :locale], "en")
              |> Contract.compile()
+
+    assert {:error, [%{code: :invalid_normalizer_profile}]} =
+             domain()
+             |> put_in(
+               [:rules, :normalizers, :reference, :steps, Access.at(1), :profile],
+               "ascii_whitespace_v1"
+             )
+             |> Contract.compile()
   end
 
   test "rejects unbounded or non-portable regex syntax" do
@@ -79,6 +89,45 @@ defmodule Selecto.Rule.ContractTest do
                pattern: "(?=VIN)",
                match: "search"
              })
+
+    for pattern <- ["\\p{L}+", "a+?", "[[:alpha:]]"] do
+      assert {:error, %{code: :invalid_text_pattern}} =
+               Contract.compile_test(%{
+                 op: "text.pattern",
+                 profile: "ascii_v1",
+                 pattern: pattern,
+                 match: "search"
+               })
+    end
+  end
+
+  test "semantic fingerprints use stable canonical JSON bytes" do
+    domain = %{
+      source: %{
+        source_table: "items",
+        primary_key: :id,
+        fields: [:id, :value],
+        columns: %{id: %{type: :integer}, value: %{type: :string}},
+        associations: %{}
+      },
+      schemas: %{},
+      rules: %{
+        schema: "selecto.data_rules.v1",
+        definitions: %{present: %{version: 1, test: %{op: "presence.required"}}},
+        normalizers: %{},
+        bindings: %{
+          value: %{
+            subject: %{scope: :candidate, path: [:value]},
+            rule: %{id: :present, version: 1}
+          }
+        }
+      }
+    }
+
+    assert {:ok, contract} = Contract.compile(domain)
+
+    assert contract.fingerprint ==
+             "sha256:99b53d0df797657c165281d70b4f3a29001f8a5b9b072b5a48ae4712d19dc2a0"
   end
 
   defp domain do

@@ -123,7 +123,7 @@ defmodule Selecto.Rule.Contract do
     projected = portable(semantic)
 
     projected
-    |> Map.put("fingerprint", semantic_fingerprint(canonical(semantic)))
+    |> Map.put("fingerprint", semantic_fingerprint(semantic))
     |> Map.put("evaluation", evaluation_markers(bindings))
   end
 
@@ -339,9 +339,12 @@ defmodule Selecto.Rule.Contract do
 
   defp normalizer_keys(_op), do: ~w(op)
 
-  defp valid_normalizer_profile(op, profile, _path)
-       when op in ["text.trim", "text.uppercase", "text.lowercase"] and
-              profile in ["ascii_v1", "ascii_whitespace_v1"],
+  defp valid_normalizer_profile("text.trim", profile, _path)
+       when profile in ["ascii_v1", "ascii_whitespace_v1"],
+       do: :ok
+
+  defp valid_normalizer_profile(op, "ascii_v1", _path)
+       when op in ["text.uppercase", "text.lowercase"],
        do: :ok
 
   defp valid_normalizer_profile("text.nfc", "unicode_nfc_v1", _path), do: :ok
@@ -813,7 +816,7 @@ defmodule Selecto.Rule.Contract do
       required_features: features
     }
 
-    fingerprint = semantic_fingerprint(canonical(semantic))
+    fingerprint = semantic_fingerprint(semantic)
 
     %{contract | fingerprint: fingerprint, required_features: features}
   end
@@ -877,11 +880,32 @@ defmodule Selecto.Rule.Contract do
 
   defp semantic_fingerprint(value) do
     digest =
-      :crypto.hash(:sha256, :erlang.term_to_binary(value, [:deterministic]))
+      :crypto.hash(:sha256, canonical_json(value))
       |> Base.encode16(case: :lower)
 
     "sha256:#{digest}"
   end
+
+  defp canonical_json(value),
+    do: value |> portable() |> encode_canonical_json() |> IO.iodata_to_binary()
+
+  defp encode_canonical_json(map) when is_map(map) do
+    members =
+      map
+      |> Enum.sort_by(fn {key, _value} -> to_string(key) end)
+      |> Enum.map(fn {key, value} ->
+        [Jason.encode!(to_string(key)), ?:, encode_canonical_json(value)]
+      end)
+
+    [?{, Enum.intersperse(members, ?,), ?}]
+  end
+
+  defp encode_canonical_json(list) when is_list(list),
+    do: [?[, Enum.intersperse(Enum.map(list, &encode_canonical_json/1), ?,), ?]]
+
+  defp encode_canonical_json(value)
+       when is_binary(value) or is_integer(value) or is_boolean(value) or is_nil(value),
+       do: Jason.encode!(value)
 
   defp test_features(%{"op" => op} = test) when op in ["all", "any"],
     do: ["rule:logic"] ++ Enum.flat_map(test["rules"], &test_features/1)
@@ -1038,10 +1062,34 @@ defmodule Selecto.Rule.Contract do
       String.contains?(pattern, ["(?", "\\1", "\\2", "\\3", "^", "$"]) ->
         {:error, :unsupported_regex_feature}
 
+      String.contains?(pattern, ["[[:", ":]]", "&&"]) ->
+        {:error, :unsupported_character_class}
+
+      Regex.match?(~r/(?:\*|\+|\?|\})[?+]/, pattern) ->
+        {:error, :unsupported_quantifier_mode}
+
+      not portable_escapes?(pattern) ->
+        {:error, :unsupported_escape}
+
       true ->
         :ok
     end
   end
+
+  defp portable_escapes?(pattern) do
+    pattern
+    |> :binary.bin_to_list()
+    |> portable_escape_bytes?()
+  end
+
+  defp portable_escape_bytes?([]), do: true
+  defp portable_escape_bytes?([?\\]), do: false
+
+  defp portable_escape_bytes?([?\\, escaped | rest]) do
+    escaped in ~c"\\.^$|?*+()[]{}-dDsSwWtrn" and portable_escape_bytes?(rest)
+  end
+
+  defp portable_escape_bytes?([_byte | rest]), do: portable_escape_bytes?(rest)
 
   defp ascii?(value), do: value |> :binary.bin_to_list() |> Enum.all?(&(&1 < 128))
 
@@ -1089,23 +1137,13 @@ defmodule Selecto.Rule.Contract do
   defp string_keys(map), do: Map.new(map, fn {key, value} -> {to_string(key), value} end)
   defp compact(map), do: Map.reject(map, fn {_key, value} -> is_nil(value) end)
 
-  defp canonical(%Decimal{} = value), do: Decimal.to_string(value, :normal)
-
-  defp canonical(map) when is_map(map),
-    do:
-      map
-      |> Enum.sort_by(fn {key, _} -> to_string(key) end)
-      |> Enum.map(fn {key, value} -> {to_string(key), canonical(value)} end)
-
-  defp canonical(list) when is_list(list), do: Enum.map(list, &canonical/1)
-  defp canonical(value), do: value
-
   defp portable(%Decimal{} = value), do: Decimal.to_string(value, :normal)
 
   defp portable(map) when is_map(map),
     do: Map.new(map, fn {key, value} -> {to_string(key), portable(value)} end)
 
   defp portable(list) when is_list(list), do: Enum.map(list, &portable/1)
+  defp portable(value) when is_boolean(value) or is_nil(value), do: value
   defp portable(value) when is_atom(value), do: Atom.to_string(value)
   defp portable(value), do: value
 

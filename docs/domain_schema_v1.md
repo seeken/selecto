@@ -796,7 +796,8 @@ whitespace-only text is forbidden. Unknown operators, options, subject paths,
 versions, normalizer profiles, and references reject the Domain.
 
 `Selecto.Rule.Compiler.compile/1` produces the immutable contract and semantic
-fingerprint. `Selecto.Rule.Contract.project/2` emits a deterministic subset for
+fingerprint using the language-neutral `selecto.canonical-json.v1` byte format
+and SHA-256. `Selecto.Rule.Contract.project/2` emits a deterministic subset for
 consumer releases, including exact operator, normalizer, and stage features.
 Its evaluation markers distinguish locally eligible input checks from required
 server revalidation and external evidence. Client results are never marked
