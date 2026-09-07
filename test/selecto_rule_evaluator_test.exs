@@ -140,6 +140,41 @@ defmodule Selecto.Rule.EvaluatorTest do
              Contract.compile_test(%{op: "object.shape", properties: %{}, additional: true})
   end
 
+  test "uses a path test to make a binding conditional on a related value" do
+    domain =
+      domain()
+      |> update_in([:source, :fields], &(&1 ++ [:kind, :discount_code]))
+      |> put_in([:rules, :definitions, :discount_code], %{
+        version: 1,
+        test: %{op: "presence.required"}
+      })
+      |> put_in([:rules, :bindings, :discount_code], %{
+        subject: %{scope: :candidate, path: [:discount_code]},
+        rule: %{id: :discount_code, version: 1},
+        condition: %{op: "path.test", path: [:kind], test: %{op: "value.eq", value: "coupon"}}
+      })
+
+    assert {:ok, contract} = Contract.compile(domain)
+
+    assert %{disposition: :passed} =
+             Evaluator.evaluate(
+               contract,
+               :candidate,
+               %{kind: "standard", quantity: "1", reference: "AB12", selected: [1, 2, 3]},
+               operation: :insert
+             )
+
+    assert %{disposition: :failed, outcomes: outcomes} =
+             Evaluator.evaluate(
+               contract,
+               :candidate,
+               %{kind: "coupon", quantity: "1", reference: "AB12", selected: [1, 2, 3]},
+               operation: :insert
+             )
+
+    assert Enum.any?(outcomes, &(&1.path == ["discount_code"] and &1.code == :required))
+  end
+
   test "returns required transaction and evidence checks as pending obligations" do
     assert {:ok, contract} = Contract.compile(obligation_domain())
 

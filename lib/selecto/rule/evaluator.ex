@@ -355,6 +355,10 @@ defmodule Selecto.Rule.Evaluator do
   defp do_evaluate(%{"op" => "object.shape"}, _value, _opts),
     do: failed(:invalid_type, "value must be an object")
 
+  defp do_evaluate(%{"op" => "path.test", "path" => path, "test" => nested_test}, value, opts) do
+    do_evaluate(nested_test, fetch_path(value, path), opts)
+  end
+
   defp do_evaluate(%{"op" => "value.eq", "value" => expected}, value, _opts),
     do:
       if(value == expected,

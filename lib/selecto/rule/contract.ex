@@ -25,7 +25,7 @@ defmodule Selecto.Rule.Contract do
     text.length text.pattern text.prefix text.suffix text.contains
     number.gt number.gte number.lt number.lte number.range number.integer number.multiple_of
     membership.in membership.not_in collection.count collection.unique_by
-    object.shape
+    object.shape path.test
     value.eq value.neq value.compare_path
     temporal.date temporal.time temporal.instant temporal.compare_path
     all any not
@@ -481,6 +481,9 @@ defmodule Selecto.Rule.Contract do
       op == "object.shape" ->
         compile_object_shape(test, path, depth)
 
+      op == "path.test" ->
+        compile_path_test(test, path, depth)
+
       op in ["text.prefix", "text.suffix", "text.contains"] ->
         compile_text_operand(test, path)
 
@@ -715,6 +718,22 @@ defmodule Selecto.Rule.Contract do
   end
 
   defp object_key?(value), do: is_atom(value) or (is_binary(value) and String.trim(value) != "")
+
+  defp compile_path_test(test, path, depth) do
+    with :ok <- known_keys(test, ~w(op path test), path),
+         {:ok, target_path} <- semantic_path(value(test, :path), path ++ [:path]),
+         {:ok, nested_test} <- compile_test(value(test, :test), path ++ [:test], depth + 1) do
+      {:ok, %{"op" => "path.test", "path" => target_path, "test" => nested_test}}
+    else
+      _ ->
+        {:error,
+         error(
+           :invalid_path_test_rule,
+           path,
+           "path.test requires a non-empty semantic path and a valid nested rule test"
+         )}
+    end
+  end
 
   defp compile_text_operand(test, path) do
     with :ok <- known_keys(test, ~w(op text), path),

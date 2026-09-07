@@ -809,6 +809,13 @@ one object shape at 64 properties and reuses the ordinary bounded rule nesting
 limit; cross-field object logic and database JSON-schema enforcement remain
 separate adapter obligations.
 
+Bindings may use `condition: %{op: "path.test", path: [...], test: ...}` to
+evaluate a nested rule against a related candidate value before applying the
+binding. A failed condition makes the binding inapplicable; an invalid condition
+is an evaluation error. This expresses rules such as “discount code is required
+when kind is coupon.” It still requires a complete candidate value for partial
+updates, which the prepared writer boundary must supply.
+
 `presence.required` means the path must exist; explicit null remains distinct.
 Use `presence.non_null` when null is forbidden and `text.nonblank` when empty or
 whitespace-only text is forbidden. Unknown operators, options, subject paths,
