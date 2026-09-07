@@ -25,7 +25,9 @@ defmodule Selecto.Rule.Contract do
     text.length text.pattern text.prefix text.suffix text.contains
     number.gt number.gte number.lt number.lte number.range number.integer number.multiple_of
     membership.in membership.not_in collection.count collection.unique_by
-    value.eq value.neq value.compare_path all any not
+    value.eq value.neq value.compare_path
+    temporal.date temporal.time temporal.instant temporal.compare_path
+    all any not
   )
 
   @enforce_keys [:definitions, :normalizers, :bindings]
@@ -484,6 +486,9 @@ defmodule Selecto.Rule.Contract do
       op == "value.compare_path" ->
         compile_compare_path(test, path)
 
+      op == "temporal.compare_path" ->
+        compile_temporal_compare_path(test, path)
+
       true ->
         compile_leaf(test, path, ~w(op))
     end
@@ -686,6 +691,30 @@ defmodule Selecto.Rule.Contract do
            :invalid_related_value_rule,
            path,
            "value.compare_path requires gt/gte/lt/lte/eq/neq and a non-empty semantic path"
+         )}
+    end
+  end
+
+  defp compile_temporal_compare_path(test, path) do
+    with :ok <- known_keys(test, ~w(op kind comparison path), path),
+         kind when kind in ["date", "time", "instant"] <- value(test, :kind),
+         comparison when comparison in ["gt", "gte", "lt", "lte", "eq", "neq"] <-
+           value(test, :comparison),
+         {:ok, related_path} <- semantic_path(value(test, :path), path ++ [:path]) do
+      {:ok,
+       %{
+         "op" => "temporal.compare_path",
+         "kind" => kind,
+         "comparison" => comparison,
+         "path" => related_path
+       }}
+    else
+      _ ->
+        {:error,
+         error(
+           :invalid_temporal_comparison_rule,
+           path,
+           "temporal.compare_path requires date/time/instant, gt/gte/lt/lte/eq/neq, and a semantic path"
          )}
     end
   end

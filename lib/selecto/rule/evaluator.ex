@@ -362,6 +362,40 @@ defmodule Selecto.Rule.Evaluator do
     end
   end
 
+  for {op, kind} <- [
+        {"temporal.date", :date},
+        {"temporal.time", :time},
+        {"temporal.instant", :instant}
+      ] do
+    defp do_evaluate(%{"op" => unquote(op)}, value, _opts) do
+      case temporal(value, unquote(kind)) do
+        {:ok, _value} -> :passed
+        :error -> failed(:invalid_temporal_value, "value is not a valid #{unquote(kind)}")
+      end
+    end
+  end
+
+  defp do_evaluate(
+         %{
+           "op" => "temporal.compare_path",
+           "kind" => kind,
+           "comparison" => comparison,
+           "path" => path
+         },
+         value,
+         opts
+       ) do
+    related = fetch_path(Keyword.get(opts, :values, %{}), path)
+
+    with {:ok, value} <- temporal(value, temporal_kind(kind)),
+         {:ok, related} <- temporal(related, temporal_kind(kind)) do
+      temporal_comparison(value, related, comparison)
+    else
+      :error ->
+        failed(:invalid_temporal_value, "temporal comparison requires matching valid values")
+    end
+  end
+
   defp do_evaluate(%{"op" => "all", "rules" => rules}, value, opts) do
     results = Enum.map(rules, &do_evaluate(&1, value, opts))
 
@@ -506,6 +540,63 @@ defmodule Selecto.Rule.Evaluator do
       :error -> failed(:invalid_related_value_type, "related comparison requires exact numbers")
     end
   end
+
+  defp temporal_kind("date"), do: :date
+  defp temporal_kind("time"), do: :time
+  defp temporal_kind("instant"), do: :instant
+
+  defp temporal(%Date{} = value, :date), do: {:ok, value}
+
+  defp temporal(value, :date) when is_binary(value) do
+    case Date.from_iso8601(value) do
+      {:ok, date} -> {:ok, date}
+      _ -> :error
+    end
+  end
+
+  defp temporal(%Time{} = value, :time), do: {:ok, value}
+
+  defp temporal(value, :time) when is_binary(value) do
+    case Time.from_iso8601(value) do
+      {:ok, time} -> {:ok, time}
+      _ -> :error
+    end
+  end
+
+  defp temporal(%DateTime{} = value, :instant), do: {:ok, value}
+
+  defp temporal(value, :instant) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, datetime, _offset} -> {:ok, datetime}
+      _ -> :error
+    end
+  end
+
+  defp temporal(_value, _kind), do: :error
+
+  defp temporal_comparison(left, right, comparison) do
+    compared = compare_temporal(left, right)
+
+    valid =
+      case comparison do
+        "gt" -> compared == :gt
+        "gte" -> compared in [:gt, :eq]
+        "lt" -> compared == :lt
+        "lte" -> compared in [:lt, :eq]
+        "eq" -> compared == :eq
+        "neq" -> compared != :eq
+      end
+
+    if valid,
+      do: :passed,
+      else: failed(:temporal_comparison, "value violates its temporal comparison")
+  end
+
+  defp compare_temporal(%Date{} = left, %Date{} = right), do: Date.compare(left, right)
+  defp compare_temporal(%Time{} = left, %Time{} = right), do: Time.compare(left, right)
+
+  defp compare_temporal(%DateTime{} = left, %DateTime{} = right),
+    do: DateTime.compare(left, right)
 
   defp decimal(value) when is_integer(value), do: {:ok, Decimal.new(value)}
   defp decimal(%Decimal{} = value), do: {:ok, value}

@@ -793,6 +793,13 @@ compares its subject with an authored semantic path using `gt`, `gte`, `lt`,
 not exact literals. Use integers, decimal strings, or `Decimal` values at the
 Elixir evaluator boundary.
 
+The Elixir profile also validates strict ISO-8601 `temporal.date`,
+`temporal.time`, and offset-bearing `temporal.instant` values. A
+`temporal.compare_path` declaration names one temporal kind plus a related
+path and comparison; both values must parse as that same kind. Relative-time,
+duration, zone-policy, and stored-state update semantics remain later-stage
+obligations.
+
 `presence.required` means the path must exist; explicit null remains distinct.
 Use `presence.non_null` when null is forbidden and `text.nonblank` when empty or
 whitespace-only text is forbidden. Unknown operators, options, subject paths,

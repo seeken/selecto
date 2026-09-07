@@ -76,6 +76,38 @@ defmodule Selecto.Rule.EvaluatorTest do
              })
   end
 
+  test "validates strict temporal values and compares matching temporal kinds" do
+    assert {:ok, date} = Contract.compile_test(%{op: "temporal.date"})
+    assert :passed = Evaluator.evaluate_test(date, "2026-09-06")
+
+    assert {:failed, %{code: :invalid_temporal_value}} =
+             Evaluator.evaluate_test(date, "2026-02-30")
+
+    assert {:ok, instant} = Contract.compile_test(%{op: "temporal.instant"})
+    assert :passed = Evaluator.evaluate_test(instant, "2026-09-06T12:30:00Z")
+
+    assert {:failed, %{code: :invalid_temporal_value}} =
+             Evaluator.evaluate_test(instant, "2026-09-06")
+
+    assert {:ok, after_start} =
+             Contract.compile_test(%{
+               op: "temporal.compare_path",
+               kind: "date",
+               comparison: "gt",
+               path: [:start_date]
+             })
+
+    assert :passed =
+             Evaluator.evaluate_test(after_start, "2026-09-07",
+               values: %{start_date: "2026-09-06"}
+             )
+
+    assert {:failed, %{code: :temporal_comparison}} =
+             Evaluator.evaluate_test(after_start, "2026-09-06",
+               values: %{start_date: "2026-09-06"}
+             )
+  end
+
   test "returns required transaction and evidence checks as pending obligations" do
     assert {:ok, contract} = Contract.compile(obligation_domain())
 
