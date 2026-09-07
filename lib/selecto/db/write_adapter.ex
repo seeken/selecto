@@ -11,11 +11,13 @@ defmodule Selecto.DB.WriteAdapter do
   @type command ::
           Selecto.Write.Command.t() | Selecto.Write.Batch.t() | Selecto.Write.Graph.t()
   @type execution_result :: Selecto.Write.Result.t() | [Selecto.Write.Result.t()]
-  @type candidate_loader ::
+  @type prepared_state_loader ::
           (Selecto.Write.CandidateRequest.t() ->
              {:ok, Selecto.Write.CandidateState.t()} | {:error, Selecto.Write.Error.t()})
+          | (Selecto.Write.RecordRequest.t() ->
+               {:ok, Selecto.Write.RecordState.t()} | {:error, Selecto.Write.Error.t()})
   @type prepare_fun ::
-          (candidate_loader() ->
+          (prepared_state_loader() ->
              {:ok, command(), map()} | {:error, Selecto.Write.Error.t()} | {:error, term()})
 
   @callback write_capabilities(connection()) :: map()

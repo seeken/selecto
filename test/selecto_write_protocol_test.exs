@@ -15,6 +15,8 @@ defmodule Selecto.WriteProtocolTest do
     Result
   }
 
+  alias Selecto.Write.{RecordRequest, RecordState}
+
   alias Selecto.Write.Graph.{Binding, Node, Row}
   alias Selecto.Domain.WriteContract
 
@@ -92,15 +94,20 @@ defmodule Selecto.WriteProtocolTest do
     def execute_write(_connection, _command, _opts), do: raise("ordinary path must not run")
 
     def execute_prepared_write(pid, prepare_fun, _opts) do
-      loader = fn request ->
-        send(pid, {:candidate_request, request})
+      loader = fn
+        %RecordRequest{} = request ->
+          send(pid, {:record_request, request})
+          {:ok, %RecordState{values: %{"id" => 11}, complete?: true, protection: :locked}}
 
-        {:ok,
-         %Selecto.Write.CandidateState{
-           rows: [%{"id" => 11}],
-           complete?: true,
-           protection: :locked
-         }}
+        request ->
+          send(pid, {:candidate_request, request})
+
+          {:ok,
+           %Selecto.Write.CandidateState{
+             rows: [%{"id" => 11}],
+             complete?: true,
+             protection: :locked
+           }}
       end
 
       with {:ok, command, context} <- prepare_fun.(loader) do
@@ -233,6 +240,25 @@ defmodule Selecto.WriteProtocolTest do
               type: :write_not_supported,
               details: %{callback: {:execute_prepared_write, 3}}
             }} = Write.execute_prepared(selecto, fn _loader -> {:ok, command!(:insert), %{}} end)
+  end
+
+  test "dispatches protected root-record state through the prepared loader" do
+    selecto = %Selecto{adapter: PreparedAdapter, connection: self()}
+
+    request = %RecordRequest{
+      operation: :update,
+      relation: :items,
+      predicate: {:eq, :id, 11},
+      fields: ["id"]
+    }
+
+    prepare = fn loader ->
+      assert {:ok, %RecordState{values: %{"id" => 11}, protection: :locked}} = loader.(request)
+      {:ok, command!(:update), %{}}
+    end
+
+    assert {:ok, %Result{operation: :update}} = Write.execute_prepared(selecto, prepare)
+    assert_receive {:record_request, ^request}
   end
 
   test "requires an explicit atomic committed-effect capability before dispatch" do

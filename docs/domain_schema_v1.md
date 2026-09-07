@@ -874,6 +874,13 @@ atomic database write, the adapter must advertise `prepared_candidate_state`
 and load, evaluate, execute, install committed effects, and commit or roll back
 inside one adapter-owned transaction.
 
+For a partial root update with candidate, transaction, or evidence rules,
+Updato derives a `selecto.record_state_request` from the scoped update predicate
+and the write contract's fields. PostgreSQL locks exactly one selected root row
+with `FOR UPDATE`; Updato merges those stored values with normalized submitted
+assignments before evaluating the final candidate. A missing, ambiguous,
+incomplete, or unprotected record state rejects the write.
+
 The PostgreSQL strategy locks exactly one parent selected by the complete
 governed predicate before loading children by the authored relationship key.
 Candidate writers using this strategy serialize on that parent lock. A prepared

@@ -28,7 +28,7 @@ defmodule Selecto.Write do
   Executes a write whose portable command must be prepared from protected
   database state inside the adapter's transaction.
 
-  The adapter supplies the preparation function with a typed candidate loader.
+  The adapter supplies the preparation function with a typed protected-state loader.
   Only adapters that explicitly report `:prepared_candidate_state` support this
   boundary.
   """

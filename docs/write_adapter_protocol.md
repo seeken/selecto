@@ -52,11 +52,15 @@ add portable constraint codes deliberately rather than forwarding driver data.
 
 An adapter that reports `prepared_candidate_state: true` implements the
 optional `execute_prepared_write/3` callback. It opens the transaction first
-and supplies the trusted preparation function with a loader accepting
+and supplies the trusted preparation function with a loader accepting either
 `%Selecto.Write.CandidateRequest{}` and returning
-`%Selecto.Write.CandidateState{}`. The adapter then validates the resulting
-portable command, batch, or graph against its capability report, executes it,
-installs committed effects, and commits or rolls back.
+`%Selecto.Write.CandidateState{}`, or `%Selecto.Write.RecordRequest{}` and
+returning `%Selecto.Write.RecordState{}`. The record form names one scoped
+root update predicate and its required fields; PostgreSQL locks and loads
+exactly one root row before Updato merges stored values with submitted changes.
+The adapter then validates the resulting portable command, batch, or graph
+against its capability report, executes it, installs committed effects, and
+commits or rolls back.
 
 The PostgreSQL loader compiles the scoped parent command predicate, requires
 exactly one parent, locks it with `FOR UPDATE`, and loads the child rows through
