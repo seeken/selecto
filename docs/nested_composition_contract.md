@@ -25,7 +25,12 @@ matrix = Selecto.Domain.nested_capability_matrix()
 `selecto.composition_contract.v1` shape. A release embeds that contract with
 the exact Experiences, Operations, target certification profile, required
 features, dependencies, and fingerprint in
-`selecto.consumer_projection_release.v1`.
+`selecto.consumer_projection_release.v1`. When the Domain declares canonical
+data rules, the release also embeds the exact projected definitions,
+normalizers, bindings, semantic fingerprint, required operator/stage features,
+and evaluation-authority markers. A read-scoped release omits executable rule
+bindings. Write, execution, and all-scoped releases fail closed when the target
+does not declare every required nested and rule feature.
 
 ## Relationship meaning
 
@@ -90,7 +95,8 @@ or converted.
 `diff_consumer_projection_releases/2` classifies changes by stable relationship
 path. Ownership, cardinality, identity, tenant, capability, ordering,
 validation, conflict, idempotency, Assurance, omission, or removal changes are
-breaking. Removing a
+breaking. A changed canonical rule projection fingerprint is also breaking.
+Removing a
 mode or narrowing a bound is breaking; expanding modes or limits is compatible
 unless another policy changes.
 

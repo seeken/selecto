@@ -218,6 +218,81 @@ defmodule Selecto.Domain.CompositionContractTest do
            ]
   end
 
+  test "consumer releases publish rule requirements, fingerprints, and evaluation authority" do
+    domain =
+      CompositionFixtures.order_document()
+      |> Map.put(:rules, %{
+        schema: "selecto.data_rules.v1",
+        definitions: %{
+          nonblank_status: %{version: 1, test: %{op: "text.nonblank"}}
+        },
+        normalizers: %{
+          status: %{
+            version: 1,
+            steps: [%{op: "text.trim", profile: "ascii_whitespace_v1"}]
+          }
+        },
+        bindings: %{
+          status_input: %{
+            subject: %{scope: :input, path: [:status]},
+            rule: %{id: :nonblank_status, version: 1},
+            normalizer: %{id: :status, version: 1}
+          },
+          status_candidate: %{
+            subject: %{scope: :candidate, path: [:status]},
+            rule: %{id: :nonblank_status, version: 1}
+          },
+          status_evidence: %{
+            subject: %{scope: :evidence, path: [:status]},
+            rule: %{id: :nonblank_status, version: 1}
+          }
+        }
+      })
+
+    assert {:ok, release} = ConsumerProjectionRelease.compile(domain)
+    rules = release["rules"]
+
+    assert release["dependencies"]["rules_fingerprint"] == rules["fingerprint"]
+    assert "normalizer:text.trim" in release["required_features"]
+    assert "rule:text.nonblank" in release["required_features"]
+    assert "rule_stage:evidence" in release["required_features"]
+    refute rules["evaluation"]["client_results_authoritative"]
+
+    assert Enum.find(rules["evaluation"]["bindings"], &(&1["binding"] == "status_input"))[
+             "local_eligible"
+           ]
+
+    assert Enum.find(
+             rules["evaluation"]["bindings"],
+             &(&1["binding"] == "status_evidence")
+           )["external_evidence_required"]
+
+    assert {:ok, read_release} =
+             ConsumerProjectionRelease.compile(domain, feature_scope: :read)
+
+    assert read_release["rules"]["bindings"] == %{}
+    refute Enum.any?(read_release["required_features"], &String.starts_with?(&1, "rule"))
+
+    assert {:error, %{code: :unsupported_consumer_projection, missing_features: missing}} =
+             ConsumerProjectionRelease.compile(domain,
+               supported_features:
+                 domain
+                 |> CompositionContract.compile()
+                 |> elem(1)
+                 |> CompositionContract.required_features()
+             )
+
+    assert "rule:text.nonblank" in missing
+
+    changed =
+      put_in(domain, [:rules, :definitions, :nonblank_status, :test], %{op: "presence.non_null"})
+
+    assert {:ok, changed_release} = ConsumerProjectionRelease.compile(changed)
+    diff = ConsumerProjectionRelease.diff(release, changed_release)
+    assert %{path: "rules", kind: :changed, classification: :breaking} in diff.changes
+    assert diff.classification == :breaking
+  end
+
   test "published capability profiles name finite live evidence and proof boundaries" do
     profiles = Domain.nested_capability_matrix()
 

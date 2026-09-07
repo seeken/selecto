@@ -82,6 +82,56 @@ defmodule Selecto.Rule.Contract do
     end
   end
 
+  @doc """
+  Projects a compiled contract into a deterministic consumer artifact.
+
+  The projection contains only bindings for the requested stages and only the
+  definitions and normalizers those bindings reference. Evaluation markers are
+  descriptive: local evaluation is a user-experience optimization and every
+  submitted value still requires authoritative server evaluation.
+  """
+  @spec project(t(), keyword()) :: map()
+  def project(%__MODULE__{} = contract, opts \\ []) do
+    stages =
+      opts
+      |> Keyword.get(:stages, @supported_scopes)
+      |> normalize_projected_stages()
+
+    bindings =
+      contract.bindings
+      |> Enum.filter(fn {_id, binding} -> MapSet.member?(stages, binding.stage) end)
+      |> Map.new()
+
+    definition_ids = MapSet.new(bindings, fn {_id, binding} -> binding.rule.id end)
+
+    normalizer_ids =
+      bindings
+      |> Enum.flat_map(fn
+        {_id, %{normalizer: %{id: id}}} -> [id]
+        _ -> []
+      end)
+      |> MapSet.new()
+
+    semantic = %{
+      schema: @schema,
+      definitions: Map.take(contract.definitions, MapSet.to_list(definition_ids)),
+      normalizers: Map.take(contract.normalizers, MapSet.to_list(normalizer_ids)),
+      bindings: bindings,
+      required_features: required_features(contract, bindings)
+    }
+
+    projected = portable(semantic)
+
+    projected
+    |> Map.put("fingerprint", semantic_fingerprint(canonical(semantic)))
+    |> Map.put("evaluation", evaluation_markers(bindings))
+  end
+
+  defp normalize_projected_stages(:all), do: MapSet.new(@supported_scopes)
+
+  defp normalize_projected_stages(stages) when is_list(stages),
+    do: MapSet.new(stages, &to_string/1)
+
   defp compile_rules(rules) when rules in [nil, %{}] do
     {:ok, finish(%__MODULE__{definitions: %{}, normalizers: %{}, bindings: %{}})}
   end
@@ -753,12 +803,7 @@ defmodule Selecto.Rule.Contract do
   defp find_entry(_entries, _id), do: nil
 
   defp finish(contract) do
-    features =
-      contract.definitions
-      |> Map.values()
-      |> Enum.flat_map(&test_features(&1.test))
-      |> Enum.uniq()
-      |> Enum.sort()
+    features = required_features(contract, contract.bindings)
 
     semantic = %{
       schema: @schema,
@@ -768,11 +813,74 @@ defmodule Selecto.Rule.Contract do
       required_features: features
     }
 
-    fingerprint =
-      :crypto.hash(:sha256, :erlang.term_to_binary(canonical(semantic)))
-      |> Base.encode16(case: :lower)
+    fingerprint = semantic_fingerprint(canonical(semantic))
 
     %{contract | fingerprint: fingerprint, required_features: features}
+  end
+
+  defp required_features(contract, bindings) do
+    definition_ids = MapSet.new(bindings, fn {_id, binding} -> binding.rule.id end)
+
+    definition_features =
+      contract.definitions
+      |> Enum.filter(fn {id, _definition} -> MapSet.member?(definition_ids, id) end)
+      |> Enum.flat_map(fn {_id, definition} -> test_features(definition.test) end)
+
+    condition_features =
+      bindings
+      |> Enum.flat_map(fn
+        {_id, %{condition: nil}} -> []
+        {_id, binding} -> ["rule:condition" | test_features(binding.condition)]
+      end)
+
+    normalizer_features =
+      bindings
+      |> Enum.flat_map(fn
+        {_id, %{normalizer: nil}} ->
+          []
+
+        {_id, binding} ->
+          contract.normalizers
+          |> Map.fetch!(binding.normalizer.id)
+          |> Map.fetch!(:steps)
+          |> Enum.map(&"normalizer:#{&1["op"]}")
+      end)
+
+    stage_features =
+      Enum.map(bindings, fn {_id, binding} -> "rule_stage:#{binding.stage}" end)
+
+    (definition_features ++ condition_features ++ normalizer_features ++ stage_features)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp evaluation_markers(bindings) do
+    binding_markers =
+      bindings
+      |> Enum.sort_by(fn {id, _binding} -> id end)
+      |> Enum.map(fn {id, binding} ->
+        %{
+          "binding" => id,
+          "stage" => binding.stage,
+          "local_eligible" => binding.stage in ["input", "action_input"],
+          "server_required" => true,
+          "external_evidence_required" => binding.stage == "evidence"
+        }
+      end)
+
+    %{
+      "client_results_authoritative" => false,
+      "server_revalidation_required" => binding_markers != [],
+      "bindings" => binding_markers
+    }
+  end
+
+  defp semantic_fingerprint(value) do
+    digest =
+      :crypto.hash(:sha256, :erlang.term_to_binary(value, [:deterministic]))
+      |> Base.encode16(case: :lower)
+
+    "sha256:#{digest}"
   end
 
   defp test_features(%{"op" => op} = test) when op in ["all", "any"],
@@ -991,6 +1099,15 @@ defmodule Selecto.Rule.Contract do
 
   defp canonical(list) when is_list(list), do: Enum.map(list, &canonical/1)
   defp canonical(value), do: value
+
+  defp portable(%Decimal{} = value), do: Decimal.to_string(value, :normal)
+
+  defp portable(map) when is_map(map),
+    do: Map.new(map, fn {key, value} -> {to_string(key), portable(value)} end)
+
+  defp portable(list) when is_list(list), do: Enum.map(list, &portable/1)
+  defp portable(value) when is_atom(value), do: Atom.to_string(value)
+  defp portable(value), do: value
 
   defp error(code, path, message, attrs \\ []),
     do: attrs |> Map.new() |> Map.merge(%{code: code, path: path, message: message})

@@ -18,10 +18,30 @@ defmodule Selecto.Rule.ContractTest do
     assert {:ok, second} = Contract.compile(string_key_domain())
 
     assert first.fingerprint == second.fingerprint
+    assert String.starts_with?(first.fingerprint, "sha256:")
     assert first.definitions["positive_quantity"].test["bound"].value == "0"
     assert "rule:number.gt" in first.required_features
     assert "rule:text.pattern" in first.required_features
+    assert "normalizer:text.trim" in first.required_features
+    assert "rule_stage:candidate" in first.required_features
     assert first.bindings["quantity_on_write"].stage == "candidate"
+  end
+
+  test "projects deterministic consumer rules with explicit authority markers" do
+    assert {:ok, contract} = Contract.compile(domain())
+    projection = Contract.project(contract, stages: [:candidate])
+
+    assert projection["schema"] == "selecto.data_rules.v1"
+    assert String.starts_with?(projection["fingerprint"], "sha256:")
+    assert Map.keys(projection["bindings"]) == ["quantity_on_write", "reference_on_write"]
+    assert projection["definitions"]["positive_quantity"]["test"]["bound"]["decimal"] == "0"
+    assert projection["evaluation"]["client_results_authoritative"] == false
+    assert projection["evaluation"]["server_revalidation_required"] == true
+
+    assert Enum.all?(projection["evaluation"]["bindings"], fn marker ->
+             marker["stage"] == "candidate" and marker["local_eligible"] == false and
+               marker["server_required"] == true
+           end)
   end
 
   test "rejects unknown operators, options, and unresolved versions" do

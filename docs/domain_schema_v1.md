@@ -796,10 +796,14 @@ whitespace-only text is forbidden. Unknown operators, options, subject paths,
 versions, normalizer profiles, and references reject the Domain.
 
 `Selecto.Rule.Compiler.compile/1` produces the immutable contract and semantic
-fingerprint. `Selecto.Rule.Evaluator.evaluate/4` is pure and returns structured
-outcomes. Required transaction and evidence bindings remain pending unless the
-caller explicitly supplies that authoritative stage. A pending result is not
-permission to execute a write.
+fingerprint. `Selecto.Rule.Contract.project/2` emits a deterministic subset for
+consumer releases, including exact operator, normalizer, and stage features.
+Its evaluation markers distinguish locally eligible input checks from required
+server revalidation and external evidence. Client results are never marked
+authoritative. `Selecto.Rule.Evaluator.evaluate/4` is pure and returns
+structured outcomes. Required transaction and evidence bindings remain pending
+unless the caller explicitly supplies that authoritative stage. A pending
+result is not permission to execute a write.
 
 ## Write Contract
 
@@ -1832,8 +1836,8 @@ The public boundaries are:
 | `Selecto.Domain.Sections.sections/0` | none | Returns the finite recognized top-level vocabulary, grouped by diagnostic category, for documentation and certification coverage checks. |
 | `Selecto.Domain.WriteContract.compile/1` | authored, normalized, or configured Selecto | Produces the explicit fail-closed write contract or an error. |
 | `Selecto.Domain.composition_contract/1` | authored or normalized | Compiles deterministic `selecto.composition_contract.v1` nested relationship metadata. |
-| `Selecto.Domain.consumer_projection_release/2` | authored or normalized plus target options | Produces an immutable, fingerprinted nested consumer release and rejects unsupported target features. |
-| `Selecto.Domain.diff_consumer_projection_releases/2` | two consumer releases | Classifies relationship additions, removals, narrowed bounds, and policy changes as compatible or breaking. |
+| `Selecto.Domain.consumer_projection_release/2` | authored or normalized plus target options | Produces an immutable, fingerprinted composition and canonical-rule consumer release and rejects unsupported target features. |
+| `Selecto.Domain.diff_consumer_projection_releases/2` | two consumer releases | Classifies relationship additions, removals, narrowed bounds, policy changes, and rule-plan changes as compatible or breaking. |
 | `Selecto.Domain.nested_capability_matrix/0` | none | Returns current runtime/adapter features and their finite evidence boundaries. |
 | `Selecto.Domain.ContractVerification.verify/3` | provider and consumer domains | Verifies canonical `domain_dependencies` against provider published surfaces. |
 | `Selecto.Domain.ContractVerification.published_surfaces/2` | provider domain | Projects named published query surfaces and validates their references. |

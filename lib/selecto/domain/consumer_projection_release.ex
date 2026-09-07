@@ -1,10 +1,10 @@
 defmodule Selecto.Domain.ConsumerProjectionRelease do
   @moduledoc """
-  Builds immutable, projection-specific nested consumer contracts and compares
-  them for compatibility.
+  Builds immutable, projection-specific composition and canonical-rule
+  consumer contracts and compares them for compatibility.
 
   Publication is fail closed when a target runtime/adapter does not declare
-  every feature required by the projected relationship contract. Callers may
+  every feature required by the projected contract. Callers may
   provide an explicit `:supported_features` list for a separately certified
   target.
   """
@@ -13,6 +13,7 @@ defmodule Selecto.Domain.ConsumerProjectionRelease do
   alias Selecto.Domain.CompositionContract
   alias Selecto.Domain.Contract.Shared.Core
   alias Selecto.Domain.NestedCapabilityMatrix
+  alias Selecto.Rule.Contract, as: RuleContract
 
   @schema "selecto.consumer_projection_release.v1"
 
@@ -20,10 +21,15 @@ defmodule Selecto.Domain.ConsumerProjectionRelease do
   def compile(input, opts \\ []) when is_list(opts) do
     with {:ok, normalized, _diagnostics} <- normalized(input),
          {:ok, composition} <- CompositionContract.compile(normalized),
+         {:ok, rules} <- RuleContract.compile_normalized(normalized),
          :ok <- reject_deferred_extensions(composition, opts),
          {:ok, target} <- target(opts),
-         all_features = CompositionContract.required_features(composition),
-         {:ok, feature_scope, required_features} <- feature_scope(all_features, opts),
+         nested_features = CompositionContract.required_features(composition),
+         {:ok, feature_scope, nested_required, rule_stages} <-
+           feature_scope(nested_features, opts),
+         rule_projection = RuleContract.project(rules, stages: rule_stages),
+         required_features =
+           Enum.sort(Enum.uniq(nested_required ++ rule_projection["required_features"])),
          :ok <- ensure_supported(required_features, target) do
       projection_id = Keyword.get(opts, :projection_id, "default") |> to_string()
       version = Keyword.get(opts, :version, Map.get(normalized, :domain_version))
@@ -40,9 +46,11 @@ defmodule Selecto.Domain.ConsumerProjectionRelease do
         "dependencies" => %{
           "domain_version" => Map.get(normalized, :domain_version),
           "domain_fingerprint" => Map.get(normalized, :domain_fingerprint),
+          "rules_fingerprint" => rule_projection["fingerprint"],
           "operations" => registry_dependencies(normalized, :operations)
         },
         "composition" => composition,
+        "rules" => rule_projection,
         "experiences" => registry(normalized, :experiences),
         "operations" => registry(normalized, :operations),
         "required_features" => required_features
@@ -63,10 +71,12 @@ defmodule Selecto.Domain.ConsumerProjectionRelease do
       |> Enum.uniq()
       |> Enum.sort()
 
-    changes =
+    relationship_changes =
       Enum.flat_map(ids, fn id ->
         relationship_changes(id, previous_relationships[id], current_relationships[id])
       end)
+
+    changes = relationship_changes ++ rule_changes(previous, current)
 
     %{
       classification:
@@ -76,6 +86,17 @@ defmodule Selecto.Domain.ConsumerProjectionRelease do
         ),
       changes: changes
     }
+  end
+
+  defp rule_changes(previous, current) do
+    previous_fingerprint = get_in(previous, ["rules", "fingerprint"])
+    current_fingerprint = get_in(current, ["rules", "fingerprint"])
+
+    if previous_fingerprint == current_fingerprint do
+      []
+    else
+      [%{path: "rules", kind: :changed, classification: :breaking}]
+    end
   end
 
   @spec supported_features(String.t(), String.t()) :: [String.t()]
@@ -137,28 +158,28 @@ defmodule Selecto.Domain.ConsumerProjectionRelease do
   defp feature_scope(features, opts) do
     case Keyword.get(opts, :feature_scope, :all) do
       :all ->
-        {:ok, "all", features}
+        {:ok, "all", features, :all}
 
       "all" ->
-        {:ok, "all", features}
+        {:ok, "all", features, :all}
 
       :read ->
-        {:ok, "read", Enum.filter(features, &read_feature?/1)}
+        {:ok, "read", Enum.filter(features, &read_feature?/1), []}
 
       "read" ->
-        {:ok, "read", Enum.filter(features, &read_feature?/1)}
+        {:ok, "read", Enum.filter(features, &read_feature?/1), []}
 
       :write ->
-        {:ok, "write", Enum.reject(features, &(&1 == "nested_read"))}
+        {:ok, "write", Enum.reject(features, &(&1 == "nested_read")), :all}
 
       "write" ->
-        {:ok, "write", Enum.reject(features, &(&1 == "nested_read"))}
+        {:ok, "write", Enum.reject(features, &(&1 == "nested_read")), :all}
 
       :execution ->
-        {:ok, "execution", Enum.filter(features, &execution_feature?/1)}
+        {:ok, "execution", Enum.filter(features, &execution_feature?/1), :all}
 
       "execution" ->
-        {:ok, "execution", Enum.filter(features, &execution_feature?/1)}
+        {:ok, "execution", Enum.filter(features, &execution_feature?/1), :all}
 
       scope ->
         {:error,
@@ -190,7 +211,7 @@ defmodule Selecto.Domain.ConsumerProjectionRelease do
       {:error,
        %{
          code: :unsupported_consumer_projection,
-         message: "consumer target does not support the complete nested contract",
+         message: "consumer target does not support the complete projected contract",
          runtime: target["runtime"],
          adapter: target["adapter"],
          missing_features: missing
