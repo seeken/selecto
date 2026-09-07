@@ -56,6 +56,26 @@ defmodule Selecto.Rule.EvaluatorTest do
     assert {:failed, %{code: :invalid_type}} = Evaluator.evaluate_test(test, 0.11)
   end
 
+  test "sums collection paths with exact decimal bounds" do
+    assert {:ok, sum} =
+             Contract.compile_test(%{
+               op: "collection.sum",
+               path: [:quantity],
+               min: "1.10",
+               max: "1.10"
+             })
+
+    assert :passed = Evaluator.evaluate_test(sum, [%{quantity: "0.10"}, %{quantity: 1}])
+
+    assert {:failed, %{code: :invalid_collection_sum, actual: "1.09"}} =
+             Evaluator.evaluate_test(sum, [%{quantity: "1.09"}])
+
+    assert {:failed, %{code: :missing_sum_field}} = Evaluator.evaluate_test(sum, [%{}])
+
+    assert {:failed, %{code: :invalid_sum_value}} =
+             Evaluator.evaluate_test(sum, [%{quantity: 1.1}])
+  end
+
   test "compares a value with a related field using exact numeric semantics" do
     assert {:ok, test} =
              Contract.compile_test(%{op: "value.compare_path", comparison: "gt", path: [:start]})

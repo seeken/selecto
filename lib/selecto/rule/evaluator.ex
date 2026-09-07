@@ -319,6 +319,35 @@ defmodule Selecto.Rule.Evaluator do
   defp do_evaluate(%{"op" => "collection.count"}, _value, _opts),
     do: failed(:invalid_type, "value must be a collection")
 
+  defp do_evaluate(%{"op" => "collection.sum", "path" => path} = test, value, _opts)
+       when is_list(value) do
+    case collection_sum(value, path) do
+      {:ok, total} ->
+        case check_numeric_bounds(total, test) do
+          :ok ->
+            :passed
+
+          {:error, direction} ->
+            failed(:invalid_collection_sum, "collection sum is outside its declared bounds",
+              actual: display_number(total),
+              direction: direction,
+              min: test["min"] && test["min"].value,
+              max: test["max"] && test["max"].value,
+              exact: test["exact"] && test["exact"].value
+            )
+        end
+
+      {:error, :missing} ->
+        failed(:missing_sum_field, "collection sum field is missing")
+
+      {:error, :invalid} ->
+        failed(:invalid_sum_value, "collection sum values must be exact numbers")
+    end
+  end
+
+  defp do_evaluate(%{"op" => "collection.sum"}, _value, _opts),
+    do: failed(:invalid_type, "value must be a collection")
+
   defp do_evaluate(%{"op" => "collection.unique_by", "paths" => paths}, value, _opts)
        when is_list(value) do
     keys = Enum.map(value, fn item -> Enum.map(paths, &fetch_path(item, &1)) end)
@@ -546,6 +575,44 @@ defmodule Selecto.Rule.Evaluator do
           max: test["max"],
           exact: test["exact"]
         )
+  end
+
+  defp collection_sum(values, path) do
+    Enum.reduce_while(values, {:ok, Decimal.new(0)}, fn value, {:ok, total} ->
+      case fetch_path(value, path) do
+        @missing ->
+          {:halt, {:error, :missing}}
+
+        item ->
+          case decimal(item) do
+            {:ok, number} -> {:cont, {:ok, Decimal.add(total, number)}}
+            :error -> {:halt, {:error, :invalid}}
+          end
+      end
+    end)
+  end
+
+  defp check_numeric_bounds(total, test) do
+    cond do
+      exact = test["exact"] ->
+        if Decimal.equal?(total, exact.decimal), do: :ok, else: {:error, :exact}
+
+      minimum = test["min"] ->
+        if Decimal.compare(total, minimum.decimal) in [:eq, :gt],
+          do: check_numeric_maximum(total, test["max"]),
+          else: {:error, :minimum}
+
+      true ->
+        check_numeric_maximum(total, test["max"])
+    end
+  end
+
+  defp check_numeric_maximum(_total, nil), do: :ok
+
+  defp check_numeric_maximum(total, maximum) do
+    if Decimal.compare(total, maximum.decimal) in [:eq, :lt],
+      do: :ok,
+      else: {:error, :maximum}
   end
 
   defp compare(left, right, :gt), do: Decimal.compare(left, right) == :gt

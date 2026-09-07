@@ -26,7 +26,7 @@ defmodule Selecto.Rule.Contract do
     presence.required presence.non_null presence.absent type.is text.nonblank
     text.length text.pattern text.prefix text.suffix text.contains
     number.gt number.gte number.lt number.lte number.range number.integer number.multiple_of
-    membership.in membership.not_in collection.count collection.unique_by
+    membership.in membership.not_in collection.count collection.sum collection.unique_by
     object.shape path.test
     value.eq value.neq value.compare_path
     temporal.date temporal.time temporal.instant temporal.compare_path
@@ -493,6 +493,9 @@ defmodule Selecto.Rule.Contract do
       op == "collection.count" ->
         compile_bounds(test, path, ~w(op min max exact), nil)
 
+      op == "collection.sum" ->
+        compile_collection_sum(test, path)
+
       op in ["number.gt", "number.gte", "number.lt", "number.lte"] ->
         compile_number_bound(test, path)
 
@@ -693,6 +696,24 @@ defmodule Selecto.Rule.Contract do
            path ++ [:paths],
            "collection.unique_by requires non-empty semantic paths"
          )}
+    end
+  end
+
+  defp compile_collection_sum(test, path) do
+    with :ok <- known_keys(test, ~w(op path min max exact), path),
+         {:ok, sum_path} <- semantic_path(value(test, :path), path ++ [:path]),
+         {:ok, minimum} <- optional_number_literal(value(test, :min), path ++ [:min]),
+         {:ok, maximum} <- optional_number_literal(value(test, :max), path ++ [:max]),
+         {:ok, exact} <- optional_number_literal(value(test, :exact), path ++ [:exact]),
+         :ok <- valid_numeric_bounds(minimum, maximum, exact, path) do
+      {:ok,
+       compact(%{
+         "op" => "collection.sum",
+         "path" => sum_path,
+         "min" => minimum,
+         "max" => maximum,
+         "exact" => exact
+       })}
     end
   end
 
@@ -1213,6 +1234,25 @@ defmodule Selecto.Rule.Contract do
            path,
            "numeric literals must be exact integers or decimal strings"
          )}
+    end
+  end
+
+  defp optional_number_literal(nil, _path), do: {:ok, nil}
+  defp optional_number_literal(value, path), do: number_literal(value, path)
+
+  defp valid_numeric_bounds(minimum, maximum, exact, path) do
+    cond do
+      is_nil(minimum) and is_nil(maximum) and is_nil(exact) ->
+        {:error, error(:missing_rule_bound, path, "rule requires min, max, or exact")}
+
+      not is_nil(exact) and (not is_nil(minimum) or not is_nil(maximum)) ->
+        {:error, error(:conflicting_rule_bounds, path, "exact cannot be combined with min/max")}
+
+      minimum && maximum && Decimal.compare(minimum.decimal, maximum.decimal) == :gt ->
+        {:error, error(:invalid_rule_bounds, path, "minimum must not exceed maximum")}
+
+      true ->
+        :ok
     end
   end
 
