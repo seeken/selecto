@@ -881,6 +881,11 @@ with `FOR UPDATE`; Updato merges those stored values with normalized submitted
 assignments before evaluating the final candidate. A missing, ambiguous,
 incomplete, or unprotected record state rejects the write.
 
+An upsert whose required binding reaches candidate, transaction, or evidence
+state rejects with `upsert_rule_strategy_unsupported` until its adapter exposes
+a branch-aware protected-state strategy. Treating every upsert as an insert
+would allow the conflict-update branch to bypass final-state rules.
+
 The PostgreSQL strategy locks exactly one parent selected by the complete
 governed predicate before loading children by the authored relationship key.
 Candidate writers using this strategy serialize on that parent lock. A prepared
