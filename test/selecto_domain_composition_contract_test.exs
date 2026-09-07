@@ -289,7 +289,18 @@ defmodule Selecto.Domain.CompositionContractTest do
 
     assert {:ok, changed_release} = ConsumerProjectionRelease.compile(changed)
     diff = ConsumerProjectionRelease.diff(release, changed_release)
-    assert %{path: "rules", kind: :changed, classification: :breaking} in diff.changes
+
+    assert %{
+             path: "rules",
+             kind: :changed,
+             classification: :breaking,
+             migration: :review_required,
+             previous_fingerprint: previous_fingerprint,
+             current_fingerprint: current_fingerprint
+           } = Enum.find(diff.changes, &(&1.path == "rules"))
+
+    assert previous_fingerprint == release["rules"]["fingerprint"]
+    assert current_fingerprint == changed_release["rules"]["fingerprint"]
     assert diff.classification == :breaking
   end
 

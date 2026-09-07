@@ -95,7 +95,16 @@ defmodule Selecto.Domain.ConsumerProjectionRelease do
     if previous_fingerprint == current_fingerprint do
       []
     else
-      [%{path: "rules", kind: :changed, classification: :breaking}]
+      [
+        %{
+          path: "rules",
+          kind: :changed,
+          classification: :breaking,
+          previous_fingerprint: previous_fingerprint,
+          current_fingerprint: current_fingerprint,
+          migration: :review_required
+        }
+      ]
     end
   end
 
