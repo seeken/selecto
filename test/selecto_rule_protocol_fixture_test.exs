@@ -56,12 +56,18 @@ defmodule Selecto.Rule.ProtocolFixtureTest do
   defp domain(rules) do
     fields = ~w(id quantity reference selected items verdict)
 
+    types = %{
+      "quantity" => :integer,
+      "selected" => :collection,
+      "items" => :collection
+    }
+
     %{
       source: %{
         source_table: "rules",
         primary_key: "id",
         fields: fields,
-        columns: Map.new(fields, &{&1, %{type: :string}}),
+        columns: Map.new(fields, &{&1, %{type: Map.get(types, &1, :string)}}),
         associations: %{}
       },
       schemas: %{},

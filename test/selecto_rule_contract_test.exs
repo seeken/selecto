@@ -96,6 +96,24 @@ defmodule Selecto.Rule.ContractTest do
              |> Contract.compile()
   end
 
+  test "rejects rules and normalizers that conflict with a known subject type" do
+    assert {:error, [%{code: :rule_subject_type_mismatch, subject_type: "string"}]} =
+             domain()
+             |> put_in([:rules, :bindings, :reference_on_write, :rule], %{
+               id: :positive_quantity,
+               version: 1
+             })
+             |> Contract.compile()
+
+    assert {:error, [%{code: :rule_subject_type_mismatch, subject_type: "integer"}]} =
+             domain()
+             |> put_in([:rules, :bindings, :quantity_on_write, :normalizer], %{
+               id: :reference,
+               version: 1
+             })
+             |> Contract.compile()
+  end
+
   test "compiles a strict native constraint declaration into the canonical binding" do
     native = %{
       adapter: "postgresql",

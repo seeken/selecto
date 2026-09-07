@@ -891,7 +891,13 @@ defmodule Selecto.Rule.Contract do
     |> Enum.reduce_while({:ok, %{}}, fn {id, binding}, {:ok, bindings} ->
       case subject_type(binding.subject, normalized) do
         {:ok, type} ->
-          {:cont, {:ok, Map.put(bindings, id, Map.put(binding, :subject_type, type))}}
+          case validate_subject_type(binding, type, contract) do
+            :ok ->
+              {:cont, {:ok, Map.put(bindings, id, Map.put(binding, :subject_type, type))}}
+
+            {:error, error} ->
+              {:halt, {:error, error}}
+          end
 
         :error ->
           {:halt,
@@ -981,6 +987,89 @@ defmodule Selecto.Rule.Contract do
   defp normalize_subject_type(type) when is_atom(type), do: Atom.to_string(type)
   defp normalize_subject_type(type) when is_binary(type) and type != "", do: type
   defp normalize_subject_type(_type), do: "unknown"
+
+  defp validate_subject_type(_binding, "unknown", _contract), do: :ok
+
+  # Action input schemas describe the transport accepted by an action. They are
+  # not yet a portable assertion of the rule subject's semantic type: existing
+  # domains commonly declare a string transport input for values normalized or
+  # coerced before rule evaluation. Keep the resolved type as compiler metadata,
+  # but defer compatibility to runtime until the protocol defines that stronger
+  # input-type contract.
+  defp validate_subject_type(%{subject: %{scope: "action_input"}}, _type, _contract), do: :ok
+
+  defp validate_subject_type(binding, type, contract) do
+    definition = Map.fetch!(contract.definitions, binding.rule.id)
+    normalizer = binding.normalizer && Map.fetch!(contract.normalizers, binding.normalizer.id)
+
+    cond do
+      not test_subject_compatible?(definition.test, type) ->
+        {:error,
+         error(
+           :rule_subject_type_mismatch,
+           [:rules, :bindings, binding.id, :subject],
+           "rule predicate is incompatible with its resolved subject type",
+           subject_type: type,
+           operator: definition.test["op"]
+         )}
+
+      normalizer && type not in ["string", "text", "citext"] ->
+        {:error,
+         error(
+           :rule_subject_type_mismatch,
+           [:rules, :bindings, binding.id, :normalizer],
+           "text normalizers require a text subject type",
+           subject_type: type
+         )}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp test_subject_compatible?(%{"op" => op, "rules" => rules}, type) when op in ["all", "any"],
+    do: Enum.all?(rules, &test_subject_compatible?(&1, type))
+
+  defp test_subject_compatible?(%{"op" => "not", "rule" => rule}, type),
+    do: test_subject_compatible?(rule, type)
+
+  defp test_subject_compatible?(%{"op" => "path.test"}, _type), do: true
+
+  defp test_subject_compatible?(%{"op" => "object.shape"}, type),
+    do: type in ["map", "object"]
+
+  defp test_subject_compatible?(%{"op" => op}, type)
+       when op in [
+              "text.nonblank",
+              "text.length",
+              "text.pattern",
+              "text.prefix",
+              "text.suffix",
+              "text.contains"
+            ],
+       do: type in ["string", "text", "citext"]
+
+  defp test_subject_compatible?(%{"op" => op}, type)
+       when op in [
+              "number.gt",
+              "number.gte",
+              "number.lt",
+              "number.lte",
+              "number.range",
+              "number.integer",
+              "number.multiple_of"
+            ],
+       do: type in ["integer", "decimal", "numeric"]
+
+  defp test_subject_compatible?(%{"op" => op}, type)
+       when op in ["collection.count", "collection.sum", "collection.unique_by"],
+       do: type == "collection"
+
+  defp test_subject_compatible?(%{"op" => op}, type)
+       when op in ["temporal.date", "temporal.time", "temporal.instant", "temporal.compare_path"],
+       do: type in ["date", "time", "datetime", "utc_datetime", "naive_datetime"]
+
+  defp test_subject_compatible?(_test, _type), do: true
 
   defp known_write_subject?(normalized, field) do
     writes = Map.get(normalized, :writes, %{})
