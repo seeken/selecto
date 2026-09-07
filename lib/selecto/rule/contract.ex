@@ -1114,7 +1114,7 @@ defmodule Selecto.Rule.Contract do
        do: type == "collection"
 
   defp test_subject_compatible?(%{"op" => op}, type)
-       when op in ["temporal.date", "temporal.time", "temporal.instant", "temporal.compare_path"],
+       when op in ["temporal.date", "temporal.time", "temporal.instant"],
        do: type in ["date", "time", "datetime", "utc_datetime", "naive_datetime"]
 
   defp test_subject_compatible?(_test, _type), do: true

@@ -68,6 +68,24 @@ defmodule Selecto.Rule.Legacy do
     end)
   end
 
+  @doc """
+  Translates a delivered input-validator declaration into one canonical test.
+
+  Multiple legacy checks become one `all` node, giving callers a single
+  portable artifact to compile and evaluate rather than a private loop over
+  individual tests.
+  """
+  @spec input_test(map()) :: {:ok, map()} | {:error, term()}
+  def input_test(spec) when is_map(spec) do
+    with {:ok, tests} <- input_tests(spec) do
+      case tests do
+        [] -> {:error, :empty}
+        [test] -> {:ok, test}
+        tests -> {:ok, %{"op" => "all", "rules" => tests}}
+      end
+    end
+  end
+
   defp number_option({:greater_than, bound}), do: number_test("number.gt", bound)
   defp number_option({:greater_than_or_equal_to, bound}), do: number_test("number.gte", bound)
   defp number_option({:less_than, bound}), do: number_test("number.lt", bound)

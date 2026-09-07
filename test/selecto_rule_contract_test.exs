@@ -2,7 +2,7 @@ defmodule Selecto.Rule.ContractTest do
   use ExUnit.Case, async: true
 
   alias Selecto.Domain
-  alias Selecto.Rule.Contract
+  alias Selecto.Rule.{Contract, Legacy}
 
   test "rules are canonical and appear on write, ui, and api projections" do
     domain = domain()
@@ -57,6 +57,14 @@ defmodule Selecto.Rule.ContractTest do
 
     assert {:error, [%{code: :invalid_rule_projection}]} =
              Contract.compile_projection(Map.put(projection, "fingerprint", "sha256:forged"))
+  end
+
+  test "combines legacy input declarations into one canonical test" do
+    assert {:ok, %{"op" => "all", "rules" => rules}} =
+             Legacy.input_test(%{required: true, greater_than: 0, less_than: 10})
+
+    assert Enum.map(rules, & &1["op"]) == ["presence.required", "number.gt", "number.lt"]
+    assert {:ok, _compiled} = Contract.compile_test(%{"op" => "all", "rules" => rules})
   end
 
   test "includes the compiled canonical rule projection in domain inspection" do
