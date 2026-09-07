@@ -1,6 +1,7 @@
 defmodule Selecto.Write.RecordRequest do
   @moduledoc """
-  Portable request for one protected root record used to form an update candidate.
+  Portable request for one protected root record used to form an update or
+  upsert candidate.
 
   The request is supplied only inside a prepared-write transaction. Its command
   carries the scoped predicate and its field list names the record values the
@@ -19,7 +20,7 @@ defmodule Selecto.Write.RecordRequest do
   @type t :: %__MODULE__{
           format: String.t(),
           format_version: pos_integer(),
-          operation: :update | String.t(),
+          operation: :update | :upsert | String.t(),
           relation: atom() | String.t(),
           predicate: term(),
           context: map(),
