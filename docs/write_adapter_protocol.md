@@ -48,6 +48,31 @@ reason categories. Driver exception structs, connection handles, SQL text, and
 bound values are not retained in `Selecto.Write.Error.details`; adapters should
 add portable constraint codes deliberately rather than forwarding driver data.
 
+### Prepared candidate-state writes
+
+An adapter that reports `prepared_candidate_state: true` implements the
+optional `execute_prepared_write/3` callback. It opens the transaction first
+and supplies the trusted preparation function with a loader accepting
+`%Selecto.Write.CandidateRequest{}` and returning
+`%Selecto.Write.CandidateState{}`. The adapter then validates the resulting
+portable command, batch, or graph against its capability report, executes it,
+installs committed effects, and commits or rolls back.
+
+The PostgreSQL loader compiles the scoped parent command predicate, requires
+exactly one parent, locks it with `FOR UPDATE`, and loads the child rows through
+the Domain-authored relationship key in deterministic identity order. It asks
+for one row beyond the finite bound so overflow rejects rather than truncates.
+Two prepared candidate writers for the same parent therefore serialize, and
+the second loader observes the first writer's committed state. Optimistic child
+fields remain in the emitted write predicate; a stale value causes exact
+cardinality failure and transaction rollback.
+
+This capability covers writers that invoke the candidate loader. A full-set or
+other membership-changing path that does not invoke it must still take the same
+parent lock before the adapter may claim serialization against candidate
+writers. Database-native constraints remain a separate strategy and capability
+claim.
+
 ### Document shape refinements
 
 The experimental single-document action profile attaches a typed

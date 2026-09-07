@@ -806,6 +806,63 @@ structured outcomes. Required transaction and evidence bindings remain pending
 unless the caller explicitly supplies that authoritative stage. A pending
 result is not permission to execute a write.
 
+### Candidate rules for nested writes
+
+A `candidate` binding whose subject begins with a writable relationship path
+applies to the complete resulting relationship value, not merely the submitted
+mutation entries. For example, a `collection.count` rule on `[:items]` means
+the stored items after the requested create, update, and delete operations must
+satisfy the rule.
+
+An insert, `full_set`, or `replace_one` representation supplies a complete
+candidate directly. A partial `delta` cannot be treated as the collection. If
+an applicable candidate binding exists, the write consumer MUST obtain the
+complete prior child state, apply the submitted delta itself, and evaluate the
+result. Missing or incomplete state, loader failure, duplicate or missing
+identities, and an exceeded bound are non-pass outcomes and MUST prevent write
+dispatch.
+
+The portable `selecto.candidate_state_request` version 1 is derived from the
+Domain rather than authored as another Domain section:
+
+| Request member | Canonical Domain source |
+| --- | --- |
+| parent relation and key | parent `source.source_table` and `source.primary_key`, represented by the scoped parent write command |
+| child relation | relationship `domain.source.source_table` |
+| relationship key | relationship `child_key` or `foreign_key` |
+| identity fields | relationship `identity_fields` after canonical normalization |
+| projected fields | the child write contract's known fields needed to materialize and evaluate the candidate |
+| operation and representation | the governed nested write operation and declared relationship write mode |
+| context | trusted execution context after scope resolution |
+| row bound | the consumer's published finite candidate-state limit; the current Updato profile uses 1,000 rows |
+
+Derivation fails closed unless the parent command has an authoritative scoped
+predicate, the child relation and relationship key are known, identity fields
+are non-empty, and the collection fits the finite bound. Caller input cannot
+replace these values or claim that a partial collection is complete.
+
+A host may provide a typed `%Selecto.Write.CandidateState{}` from a trusted
+loader. Its protection is one of `snapshot`, `locked`, `serializable`, or
+`native_constraint`. A snapshot proves only candidate construction. For an
+atomic database write, the adapter must advertise `prepared_candidate_state`
+and load, evaluate, execute, install committed effects, and commit or roll back
+inside one adapter-owned transaction.
+
+The PostgreSQL strategy locks exactly one parent selected by the complete
+governed predicate before loading children by the authored relationship key.
+Candidate writers using this strategy serialize on that parent lock. Other
+membership-changing write shapes must acquire the same lock before a Domain or
+adapter can claim full collection-writer race safety. Direct SQL and other
+bypassing writers remain outside the governed guarantee.
+
+Nested stale-write protection is part of relationship policy. A relationship
+`conflict` map may identify `child_field` or `child_fields`; submitted update
+and delete entries must carry those values, and the generated child predicate
+includes them with the stable identity fields. A mismatch produces the
+operation's exact-cardinality failure and rolls back the entire graph. A root
+write uses `writes.constraints.optimistic_lock` for its own known version
+field. These declarations do not replace database constraints.
+
 ## Write Contract
 
 The optional `writes` map declares the only portable write authority granted by
