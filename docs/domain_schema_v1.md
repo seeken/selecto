@@ -153,6 +153,7 @@ Canonical sections are part of the current domain contract:
 - `functions`
 - `query_members`
 - `query_library`
+- `rules`
 - `domain_dependencies`
 - `operations`
 - `experiences`
@@ -217,6 +218,7 @@ has this stable schema-v1 organization:
 | `source`, `schemas`, `joins` | Core relation and join sections. |
 | `query` | Query defaults, filters, functions, members, portable query-library definitions, and published views. |
 | `projection` | Display and implementation-facing projection metadata. |
+| `rules` | Versioned portable data-rule definitions, normalizers, and scoped bindings. |
 | `writes`, `actions`, `events`, `capabilities` | Mutation, immutable-fact, and governance registries. |
 | `source_relationships`, `choice_sources`, `co_domains` | Cross-domain reference and governed lookup registries. |
 | `domain_dependencies` | Consumer requirements against named provider contracts. |
@@ -734,6 +736,70 @@ registries in its immutable release and fingerprints them with the nested
 composition contract. Generic `:query`, `:write`, `:ui`, `:api`, and
 `:query_contract` projections do not expose these registries. Consumers that
 need them MUST use a projection-specific consumer release.
+
+## Portable Data Rules
+
+The optional `rules` map declares portable validation and normalization under
+the independently versioned `selecto.data_rules.v1` schema. It contains three
+registries: versioned `definitions`, versioned `normalizers`, and `bindings`
+that attach both to a semantic subject.
+
+```elixir
+rules: %{
+  schema: "selecto.data_rules.v1",
+  definitions: %{
+    positive_quantity: %{
+      version: 1,
+      test: %{op: "number.gt", bound: "0"}
+    },
+    exactly_three: %{
+      version: 1,
+      test: %{op: "collection.count", exact: 3}
+    }
+  },
+  normalizers: %{
+    reference: %{
+      version: 1,
+      steps: [
+        %{op: "text.trim", profile: "ascii_whitespace_v1"},
+        %{op: "text.uppercase", profile: "ascii_v1"}
+      ]
+    }
+  },
+  bindings: %{
+    quantity_on_write: %{
+      subject: %{scope: :candidate, path: [:quantity]},
+      operations: [:insert, :update],
+      rule: %{id: :positive_quantity, version: 1}
+    },
+    products_on_action: %{
+      subject: %{
+        scope: :action_input,
+        action: :choose_products,
+        path: [:selected_products]
+      },
+      rule: %{id: :exactly_three, version: 1}
+    }
+  }
+}
+```
+
+The first pure profile includes presence and explicit non-null checks, portable
+types, text length/content and bounded ASCII patterns, exact numeric bounds and
+multiples, membership, collection count and uniqueness, literal equality, and
+`all`/`any`/`not`. Numeric floats are not exact literals. Use integers, decimal
+strings, or `Decimal` values at the Elixir evaluator boundary.
+
+`presence.required` means the path must exist; explicit null remains distinct.
+Use `presence.non_null` when null is forbidden and `text.nonblank` when empty or
+whitespace-only text is forbidden. Unknown operators, options, subject paths,
+versions, normalizer profiles, and references reject the Domain.
+
+`Selecto.Rule.Compiler.compile/1` produces the immutable contract and semantic
+fingerprint. `Selecto.Rule.Evaluator.evaluate/4` is pure and returns structured
+outcomes. Required transaction and evidence bindings remain pending unless the
+caller explicitly supplies that authoritative stage. A pending result is not
+permission to execute a write.
 
 ## Write Contract
 

@@ -26,6 +26,7 @@ defmodule Selecto.Domain.Contract do
   alias Selecto.Domain.Contract.Query
   alias Selecto.Domain.Contract.QueryMembers, as: QueryMembersValidator
   alias Selecto.Domain.Contract.Relations
+  alias Selecto.Rule.Contract, as: RuleContract
   alias Selecto.Domain.Contract.Shared.Core
   alias Selecto.Domain.Contract.SourceRelationships
   alias Selecto.Domain.Contract.Writes
@@ -81,6 +82,7 @@ defmodule Selecto.Domain.Contract do
     |> PublishedViews.validate(query)
     |> DetailActions.validate(detail_actions, field_index)
     |> Writes.validate(writes, field_index)
+    |> Kernel.++(RuleContract.errors(normalized_domain))
     |> Capabilities.validate(capabilities)
     |> Capabilities.validate_query_references(query, detail_actions, capabilities)
     |> Events.validate(events)

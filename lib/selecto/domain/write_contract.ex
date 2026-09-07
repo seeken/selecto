@@ -26,6 +26,7 @@ defmodule Selecto.Domain.WriteContract do
           relationships: map(),
           constraints: term(),
           transitions: map(),
+          rules: Selecto.Rule.Contract.t(),
           fingerprint: String.t() | nil
         }
 
@@ -37,6 +38,7 @@ defmodule Selecto.Domain.WriteContract do
             relationships: %{},
             constraints: %{},
             transitions: %{},
+            rules: nil,
             fingerprint: nil
 
   @spec compile(term()) :: {:ok, t()} | {:error, Error.t()}
@@ -45,7 +47,8 @@ defmodule Selecto.Domain.WriteContract do
          {:ok, writes} <- explicit_writes(normalized),
          {:ok, operations} <- compile_operations(writes),
          {:ok, fields} <- compile_fields(writes, normalized),
-         {:ok, scope} <- compile_scope(writes, normalized) do
+         {:ok, scope} <- compile_scope(writes, normalized),
+         {:ok, rules} <- Selecto.Rule.Contract.compile_normalized(normalized) do
       {:ok,
        %__MODULE__{
          source: Map.get(normalized, :source, %{}),
@@ -55,6 +58,7 @@ defmodule Selecto.Domain.WriteContract do
          relationships: map_section(writes, :relationships),
          constraints: map_section(writes, :constraints),
          transitions: map_section(writes, :transitions),
+         rules: rules,
          fingerprint: Map.get(normalized, :domain_fingerprint)
        }}
     end
