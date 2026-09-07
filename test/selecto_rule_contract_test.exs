@@ -98,7 +98,7 @@ defmodule Selecto.Rule.ContractTest do
     native = %{
       adapter: "postgresql",
       constraint: "line_items_quantity_positive",
-      category: "unique_violation"
+      category: "check_violation"
     }
 
     assert {:ok, contract} =
@@ -109,7 +109,7 @@ defmodule Selecto.Rule.ContractTest do
     assert contract.bindings["quantity_on_write"].native_constraint == %{
              adapter: "postgresql",
              constraint: "line_items_quantity_positive",
-             category: "unique_violation"
+             category: "check_violation"
            }
 
     assert "native_constraint:postgresql" in contract.required_features
@@ -119,7 +119,7 @@ defmodule Selecto.Rule.ContractTest do
              |> put_in([:rules, :bindings, :quantity_on_write, :native_constraint], %{
                adapter: "postgresql",
                constraint: "line_items_quantity_positive",
-               category: "unique_violation",
+               category: "check_violation",
                unsafe: true
              })
              |> Contract.compile()

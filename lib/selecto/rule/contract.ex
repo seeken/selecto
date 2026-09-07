@@ -15,7 +15,7 @@ defmodule Selecto.Rule.Contract do
   @normalizer_keys ~w(version steps)
   @binding_keys ~w(subject operations rule normalizer condition enforcement native_constraint)
   @native_constraint_keys ~w(adapter constraint category)
-  @native_constraint_categories ~w(unique_violation foreign_key_violation not_null_violation)
+  @native_constraint_categories ~w(unique_violation foreign_key_violation not_null_violation check_violation)
   @subject_keys ~w(scope path action)
   @message_keys ~w(key default)
   @ref_keys ~w(id version)

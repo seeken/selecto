@@ -577,7 +577,7 @@ defmodule Selecto.WriteProtocolTest do
           binding_id: "quantity_on_write",
           adapter: "postgresql",
           constraint: "line_items_quantity_positive",
-          category: :unique_violation
+          category: :check_violation
         }
       ])
 

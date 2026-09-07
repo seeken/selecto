@@ -302,7 +302,12 @@ defmodule Selecto.Write.Command do
          category: category
        })
        when is_binary(binding_id) and is_binary(adapter) and is_binary(name) and
-              category in [:unique_violation, :foreign_key_violation, :not_null_violation] do
+              category in [
+                :unique_violation,
+                :foreign_key_violation,
+                :not_null_violation,
+                :check_violation
+              ] do
     if Enum.all?([binding_id, adapter, name], &(String.trim(&1) != "")) do
       :ok
     else
