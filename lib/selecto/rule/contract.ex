@@ -22,6 +22,7 @@ defmodule Selecto.Rule.Contract do
   @supported_scopes ~w(input action_input candidate transaction evidence)
   @supported_enforcement ~w(required advisory)
   @supported_normalizers ~w(text.trim text.uppercase text.lowercase text.nfc text.line_endings text.empty_to_null)
+  @projection_keys ~w(schema definitions normalizers bindings required_features fingerprint evaluation)
   @supported_ops ~w(
     presence.required presence.non_null presence.absent type.is text.nonblank
     text.length text.pattern text.prefix text.suffix text.contains
@@ -57,6 +58,53 @@ defmodule Selecto.Rule.Contract do
 
   def compile(_input),
     do: {:error, [error(:invalid_rules_input, [], "rules input must be a Domain map")]}
+
+  @doc """
+  Verifies and compiles a server-produced portable rule projection for local,
+  non-authoritative evaluation.
+
+  The projection must exactly match the canonical artifact the compiler would
+  produce. This prevents a client from treating edited bindings, requirements,
+  authority markers, or a substituted fingerprint as a trusted local profile.
+  """
+  @spec compile_projection(map()) :: {:ok, t()} | {:error, [map()]}
+  def compile_projection(projection) when is_map(projection) do
+    with :ok <- known_keys(projection, @projection_keys, [:rules]),
+         {:ok, contract} <- compile_rules(authored_projection_rules(projection)) do
+      compiled = project(contract)
+
+      if Map.take(projection, @projection_keys) == compiled do
+        {:ok, contract}
+      else
+        {:error,
+         [
+           error(
+             :invalid_rule_projection,
+             [:rules],
+             "rule projection does not match its canonical compiled artifact"
+           )
+         ]}
+      end
+    else
+      {:error, error} when is_map(error) -> {:error, [error]}
+      {:error, errors} -> {:error, errors}
+    end
+  end
+
+  def compile_projection(_projection),
+    do: {:error, [error(:invalid_rule_projection, [:rules], "rule projection must be a map")]}
+
+  defp authored_projection_rules(projection) do
+    projection
+    |> Map.take(@rules_keys)
+    |> Map.update("definitions", %{}, &drop_projection_fields(&1, ["id"]))
+    |> Map.update("normalizers", %{}, &drop_projection_fields(&1, ["id"]))
+    |> Map.update("bindings", %{}, &drop_projection_fields(&1, ["id", "stage"]))
+  end
+
+  defp drop_projection_fields(entries, fields) when is_map(entries) do
+    Map.new(entries, fn {id, entry} -> {id, Map.drop(entry, fields)} end)
+  end
 
   @doc false
   @spec compile_normalized(map()) :: {:ok, t()} | {:error, [map()]}

@@ -48,6 +48,17 @@ defmodule Selecto.Rule.ContractTest do
            end)
   end
 
+  test "verifies canonical portable projections before local evaluation" do
+    assert {:ok, contract} = Contract.compile(domain())
+    projection = Contract.project(contract)
+
+    assert {:ok, recompiled} = Contract.compile_projection(projection)
+    assert recompiled.bindings["quantity_on_write"].rule.id == "positive_quantity"
+
+    assert {:error, [%{code: :invalid_rule_projection}]} =
+             Contract.compile_projection(Map.put(projection, "fingerprint", "sha256:forged"))
+  end
+
   test "includes the compiled canonical rule projection in domain inspection" do
     assert {:ok, inspection, _diagnostics} = Domain.describe(domain())
 
