@@ -46,6 +46,19 @@ defmodule Selecto.Rule.ContractTest do
            end)
   end
 
+  test "includes the compiled canonical rule projection in domain inspection" do
+    assert {:ok, inspection, _diagnostics} = Domain.describe(domain())
+
+    assert inspection.counts.rules == %{definitions: 2, normalizers: 1, bindings: 2}
+    assert inspection.registries.rule_definitions == [:positive_quantity, :reference_shape]
+    assert inspection.registries.rule_normalizers == [:reference]
+    assert inspection.registries.rule_bindings == [:quantity_on_write, :reference_on_write]
+    assert inspection.rules["schema"] == "selecto.data_rules.v1"
+    assert "rule:number.gt" in inspection.rules["required_features"]
+    assert inspection.rules["bindings"]["quantity_on_write"]["stage"] == "candidate"
+    assert inspection.rules["evaluation"]["server_revalidation_required"]
+  end
+
   test "rejects unknown operators, options, and unresolved versions" do
     assert {:error, [%{code: :unsupported_rule_operator}]} =
              domain()

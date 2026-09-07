@@ -5,6 +5,7 @@ defmodule Selecto.Domain.Inspector do
 
   alias Selecto.Domain.Shared.Map, as: MapHelpers
   alias Selecto.Domain.FieldBindings
+  alias Selecto.Rule.Contract, as: RuleContract
 
   @projections [:query, :write, :ui, :api, :query_contract]
   @security_review_sections [
@@ -25,6 +26,7 @@ defmodule Selecto.Domain.Inspector do
     field_choice_bindings = FieldBindings.field_choice_bindings(normalized)
     capability_usage = inspect_capability_usage(normalized)
     capabilities = inspect_capabilities(Map.get(normalized, :capabilities, %{}))
+    rules = inspect_rules(normalized)
 
     %{
       schema_version: Map.fetch!(normalized, :schema_version),
@@ -37,6 +39,7 @@ defmodule Selecto.Domain.Inspector do
       writes: inspect_writes(Map.get(normalized, :writes, %{})),
       actions: inspect_actions(Map.get(normalized, :actions, %{})),
       capabilities: capabilities,
+      rules: rules,
       capability_usage: capability_usage,
       capability_visibility: inspect_capability_visibility(capabilities, capability_usage),
       security_review: inspect_security_review(normalized),
@@ -77,6 +80,7 @@ defmodule Selecto.Domain.Inspector do
     query = Map.get(normalized, :query, %{})
     projection = Map.get(normalized, :projection, %{})
     writes = Map.get(normalized, :writes, %{})
+    rules = Map.get(normalized, :rules, %{})
 
     %{
       source_fields: length(MapHelpers.relation_field_ids(Map.get(normalized, :source))),
@@ -95,6 +99,11 @@ defmodule Selecto.Domain.Inspector do
         constraints: MapHelpers.list_count(MapHelpers.map_value(writes, :constraints)),
         scope: MapHelpers.map_count(MapHelpers.map_value(writes, :scope)),
         hooks: MapHelpers.map_count(MapHelpers.map_value(writes, :hooks))
+      },
+      rules: %{
+        definitions: MapHelpers.map_count(MapHelpers.map_value(rules, :definitions)),
+        normalizers: MapHelpers.map_count(MapHelpers.map_value(rules, :normalizers)),
+        bindings: MapHelpers.map_count(MapHelpers.map_value(rules, :bindings))
       },
       actions: MapHelpers.map_count(Map.get(normalized, :actions)),
       events: MapHelpers.map_count(Map.get(normalized, :events)),
@@ -125,6 +134,9 @@ defmodule Selecto.Domain.Inspector do
       functions: MapHelpers.sorted_keys(MapHelpers.map_value(query, :functions)),
       query_members: MapHelpers.query_member_keys(MapHelpers.map_value(query, :query_members)),
       custom_columns: MapHelpers.sorted_keys(MapHelpers.map_value(projection, :custom_columns)),
+      rule_definitions: rules_registry(normalized, :definitions),
+      rule_normalizers: rules_registry(normalized, :normalizers),
+      rule_bindings: rules_registry(normalized, :bindings),
       actions: MapHelpers.sorted_keys(Map.get(normalized, :actions)),
       events: MapHelpers.sorted_keys(Map.get(normalized, :events)),
       capabilities: MapHelpers.sorted_keys(Map.get(normalized, :capabilities)),
@@ -134,6 +146,23 @@ defmodule Selecto.Domain.Inspector do
       operations: MapHelpers.sorted_keys(Map.get(normalized, :operations)),
       experiences: MapHelpers.sorted_keys(Map.get(normalized, :experiences))
     }
+  end
+
+  defp rules_registry(normalized, registry) do
+    normalized
+    |> Map.get(:rules, %{})
+    |> MapHelpers.map_value(registry)
+    |> MapHelpers.sorted_keys()
+  end
+
+  # `describe/1` deliberately remains an inspection API: malformed rules are
+  # represented here rather than changing its existing normalization result.
+  # `Domain.validate/1` remains the validation boundary.
+  defp inspect_rules(normalized) do
+    case RuleContract.compile_normalized(normalized) do
+      {:ok, contract} -> RuleContract.project(contract)
+      {:error, errors} -> %{compile_errors: errors}
+    end
   end
 
   def inspect_writes(writes) when is_map(writes) do
