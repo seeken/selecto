@@ -74,6 +74,42 @@ defmodule Selecto.WriteProtocolTest do
     def supports?(_feature), do: false
   end
 
+  defmodule PreparedAdapter do
+    @behaviour Selecto.DB.Adapter
+    @behaviour Selecto.DB.WriteAdapter
+
+    def name, do: :prepared_write_test
+    def connect(connection), do: {:ok, connection}
+    def execute(_connection, _query, _params, _opts), do: {:ok, %{rows: [], columns: []}}
+    def placeholder(index), do: ["$", Integer.to_string(index)]
+    def quote_identifier(identifier), do: ~s("#{identifier}")
+    def supports?(_feature), do: false
+
+    def write_capabilities(_connection),
+      do: %{protocol_version: 1, insert: true, prepared_candidate_state: true}
+
+    def preview_write(_connection, _command, _opts), do: {:ok, %Preview{statements: []}}
+    def execute_write(_connection, _command, _opts), do: raise("ordinary path must not run")
+
+    def execute_prepared_write(pid, prepare_fun, _opts) do
+      loader = fn request ->
+        send(pid, {:candidate_request, request})
+
+        {:ok,
+         %Selecto.Write.CandidateState{
+           rows: [%{"id" => 11}],
+           complete?: true,
+           protection: :locked
+         }}
+      end
+
+      with {:ok, command, context} <- prepare_fun.(loader) do
+        send(pid, {:prepared, command, context})
+        {:ok, %Result{operation: command.operation, affected_rows: 1}}
+      end
+    end
+  end
+
   defmodule EffectAdapter do
     @behaviour Selecto.DB.Adapter
     @behaviour Selecto.DB.WriteAdapter
@@ -160,6 +196,43 @@ defmodule Selecto.WriteProtocolTest do
              Write.preview(selecto, command)
 
     assert {:ok, %{atomic_batch: true}} = Write.capabilities(selecto)
+  end
+
+  test "dispatches trusted preparation through an adapter-owned candidate loader" do
+    selecto = %Selecto{adapter: PreparedAdapter, connection: self()}
+
+    request = %Selecto.Write.CandidateRequest{
+      operation: :update,
+      representation: :delta,
+      relationship: "items",
+      path: [:items],
+      parent_command: command!(:update),
+      parent_key: :id,
+      child_relation: :line_items,
+      child_key: :item_id,
+      identity_fields: ["id"],
+      fields: ["id"],
+      max_rows: 1_000
+    }
+
+    prepare = fn loader ->
+      assert {:ok, %Selecto.Write.CandidateState{protection: :locked}} = loader.(request)
+      {:ok, command!(:insert), %{candidate_revision: 1}}
+    end
+
+    assert {:ok, %Result{operation: :insert}} = Write.execute_prepared(selecto, prepare)
+    assert_receive {:candidate_request, ^request}
+    assert_receive {:prepared, %Command{operation: :insert}, %{candidate_revision: 1}}
+  end
+
+  test "requires explicit prepared candidate-state capability" do
+    selecto = %Selecto{adapter: WriteAdapter, connection: :connection}
+
+    assert {:error,
+            %Error{
+              type: :write_not_supported,
+              details: %{callback: {:execute_prepared_write, 3}}
+            }} = Write.execute_prepared(selecto, fn _loader -> {:ok, command!(:insert), %{}} end)
   end
 
   test "requires an explicit atomic committed-effect capability before dispatch" do

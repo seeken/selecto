@@ -24,6 +24,30 @@ defmodule Selecto.Write do
     end
   end
 
+  @doc """
+  Executes a write whose portable command must be prepared from protected
+  database state inside the adapter's transaction.
+
+  The adapter supplies the preparation function with a typed candidate loader.
+  Only adapters that explicitly report `:prepared_candidate_state` support this
+  boundary.
+  """
+  @spec execute_prepared(Selecto.t(), Selecto.DB.WriteAdapter.prepare_fun(), keyword()) ::
+          {:ok, execution_result()} | {:error, Error.t()} | {:error, term()}
+  def execute_prepared(
+        %Selecto{adapter: adapter, connection: connection},
+        prepare_fun,
+        opts \\ []
+      )
+      when is_function(prepare_fun, 1) do
+    with :ok <- ensure_callback(adapter, :execute_prepared_write, 3),
+         {:ok, capabilities} <- adapter_capabilities(adapter, connection),
+         :ok <- require_prepared_candidate_state(capabilities),
+         :ok <- require_committed_effect_sink(capabilities, opts) do
+      adapter.execute_prepared_write(connection, prepare_fun, opts)
+    end
+  end
+
   @spec preview(Selecto.t(), command(), keyword()) :: {:ok, Preview.t()} | {:error, Error.t()}
   def preview(%Selecto{adapter: adapter, connection: connection}, command, opts \\ []) do
     with :ok <- validate_command(command),
@@ -104,6 +128,22 @@ defmodule Selecto.Write do
        )}
     else
       :ok
+    end
+  end
+
+  defp require_prepared_candidate_state(capabilities) do
+    if Capabilities.supported?(capabilities, :prepared_candidate_state) do
+      :ok
+    else
+      {:error,
+       Error.new(
+         :write_capability_missing,
+         "configured adapter cannot prepare writes from protected candidate state",
+         details: %{
+           required: [:prepared_candidate_state],
+           missing: [:prepared_candidate_state]
+         }
+       )}
     end
   end
 end
