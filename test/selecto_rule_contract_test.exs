@@ -94,6 +94,39 @@ defmodule Selecto.Rule.ContractTest do
              |> Contract.compile()
   end
 
+  test "compiles a strict native constraint declaration into the canonical binding" do
+    native = %{
+      adapter: "postgresql",
+      constraint: "line_items_quantity_positive",
+      category: "unique_violation"
+    }
+
+    assert {:ok, contract} =
+             domain()
+             |> put_in([:rules, :bindings, :quantity_on_write, :native_constraint], native)
+             |> Contract.compile()
+
+    assert contract.bindings["quantity_on_write"].native_constraint == %{
+             adapter: "postgresql",
+             constraint: "line_items_quantity_positive",
+             category: "unique_violation"
+           }
+
+    assert "native_constraint:postgresql" in contract.required_features
+
+    assert {:error, [%{code: :unknown_rule_option, path: path}]} =
+             domain()
+             |> put_in([:rules, :bindings, :quantity_on_write, :native_constraint], %{
+               adapter: "postgresql",
+               constraint: "line_items_quantity_positive",
+               category: "unique_violation",
+               unsafe: true
+             })
+             |> Contract.compile()
+
+    assert path == [:rules, :bindings, "quantity_on_write", :native_constraint]
+  end
+
   test "rejects unbounded or non-portable regex syntax" do
     assert {:error, %{code: :invalid_text_pattern}} =
              Contract.compile_test(%{

@@ -569,6 +569,27 @@ defmodule Selecto.WriteProtocolTest do
     assert {:error, %Error{type: :invalid_command}} = Batch.new([command], atomic?: false)
   end
 
+  test "native constraint obligations require an adapter mapping capability" do
+    command =
+      command!(:insert)
+      |> Map.put(:native_constraints, [
+        %{
+          binding_id: "quantity_on_write",
+          adapter: "postgresql",
+          constraint: "line_items_quantity_positive",
+          category: :unique_violation
+        }
+      ])
+
+    assert :ok = Command.validate(command)
+    assert :native_constraint_mapping in Capabilities.requirements(command)
+
+    assert {:error, %Error{type: :write_capability_missing, details: %{missing: missing}}} =
+             Capabilities.require(%{protocol_version: 1, insert: true}, command)
+
+    assert :native_constraint_mapping in missing
+  end
+
   test "dispatches batch execution results as an ordered result list" do
     {:ok, batch} = Batch.new([command!(:insert), command!(:delete)])
     selecto = %Selecto{adapter: WriteAdapter, connection: :connection}

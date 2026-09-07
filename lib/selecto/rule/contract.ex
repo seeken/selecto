@@ -13,7 +13,9 @@ defmodule Selecto.Rule.Contract do
   @rules_keys ~w(schema definitions normalizers bindings)
   @definition_keys ~w(version test message)
   @normalizer_keys ~w(version steps)
-  @binding_keys ~w(subject operations rule normalizer condition enforcement)
+  @binding_keys ~w(subject operations rule normalizer condition enforcement native_constraint)
+  @native_constraint_keys ~w(adapter constraint category)
+  @native_constraint_categories ~w(unique_violation foreign_key_violation not_null_violation)
   @subject_keys ~w(scope path action)
   @message_keys ~w(key default)
   @ref_keys ~w(id version)
@@ -247,6 +249,11 @@ defmodule Selecto.Rule.Contract do
          {:ok, rule} <- compile_ref(value(spec, :rule), path ++ [:rule]),
          {:ok, normalizer} <-
            compile_optional_ref(value(spec, :normalizer), path ++ [:normalizer]),
+         {:ok, native_constraint} <-
+           compile_optional_native_constraint(
+             value(spec, :native_constraint),
+             path ++ [:native_constraint]
+           ),
          {:ok, enforcement} <-
            enum(
              value(spec, :enforcement, "required"),
@@ -255,17 +262,22 @@ defmodule Selecto.Rule.Contract do
            ),
          {:ok, operations} <- operations(value(spec, :operations, []), path ++ [:operations]),
          {:ok, condition} <- compile_optional_test(value(spec, :condition), path ++ [:condition]) do
+      binding = %{
+        id: id,
+        subject: subject,
+        rule: rule,
+        normalizer: normalizer,
+        enforcement: enforcement,
+        operations: operations,
+        condition: condition,
+        stage: subject.scope
+      }
+
       {:ok,
-       %{
-         id: id,
-         subject: subject,
-         rule: rule,
-         normalizer: normalizer,
-         enforcement: enforcement,
-         operations: operations,
-         condition: condition,
-         stage: subject.scope
-       }}
+       if(native_constraint,
+         do: Map.put(binding, :native_constraint, native_constraint),
+         else: binding
+       )}
     end
   end
 
@@ -275,6 +287,24 @@ defmodule Selecto.Rule.Contract do
        actual: kind(other)
      )}
   end
+
+  defp compile_optional_native_constraint(nil, _path), do: {:ok, nil}
+
+  defp compile_optional_native_constraint(spec, path) when is_map(spec) do
+    with :ok <- known_keys(spec, @native_constraint_keys, path),
+         {:ok, adapter} <- native_constraint_id(value(spec, :adapter), path ++ [:adapter]),
+         {:ok, constraint} <-
+           native_constraint_id(value(spec, :constraint), path ++ [:constraint]),
+         {:ok, category} <-
+           enum(value(spec, :category), @native_constraint_categories, path ++ [:category]) do
+      {:ok, %{adapter: adapter, constraint: constraint, category: category}}
+    end
+  end
+
+  defp compile_optional_native_constraint(_spec, path),
+    do:
+      {:error,
+       error(:invalid_native_constraint, path, "native constraint declarations must be maps")}
 
   defp compile_message(message, path) when is_map(message) do
     with :ok <- known_keys(message, @message_keys, path) do
@@ -982,10 +1012,18 @@ defmodule Selecto.Rule.Contract do
           |> Enum.map(&"normalizer:#{&1["op"]}")
       end)
 
+    native_constraint_features =
+      bindings
+      |> Enum.flat_map(fn
+        {_id, %{native_constraint: native}} -> ["native_constraint:#{native.adapter}"]
+        _ -> []
+      end)
+
     stage_features =
       Enum.map(bindings, fn {_id, binding} -> "rule_stage:#{binding.stage}" end)
 
-    (definition_features ++ condition_features ++ normalizer_features ++ stage_features)
+    (definition_features ++
+       condition_features ++ normalizer_features ++ native_constraint_features ++ stage_features)
     |> Enum.uniq()
     |> Enum.sort()
   end
@@ -1244,6 +1282,19 @@ defmodule Selecto.Rule.Contract do
     do:
       (is_atom(value) and value not in [nil, true, false]) or
         (is_binary(value) and String.trim(value) != "")
+
+  defp native_constraint_id(value, path) do
+    if is_binary(value) and String.match?(value, ~r/\A[A-Za-z][A-Za-z0-9_.-]*\z/) do
+      {:ok, value}
+    else
+      {:error,
+       error(
+         :invalid_native_constraint,
+         path,
+         "native constraint adapter and name must start with a letter and use letters, numbers, dots, dashes, or underscores"
+       )}
+    end
+  end
 
   defp maybe_id(nil), do: nil
   defp maybe_id(value) when is_atom(value), do: Atom.to_string(value)

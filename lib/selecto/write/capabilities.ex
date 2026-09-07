@@ -101,7 +101,8 @@ defmodule Selecto.Write.Capabilities do
   end
 
   defp command_requirements(command, include_returning?) do
-    ([command.operation | command.required_capabilities] ++ document_requirements(command))
+    ([command.operation | command.required_capabilities] ++
+       native_constraint_requirements(command) ++ document_requirements(command))
     |> maybe_require_returning(command, include_returning?)
     |> Enum.uniq()
   end
@@ -122,6 +123,11 @@ defmodule Selecto.Write.Capabilities do
     do: Selecto.Write.DocumentMutation.capabilities()
 
   defp document_requirements(_command), do: []
+
+  defp native_constraint_requirements(%Command{native_constraints: [_ | _]}),
+    do: [:native_constraint_mapping]
+
+  defp native_constraint_requirements(_command), do: []
 
   defp maybe_require_returning(requirements, %Command{returning: :none}, _include?),
     do: requirements

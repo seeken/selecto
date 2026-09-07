@@ -28,6 +28,7 @@ defmodule Selecto.Write.Command do
           expected_cardinality: expected_cardinality(),
           returning: :none | :all | [atom() | String.t()],
           required_capabilities: [atom()],
+          native_constraints: [map()],
           metadata: map()
         }
 
@@ -39,6 +40,7 @@ defmodule Selecto.Write.Command do
             expected_cardinality: {:exactly, 1},
             returning: :none,
             required_capabilities: [],
+            native_constraints: [],
             metadata: %{}
 
   @spec new(map() | keyword()) :: {:ok, t()} | {:error, Error.t()}
@@ -69,6 +71,7 @@ defmodule Selecto.Write.Command do
          :ok <- validate_cardinality(command.expected_cardinality),
          :ok <- validate_returning(command.returning),
          :ok <- validate_capabilities(command.required_capabilities),
+         :ok <- validate_native_constraints(command.native_constraints),
          :ok <- validate_metadata(command.metadata),
          :ok <- validate_document(command) do
       :ok
@@ -274,6 +277,44 @@ defmodule Selecto.Write.Command do
   defp validate_metadata(metadata) do
     {:error,
      Error.new(:invalid_command, "command metadata must be a map", details: %{metadata: metadata})}
+  end
+
+  defp validate_native_constraints(constraints) when is_list(constraints) do
+    Enum.reduce_while(constraints, :ok, fn constraint, :ok ->
+      case validate_native_constraint(constraint) do
+        :ok -> {:cont, :ok}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp validate_native_constraints(constraints) do
+    {:error,
+     Error.new(:invalid_command, "native constraints must be a list",
+       details: %{native_constraints: constraints}
+     )}
+  end
+
+  defp validate_native_constraint(%{
+         binding_id: binding_id,
+         adapter: adapter,
+         constraint: name,
+         category: category
+       })
+       when is_binary(binding_id) and is_binary(adapter) and is_binary(name) and
+              category in [:unique_violation, :foreign_key_violation, :not_null_violation] do
+    if Enum.all?([binding_id, adapter, name], &(String.trim(&1) != "")) do
+      :ok
+    else
+      {:error, Error.new(:invalid_command, "native constraint fields must not be blank")}
+    end
+  end
+
+  defp validate_native_constraint(constraint) do
+    {:error,
+     Error.new(:invalid_command, "native constraint obligation is invalid",
+       details: %{native_constraint: constraint}
+     )}
   end
 
   defp validate_unique_identifiers(fields, kind) do
