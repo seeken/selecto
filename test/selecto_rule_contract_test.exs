@@ -25,6 +25,8 @@ defmodule Selecto.Rule.ContractTest do
     assert "normalizer:text.trim" in first.required_features
     assert "rule_stage:candidate" in first.required_features
     assert first.bindings["quantity_on_write"].stage == "candidate"
+    assert first.bindings["quantity_on_write"].subject_type == "integer"
+    assert first.bindings["reference_on_write"].subject_type == "string"
   end
 
   test "projects deterministic consumer rules with explicit authority markers" do
@@ -178,6 +180,7 @@ defmodule Selecto.Rule.ContractTest do
 
     assert {:ok, contract} = Contract.compile(nested)
     assert contract.bindings["three_items"].subject.path == ["items"]
+    assert contract.bindings["three_items"].subject_type == "collection"
 
     assert {:error, [%{code: :unresolved_rule_subject}]} =
              nested

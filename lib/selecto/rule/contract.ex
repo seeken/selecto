@@ -65,8 +65,8 @@ defmodule Selecto.Rule.Contract do
 
     case compile_rules(rules) do
       {:ok, contract} ->
-        case validate_subjects(contract, normalized) do
-          :ok -> {:ok, contract}
+        case resolve_subjects(contract, normalized) do
+          {:ok, contract} -> {:ok, contract}
           {:error, error} -> {:error, [error]}
         end
 
@@ -105,7 +105,7 @@ defmodule Selecto.Rule.Contract do
     bindings =
       contract.bindings
       |> Enum.filter(fn {_id, binding} -> MapSet.member?(stages, binding.stage) end)
-      |> Map.new()
+      |> Map.new(fn {id, binding} -> {id, portable_binding(binding)} end)
 
     definition_ids = MapSet.new(bindings, fn {_id, binding} -> binding.rule.id end)
 
@@ -886,44 +886,101 @@ defmodule Selecto.Rule.Contract do
     end)
   end
 
-  defp validate_subjects(contract, normalized) do
-    Enum.reduce_while(contract.bindings, :ok, fn {id, binding}, :ok ->
-      if known_subject?(binding.subject, normalized) do
-        {:cont, :ok}
-      else
-        {:halt,
-         {:error,
-          error(
-            :unresolved_rule_subject,
-            [:rules, :bindings, id, :subject],
-            "rule subject does not resolve in its declared scope",
-            scope: binding.subject.scope,
-            path: binding.subject.path,
-            action: binding.subject[:action]
-          )}}
+  defp resolve_subjects(contract, normalized) do
+    contract.bindings
+    |> Enum.reduce_while({:ok, %{}}, fn {id, binding}, {:ok, bindings} ->
+      case subject_type(binding.subject, normalized) do
+        {:ok, type} ->
+          {:cont, {:ok, Map.put(bindings, id, Map.put(binding, :subject_type, type))}}
+
+        :error ->
+          {:halt,
+           {:error,
+            error(
+              :unresolved_rule_subject,
+              [:rules, :bindings, id, :subject],
+              "rule subject does not resolve in its declared scope",
+              scope: binding.subject.scope,
+              path: binding.subject.path,
+              action: binding.subject[:action]
+            )}}
       end
     end)
+    |> case do
+      {:ok, bindings} -> {:ok, %{contract | bindings: bindings}}
+      {:error, _error} = error -> error
+    end
   end
 
-  defp known_subject?(%{scope: "action_input", action: action, path: [field | _]}, normalized) do
-    normalized
-    |> Map.get(:actions, %{})
-    |> find_entry(action)
-    |> action_input_ids()
-    |> MapSet.member?(field)
+  defp subject_type(%{scope: "action_input", action: action, path: [field | _]}, normalized) do
+    case normalized |> Map.get(:actions, %{}) |> find_entry(action) |> action_input_spec(field) do
+      {:ok, input} -> {:ok, input |> value(:type, "unknown") |> normalize_subject_type()}
+      :error -> :error
+    end
   end
 
-  defp known_subject?(%{scope: "input", path: [field | _]}, normalized) do
-    known_write_subject?(normalized, field)
+  defp subject_type(%{scope: "input", path: [field | _]}, normalized) do
+    if known_write_subject?(normalized, field),
+      do: {:ok, write_subject_type(normalized, field)},
+      else: :error
   end
 
-  defp known_subject?(%{scope: scope, path: [field | _]}, normalized)
+  defp subject_type(%{scope: scope, path: [field | _]}, normalized)
        when scope in ["candidate", "transaction", "evidence"] do
-    field in Core.relation_fields(Map.get(normalized, :source, %{})) or
-      known_relationship_subject?(normalized, field)
+    cond do
+      field in Core.relation_fields(Map.get(normalized, :source, %{})) ->
+        {:ok, source_field_type(normalized, field)}
+
+      known_relationship_subject?(normalized, field) ->
+        {:ok, "collection"}
+
+      true ->
+        :error
+    end
   end
 
-  defp known_subject?(_subject, _normalized), do: false
+  defp subject_type(_subject, _normalized), do: :error
+
+  defp write_subject_type(normalized, field) do
+    if known_relationship_subject?(normalized, field),
+      do: "collection",
+      else: source_field_type(normalized, field)
+  end
+
+  defp source_field_type(normalized, field) do
+    normalized
+    |> Map.get(:source, %{})
+    |> value(:columns, %{})
+    |> find_entry(field)
+    |> value(:type, "unknown")
+    |> normalize_subject_type()
+  end
+
+  defp action_input_spec(nil, _field), do: :error
+
+  defp action_input_spec(action, field) do
+    direct = action |> value(:inputs, %{}) |> find_entry(field)
+
+    cond do
+      is_map(direct) ->
+        {:ok, direct}
+
+      true ->
+        action
+        |> value(:variants, [])
+        |> List.wrap()
+        |> Enum.find_value(:error, fn variant ->
+          case variant |> value(:inputs, %{}) |> find_entry(field) do
+            input when is_map(input) -> {:ok, input}
+            _ -> false
+          end
+        end)
+    end
+  end
+
+  defp normalize_subject_type(type) when is_atom(type), do: Atom.to_string(type)
+  defp normalize_subject_type(type) when is_binary(type) and type != "", do: type
+  defp normalize_subject_type(_type), do: "unknown"
 
   defp known_write_subject?(normalized, field) do
     writes = Map.get(normalized, :writes, %{})
@@ -939,37 +996,6 @@ defmodule Selecto.Rule.Contract do
     |> entry_ids()
     |> MapSet.member?(field)
   end
-
-  defp action_input_ids(nil), do: MapSet.new()
-
-  defp action_input_ids(action) do
-    direct = action |> value(:inputs, %{}) |> input_ids()
-
-    variant =
-      action
-      |> value(:variants, [])
-      |> List.wrap()
-      |> Enum.flat_map(fn variant -> variant |> value(:inputs, %{}) |> input_ids() end)
-
-    MapSet.new(direct ++ variant)
-  end
-
-  defp input_ids(inputs) when is_map(inputs), do: inputs |> Map.keys() |> Enum.map(&to_string/1)
-
-  defp input_ids(inputs) when is_list(inputs) do
-    Enum.flat_map(inputs, fn
-      input when is_map(input) ->
-        case value(input, :id, value(input, :name)) do
-          id when is_atom(id) or is_binary(id) -> [to_string(id)]
-          _ -> []
-        end
-
-      _ ->
-        []
-    end)
-  end
-
-  defp input_ids(_inputs), do: []
 
   defp entry_ids(entries) when is_map(entries),
     do: MapSet.new(entries, fn {id, _} -> to_string(id) end)
@@ -996,7 +1022,7 @@ defmodule Selecto.Rule.Contract do
       schema: @schema,
       definitions: contract.definitions,
       normalizers: contract.normalizers,
-      bindings: contract.bindings,
+      bindings: portable_bindings(contract.bindings),
       required_features: features
     }
 
@@ -1069,6 +1095,11 @@ defmodule Selecto.Rule.Contract do
       "bindings" => binding_markers
     }
   end
+
+  defp portable_bindings(bindings),
+    do: Map.new(bindings, fn {id, binding} -> {id, portable_binding(binding)} end)
+
+  defp portable_binding(binding), do: Map.delete(binding, :subject_type)
 
   defp semantic_fingerprint(value) do
     digest =
