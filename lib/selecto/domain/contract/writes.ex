@@ -1631,6 +1631,7 @@ defmodule Selecto.Domain.Contract.Writes do
 
   defp contains_unsafe_sql?({:unsafe_sql, _}), do: true
   defp contains_unsafe_sql?({:unsafe_fragment, _}), do: true
+  defp contains_unsafe_sql?(%Regex{}), do: false
 
   defp contains_unsafe_sql?(map) when is_map(map),
     do:

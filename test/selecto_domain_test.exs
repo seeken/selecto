@@ -406,6 +406,22 @@ defmodule Selecto.DomainTest do
       refute Selecto.Domain.WriteContract.writable?(contract, :insert, :id)
     end
 
+    test "accepts a portable legacy format validator without crashing unsafe-term checks" do
+      domain =
+        minimal_query_domain()
+        |> put_in([:source, :columns, :status, :write], %{
+          insertable: true,
+          validators: [{:format, ~r/[a-z]+/}]
+        })
+        |> Map.put(:writes, %{operations: %{insert: %{enabled: true}}})
+
+      assert {:ok, _normalized, _diagnostics} = Domain.validate(domain)
+      assert {:ok, _contract} = Selecto.Domain.WriteContract.compile(domain)
+
+      assert {:ok, %{"op" => "text.pattern"}} =
+               Selecto.Rule.Legacy.field_test({:format, ~r/[a-z]+/})
+    end
+
     test "normalizes colocated source association write policy into writes.relationships" do
       child_domain =
         minimal_query_domain()

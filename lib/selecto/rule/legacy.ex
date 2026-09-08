@@ -20,7 +20,7 @@ defmodule Selecto.Rule.Legacy do
     valid_test(translated)
   end
 
-  def field_test({:format, %Regex{source: source, opts: ""}}) do
+  def field_test({:format, %Regex{source: source, opts: opts}}) when opts in ["", []] do
     valid_test(
       {:ok,
        %{

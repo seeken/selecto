@@ -790,6 +790,41 @@ defmodule Selecto.DomainValidatorTest do
              end)
     end
 
+    test "accepts a write-only association with a complete child domain" do
+      child_domain = %{
+        source: %{
+          source_table: "order_items",
+          primary_key: :id,
+          fields: [:id, :order_id],
+          columns: %{id: %{type: :integer}, order_id: %{type: :integer}},
+          associations: %{}
+        },
+        schemas: %{},
+        writes: %{operations: %{insert: %{enabled: true}}}
+      }
+
+      domain = %{
+        source: %{
+          source_table: "orders",
+          primary_key: :id,
+          fields: [:id],
+          columns: %{id: %{type: :integer}},
+          associations: %{
+            items: %{
+              cardinality: :many,
+              owner_key: :id,
+              related_key: :order_id,
+              write: %{writable: true, domain: child_domain}
+            }
+          }
+        },
+        schemas: %{},
+        joins: %{}
+      }
+
+      assert DomainValidator.validate_domain(domain) == :ok
+    end
+
     test "validates join references existing associations" do
       invalid_domain = %{
         source: %{

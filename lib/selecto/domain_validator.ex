@@ -342,6 +342,9 @@ defmodule Selecto.DomainValidator do
         queryable = Map.get(assoc, :queryable)
 
         cond do
+          is_nil(queryable) and write_only_association?(assoc) ->
+            inner_acc
+
           is_nil(queryable) ->
             inner_acc ++ [{:association_missing_queryable, {schema_name, assoc_name}}]
 
@@ -353,6 +356,14 @@ defmodule Selecto.DomainValidator do
         end
       end)
     end)
+  end
+
+  defp write_only_association?(association) when is_map(association) do
+    write = Map.get(association, :write, Map.get(association, "write"))
+
+    is_map(write) and
+      is_map(Map.get(write, :domain, Map.get(write, "domain"))) and
+      Map.get(write, :writable, Map.get(write, "writable", true)) == true
   end
 
   # Validate joins reference valid associations  
