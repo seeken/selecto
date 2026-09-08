@@ -3,6 +3,12 @@
 
 ## Unreleased
 
+- Documented and validated explicit write-only source associations backed by a
+  complete `write.domain`, without granting query or join capability.
+- Accepted option-free `%Regex{}` values in portable legacy `{:format, regex}`
+  validators and converted supported patterns to canonical `text.pattern`
+  rules without treating the regex struct as an unsafe write fragment.
+
 - Added the database-native `Selecto.DB.SubscriptionPublisher` boundary and a
   fail-closed preflight for gap-free Domain Subscription snapshot/change feeds.
 

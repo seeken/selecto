@@ -282,19 +282,32 @@ properties described in this document; consumers MUST ignore unknown display
 metadata unless they explicitly define it and MUST NOT derive SQL identifiers
 or write permission from arbitrary values.
 
-`joins` must be a map when present. Each join key must be declared as an
-association on its parent relation, and each association must point at a schema
-available in `schemas` unless it explicitly targets `:source`.
+`joins` must be a map when present. Each join key must be declared as a
+queryable association on its parent relation, and each queryable association
+must point at a schema available in `schemas` unless it explicitly targets
+`:source`.
 
-An association MUST be a map with `queryable` naming its target schema. Runtime
-associations normally also declare `field`, `owner_key`, and `related_key` so the
-join compiler can bind the relationship. A join entry is a map keyed by the
-association id and MAY contain nested `joins`; nested joins are resolved against
-the target relation. Authored runtime validation rejects missing associations,
-missing target schemas, dependency cycles, and incomplete metadata required by
-advanced join types. Join `type`, display fields, cardinality, and advanced
-dimension or hierarchy options are runtime query configuration; they do not
-confer write or authorization rights.
+An association MUST be a map. A queryable association declares `queryable`
+naming its target schema and normally also declares `field`, `owner_key`, and
+`related_key` so the join compiler can bind the relationship. A join entry is a
+map keyed by the association id and MAY contain nested `joins`; nested joins are
+resolved against the target relation.
+
+An association MAY omit `queryable` when it is explicitly write-only. A
+write-only association MUST declare `write.domain` as a complete child Selecto
+domain and MUST NOT set `write.writable` to `false`. It participates in domain
+validation and portable owned-graph write construction, but it is not a query
+or join edge and confers no read, SQL, write, or authorization permission by
+itself. The child domain and the effective `writes.relationships` policy remain
+the authority for allowed operations and fields. An association that declares
+neither a valid `queryable` nor a complete enabled `write.domain` is invalid.
+A read/write association MAY declare both forms.
+
+Authored runtime validation rejects missing associations, missing target
+schemas, dependency cycles, and incomplete metadata required by advanced join
+types. Join `type`, display fields, cardinality, and advanced dimension or
+hierarchy options are runtime query configuration; they do not confer write or
+authorization rights.
 
 ## Projection And Host Metadata
 
@@ -956,6 +969,15 @@ Authoring and downstream write consumers also use metadata such as
 are preserved in the field spec, but their execution belongs to the write
 consumer; core schema validation is not proof that a particular adapter or host
 implements them.
+
+The compatibility validator `{:format, %Regex{}}` is portable only when the
+regex has no options. Core accepts the regex struct as declarative metadata and
+translates a supported option-free pattern to a bounded canonical
+`text.pattern` rule using the `ascii_v1` profile, full-match mode, and no flags.
+Patterns with regex options or syntax outside that canonical profile are
+unsupported and MUST be rejected by compilation rather than executed with
+runtime-specific semantics. Accepting `%Regex{}` here does not make arbitrary
+structs or executable terms safe write metadata.
 
 ### Scope
 
