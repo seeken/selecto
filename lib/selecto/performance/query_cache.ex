@@ -940,11 +940,11 @@ defmodule Selecto.Performance.QueryCache do
   defp counter_index(:item_count), do: @counter_item_count
   defp counter_index(:size_bytes), do: @counter_size_bytes
 
-  defp record_hit(cache_key) do
-    :telemetry.execute([:selecto, :cache, :hit], %{count: 1}, %{key: cache_key})
+  defp record_hit(_cache_key) do
+    :telemetry.execute([:selecto, :cache, :hit], %{count: 1}, %{})
   end
 
-  defp record_miss(cache_key) do
-    :telemetry.execute([:selecto, :cache, :miss], %{count: 1}, %{key: cache_key})
+  defp record_miss(_cache_key) do
+    :telemetry.execute([:selecto, :cache, :miss], %{count: 1}, %{})
   end
 end

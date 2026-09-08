@@ -37,6 +37,7 @@ defmodule Selecto.MixProject do
           "docs/developer_contracts.md",
           "docs/function_verification.md",
           "docs/formal_verification.md",
+          "docs/telemetry.md",
           "docs/contexts.md",
           "docs/query_library.md",
           "docs/document_shapes.md",
@@ -162,7 +163,9 @@ defmodule Selecto.MixProject do
         "docs/document_shapes.md",
         "docs/source_query_plans.md",
         "docs/strict_mode.md",
+        "docs/telemetry.md",
         "docs/write_adapter_protocol.md",
+        "priv/telemetry_events.json",
         "guides",
         ".formatter.exs"
       ],

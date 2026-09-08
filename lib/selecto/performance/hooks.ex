@@ -122,10 +122,12 @@ defmodule Selecto.Performance.Hooks do
   This is the main entry point for integrating hooks into query execution.
   """
   def with_hooks(selecto, execution_fn, options \\ []) do
+    operation = Selecto.Telemetry.Context.current_operation() || %{}
+
     context = %{
       selecto: selecto,
       options: options,
-      query_id: generate_query_id(),
+      query_id: Map.get(operation, :operation_id, generate_query_id()),
       started_at: System.monotonic_time(:millisecond)
     }
 
@@ -133,7 +135,10 @@ defmodule Selecto.Performance.Hooks do
     context = run_hooks(:before_query_build, context)
 
     # Generate SQL
-    {sql, params, query_metadata} = build_query_context(selecto, options)
+    {sql, params, query_metadata} =
+      Selecto.Telemetry.span([:compile], %{}, fn ->
+        build_query_context(selecto, options)
+      end)
 
     context =
       Map.merge(context, %{
@@ -152,6 +157,8 @@ defmodule Selecto.Performance.Hooks do
 
         case Selecto.Performance.QueryCache.get(cache_key) do
           {:ok, cached_result} ->
+            Selecto.Telemetry.emit([:cache, :lookup], %{count: 1}, %{cache_result: :hit})
+
             context =
               context
               |> Map.put(:cache_hit, true)
@@ -160,6 +167,8 @@ defmodule Selecto.Performance.Hooks do
             run_hooks(:on_cache_hit, context)
 
           :miss ->
+            Selecto.Telemetry.emit([:cache, :lookup], %{count: 1}, %{cache_result: :miss})
+
             context =
               context
               |> Map.put(:cache_hit, false)
@@ -301,7 +310,7 @@ defmodule Selecto.Performance.Hooks do
 
       :telemetry.execute([:selecto, :query, :error], %{count: 1}, %{
         query_id: context.query_id,
-        error: context.error
+        error_type: error_type(context.error)
       })
 
       context
@@ -309,6 +318,10 @@ defmodule Selecto.Performance.Hooks do
 
     :ok
   end
+
+  defp error_type(%{__struct__: module}) when is_atom(module), do: module
+  defp error_type(reason) when is_atom(reason), do: reason
+  defp error_type(_reason), do: :unknown
 
   @doc """
   Create a custom hook for specific monitoring needs.

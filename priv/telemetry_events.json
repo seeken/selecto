@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "time_unit": "native",
+  "metadata_policy": "allowlist",
+  "events": [
+    {"prefix": ["selecto", "telemetry", "operation"], "lifecycle": ["start", "stop", "exception"]},
+    {"prefix": ["selecto", "telemetry", "compile"], "lifecycle": ["start", "stop", "exception"]},
+    {"prefix": ["selecto", "telemetry", "adapter"], "lifecycle": ["start", "stop", "exception"]},
+    {"prefix": ["selecto", "telemetry", "transform"], "lifecycle": ["start", "stop", "exception"]},
+    {"prefix": ["selecto", "telemetry", "stream"], "lifecycle": ["start", "stop", "exception"]},
+    {"name": ["selecto", "telemetry", "cache", "lookup"], "measurements": ["count"]}
+  ],
+  "excluded_metadata": [
+    "sql", "params", "rows", "connection", "dsn", "cache_key", "tenant_id", "user_id",
+    "error_message", "exception", "stacktrace"
+  ]
+}

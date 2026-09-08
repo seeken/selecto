@@ -38,6 +38,10 @@ defmodule Selecto.ExecutorTest do
 
     def stream(:stream_error, _query, _params, _opts), do: {:error, "stream failed"}
 
+    def stream(:stream_raise, _query, _params, _opts) do
+      {:ok, Stream.map([[1]], fn _row -> raise "secret-stream-canary" end), ["id"]}
+    end
+
     def supports?(:stream), do: true
     def supports?(_feature), do: false
   end
@@ -156,6 +160,72 @@ defmodule Selecto.ExecutorTest do
     assert is_list(aliases_1)
     assert is_binary(hd(aliases_1))
     assert aliases_1 == aliases_2
+  end
+
+  test "stream telemetry distinguishes exhaustion from consumer cancellation" do
+    handler_id = "selecto-stream-lifecycle-#{System.unique_integer([:positive])}"
+
+    events = [
+      [:selecto, :telemetry, :stream, :start],
+      [:selecto, :telemetry, :stream, :stop],
+      [:selecto, :telemetry, :stream, :exception]
+    ]
+
+    :ok =
+      :telemetry.attach_many(
+        handler_id,
+        events,
+        &__MODULE__.handle_span_event/4,
+        self()
+      )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
+    assert {:ok, complete_stream} =
+             Executor.execute_stream(selecto_for(:single_stream), analyze_complexity: false)
+
+    assert length(Enum.to_list(complete_stream)) == 2
+
+    assert_receive {:executor_span_event, [:selecto, :telemetry, :stream, :start], _, _}
+
+    assert_receive {:executor_span_event, [:selecto, :telemetry, :stream, :stop], %{row_count: 2},
+                    %{stream_result: :completed, outcome: :ok}}
+
+    assert {:ok, cancelled_stream} =
+             Executor.execute_stream(selecto_for(:single_stream), analyze_complexity: false)
+
+    assert length(Enum.take(cancelled_stream, 1)) == 1
+
+    assert_receive {:executor_span_event, [:selecto, :telemetry, :stream, :start], _, _}
+
+    assert_receive {:executor_span_event, [:selecto, :telemetry, :stream, :stop], %{row_count: 1},
+                    %{stream_result: :cancelled, outcome: :cancelled}}
+  end
+
+  test "stream telemetry sanitizes enumeration exceptions" do
+    handler_id = "selecto-stream-exception-#{System.unique_integer([:positive])}"
+
+    :ok =
+      :telemetry.attach(
+        handler_id,
+        [:selecto, :telemetry, :stream, :exception],
+        &__MODULE__.handle_span_event/4,
+        self()
+      )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
+    assert {:ok, stream} =
+             Executor.execute_stream(selecto_for(:stream_raise), analyze_complexity: false)
+
+    assert_raise RuntimeError, "secret-stream-canary", fn -> Enum.to_list(stream) end
+
+    assert_receive {:executor_span_event, [:selecto, :telemetry, :stream, :exception],
+                    %{row_count: 0}, metadata}
+
+    assert metadata.outcome == :error
+    assert metadata.status == RuntimeError
+    refute inspect(metadata) =~ "secret-stream-canary"
   end
 
   test "execute_stream wraps adapter stream errors" do
@@ -309,7 +379,7 @@ defmodule Selecto.ExecutorTest do
     assert Enum.any?(events, fn
              {:executor_span_event, [:selecto, :query, :execution, :start], _measurements,
               metadata} ->
-               is_binary(metadata.query_id) and is_binary(metadata.query)
+               is_binary(metadata.query_id) and not Map.has_key?(metadata, :query)
 
              _ ->
                false
@@ -328,6 +398,53 @@ defmodule Selecto.ExecutorTest do
              {:executor_span_event, [:selecto, :query, :execution, :exception], _, _} -> true
              _ -> false
            end)
+  end
+
+  test "execute emits one correlated safe canonical lifecycle and child phases" do
+    handler_id = "selecto-canonical-span-#{System.unique_integer([:positive])}"
+
+    events =
+      for phase <- [:operation, :compile, :adapter], terminal <- [:start, :stop] do
+        [:selecto, :telemetry, phase, terminal]
+      end
+
+    :ok =
+      :telemetry.attach_many(
+        handler_id,
+        events,
+        &__MODULE__.handle_span_event/4,
+        self()
+      )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
+    assert {:ok, {[[1]], ["id"], _aliases}} =
+             Executor.execute(selecto_for(:single), analyze_complexity: false)
+
+    captured = drain_span_events()
+
+    operation_stop =
+      Enum.find_value(captured, fn
+        {:executor_span_event, [:selecto, :telemetry, :operation, :stop], _, metadata} ->
+          metadata
+
+        _event ->
+          nil
+      end)
+
+    assert %{operation_id: operation_id, outcome: :ok, row_count: 1} = operation_stop
+
+    for phase <- [:compile, :adapter] do
+      assert Enum.any?(captured, fn
+               {:executor_span_event, [:selecto, :telemetry, ^phase, :stop], _, metadata} ->
+                 metadata.operation_id == operation_id
+
+               _event ->
+                 false
+             end)
+    end
+
+    refute inspect(captured) =~ "SELECT"
   end
 
   test "execute emits telemetry span stop metadata for query errors" do

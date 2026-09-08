@@ -37,8 +37,17 @@ defmodule Selecto.Executor do
   @spec execute(Selecto.Types.t(), Selecto.Types.execute_options()) ::
           Selecto.Types.safe_execute_result()
   def execute(selecto, opts \\ []) do
+    Selecto.Telemetry.operation(:execute, selecto, fn -> do_execute(selecto, opts) end)
+  end
+
+  defp do_execute(selecto, opts) do
     start_time = System.monotonic_time(:millisecond)
-    query_id = :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)
+
+    query_id =
+      case Selecto.Telemetry.Context.current_operation() do
+        %{operation_id: operation_id} -> operation_id
+        _ -> :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)
+      end
 
     with :ok <- Selecto.Tenant.validate_scope(selecto, opts) do
       execute_safe(selecto, opts, query_id, start_time)
@@ -58,7 +67,13 @@ defmodule Selecto.Executor do
           format = Keyword.get(opts, :format, :raw)
           format_options = Keyword.get(opts, :format_options, [])
 
-          case Selecto.Output.Formats.transform({rows, columns, aliases}, format, format_options) do
+          case Selecto.Telemetry.span([:transform], %{}, fn ->
+                 Selecto.Output.Formats.transform(
+                   {rows, columns, aliases},
+                   format,
+                   format_options
+                 )
+               end) do
             {:ok, transformed_result} ->
               {:ok, transformed_result}
 
@@ -93,7 +108,7 @@ defmodule Selecto.Executor do
         :telemetry.execute(
           [:selecto, :query, :complexity_analyzed],
           %{complexity_score: analysis.score},
-          %{query_id: query_id, warnings: analysis.warnings, details: analysis.details}
+          %{query_id: query_id, warning_count: length(analysis.warnings)}
         )
 
         :ok
@@ -109,8 +124,7 @@ defmodule Selecto.Executor do
           %{complexity_score: analysis.score},
           %{
             query_id: query_id,
-            blocking_issues: analysis.blocking_issues,
-            recommendations: analysis.recommendations
+            issue_count: length(analysis.blocking_issues)
           }
         )
 
@@ -156,7 +170,7 @@ defmodule Selecto.Executor do
         :telemetry.execute(
           [:selecto, :query, :error],
           %{count: 1},
-          %{query_id: query_id, error: reason, duration: duration}
+          %{query_id: query_id, error_type: infer_error_type(reason), duration: duration}
         )
 
         {:error,
@@ -217,6 +231,12 @@ defmodule Selecto.Executor do
   @spec execute_with_metadata(Selecto.Types.t(), Selecto.Types.execute_options()) ::
           {:ok, Selecto.Types.execute_result(), map()} | {:error, Selecto.Error.t()}
   def execute_with_metadata(selecto, opts \\ []) do
+    Selecto.Telemetry.operation(:execute_with_metadata, selecto, fn ->
+      do_execute_with_metadata(selecto, opts)
+    end)
+  end
+
+  defp do_execute_with_metadata(selecto, opts) do
     start_time = System.monotonic_time(:millisecond)
 
     with :ok <- Selecto.Tenant.validate_scope(selecto, opts) do
@@ -243,11 +263,13 @@ defmodule Selecto.Executor do
             format_options = Keyword.get(opts, :format_options, [])
 
             transformed_result =
-              case Selecto.Output.Formats.transform(
-                     {rows, columns, aliases},
-                     format,
-                     format_options
-                   ) do
+              case Selecto.Telemetry.span([:transform], %{}, fn ->
+                     Selecto.Output.Formats.transform(
+                       {rows, columns, aliases},
+                       format,
+                       format_options
+                     )
+                   end) do
                 {:ok, transformed} -> transformed
                 {:error, _transform_error} -> {rows, columns, aliases}
               end
@@ -286,6 +308,12 @@ defmodule Selecto.Executor do
   @spec execute_count_with_metadata(Selecto.Types.t(), Selecto.Types.execute_options()) ::
           {:ok, non_neg_integer(), map()} | {:error, Selecto.Error.t()}
   def execute_count_with_metadata(selecto, opts \\ []) do
+    Selecto.Telemetry.operation(:count, selecto, fn ->
+      do_execute_count_with_metadata(selecto, opts)
+    end)
+  end
+
+  defp do_execute_count_with_metadata(selecto, opts) do
     start_time = System.monotonic_time(:millisecond)
 
     with :ok <- Selecto.Tenant.validate_scope(selecto, opts) do
@@ -338,6 +366,10 @@ defmodule Selecto.Executor do
   """
   @spec execute_stream(Selecto.Types.t(), keyword()) :: Selecto.Types.safe_execute_stream_result()
   def execute_stream(selecto, opts \\ []) do
+    Selecto.Telemetry.operation(:stream_open, selecto, fn -> do_execute_stream(selecto, opts) end)
+  end
+
+  defp do_execute_stream(selecto, opts) do
     with :ok <- Selecto.Tenant.validate_scope(selecto, opts) do
       try do
         stream_sql_opts =
@@ -352,7 +384,7 @@ defmodule Selecto.Executor do
         {query, aliases, params} = Selecto.gen_sql(selecto, stream_sql_opts)
 
         case execute_stream_for_context(selecto, query, params, aliases, opts) do
-          {:ok, stream} -> {:ok, stream}
+          {:ok, stream} -> {:ok, Selecto.Telemetry.Stream.wrap(stream)}
           {:error, error} -> {:error, error}
         end
       rescue
@@ -394,7 +426,11 @@ defmodule Selecto.Executor do
   @spec execute_one(Selecto.Types.t(), Selecto.Types.execute_options()) ::
           Selecto.Types.safe_execute_one_result()
   def execute_one(selecto, opts \\ []) do
-    case execute(selecto, opts) do
+    Selecto.Telemetry.operation(:execute_one, selecto, fn -> do_execute_one(selecto, opts) end)
+  end
+
+  defp do_execute_one(selecto, opts) do
+    case do_execute(selecto, opts) do
       {:ok, {[], _columns, _aliases}} ->
         {:error, Selecto.Error.no_results_error()}
 
@@ -516,12 +552,12 @@ defmodule Selecto.Executor do
         aliases = Map.get(context, :aliases, [])
 
         result =
-          :telemetry.span(@query_execution_event, %{query_id: query_id, query: sql}, fn ->
+          :telemetry.span(@query_execution_event, %{query_id: query_id}, fn ->
             result = execute_for_context(selecto, sql, params, aliases)
             duration = System.monotonic_time(:millisecond) - start_time
 
             stop_metadata =
-              telemetry_stop_metadata(result, query_id, sql)
+              telemetry_stop_metadata(result, query_id)
               |> Map.put(:execution_time, duration)
 
             {result, stop_metadata}
@@ -553,13 +589,17 @@ defmodule Selecto.Executor do
   end
 
   defp execute_for_context(selecto, query, params, aliases) do
-    execute_with_adapter(
-      runtime_adapter(selecto),
-      runtime_connection(selecto),
-      query,
-      params,
-      aliases
-    )
+    adapter = runtime_adapter(selecto)
+
+    Selecto.Telemetry.span([:adapter], %{adapter: adapter}, fn ->
+      execute_with_adapter(
+        adapter,
+        runtime_connection(selecto),
+        query,
+        params,
+        aliases
+      )
+    end)
   end
 
   defp execute_stream_for_context(selecto, query, params, aliases, opts) do
@@ -652,10 +692,9 @@ defmodule Selecto.Executor do
   defp result_row_count({:ok, {rows, _columns, _aliases}}) when is_list(rows), do: length(rows)
   defp result_row_count(_), do: 0
 
-  defp telemetry_stop_metadata(result, query_id, sql) do
+  defp telemetry_stop_metadata(result, query_id) do
     %{
       query_id: query_id,
-      query: sql,
       row_count: result_row_count(result),
       status: telemetry_result_status(result)
     }

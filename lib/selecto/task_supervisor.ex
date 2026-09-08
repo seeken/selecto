@@ -16,9 +16,13 @@ defmodule Selecto.TaskSupervisor do
 
   @spec async((-> term())) :: Task.t()
   def async(fun) when is_function(fun, 0) do
+    context = Selecto.Telemetry.Context.capture()
+
     case ensure_started() do
       {:ok, _pid} ->
-        Task.Supervisor.async_nolink(@name, fun)
+        Task.Supervisor.async_nolink(@name, fn ->
+          Selecto.Telemetry.Context.run(context, fun)
+        end)
 
       {:error, reason} ->
         raise RuntimeError, "Selecto task supervisor is unavailable: #{inspect(reason)}"
@@ -27,9 +31,16 @@ defmodule Selecto.TaskSupervisor do
 
   @spec start_child((-> term())) :: {:ok, pid()} | {:error, term()}
   def start_child(fun) when is_function(fun, 0) do
+    context = Selecto.Telemetry.Context.capture()
+
     case ensure_started() do
-      {:ok, _pid} -> Task.Supervisor.start_child(@name, fun)
-      {:error, _reason} = error -> error
+      {:ok, _pid} ->
+        Task.Supervisor.start_child(@name, fn ->
+          Selecto.Telemetry.Context.run(context, fun)
+        end)
+
+      {:error, _reason} = error ->
+        error
     end
   end
 end
