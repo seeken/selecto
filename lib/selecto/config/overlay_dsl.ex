@@ -16,7 +16,7 @@ defmodule Selecto.Config.OverlayDSL do
 
       defmodule MyApp.SelectoDomains.Overlays.ProductDomainOverlay do
         use Selecto.Config.OverlayDSL,
-          # Selecto.Extensions.PostGIS is provided by the :selecto_postgis package
+          # Selecto.Extensions.PostGIS is provided by the :selecto_db_postgresql_postgis package
           extensions: [Selecto.Extensions.PostGIS]
 
         # Module attributes for common configurations

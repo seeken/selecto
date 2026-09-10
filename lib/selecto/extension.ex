@@ -15,7 +15,7 @@ defmodule Selecto.Extension do
         schemas: %{},
         joins: %{},
         extensions: [
-          # From the :selecto_postgis package
+          # From the :selecto_db_postgresql_postgis package
           Selecto.Extensions.PostGIS,
           {MyApp.Selecto.Extensions.Timescale, hypertable: "events"}
         ]

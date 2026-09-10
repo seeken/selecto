@@ -165,7 +165,7 @@ Principles:
 
 Examples:
 
-- PostGIS belongs in `selecto_postgis`
+- PostGIS belongs in `selecto_db_postgresql_postgis`
 - TimescaleDB-specific behavior belongs in a companion package
 - future DuckDB-specific extras should not be conflated with SQLite support
 

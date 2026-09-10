@@ -35,7 +35,7 @@ Use `selecto` with companion packages when you need more than the core engine:
 - `selecto_mix` for domain generation and installation tasks
 - `selecto_updato` for write operations over Selecto domains
 - adapter packages such as `selecto_db_postgresql`, `selecto_db_mysql`, `selecto_db_sqlite`, and others
-- `selecto_postgis` for spatial/map extension support
+- `selecto_db_postgresql_postgis` for spatial/map extension support
 
 ## Installation
 
@@ -346,5 +346,5 @@ tracking issue and the exact condition for re-enabling the test.
 - `selecto_components`
 - `selecto_mix`
 - `selecto_updato`
-- `selecto_postgis`
+- `selecto_db_postgresql_postgis`
 - `selecto_test`
