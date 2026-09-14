@@ -60,7 +60,11 @@ defmodule Selecto.SQL.Params do
   def rebind_finalized(sql, params, adapter)
       when is_binary(sql) and is_list(params) and is_atom(adapter) do
     placeholder = placeholder_fun(adapter)
-    placeholders = Enum.map(1..length(params), &(&1 |> placeholder.() |> IO.iodata_to_binary()))
+
+    placeholders =
+      params
+      |> Enum.with_index(1)
+      |> Enum.map(fn {value, index} -> placeholder.(index, value) |> IO.iodata_to_binary() end)
 
     if Enum.uniq(placeholders) |> length() == 1 do
       rebind_repeated(sql, params, hd(placeholders))
@@ -110,7 +114,7 @@ defmodule Selecto.SQL.Params do
   defp traverse_with_offset([h | t], {acc_io, acc_params, idx}, placeholder_fun) do
     case h do
       {:param, v} ->
-        placeholder = placeholder_fun.(idx + 1)
+        placeholder = placeholder_fun.(idx + 1, v)
 
         traverse_with_offset(
           t,
@@ -141,7 +145,7 @@ defmodule Selecto.SQL.Params do
   defp traverse([h | t], {acc_io, acc_params, idx}, placeholder_fun) do
     case h do
       {:param, v} ->
-        placeholder = placeholder_fun.(idx + 1)
+        placeholder = placeholder_fun.(idx + 1, v)
         traverse(t, {[placeholder | acc_io], [v | acc_params], idx + 1}, placeholder_fun)
 
       list when is_list(list) ->
@@ -210,7 +214,11 @@ defmodule Selecto.SQL.Params do
 
   defp placeholder_fun(adapter) when is_atom(adapter) do
     if Selecto.AdapterSupport.callback_available?(adapter, :placeholder, 1) do
-      &adapter.placeholder/1
+      if Selecto.AdapterSupport.callback_available?(adapter, :parameter_placeholder, 2) do
+        &adapter.parameter_placeholder/2
+      else
+        fn index, _value -> adapter.placeholder(index) end
+      end
     else
       raise ArgumentError,
             "adapter #{inspect(adapter)} must implement placeholder/1 before SQL finalization"

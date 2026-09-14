@@ -133,6 +133,14 @@ defmodule Selecto.DB.Adapter do
             ) :: function_verification_result()
 
   @callback placeholder(pos_integer()) :: iodata()
+  @doc """
+  Optional value-aware placeholder rendering for exact driver transport.
+
+  Receives a separately bound value and its one-based parameter position.
+  Return only adapter-generated SQL around the positional placeholder; never
+  interpolate the value. The parameter list and ordering must remain unchanged.
+  """
+  @callback parameter_placeholder(pos_integer(), term()) :: iodata()
   @callback quote_identifier(String.t()) :: String.t()
   @callback format_datetime(iodata(), String.t()) :: iodata()
   @callback rollup_sql(iodata()) :: iodata()
@@ -141,6 +149,7 @@ defmodule Selecto.DB.Adapter do
   @callback supports?(atom()) :: boolean()
 
   @optional_callbacks adapter_contract_version: 0,
+                      parameter_placeholder: 2,
                       stream: 4,
                       disconnect: 1,
                       normalize_execution_result: 1,
