@@ -6,7 +6,7 @@ defmodule Selecto.Domain.Projector do
   alias Selecto.Domain.Shared.Map, as: MapHelpers
   alias Selecto.Domain.FieldBindings
 
-  @projections [:query, :write, :ui, :api, :query_contract]
+  @projections [:query, :write, :ui, :api, :import, :query_contract]
   @query_contract_numeric_types ~w(integer float decimal)
   @query_contract_temporal_types ~w(date time datetime naive_datetime naive_datetime_usec utc_datetime utc_datetime_usec)
   @query_contract_text_types ~w(string text)
@@ -142,6 +142,18 @@ defmodule Selecto.Domain.Projector do
       choice_sources: Map.get(normalized, :choice_sources, %{}),
       co_domains: Map.get(normalized, :co_domains, %{}),
       detail_actions: Map.get(normalized, :detail_actions, %{})
+    })
+  end
+
+  def project(%{schema_version: _schema_version, domain: _domain} = normalized, :import) do
+    normalized
+    |> base_projection()
+    |> Map.take([:schema_version, :domain_version, :domain_fingerprint, :name, :source])
+    |> Map.merge(%{
+      projection: :import,
+      columns: projection_section(normalized, :columns, %{}),
+      imports: import_contract(normalized),
+      capabilities: Map.get(normalized, :capabilities, %{})
     })
   end
 
@@ -856,6 +868,97 @@ defmodule Selecto.Domain.Projector do
     |> MapHelpers.maybe_put(:domain_version, Map.get(normalized, :domain_version))
     |> MapHelpers.maybe_put(:domain_fingerprint, Map.get(normalized, :domain_fingerprint))
   end
+
+  def import_contract(normalized) do
+    imports = Map.get(normalized, :imports, %{})
+    writes = Map.get(normalized, :writes, %{})
+    actions = Map.get(normalized, :actions, %{})
+
+    fields =
+      imports
+      |> MapHelpers.map_value(:fields)
+      |> case do
+        value when is_map(value) ->
+          Enum.into(value, %{}, fn {field, spec} ->
+            write = fetch_registry_entry(MapHelpers.map_value(writes, :fields), field)
+
+            write_on =
+              [
+                if(MapHelpers.map_value(write, :insertable) == true, do: :insert),
+                if(MapHelpers.map_value(write, :updatable) == true, do: :update)
+              ]
+              |> Enum.reject(&is_nil/1)
+
+            projected =
+              spec
+              |> Map.drop([:trusted_provider, "trusted_provider"])
+              |> MapHelpers.maybe_put(
+                :write_on,
+                unless(MapHelpers.map_value(spec, :match_only), do: write_on)
+              )
+
+            {field, projected}
+          end)
+
+        _ ->
+          %{}
+      end
+
+    import_actions =
+      imports
+      |> MapHelpers.map_value(:actions)
+      |> case do
+        value when is_map(value) ->
+          Enum.into(value, %{}, fn {action_id, import_action} ->
+            action = fetch_registry_entry(actions, action_id)
+            action_inputs = MapHelpers.map_value(action, :inputs) || %{}
+
+            inputs =
+              import_action
+              |> MapHelpers.map_value(:inputs)
+              |> case do
+                value when is_map(value) ->
+                  Enum.into(value, %{}, fn {input_id, spec} ->
+                    input = fetch_registry_entry(action_inputs, input_id)
+
+                    projected =
+                      spec
+                      |> Map.drop([:trusted_provider, "trusted_provider"])
+                      |> Map.put(:label, MapHelpers.map_value(input, :label) || input_id)
+                      |> Map.put(:type, MapHelpers.map_value(input, :type) || :string)
+                      |> MapHelpers.maybe_put(:required, MapHelpers.map_value(input, :required))
+
+                    {input_id, projected}
+                  end)
+
+                _ ->
+                  %{}
+              end
+
+            {action_id,
+             %{
+               label: MapHelpers.map_value(action, :label) || action_id,
+               inputs: inputs
+             }}
+          end)
+
+        _ ->
+          %{}
+      end
+
+    imports
+    |> Map.drop([:fields, "fields", :actions, "actions"])
+    |> Map.put(:fields, fields)
+    |> Map.put(:actions, import_actions)
+  end
+
+  defp fetch_registry_entry(registry, key) when is_map(registry) do
+    Enum.find_value(registry, %{}, fn {candidate, value} ->
+      if MapHelpers.field_id(candidate) == MapHelpers.field_id(key), do: value
+    end)
+  end
+
+  defp fetch_registry_entry(_registry, _key), do: %{}
 
   def take_query_sections(normalized, keys) do
     normalized

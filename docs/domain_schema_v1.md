@@ -6,7 +6,7 @@ normalized domain contract in Selecto 0.5. Normative words such as **MUST**,
 meaning.
 
 A Selecto domain is a declarative, versioned description of the data,
-relationships, query surfaces, write permissions, actions, choices, capability
+relationships, query surfaces, write permissions, actions, governed imports, choices, capability
 names, and event contracts that an application elects to expose. It is a governance
 contract for operational applications; it is not a database schema dump, an
 authorization decision engine, or a substitute for database roles, constraints,
@@ -160,6 +160,7 @@ Canonical sections are part of the current domain contract:
 - `published_views`
 - `detail_actions`
 - `components`
+- `imports`
 - `domain_data`
 - `extensions`
 - `co_domains`
@@ -224,6 +225,7 @@ has this stable schema-v1 organization:
 | `domain_dependencies` | Consumer requirements against named provider contracts. |
 | `operations`, `experiences` | Application-operation and consumer-experience registries carried by dedicated consumer releases. |
 | `detail_actions`, `components` | Detail-row actions and canonical component-facing UI policy. |
+| `imports` | Versioned governed-import policy and its write/action cross-references. |
 | `domain_data`, `extensions` | Host data and declared extension specifications. |
 
 Missing map registries normalize to `%{}` and missing list-style sections to
@@ -1261,6 +1263,110 @@ decision =
 Decision statuses are `:allow`, `:deny`, `:conditional`, and
 `:not_applicable`. Visibility recommendations are `:enabled`, `:disabled`,
 `:hidden`, and `:preview_only`.
+
+## Governed Imports
+
+The optional canonical `imports` map declares which parts of the Domain may be
+used by a governed bulk-import consumer. It narrows the authority already
+published by `writes` and `actions`; it MUST NOT grant write or action authority
+on its own. Its independently versioned schema is `selecto.imports.v1`:
+
+```elixir
+%{
+  imports: %{
+    contract_version: 1,
+    enabled: true,
+    field_policy: :declared_only,
+    fields: %{
+      id: %{sources: [:column], match_only: true},
+      tenant_id: %{
+        sources: [:trusted],
+        trusted_provider: :current_tenant_id,
+        blank_policy: :error
+      },
+      sku: %{
+        sources: [:column],
+        header_aliases: ["SKU", "Item number"],
+        transforms: [:trim, :uppercase],
+        blank_policy: :error
+      }
+    },
+    actions: %{
+      record_count: %{
+        inputs: %{
+          quantity: %{sources: [:column], header_aliases: ["Count"]}
+        }
+      }
+    },
+    key_sets: [
+      %{
+        id: :sku,
+        label: "SKU",
+        fields: [:sku],
+        cardinality: :zero_or_one,
+        allowed_on_match: [:update, :skip, :error],
+        allowed_on_missing: [:insert, :skip, :error],
+        default_on_match: :update,
+        default_on_missing: :insert
+      }
+    ],
+    idempotency: %{supported: true}
+  }
+}
+```
+
+The contract rules are:
+
+- `contract_version` MUST be `1`, `enabled` MUST be `true`, and
+  `field_policy` MUST be `declared_only`.
+- `fields` MUST be a non-empty map keyed by direct root-domain field ids.
+  Joined, computed, and undeclared fields are not import targets.
+- Each field declares a non-empty unique subset of `column`, `static`,
+  `parameter`, and `trusted` in `sources`. A `trusted` source MUST name a stable
+  symbolic `trusted_provider`; the Domain never contains the provider's value,
+  credentials, or runtime implementation.
+- Optional `header_aliases` are non-empty strings. Optional `transforms` are a
+  unique subset of `trim`, `uppercase`, `lowercase`, `normalize_whitespace`,
+  and `empty_to_null`. Optional `blank_policy` is `omit`, `empty`, `null`, or
+  `error`.
+- A field with `match_only: true` may identify a target but cannot be assigned.
+  Every other import field MUST be `insertable` or `updatable` in
+  `writes.fields`. The operations on which it may be written are derived from
+  `writes`; they are not authored again under `imports`.
+- `actions` is a map keyed by published action id. Each `inputs` value is a map
+  keyed by an input declared in the corresponding canonical `actions` entry.
+  Every required action input MUST be declared by the import action. Input
+  labels, types, and requiredness are derived from `actions` rather than copied
+  into `imports`.
+- `key_sets` MUST be a non-empty list with unique ids and non-empty field lists.
+  Every key field MUST be declared in `imports.fields`. Version 1 supports only
+  `zero_or_one` cardinality. Match decisions are limited to `update`, `skip`,
+  and `error`; missing decisions are limited to `insert`, `skip`, and `error`.
+  Each default MUST occur in its corresponding allowed list. When omitted,
+  cardinality and decision lists use those complete sets and each default is
+  the first allowed value.
+- Optional `idempotency.supported` is boolean. It publishes whether the host can
+  provide source-row idempotency; it does not select a run mode or store a key.
+
+Canonical action `inputs` MUST be a map keyed by stable input id. Each input
+value MUST be a map; `type`, when present, is a non-empty atom or string, and
+`required`, when present, is boolean.
+
+`Selecto.Domain.project(normalized, :import)` returns the portable importer
+consumer view. It includes `imports`, source metadata, columns, and capability
+metadata. The projection derives field `write_on` operations and action-input
+labels, types, and requiredness. It omits `trusted_provider` identifiers because
+an untrusted browser only needs to know that `trusted` is an allowed source;
+provider resolution remains a trusted host responsibility.
+
+Uploads, bytes, digests, parser limits, row selections, saved profiles,
+concrete mappings and values, tenant or actor identity, preview results,
+execution state, storage details, HTTP routes, CSRF policy, and audit records
+are run- or host-owned state and MUST NOT be authored in the Domain.
+
+`imports` is not an `extensions` entry. `extensions` remains the ordered list of
+trusted host-code extension specifications described above, with its existing
+composition semantics.
 
 ## Events And Event-Stream Actions
 

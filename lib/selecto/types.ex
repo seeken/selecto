@@ -337,6 +337,7 @@ defmodule Selecto.Types do
           optional(:required_group_by) => [field_name()],
           optional(:filters) => %{String.t() => term()},
           optional(:detail_actions) => %{optional(atom() | String.t()) => detail_action()},
+          optional(:imports) => map(),
           optional(:domain_data) => term(),
           optional(:extensions) => [term()],
           optional(:functions) => function_registry(),

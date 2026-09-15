@@ -177,6 +177,7 @@ defmodule Selecto.DomainTest do
       assert "co_domains" in sections.canonical
       assert "domain_dependencies" in sections.canonical
       assert "experiences" in sections.canonical
+      assert "imports" in sections.canonical
       assert "operations" in sections.canonical
       assert "query_library" in sections.canonical
       assert "columns" in sections.projection
@@ -754,7 +755,7 @@ defmodule Selecto.DomainTest do
 
       assert inspection.schema_version == 1
       assert inspection.name == "Orders"
-      assert inspection.projections == [:query, :write, :ui, :api, :query_contract]
+      assert inspection.projections == [:query, :write, :ui, :api, :import, :query_contract]
       assert inspection.diagnostics.error_count == 0
       assert inspection.counts.source_fields == 4
       assert inspection.counts.choice_sources == 1

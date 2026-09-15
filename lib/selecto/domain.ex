@@ -36,6 +36,7 @@ defmodule Selecto.Domain do
     :published_views,
     :detail_actions,
     :components,
+    :imports,
     :columns,
     :custom_columns,
     :json_schemas,
@@ -82,7 +83,7 @@ defmodule Selecto.Domain do
   - classifies authored top-level sections as canonical, projection, proposed,
     or unknown
   - exposes current query, write, action, capability, relationship, choice,
-    dependency, operation, and experience registries without rewriting existing
+    dependency, operation, experience, and import registries without rewriting existing
     runtime behavior
 
   Returns `{:ok, normalized, diagnostics}` for maps and `{:error, diagnostics}`
@@ -259,9 +260,10 @@ defmodule Selecto.Domain do
   - `:write` - write/action/reference sections
   - `:ui` - display defaults, choices, actions, and detail actions
   - `:api` - read/write/action contract for API-style consumers
+  - `:import` - governed importer policy with derived write and action metadata
   - `:query_contract` - constrained query metadata for tools, Components, and AI
   """
-  @spec project(map(), :query | :write | :ui | :api | :query_contract) :: map()
+  @spec project(map(), :query | :write | :ui | :api | :import | :query_contract) :: map()
   defdelegate project(normalized, projection), to: Projector
 
   @doc "Compiles the canonical nested relationship composition contract."
@@ -316,6 +318,7 @@ defmodule Selecto.Domain do
       experiences: MapHelpers.section(canonical_domain, :experiences, %{}),
       detail_actions: MapHelpers.section(canonical_domain, :detail_actions, %{}),
       components: MapHelpers.section(canonical_domain, :components, %{}),
+      imports: MapHelpers.section(canonical_domain, :imports, %{}),
       domain_data: MapHelpers.section(canonical_domain, :domain_data, %{}),
       extensions: MapHelpers.section(canonical_domain, :extensions, [])
     }

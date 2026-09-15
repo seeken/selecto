@@ -73,6 +73,7 @@ defmodule Selecto.Domain.Contract.Actions do
       )
       when is_map(action) do
     errors
+    |> validate_action_inputs(action_id, action, path)
     |> validate_action_capability(action_id, action, path, capabilities)
     |> validate_action_preconditions(action_id, action, path, field_index)
     |> validate_action_eligibility_field(action_id, action, path, source)
@@ -99,6 +100,112 @@ defmodule Selecto.Domain.Contract.Actions do
         expected: :map,
         actual: Core.value_type(action),
         action: action_id
+      )
+      | errors
+    ]
+  end
+
+  def validate_action_inputs(errors, action_id, action, path) do
+    case Core.map_value(action, :inputs) do
+      nil ->
+        errors
+
+      inputs when is_map(inputs) ->
+        Enum.reduce(inputs, errors, fn {input_id, spec}, acc ->
+          input_path = path ++ [:inputs, input_id]
+
+          acc
+          |> validate_action_input_id(action_id, input_id, input_path)
+          |> validate_action_input_spec(action_id, input_id, spec, input_path)
+        end)
+
+      inputs ->
+        [
+          Core.error(
+            :invalid_action_inputs,
+            path ++ [:inputs],
+            "action #{inspect(action_id)} inputs must be a map keyed by input id",
+            action: action_id,
+            expected: :map,
+            actual: Core.value_type(inputs)
+          )
+          | errors
+        ]
+    end
+  end
+
+  defp validate_action_input_id(errors, _action_id, input_id, _path)
+       when (is_atom(input_id) and not is_nil(input_id)) or
+              (is_binary(input_id) and input_id != ""),
+       do: errors
+
+  defp validate_action_input_id(errors, action_id, input_id, path) do
+    [
+      Core.error(
+        :invalid_action_input_id,
+        path,
+        "action input ids must be non-empty atoms or strings",
+        action: action_id,
+        input: input_id
+      )
+      | errors
+    ]
+  end
+
+  defp validate_action_input_spec(errors, action_id, input_id, spec, path)
+       when is_map(spec) do
+    errors
+    |> validate_action_input_type(action_id, input_id, Core.map_value(spec, :type), path)
+    |> validate_action_input_required(action_id, input_id, Core.map_value(spec, :required), path)
+  end
+
+  defp validate_action_input_spec(errors, action_id, input_id, spec, path) do
+    [
+      Core.error(
+        :invalid_action_input_spec,
+        path,
+        "action input specifications must be maps",
+        action: action_id,
+        input: input_id,
+        actual: Core.value_type(spec)
+      )
+      | errors
+    ]
+  end
+
+  defp validate_action_input_type(errors, _action_id, _input_id, nil, _path), do: errors
+
+  defp validate_action_input_type(errors, _action_id, _input_id, type, _path)
+       when (is_atom(type) and not is_nil(type)) or (is_binary(type) and type != ""),
+       do: errors
+
+  defp validate_action_input_type(errors, action_id, input_id, type, path) do
+    [
+      Core.error(
+        :invalid_action_input_type,
+        path ++ [:type],
+        "action input types must be non-empty atoms or strings",
+        action: action_id,
+        input: input_id,
+        actual: type
+      )
+      | errors
+    ]
+  end
+
+  defp validate_action_input_required(errors, _action_id, _input_id, value, _path)
+       when value in [nil, true, false],
+       do: errors
+
+  defp validate_action_input_required(errors, action_id, input_id, value, path) do
+    [
+      Core.error(
+        :invalid_action_input_required,
+        path ++ [:required],
+        "action input required must be boolean",
+        action: action_id,
+        input: input_id,
+        actual: value
       )
       | errors
     ]

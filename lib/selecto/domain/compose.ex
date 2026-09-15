@@ -16,6 +16,7 @@ defmodule Selecto.Domain.Compose do
     :rules,
     :published_views,
     :detail_actions,
+    :imports,
     :columns,
     :custom_columns,
     :json_schemas,

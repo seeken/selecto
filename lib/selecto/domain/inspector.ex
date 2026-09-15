@@ -7,7 +7,7 @@ defmodule Selecto.Domain.Inspector do
   alias Selecto.Domain.FieldBindings
   alias Selecto.Rule.Contract, as: RuleContract
 
-  @projections [:query, :write, :ui, :api, :query_contract]
+  @projections [:query, :write, :ui, :api, :import, :query_contract]
   @security_review_sections [
     actions: "business command definitions and execution surfaces",
     events: "immutable business fact schemas emitted by event-stream actions",
@@ -17,6 +17,7 @@ defmodule Selecto.Domain.Inspector do
     choice_sources: "cross-domain choices and constraint policy",
     co_domains: "host-resolved governed cross-domain lookups",
     detail_actions: "user-visible detail actions",
+    imports: "governed bulk-import fields, actions, matching, and replay policy",
     source_relationships: "cross-domain source bindings",
     writes:
       "write operations, fields, relationships, scope, hooks, validations, constraints, and transitions"
@@ -106,6 +107,7 @@ defmodule Selecto.Domain.Inspector do
         bindings: MapHelpers.map_count(MapHelpers.map_value(rules, :bindings))
       },
       actions: MapHelpers.map_count(Map.get(normalized, :actions)),
+      imports: MapHelpers.map_count(Map.get(normalized, :imports)),
       events: MapHelpers.map_count(Map.get(normalized, :events)),
       capabilities: MapHelpers.map_count(Map.get(normalized, :capabilities)),
       capability_usages: length(capability_usage),

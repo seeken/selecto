@@ -34,6 +34,7 @@ defmodule Selecto.Domain.Sections do
                         "published_views",
                         "detail_actions",
                         "components",
+                        "imports",
                         "domain_data",
                         "extensions"
                       ])
