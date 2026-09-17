@@ -159,6 +159,7 @@ Canonical sections are part of the current domain contract:
 - `experiences`
 - `published_views`
 - `detail_actions`
+- `editors`
 - `components`
 - `imports`
 - `domain_data`
@@ -685,7 +686,8 @@ Each detail action id must be a non-empty atom or string, and each action spec
 must be a map with:
 
 - `name` as a non-empty string
-- `type` as `:modal`, `:iframe_modal`, `:external_link`, or `:live_component`
+- `type` as `:modal`, `:iframe_modal`, `:external_link`, `:live_component`,
+  or `:record_editor`
 
 Optional metadata:
 
@@ -699,12 +701,42 @@ Type-specific payload checks:
 - `:external_link` and `:iframe_modal` require `payload.url_template` as a
   non-empty string.
 - `:live_component` requires `payload.module` as an atom.
+- `:record_editor` requires `payload.editor` to reference an entry in
+  `editors`. Its `payload.target_field` defaults to the source primary key and
+  must appear in `required_fields`. It rejects link/embed-only payload keys and
+  accepts an optional presentation `size` and boolean `navigation_enabled`.
 
 Invalid detail-action metadata produces diagnostics such as
 `:invalid_detail_action_id`, `:invalid_detail_action_spec`,
 `:invalid_detail_action_name`, `:invalid_detail_action_type`,
 `:invalid_detail_action_payload`, `:missing_detail_action_url_template`,
 `:missing_detail_action_module`, or `:detail_action_field_not_found`.
+
+## Governed Record Editors
+
+The optional canonical `editors` map publishes declarative row-editing
+surfaces. It does not execute updates, infer write authority, or name runtime
+callbacks. Every editor requires an enabled `writes.operations.update` policy,
+and every listed field must be both a public root source field and explicitly
+`updatable: true` in `writes.fields`.
+
+An editor id is a non-empty atom or string. Its specification supports:
+
+- `fields` as a non-empty ordered list of field identifiers or field maps
+- optional non-empty `label`, `description`, and `submit_label` strings
+- `actions` as a list of published action ids that accept row targets
+
+A field map requires `field` and may declare `label`, `placeholder`,
+`required`, `nullable`, `rows`, `options`, and `control`. Portable controls are
+`text`, `textarea`, `number`, `date`, `datetime-local`, `checkbox`, and
+`select`. Textarea rows must be from 2 through 20. Select options are maps with
+a scalar `value` and non-empty `label`. Hosts MAY infer a control from source
+metadata when `control` is absent, but MUST retain the field's exact submitted
+value until the governed update pipeline validates and coerces it.
+
+Malformed editors fail domain validation. A renderer may hide or disable an
+editor after a host authorization decision, but `editors` itself grants no
+authorization and does not replace the write contract.
 
 ## Component Metadata
 

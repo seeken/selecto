@@ -4,19 +4,20 @@ defmodule Selecto.Domain.Contract.DetailActions do
   use Selecto.Domain.Constants
   alias Selecto.Domain.Contract.Shared.Core
 
-  def validate(errors, detail_actions, field_index) do
-    validate_detail_actions(errors, detail_actions, field_index)
+  def validate(errors, detail_actions, field_index, editors \\ %{}, source \\ %{}) do
+    validate_detail_actions(errors, detail_actions, field_index, editors, source)
   end
 
-  def validate_detail_actions(errors, detail_actions, field_index) when is_map(detail_actions) do
+  def validate_detail_actions(errors, detail_actions, field_index, editors, source)
+      when is_map(detail_actions) do
     Enum.reduce(detail_actions, errors, fn {action_id, action_spec}, acc ->
       acc
       |> validate_detail_action_id(action_id)
-      |> validate_detail_action_spec(action_id, action_spec, field_index)
+      |> validate_detail_action_spec(action_id, action_spec, field_index, editors, source)
     end)
   end
 
-  def validate_detail_actions(errors, detail_actions, _field_index) do
+  def validate_detail_actions(errors, detail_actions, _field_index, _editors, _source) do
     [
       Core.error(
         :invalid_section_shape,
@@ -47,16 +48,17 @@ defmodule Selecto.Domain.Contract.DetailActions do
     end
   end
 
-  def validate_detail_action_spec(errors, action_id, action_spec, field_index)
+  def validate_detail_action_spec(errors, action_id, action_spec, field_index, editors, source)
       when is_map(action_spec) do
     errors
     |> validate_detail_action_name(action_id, action_spec)
     |> validate_detail_action_type(action_id, action_spec)
     |> validate_detail_action_payload(action_id, action_spec)
     |> validate_detail_action_required_fields(action_id, action_spec, field_index)
+    |> validate_record_editor(action_id, action_spec, editors, source)
   end
 
-  def validate_detail_action_spec(errors, action_id, action_spec, _field_index) do
+  def validate_detail_action_spec(errors, action_id, action_spec, _field_index, _editors, _source) do
     [
       Core.error(
         :invalid_detail_action_spec,
@@ -68,6 +70,117 @@ defmodule Selecto.Domain.Contract.DetailActions do
       )
       | errors
     ]
+  end
+
+  defp validate_record_editor(errors, action_id, action_spec, editors, source) do
+    type = normalized_detail_action_type(Core.map_value(action_spec, :type))
+
+    if type == :record_editor do
+      payload = detail_action_payload(action_spec)
+      editor = Core.map_value(payload, :editor)
+      primary_key = Core.map_value(source, :primary_key) || :id
+      target = Core.map_value(payload, :target_field) || primary_key
+      required = Core.map_value(action_spec, :required_fields) || []
+
+      errors
+      |> require_editor(action_id, editor, editors)
+      |> require_target(action_id, target, required)
+      |> reject_record_editor_settings(action_id, payload)
+      |> validate_editor_presentation(action_id, payload)
+    else
+      errors
+    end
+  end
+
+  defp require_editor(errors, action_id, editor, editors) do
+    exists =
+      is_map(editors) and
+        Enum.any?(editors, fn {key, value} ->
+          to_string(key) == to_string(editor) and is_map(value)
+        end)
+
+    if exists do
+      errors
+    else
+      [
+        Core.error(
+          :record_editor_not_found,
+          [:detail_actions, action_id, :payload, :editor],
+          "record-editor detail action must reference a published editor",
+          editor: editor
+        )
+        | errors
+      ]
+    end
+  end
+
+  defp require_target(errors, action_id, target, required) do
+    if Enum.any?(List.wrap(required), &(to_string(&1) == to_string(target))) do
+      errors
+    else
+      [
+        Core.error(
+          :record_editor_target_not_required,
+          [:detail_actions, action_id, :payload, :target_field],
+          "record-editor target_field must be listed in required_fields",
+          field: target
+        )
+        | errors
+      ]
+    end
+  end
+
+  defp reject_record_editor_settings(errors, action_id, payload) do
+    unsupported =
+      [:url_template, :target, :allow, :referrer_policy, :sandbox]
+      |> Enum.filter(fn key -> Core.fetch_map_value(payload, key) != :__missing__ end)
+
+    if unsupported == [] do
+      errors
+    else
+      [
+        Core.error(
+          :invalid_record_editor_payload,
+          [:detail_actions, action_id, :payload],
+          "record-editor payload contains unsupported settings",
+          settings: unsupported
+        )
+        | errors
+      ]
+    end
+  end
+
+  defp validate_editor_presentation(errors, action_id, payload) do
+    size = Core.map_value(payload, :size)
+    navigation = Core.map_value(payload, :navigation_enabled)
+
+    errors =
+      if is_nil(size) or size in [:sm, :md, :lg, :xl, :full, :third, :fullscreen] or
+           size in ~w(sm md lg xl full third fullscreen) do
+        errors
+      else
+        [
+          Core.error(
+            :invalid_record_editor_size,
+            [:detail_actions, action_id, :payload, :size],
+            "record-editor size is not available"
+          )
+          | errors
+        ]
+      end
+
+    if is_nil(navigation) or is_boolean(navigation) do
+      errors
+    else
+      [
+        Core.error(
+          :invalid_record_editor_navigation,
+          [:detail_actions, action_id, :payload, :navigation_enabled],
+          "navigation_enabled must be boolean"
+        )
+        | errors
+      ]
+    end
   end
 
   def validate_detail_action_name(errors, action_id, action_spec) do

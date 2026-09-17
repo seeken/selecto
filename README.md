@@ -303,6 +303,21 @@ domain = %{
 
 Use extensions when a package needs to contribute domain metadata, overlay DSL, adapter type mapping, or companion-package integrations.
 
+## Governed imports and record editors
+
+`Selecto.Importer` consumes the canonical `imports` section to inspect bounded
+CSV or TSV input, normalize declared mappings, and preview per-row insert,
+update, and action intents. Hosts provide request-scoped key resolution and
+trusted values. The importer never opens a database connection or executes a
+write; every previewed intent still passes through the ordinary governed write
+or action layer.
+
+Domains may publish reusable `editors` whose fields must be public root fields
+enabled by `writes.fields` for update. A `detail_actions` entry of type
+`record_editor` binds an editor to a governed row target. `Selecto.FieldPolicy`
+then resolves those profiles into hidden, read-only, editable, or action-backed
+states without replacing execution-time authorization.
+
 ## Status
 
 Current `0.5.x` scope:

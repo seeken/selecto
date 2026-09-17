@@ -76,6 +76,7 @@ defmodule Selecto.Domain.Contract.Actions do
     |> validate_action_inputs(action_id, action, path)
     |> validate_action_capability(action_id, action, path, capabilities)
     |> validate_action_preconditions(action_id, action, path, field_index)
+    |> validate_action_selection(action_id, action, path)
     |> validate_action_eligibility_field(action_id, action, path, source)
     |> validate_action_transition(action_id, action, path, writes, field_index)
     |> validate_action_execution(action_id, action, path, events)
@@ -103,6 +104,115 @@ defmodule Selecto.Domain.Contract.Actions do
       )
       | errors
     ]
+  end
+
+  defp validate_action_selection(errors, action_id, action, path) do
+    case Core.map_value(action, :selection) do
+      nil ->
+        errors
+
+      selection when is_map(selection) ->
+        mode = Core.map_value(selection, :mode) || :rows
+        min_rows = Core.map_value(selection, :min_rows)
+        max_rows = Core.map_value(selection, :max_rows)
+        presentation = Core.map_value(selection, :presentation) || :toolbar
+
+        errors
+        |> selection_enum(mode, [:rows, :groups], path ++ [:selection, :mode], action_id)
+        |> selection_bound(min_rows, path ++ [:selection, :min_rows], action_id)
+        |> selection_bound(max_rows, path ++ [:selection, :max_rows], action_id)
+        |> selection_range(min_rows, max_rows, path, action_id)
+        |> selection_enum(
+          presentation,
+          [:toolbar, :row_dialog, :row_inline],
+          path ++ [:selection, :presentation],
+          action_id
+        )
+        |> row_presentation(mode, max_rows, presentation, path, action_id)
+
+      value ->
+        [
+          Core.error(
+            :invalid_action_selection,
+            path ++ [:selection],
+            "action selection must be a map",
+            action: action_id,
+            actual: Core.value_type(value)
+          )
+          | errors
+        ]
+    end
+  end
+
+  defp selection_enum(errors, value, allowed, path, action_id) do
+    normalized = if is_atom(value), do: value, else: Enum.find(allowed, &(to_string(&1) == value))
+
+    if normalized in allowed do
+      errors
+    else
+      [
+        Core.error(:invalid_action_selection, path, "action selection value is not available",
+          action: action_id,
+          actual: value
+        )
+        | errors
+      ]
+    end
+  end
+
+  defp selection_bound(errors, nil, _path, _action_id), do: errors
+
+  defp selection_bound(errors, value, _path, _action_id)
+       when is_integer(value) and value in 1..1000, do: errors
+
+  defp selection_bound(errors, value, path, action_id),
+    do: [
+      Core.error(
+        :invalid_action_selection,
+        path,
+        "action selection bounds must be integers from 1 to 1000",
+        action: action_id,
+        actual: value
+      )
+      | errors
+    ]
+
+  defp selection_range(errors, minimum, maximum, _path, _action_id)
+       when is_nil(minimum) or is_nil(maximum),
+       do: errors
+
+  defp selection_range(errors, minimum, maximum, _path, _action_id)
+       when is_integer(minimum) and is_integer(maximum) and maximum >= minimum,
+       do: errors
+
+  defp selection_range(errors, _minimum, _maximum, path, action_id),
+    do: [
+      Core.error(
+        :invalid_action_selection,
+        path ++ [:selection, :max_rows],
+        "max_rows must be at least min_rows",
+        action: action_id
+      )
+      | errors
+    ]
+
+  defp row_presentation(errors, mode, maximum, presentation, path, action_id) do
+    mode = to_string(mode)
+    presentation = to_string(presentation)
+
+    if presentation == "toolbar" or (mode == "rows" and maximum == 1) do
+      errors
+    else
+      [
+        Core.error(
+          :invalid_action_selection,
+          path ++ [:selection, :presentation],
+          "row presentations require rows mode and max_rows 1",
+          action: action_id
+        )
+        | errors
+      ]
+    end
   end
 
   def validate_action_inputs(errors, action_id, action, path) do

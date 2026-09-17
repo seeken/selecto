@@ -33,6 +33,7 @@ defmodule Selecto.Domain.Sections do
                         "experiences",
                         "published_views",
                         "detail_actions",
+                        "editors",
                         "components",
                         "imports",
                         "domain_data",

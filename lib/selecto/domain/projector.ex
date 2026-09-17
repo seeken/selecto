@@ -118,6 +118,7 @@ defmodule Selecto.Domain.Projector do
     |> Map.merge(take_projection_sections(normalized, @ui_projection_sections))
     |> Map.merge(%{
       detail_actions: Map.get(normalized, :detail_actions, %{}),
+      editors: Map.get(normalized, :editors, %{}),
       components: Map.get(normalized, :components, %{}),
       rules: Map.get(normalized, :rules, %{}),
       actions: Map.get(normalized, :actions, %{}),
@@ -141,7 +142,8 @@ defmodule Selecto.Domain.Projector do
       source_relationships: Map.get(normalized, :source_relationships, %{}),
       choice_sources: Map.get(normalized, :choice_sources, %{}),
       co_domains: Map.get(normalized, :co_domains, %{}),
-      detail_actions: Map.get(normalized, :detail_actions, %{})
+      detail_actions: Map.get(normalized, :detail_actions, %{}),
+      editors: Map.get(normalized, :editors, %{})
     })
   end
 

@@ -3,7 +3,7 @@ defmodule Selecto.Domain.Constants do
 
   @query_member_groups [:ctes, :values, :subqueries, :laterals, :unnests]
 
-  @detail_action_types [:modal, :iframe_modal, :external_link, :live_component]
+  @detail_action_types [:modal, :iframe_modal, :external_link, :live_component, :record_editor]
 
   @field_filter_ops [
     :eq,

@@ -20,6 +20,7 @@ defmodule Selecto.Domain.Contract do
   alias Selecto.Domain.Contract.DetailActions
   alias Selecto.Domain.Contract.DomainDependencies
   alias Selecto.Domain.Contract.Events
+  alias Selecto.Domain.Contract.Editors
   alias Selecto.Domain.Contract.FieldBindings
   alias Selecto.Domain.Contract.Joins
   alias Selecto.Domain.Contract.Imports
@@ -72,6 +73,7 @@ defmodule Selecto.Domain.Contract do
     operations = Map.get(normalized_domain, :operations, %{})
     experiences = Map.get(normalized_domain, :experiences, %{})
     detail_actions = Map.get(normalized_domain, :detail_actions, %{})
+    editors = Map.get(normalized_domain, :editors, %{})
     imports = Map.get(normalized_domain, :imports, %{})
     field_index = Core.field_index(source, schemas, projection, joins)
 
@@ -82,13 +84,14 @@ defmodule Selecto.Domain.Contract do
     |> Query.validate(query, field_index)
     |> QueryMembersValidator.validate(query)
     |> PublishedViews.validate(query)
-    |> DetailActions.validate(detail_actions, field_index)
     |> Writes.validate(writes, field_index)
     |> Kernel.++(RuleContract.errors(normalized_domain))
     |> Capabilities.validate(capabilities)
     |> Capabilities.validate_query_references(query, detail_actions, capabilities)
     |> Events.validate(events)
     |> Actions.validate(actions, capabilities, writes, events, field_index, source)
+    |> Editors.validate(editors, writes, actions, source)
+    |> DetailActions.validate(detail_actions, field_index, editors, source)
     |> Imports.validate(imports, source, writes, actions)
     |> SourceRelationships.validate(source_relationships, field_index)
     |> ChoiceSources.validate(choice_sources, source_relationships, capabilities)
