@@ -1247,6 +1247,7 @@ defmodule Selecto.DomainTest do
                  parent: :source,
                  target_schema: :customers,
                  type: :left,
+                 cardinality: :one,
                  fields: ["id", "name"],
                  nested_count: 0
                }
@@ -1361,6 +1362,34 @@ defmodule Selecto.DomainTest do
       refute Map.has_key?(projection, :actions)
       refute Map.has_key?(projection, :detail_actions)
       refute inspect(projection) =~ "#Function<"
+    end
+
+    test "query contracts identify joins that multiply root rows" do
+      domain =
+        query_contract_domain()
+        |> put_in([:source, :associations, :line_items], %{
+          queryable: :line_items,
+          owner_key: :id,
+          related_key: :order_id
+        })
+        |> put_in([:schemas, :line_items], %{
+          source_table: "line_items",
+          primary_key: :id,
+          fields: [:id, :order_id, :sku],
+          columns: %{
+            id: %{type: :integer},
+            order_id: %{type: :integer},
+            sku: %{type: :string}
+          },
+          associations: %{}
+        })
+        |> put_in([:joins, :line_items], %{type: :left})
+
+      assert {:ok, normalized, _diagnostics} = Domain.normalize(domain)
+      projection = Domain.project(normalized, :query_contract)
+
+      assert %{cardinality: :many, path: ["line_items"]} =
+               Enum.find(projection.joins, &(&1.id == "line_items"))
     end
 
     test "raises for unknown projections and raw domains" do

@@ -384,6 +384,7 @@ defmodule Selecto.Domain.Projector do
         parent: parent_id,
         target_schema: target_schema,
         type: MapHelpers.map_value(join_config, :type),
+        cardinality: query_contract_join_cardinality(join_config, association, target_relation),
         fields: MapHelpers.relation_field_ids(target_relation),
         nested_count: MapHelpers.map_count(nested_joins)
       }
@@ -402,6 +403,35 @@ defmodule Selecto.Domain.Projector do
   end
 
   def query_contract_join_tree(_joins, _parent_relation, _schemas, _path, _parent_id), do: []
+
+  defp query_contract_join_cardinality(join_config, association, target_relation) do
+    explicit =
+      MapHelpers.map_value(association, :cardinality) ||
+        MapHelpers.map_value(join_config, :cardinality)
+
+    case explicit do
+      value when value in [:many, "many"] -> :many
+      value when value in [:one, "one"] -> :one
+      _ -> infer_query_contract_join_cardinality(association, target_relation)
+    end
+  end
+
+  defp infer_query_contract_join_cardinality(association, target_relation)
+       when is_map(association) and is_map(target_relation) do
+    related_key = MapHelpers.map_value(association, :related_key)
+    primary_key = MapHelpers.map_value(target_relation, :primary_key)
+
+    if present_join_keys?(related_key) and present_join_keys?(primary_key) and
+         normalize_join_keys(related_key) != normalize_join_keys(primary_key),
+       do: :many,
+       else: :one
+  end
+
+  defp infer_query_contract_join_cardinality(_association, _target_relation), do: :one
+
+  defp present_join_keys?(value), do: value not in [nil, []]
+  defp normalize_join_keys(value) when is_list(value), do: Enum.map(value, &MapHelpers.field_id/1)
+  defp normalize_join_keys(value), do: [MapHelpers.field_id(value)]
 
   def query_contract_join_target_relation(target_schema, source, _schemas)
       when target_schema in [:source, "source"] do
