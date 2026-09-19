@@ -91,7 +91,9 @@ defmodule Selecto.Analytics.Pipeline do
   end
 
   defp number(nil), do: {:ok, nil}
-  defp number(value) when is_integer(value) or is_float(value), do: {:ok, value * 1.0}
+  # Keep native integers intact. Coercing them to float here loses raw values
+  # above 2^53 even when no transform is requested.
+  defp number(value) when is_integer(value) or is_float(value), do: {:ok, value}
   defp number(%Decimal{} = value), do: {:ok, Decimal.to_float(value)}
 
   defp number(value) when is_binary(value) do

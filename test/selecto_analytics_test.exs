@@ -63,7 +63,7 @@ defmodule Selecto.AnalyticsTest do
   end
 
   test "pipeline preserves null semantics and rejects invalid parameters" do
-    assert {:ok, %{unit: nil, points: [%{value: 2.0}]}} = Pipeline.apply([2], [], nil, nil)
+    assert {:ok, %{unit: nil, points: [%{value: 2}]}} = Pipeline.apply([2], [], nil, nil)
 
     assert {:ok, %{points: points}} =
              Pipeline.apply([1, nil, 2], [:cumulative], %{kind: :count}, :flow)
@@ -99,6 +99,13 @@ defmodule Selecto.AnalyticsTest do
 
     assert Enum.map(points, & &1.value) == [0.5, 1.5, 1.0]
     assert {:error, _} = Pipeline.apply(["1e3"], [], %{kind: :count}, :flow)
+  end
+
+  test "pipeline preserves raw integers beyond the exact float range" do
+    values = [9_007_199_254_740_993, nil, -9_007_199_254_740_993]
+    assert {:ok, %{points: points}} = Pipeline.apply(values, [], %{kind: :count}, nil)
+    assert Enum.map(points, & &1.raw_value) === values
+    assert Enum.map(points, & &1.value) === values
   end
 
   test "portable transform math matches Perl boundary cases" do
