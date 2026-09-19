@@ -93,6 +93,14 @@ defmodule Selecto.AnalyticsTest do
              Pipeline.apply([1], List.duplicate(:percent_of_total, 9), %{kind: :count}, nil)
   end
 
+  test "pipeline accepts numeric strings with a leading or trailing decimal point" do
+    assert {:ok, %{points: points}} =
+             Pipeline.apply([".5", "1.", "-.5"], [:cumulative], %{kind: :count}, :flow)
+
+    assert Enum.map(points, & &1.value) == [0.5, 1.5, 1.0]
+    assert {:error, _} = Pipeline.apply(["1e3"], [], %{kind: :count}, :flow)
+  end
+
   test "portable transform math matches Perl boundary cases" do
     count = %{kind: :count}
     flow = :flow

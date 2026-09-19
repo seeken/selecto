@@ -96,7 +96,13 @@ defmodule Selecto.Analytics.Pipeline do
 
   defp number(value) when is_binary(value) do
     if Regex.match?(~r/^-?(?:\d+(?:\.\d*)?|\.\d+)$/, value) do
-      case Float.parse(value) do
+      parseable =
+        value
+        |> String.replace_prefix("-.", "-0.")
+        |> String.replace_prefix(".", "0.")
+        |> then(fn text -> if String.ends_with?(text, "."), do: text <> "0", else: text end)
+
+      case Float.parse(parseable) do
         {number, ""} -> {:ok, number}
         _ -> {:error, "analytical series contains a non-numeric value"}
       end
