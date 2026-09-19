@@ -79,6 +79,22 @@ defmodule Selecto.ImporterTest do
              )
   end
 
+  test "CSV inspection rejects invalid UTF-8 before parsing and hashes valid Unicode bytes" do
+    assert {:ok, importer} = Importer.new(domain())
+    bytes = <<"VIN,Name\nA,Caf", 0xC3, 0xA9, "\n">>
+    assert {:ok, inspection} = Importer.inspect_csv(importer, bytes)
+    assert get_in(inspection.rows, [Access.at(0), :values, "c2"]) == "Café"
+
+    assert inspection.sha256 ==
+             "sha256:" <> Base.encode16(:crypto.hash(:sha256, "VIN,Name\nA,Café\n"), case: :lower)
+
+    assert {:error, %{details: %{code: :invalid_import_file}}} =
+             Importer.inspect_csv(importer, <<"VIN,Name\nA,", 0xFF, "\n">>)
+
+    assert {:error, %{details: %{code: :import_parser_error}}} =
+             Importer.inspect_csv(importer, "VIN,Name\n\"BAD,Name\n")
+  end
+
   defp domain do
     %{
       schema_version: 1,

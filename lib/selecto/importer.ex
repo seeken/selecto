@@ -71,6 +71,9 @@ defmodule Selecto.Importer do
       not is_binary(content) ->
         invalid(:invalid_import_file, "CSV content must be a binary")
 
+      not String.valid?(content) ->
+        invalid(:invalid_import_file, "CSV content must be UTF-8")
+
       not is_binary(delimiter) or String.length(delimiter) != 1 ->
         invalid(:invalid_import_file, "CSV delimiter must be one character")
 
