@@ -301,7 +301,7 @@ defmodule Selecto.Importer do
           field <> char,
           row,
           records,
-          line + if(char == "\n", do: 1, else: 0),
+          line + if(char in ["\n", "\r", "\r\n"], do: 1, else: 0),
           start
         )
 
@@ -311,7 +311,7 @@ defmodule Selecto.Importer do
       char == delimiter ->
         parse_chars(rest, delimiter, false, false, "", row ++ [field], records, line, start)
 
-      char in ["\n", "\r"] ->
+      char in ["\n", "\r", "\r\n"] ->
         rest =
           if char == "\r" and String.starts_with?(rest, "\n"),
             do: String.slice(rest, 1..-1//1),

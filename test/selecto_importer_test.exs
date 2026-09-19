@@ -95,6 +95,14 @@ defmodule Selecto.ImporterTest do
              Importer.inspect_csv(importer, "VIN,Name\n\"BAD,Name\n")
   end
 
+  test "CSV inspection recognizes CRLF record separators" do
+    assert {:ok, importer} = Importer.new(domain())
+    assert {:ok, inspection} = Importer.inspect_csv(importer, "VIN,Name\r\nA,Truck\r\n")
+    assert Enum.map(inspection.columns, & &1.label) == ["VIN", "Name"]
+    assert inspection.row_count == 1
+    assert hd(inspection.rows).values == %{"c1" => "A", "c2" => "Truck"}
+  end
+
   defp domain do
     %{
       schema_version: 1,
