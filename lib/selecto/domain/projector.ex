@@ -5,6 +5,7 @@ defmodule Selecto.Domain.Projector do
 
   alias Selecto.Domain.Shared.Map, as: MapHelpers
   alias Selecto.Domain.FieldBindings
+  alias Selecto.Analytics.Unit
 
   @projections [:query, :write, :ui, :api, :import, :query_contract]
   @query_contract_numeric_types ~w(integer float decimal)
@@ -519,6 +520,8 @@ defmodule Selecto.Domain.Projector do
       aggregatable: aggregatable?,
       comparators: query_contract_comparators(column, type_id, filterable?),
       aggregate_functions: query_contract_aggregate_functions(column, type_id, aggregatable?),
+      unit: Unit.column_unit(column),
+      behavior: Unit.column_behavior(column),
       default_grouping: query_contract_default(column, :default_grouping),
       default_aggregate: query_contract_default(column, :default_aggregate)
     }

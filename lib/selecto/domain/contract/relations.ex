@@ -4,6 +4,7 @@ defmodule Selecto.Domain.Contract.Relations do
   use Selecto.Domain.Constants
   alias Selecto.Domain.Contract.Shared.Core
   alias Selecto.Domain.Contract.ComputedPredicates
+  alias Selecto.Analytics.Unit
 
   @relation_required_keys [:source_table, :primary_key, :fields, :columns]
 
@@ -115,7 +116,18 @@ defmodule Selecto.Domain.Contract.Relations do
       columns when is_map(columns) ->
         Enum.reduce(columns, errors, fn {field, definition}, acc ->
           if is_map(definition) do
-            acc
+            case Unit.normalize_column(definition) do
+              {:ok, _normalized} ->
+                acc
+
+              {:error, message} ->
+                [
+                  Core.error(:invalid_quantitative_column, path ++ [:columns, field], message,
+                    relation: relation_id
+                  )
+                  | acc
+                ]
+            end
           else
             [
               Core.error(

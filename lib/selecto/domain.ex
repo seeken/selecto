@@ -20,6 +20,7 @@ defmodule Selecto.Domain do
   alias Selecto.Domain.Compose
   alias Selecto.Domain.CompositionContract
   alias Selecto.Domain.ConsumerProjectionRelease
+  alias Selecto.Analytics.Unit
 
   @current_schema_version 1
   @map_sections [
@@ -112,6 +113,7 @@ defmodule Selecto.Domain do
       |> maybe_put_domain_version(domain_version)
       |> maybe_put_domain_fingerprint(domain_fingerprint)
       |> Shorthand.normalize_authoring_shorthand()
+      |> Unit.normalize_domain_columns()
 
     {:ok,
      normalized_domain(

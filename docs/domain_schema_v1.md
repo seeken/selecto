@@ -281,9 +281,49 @@ grant or revoke write authority: only the explicit `writes` contract does that.
 Column definitions are open metadata maps. Query consumers commonly use
 `type`, labels, formatting, aggregate, filter, sort, capability, choice,
 reference, and colocated write metadata. Schema-v1 validators enforce the
-properties described in this document; consumers MUST ignore unknown display
+properties described in this document except where a runtime-specific
+validation boundary is explicitly noted; consumers MUST ignore unknown display
 metadata unless they explicitly define it and MUST NOT derive SQL identifiers
 or write permission from arbitrary values.
+
+### Quantitative Column Semantics
+
+A numeric source or schema column MAY declare a semantic `unit` and `behavior`
+for aggregate and graph consumers:
+
+```elixir
+amount: %{
+  type: :decimal,
+  unit: %{kind: :currency, code: "USD"},
+  behavior: :flow
+}
+```
+
+The unit describes the stored value, not a chart's formatting or axis. The
+portable unit kinds introduced by the Perl analytics consumer are `count`,
+`currency`, `distance`, `duration`, `mass`, `percentage`, `ratio`, and `scalar`.
+`currency` requires a three-letter code; `distance`, `duration`, and `mass`
+require an identifier code. `percentage` MAY declare `scale: :fraction | :whole`
+and defaults to `:fraction`. The analytical behaviors are `:flow`, `:stock`,
+`:ratio`, and `:rate`. A consumer that interprets these annotations MUST reject
+them on non-numeric columns and MUST validate the kind-specific properties.
+
+Perl and Elixir now validate and normalize these annotations in their canonical
+domain contracts. Elixir's `Selecto.Domain.validate/1` rejects malformed unit or
+behavior annotations; `Selecto.configure/3` still uses its separate authored-map
+runtime validation and is not a substitute for this portable-contract check.
+Consumers MUST NOT treat a missing annotation as
+permission to combine unlike quantities: a quantitative consumer may infer
+`scalar` for an unannotated numeric column, while count aggregates produce
+`count` and `sum`/`avg`/`min`/`max` preserve an annotated source unit.
+
+Analytical transformations are query or graph-series intent, not column
+metadata. Perl and Elixir expose bounded, ordered post-aggregate transform
+pipelines that derive each output unit. Elixir's `Selecto.Analytics.Pipeline`
+is opt-in rather than an implicit SQL query-builder step; `selecto_views` applies
+it to governed graph series after aggregate execution. Browser state, chart
+type, axis placement, color, transform parameters, and transformed values MUST
+NOT be authored as column `unit` or `behavior` declarations.
 
 `joins` must be a map when present. Each join key must be declared as a
 queryable association on its parent relation, and each queryable association
@@ -737,6 +777,8 @@ value until the governed update pipeline validates and coerces it.
 Malformed editors fail domain validation. A renderer may hide or disable an
 editor after a host authorization decision, but `editors` itself grants no
 authorization and does not replace the write contract.
+An ordered field-policy profile and its per-request view/edit decisions are
+consumer runtime inputs, not additional authored `editors` or `writes` grants.
 
 ## Component Metadata
 
@@ -1505,6 +1547,12 @@ Validation checks:
   separately, non-transition actions may use the governed `event_stream`
   execution contract described above.
 - optional execution `set` must set the transition field to the target state.
+- optional `selection` is a map. `mode` is `:rows` (the default) or `:groups`;
+  `min_rows` and `max_rows`, when present, are integers from 1 through 1000,
+  and `max_rows` must not be less than `min_rows`.
+- `selection.presentation` is `:toolbar` (the default), `:row_dialog`, or
+  `:row_inline`. The latter two require row mode and `max_rows: 1`; they are
+  presentation choices, not mutation permission.
 - `selection.eligibility_field`, when present, must name a direct boolean source
   field. Component hosts select it with the primary result query and omit row
   selection controls when it is false or null.
