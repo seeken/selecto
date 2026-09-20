@@ -16,6 +16,7 @@ defmodule Selecto.Domain.Compose do
     :rules,
     :published_views,
     :detail_actions,
+    :editors,
     :imports,
     :columns,
     :custom_columns,
@@ -155,6 +156,10 @@ defmodule Selecto.Domain.Compose do
   def merge_section_value(:extensions, base, overlay, _path)
       when is_list(base) and is_list(overlay),
       do: unique_list(base ++ overlay)
+
+  def merge_section_value(:extensions, base, overlay, path)
+      when is_map(base) and is_map(overlay),
+      do: deep_merge_domain_maps(base, overlay, path)
 
   def merge_section_value(:redact_fields, base, overlay, _path)
       when is_list(base) and is_list(overlay),

@@ -80,6 +80,7 @@ defmodule Selecto.Domain.Contract do
     []
     |> validate_required_sections(authored_domain)
     |> Relations.validate(source, schemas)
+    |> Kernel.++(Selecto.Domain.Values.validate(normalized_domain))
     |> Joins.validate(joins, source, schemas)
     |> Query.validate(query, field_index)
     |> QueryMembersValidator.validate(query)
@@ -90,7 +91,7 @@ defmodule Selecto.Domain.Contract do
     |> Capabilities.validate_query_references(query, detail_actions, capabilities)
     |> Events.validate(events)
     |> Actions.validate(actions, capabilities, writes, events, field_index, source)
-    |> Editors.validate(editors, writes, actions, source)
+    |> Editors.validate(editors, writes, actions, source, schemas)
     |> DetailActions.validate(detail_actions, field_index, editors, source)
     |> Imports.validate(imports, source, writes, actions)
     |> SourceRelationships.validate(source_relationships, field_index)

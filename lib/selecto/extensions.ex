@@ -23,6 +23,9 @@ defmodule Selecto.Extensions do
     Enum.map(specs, &normalize_spec!/1)
   end
 
+  # Declarative extension metadata is a domain section, not executable callbacks.
+  def normalize_specs(%{} = spec) when not is_map_key(spec, :module), do: []
+
   def normalize_specs(spec), do: [normalize_spec!(spec)]
 
   @doc """

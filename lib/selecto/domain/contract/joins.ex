@@ -102,7 +102,9 @@ defmodule Selecto.Domain.Contract.Joins do
 
     case Core.fetch_key(associations, join_id) do
       {:ok, association} ->
-        validate_join_target(errors, join_id, join_config, association, schemas, path)
+        errors
+        |> validate_display_fallback(join_config, association, parent_relation, schemas, path)
+        |> validate_join_target(join_id, join_config, association, schemas, path)
 
       :error ->
         [
@@ -117,6 +119,71 @@ defmodule Selecto.Domain.Contract.Joins do
         ]
     end
   end
+
+  defp validate_display_fallback(errors, join, association, parent, schemas, path) do
+    fallback = Core.map_value(join, :display_fallback)
+
+    if is_nil(fallback) do
+      errors
+    else
+      mode = Core.map_value(join, :type)
+
+      target =
+        case Core.fetch_key(schemas, Core.map_value(association, :queryable)) do
+          {:ok, relation} -> relation
+          :error -> nil
+        end
+
+      owner_type = column_type(parent, Core.map_value(association, :owner_key))
+      display_type = column_type(target, Core.map_value(join, :display_field) || :name)
+
+      cond do
+        mode not in [:star_dimension, "star_dimension"] ->
+          [
+            Core.error(
+              :invalid_display_fallback,
+              path ++ [:display_fallback],
+              "display fallback is available only for star dimensions"
+            )
+            | errors
+          ]
+
+        fallback not in [:dimension_key, "dimension_key"] ->
+          [
+            Core.error(
+              :invalid_display_fallback,
+              path ++ [:display_fallback],
+              "star dimension display fallback must be dimension_key"
+            )
+            | errors
+          ]
+
+        is_nil(owner_type) or owner_type != display_type ->
+          [
+            Core.error(
+              :invalid_display_fallback,
+              path ++ [:display_fallback],
+              "star dimension display fallback requires matching display and key types"
+            )
+            | errors
+          ]
+
+        true ->
+          errors
+      end
+    end
+  end
+
+  defp column_type(relation, field) when is_map(relation) and not is_nil(field) do
+    columns = Core.map_value(relation, :columns) || %{}
+
+    case Core.fetch_key(columns, field) do
+      {:ok, column} when is_map(column) -> Core.map_value(column, :type)
+      _ -> nil
+    end
+  end
+
+  defp column_type(_, _), do: nil
 
   def validate_join_target(errors, join_id, join_config, association, schemas, path) do
     queryable = Core.map_value(association, :queryable)

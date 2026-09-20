@@ -564,7 +564,7 @@ defmodule Selecto.DomainTest do
           filters: [],
           default_selected: :id,
           custom_columns: [],
-          extensions: %{not: :a_list}
+          extensions: :not_a_list_or_map
         })
 
       {:ok, normalized, diagnostics} = Domain.normalize(domain)
@@ -669,6 +669,23 @@ defmodule Selecto.DomainTest do
                field: :status,
                source: :extension
              }
+    end
+
+    test "deep-merges declarative extension metadata and editor overlays" do
+      base =
+        minimal_query_domain()
+        |> Map.put(:extensions, %{reporting: %{enabled: true, color: "blue"}})
+        |> Map.put(:editors, %{order: %{fields: %{status: %{help: "Original"}}}})
+
+      overlay = %{
+        extensions: %{reporting: %{color: "green", size: "wide"}},
+        editors: %{order: %{fields: %{status: %{section: "Details"}}}}
+      }
+
+      assert {:ok, normalized, _} = Domain.compose(base, overlay)
+      assert normalized.extensions == %{reporting: %{enabled: true, color: "green", size: "wide"}}
+      assert normalized.editors.order.fields.status == %{help: "Original", section: "Details"}
+      assert Selecto.Extensions.from_domain(normalized.domain) == []
     end
 
     test "warns when overlays update existing reference registry entries" do

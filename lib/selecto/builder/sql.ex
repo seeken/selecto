@@ -63,7 +63,7 @@ defmodule Selecto.Builder.Sql do
     joins_in_order = Selecto.Builder.Join.get_join_order(Selecto.joins(selecto), requested_joins)
     {from_iodata, from_params, required_ctes} = build_from_with_ctes(selecto, joins_in_order)
 
-    values_ctes = build_values_clauses_as_ctes(selecto)
+    values_ctes = build_values_clauses_as_ctes(selecto, joins_in_order)
 
     user_ctes =
       case Map.get(selecto.set, :ctes) do
@@ -213,7 +213,7 @@ defmodule Selecto.Builder.Sql do
     {from_iodata, from_params, required_ctes} = build_from_with_ctes(selecto, joins_in_order)
 
     # Add VALUES clauses as CTEs
-    values_ctes = build_values_clauses_as_ctes(selecto)
+    values_ctes = build_values_clauses_as_ctes(selecto, joins_in_order)
 
     # Add user-defined CTEs
     user_ctes =
@@ -1325,10 +1325,17 @@ defmodule Selecto.Builder.Sql do
           build_on_conditions(selecto, join, requires_join, on_conditions)
 
         _ ->
+          owner_sql = build_selector_string(selecto, config.requires_join, config.owner_key)
+
+          owner_sql =
+            if Map.has_key?(config, :values_relation),
+              do: values_owner_case(owner_sql, config),
+              else: owner_sql
+
           [
             build_selector_string(selecto, join, config.my_key),
             " = ",
-            build_selector_string(selecto, config.requires_join, config.owner_key)
+            owner_sql
           ]
       end
 
@@ -1338,6 +1345,22 @@ defmodule Selecto.Builder.Sql do
       base_on,
       Map.get(config, :param_filters, %{})
     )
+  end
+
+  defp values_owner_case(sql, config) do
+    column =
+      config
+      |> Map.get(:from_source, %{})
+      |> Map.get(:columns, %{})
+      |> Enum.find_value(fn {field, column} ->
+        if to_string(field) == to_string(config.owner_key), do: column
+      end)
+
+    case column && (Map.get(column, :text_case) || Map.get(column, "text_case")) do
+      mode when mode in [:uppercase, "uppercase"] -> ["UPPER(", sql, ")"]
+      mode when mode in [:lowercase, "lowercase"] -> ["LOWER(", sql, ")"]
+      _ -> sql
+    end
   end
 
   defp append_param_filters_to_on_clause(_selecto, _join, base_on, nil), do: base_on
@@ -1559,15 +1582,56 @@ defmodule Selecto.Builder.Sql do
   end
 
   # Phase 4.2: VALUES clause integration as CTEs
-  defp build_values_clauses_as_ctes(selecto) do
+  defp build_values_clauses_as_ctes(selecto, requested_joins) do
     values_specs = Map.get(selecto.set, :values_clauses, [])
     adapter = Map.get(selecto, :adapter, Selecto.AdapterSupport.default_adapter())
 
-    Enum.map(values_specs, fn spec ->
-      values_cte_sql = ValuesClause.build_values_cte(spec, adapter)
-      # Raw CTE entry handled directly by Selecto.Builder.CteSql.
-      {:raw_cte, values_cte_sql, []}
-    end)
+    authored_ctes =
+      Enum.map(values_specs, fn spec ->
+        values_cte_sql = ValuesClause.build_values_cte(spec, adapter)
+        # Raw CTE entry handled directly by Selecto.Builder.CteSql.
+        {:raw_cte, values_cte_sql, []}
+      end)
+
+    relation_ctes =
+      requested_joins
+      |> Enum.map(&Map.get(Selecto.joins(selecto), &1))
+      |> Enum.filter(&(is_map(&1) and is_map(Map.get(&1, :values_relation))))
+      |> Enum.uniq_by(& &1.source)
+      |> Enum.map(&values_relation_cte(selecto, &1))
+
+    relation_ctes ++ authored_ctes
+  end
+
+  defp values_relation_cte(selecto, join) do
+    %{fields: fields, rows: rows} = join.values_relation
+
+    selects =
+      rows
+      |> Enum.with_index()
+      |> Enum.map(fn {row, row_index} ->
+        columns =
+          fields
+          |> Enum.map(fn field ->
+            {_, value} = Enum.find(row, fn {key, _} -> to_string(key) == to_string(field) end)
+            marker = {:param, value}
+
+            if row_index == 0,
+              do: [marker, " AS ", quote_identifier(selecto, field)],
+              else: marker
+          end)
+
+        ["SELECT ", Enum.intersperse(columns, ", ")]
+      end)
+
+    sql = [
+      quote_identifier(selecto, join.source),
+      " AS (",
+      Enum.intersperse(selects, " UNION ALL "),
+      ")"
+    ]
+
+    {:raw_cte, sql, []}
   end
 
   # Phase 1: Legacy join builders removed - replaced with CTE-enhanced versions above

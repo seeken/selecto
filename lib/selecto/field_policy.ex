@@ -15,7 +15,7 @@ defmodule Selecto.FieldPolicy do
 
   @operations ~w(insert update upsert view)
   @modes ~w(auto hidden read_only editable action)
-  @entry_keys ~w(field label control required nullable placeholder rows options mode action view_capability edit_capability eligible reason)
+  @entry_keys ~w(field label control required nullable readonly placeholder help section rows options mode action view_capability edit_capability eligible reason)
 
   @type t :: %__MODULE__{domain: map(), authorize: (map() -> map())}
 
@@ -130,7 +130,7 @@ defmodule Selecto.FieldPolicy do
           settings: unknown
         })
 
-      Enum.any?(~w(required nullable eligible)a, fn key ->
+      Enum.any?(~w(required nullable readonly eligible)a, fn key ->
         present?(entry, key) and not is_boolean(get(entry, key))
       end) ->
         invalid_entry("field policy boolean setting is invalid", index)
@@ -155,7 +155,10 @@ defmodule Selecto.FieldPolicy do
 
   defp resolve_entry(domain, entry, field, definition, snapshot, operation, view, edit) do
     public? = not definition.internal?
-    requested_mode = id(get(entry, :mode) || :auto)
+
+    requested_mode =
+      id(get(entry, :mode) || if(get(entry, :readonly) == true, do: :read_only, else: :auto))
+
     root? = definition.root?
     writes = domain.writes || %{}
     operation_spec = fetch(get(writes, :operations), operation)
@@ -200,6 +203,7 @@ defmodule Selecto.FieldPolicy do
       end
 
     type = definition.type
+    options = get(entry, :options) || definition.options
 
     required? =
       get(entry, :required) == true or
@@ -210,7 +214,9 @@ defmodule Selecto.FieldPolicy do
       label: get(entry, :label) || definition.label || humanize(field),
       type: type,
       state: state,
-      control: get(entry, :control) || control_for(type),
+      control:
+        get(entry, :control) ||
+          if(is_list(options) and options != [], do: "select", else: control_for(type)),
       required: required?,
       nullable: get(entry, :nullable) == true,
       writable: writable?,
@@ -218,8 +224,10 @@ defmodule Selecto.FieldPolicy do
     }
     |> maybe_put(:action, id(get(entry, :action)))
     |> maybe_put(:placeholder, get(entry, :placeholder))
+    |> maybe_put(:help, get(entry, :help))
+    |> maybe_put(:section, get(entry, :section))
     |> maybe_put(:rows, get(entry, :rows))
-    |> maybe_put(:options, get(entry, :options))
+    |> maybe_put(:options, options)
     |> maybe_put(:view_capability, get(entry, :view_capability))
     |> maybe_put(:edit_capability, get(entry, :edit_capability))
     |> maybe_put(:reason, reason)
@@ -294,6 +302,7 @@ defmodule Selecto.FieldPolicy do
          root?: root?,
          type: id(get(column, :type) || :string),
          label: get(column, :label),
+         options: get(column, :options),
          internal?: get(column, :internal) == true
        }}
     else

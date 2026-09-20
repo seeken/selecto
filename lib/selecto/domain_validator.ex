@@ -152,7 +152,11 @@ defmodule Selecto.DomainValidator do
           :invalid_fields,
           :invalid_columns,
           :invalid_column_definition,
-          :invalid_primary_key
+          :invalid_primary_key,
+          :invalid_root_values,
+          :invalid_relation_source,
+          :invalid_relation_values,
+          :invalid_relation_values_row
         ]
       end)
 
@@ -260,7 +264,7 @@ defmodule Selecto.DomainValidator do
   end
 
   defp validate_schema_structure(errors, schema_name, schema) do
-    required_keys = [:source_table, :primary_key, :fields, :columns]
+    required_keys = [:primary_key, :fields, :columns]
     missing_keys = required_keys -- Map.keys(schema)
 
     case missing_keys do

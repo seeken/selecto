@@ -6,7 +6,7 @@ defmodule Selecto.Domain.Contract.Relations do
   alias Selecto.Domain.Contract.ComputedPredicates
   alias Selecto.Analytics.Unit
 
-  @relation_required_keys [:source_table, :primary_key, :fields, :columns]
+  @relation_required_keys [:primary_key, :fields, :columns]
 
   def validate(errors, source, schemas) do
     errors
@@ -19,6 +19,7 @@ defmodule Selecto.Domain.Contract.Relations do
     errors
     |> validate_required_relation_keys(relation_id, relation, path)
     |> validate_relation_source_table(relation_id, relation, path)
+    |> validate_relation_values(relation_id, relation, path)
     |> validate_relation_fields(relation_id, relation, path)
     |> validate_relation_columns(relation_id, relation, path)
     |> validate_relation_primary_key(relation_id, relation, path)
@@ -41,7 +42,12 @@ defmodule Selecto.Domain.Contract.Relations do
   end
 
   def validate_required_relation_keys(errors, relation_id, relation, path) do
-    missing_keys = Enum.reject(@relation_required_keys, &Core.has_key?(relation, &1))
+    required =
+      if relation_id == :source,
+        do: [:source_table | @relation_required_keys],
+        else: @relation_required_keys
+
+    missing_keys = Enum.reject(required, &Core.has_key?(relation, &1))
 
     case missing_keys do
       [] ->
@@ -60,6 +66,84 @@ defmodule Selecto.Domain.Contract.Relations do
         ]
     end
   end
+
+  defp validate_relation_values(errors, :source, relation, path) do
+    if Core.has_key?(relation, :values),
+      do: [
+        Core.error(:invalid_root_values, path ++ [:values], "root source must use source_table")
+        | errors
+      ],
+      else: errors
+  end
+
+  defp validate_relation_values(errors, relation_id, relation, path) do
+    has_table = Core.has_key?(relation, :source_table)
+    has_values = Core.has_key?(relation, :values)
+
+    errors =
+      if has_table != has_values do
+        errors
+      else
+        [
+          Core.error(
+            :invalid_relation_source,
+            path,
+            "schema must declare exactly one of source_table or values",
+            relation: relation_id
+          )
+          | errors
+        ]
+      end
+
+    if has_values do
+      fields = Core.map_value(relation, :fields)
+      rows = Core.map_value(relation, :values)
+
+      if is_list(fields) and fields != [] and Enum.all?(fields, &Core.field_ref?/1) and
+           is_list(rows) and rows != [] do
+        expected = MapSet.new(Enum.map(fields, &to_string/1))
+
+        rows
+        |> Enum.with_index()
+        |> Enum.reduce(errors, fn {row, index}, acc ->
+          row_fields =
+            if is_map(row) and Enum.all?(Map.keys(row), &Core.field_ref?/1),
+              do: MapSet.new(Enum.map(Map.keys(row), &to_string/1))
+
+          literals? = is_map(row) and Enum.all?(Map.values(row), &scalar_value?/1)
+
+          if row_fields == expected and literals? do
+            acc
+          else
+            [
+              Core.error(
+                :invalid_relation_values_row,
+                path ++ [:values, index],
+                "values row must contain exactly the declared scalar fields"
+              )
+              | acc
+            ]
+          end
+        end)
+      else
+        [
+          Core.error(
+            :invalid_relation_values,
+            path ++ [:values],
+            "values must be a non-empty list of rows"
+          )
+          | errors
+        ]
+      end
+    else
+      errors
+    end
+  end
+
+  defp scalar_value?(value),
+    do:
+      is_nil(value) or is_binary(value) or is_integer(value) or is_float(value) or
+        is_boolean(value)
 
   def validate_relation_source_table(errors, relation_id, relation, path) do
     case Core.fetch_map_value(relation, :source_table) do

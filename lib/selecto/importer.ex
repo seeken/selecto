@@ -718,6 +718,11 @@ defmodule Selecto.Importer do
 
       {present, value, error} = transform_value(present, value, mapping.transforms)
 
+      value =
+        if present and not error,
+          do: Domain.normalize_field_value(importer.domain, mapping.target, value),
+          else: value
+
       errors =
         if error,
           do: [

@@ -1377,6 +1377,24 @@ defmodule Selecto.WindowJsonRegressionTest do
     refute sql =~ "selecto_root.ref_load_status_id = ref_load_status.id"
   end
 
+  test "star dimension display falls back to its owner key" do
+    domain =
+      order_domain_with_status_dimension_join()
+      |> put_in([:joins, :ref_load_status, :display_fallback], :dimension_key)
+      |> put_in([:source, :columns, :status, :text_case], :uppercase)
+
+    query =
+      Selecto.configure(domain, :mock_connection, validate: false)
+      |> Selecto.select(["ref_load_status.name", "ref_load_status_display"])
+
+    {sql, []} = Selecto.to_sql(query)
+    sql = normalize_sql(sql)
+
+    assert length(
+             Regex.scan(~r/COALESCE\(ref_load_status\.name, UPPER\(selecto_root\.status\)\)/, sql)
+           ) == 2
+  end
+
   test "snowflake_dimension join honors owner_key and my_key" do
     snowflake_domain =
       order_domain_with_status_dimension_join()

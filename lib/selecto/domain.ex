@@ -20,6 +20,7 @@ defmodule Selecto.Domain do
   alias Selecto.Domain.Compose
   alias Selecto.Domain.CompositionContract
   alias Selecto.Domain.ConsumerProjectionRelease
+  alias Selecto.Domain.Values
   alias Selecto.Analytics.Unit
 
   @current_schema_version 1
@@ -61,8 +62,7 @@ defmodule Selecto.Domain do
     :required_order_by,
     :required_group_by,
     :domain_dependencies,
-    :redact_fields,
-    :extensions
+    :redact_fields
   ]
 
   @doc """
@@ -114,6 +114,7 @@ defmodule Selecto.Domain do
       |> maybe_put_domain_fingerprint(domain_fingerprint)
       |> Shorthand.normalize_authoring_shorthand()
       |> Unit.normalize_domain_columns()
+      |> Values.decorate()
 
     {:ok,
      normalized_domain(
@@ -139,6 +140,69 @@ defmodule Selecto.Domain do
 
     {:error, diagnostics}
   end
+
+  @doc "Applies a declared string field's text_case to a scalar write or import value."
+  @spec normalize_field_value(map(), atom() | String.t(), term()) :: term()
+  def normalize_field_value(domain, field, value)
+      when is_map(domain) and (is_atom(field) or is_binary(field)) and is_binary(value) do
+    path = field |> to_string() |> String.split(".")
+
+    column =
+      case path do
+        [name] ->
+          domain
+          |> MapHelpers.map_value(:source)
+          |> MapHelpers.map_value(:columns)
+          |> fetch_domain_entry(name)
+
+        [association, name] ->
+          root = MapHelpers.map_value(domain, :source)
+          association_spec = MapHelpers.relation_association(root, association)
+          schema_id = MapHelpers.map_value(association_spec, :queryable)
+          schemas = MapHelpers.map_value(domain, :schemas)
+
+          schemas
+          |> fetch_domain_entry(schema_id)
+          |> MapHelpers.map_value(:columns)
+          |> fetch_domain_entry(name)
+
+        _ ->
+          nil
+      end
+
+    case MapHelpers.map_value(column, :text_case) do
+      case_mode when case_mode in [:uppercase, "uppercase"] -> String.upcase(value)
+      case_mode when case_mode in [:lowercase, "lowercase"] -> String.downcase(value)
+      _ -> value
+    end
+  end
+
+  def normalize_field_value(_domain, _field, value), do: value
+
+  @doc "Returns declared one-to-one inline-values foreign keys by owner field."
+  @spec values_foreign_keys(map()) :: map()
+  def values_foreign_keys(domain) when is_map(domain) do
+    {keys, _errors} = Values.foreign_keys(domain)
+
+    Map.new(keys, fn {field, spec} ->
+      {field,
+       %{
+         association: spec.association,
+         display_name: spec.display_name,
+         value_field: spec.value_field,
+         values: Enum.map(spec.options, & &1.value)
+       }}
+    end)
+  end
+
+  defp fetch_domain_entry(map, key) when is_map(map) and not is_nil(key) do
+    case MapHelpers.fetch_key(map, key) do
+      {:ok, value} -> value
+      :error -> nil
+    end
+  end
+
+  defp fetch_domain_entry(_, _), do: nil
 
   @doc """
   Normalizes an authored domain and validates it against the schema-v1 contract.
@@ -438,6 +502,9 @@ defmodule Selecto.Domain do
     )
     |> Kernel.++(shape_warnings(domain, @map_sections, "map", &is_map/1))
     |> Kernel.++(shape_warnings(domain, @list_sections, "list", &is_list/1))
+    |> Kernel.++(
+      shape_warnings(domain, [:extensions], "list or map", &(is_list(&1) or is_map(&1)))
+    )
   end
 
   def shape_warnings(domain, sections, expected, valid?) do

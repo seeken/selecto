@@ -103,6 +103,29 @@ defmodule Selecto.ImporterTest do
     assert hd(inspection.rows).values == %{"c1" => "A", "c2" => "Truck"}
   end
 
+  test "declared text_case normalizes import values after authored transforms" do
+    authored = put_in(domain(), [:source, :columns, :vin, :text_case], :uppercase)
+    assert {:ok, importer} = Importer.new(authored)
+    assert {:ok, inspection} = Importer.inspect_csv(importer, "VIN\na-1\n")
+
+    configuration = %{
+      domain_fingerprint: Importer.domain_fingerprint(importer),
+      mappings: [%{target: "vin", source: %{kind: "column", column_id: "c1"}}],
+      match: %{key_set: "vin"}
+    }
+
+    resolver = fn %{"vin" => "A-1"}, _key_set, _row -> %{matches: [%{"id" => 1}]} end
+
+    assert {:ok, %{rows: [%{key: %{"vin" => "A-1"}, assignments: %{"vin" => "A-1"}}]}} =
+             Importer.preview_rows(importer, inspection, configuration,
+               key_resolver: resolver,
+               trusted_values: %{}
+             )
+
+    invalid = put_in(authored, [:source, :columns, :vin, :text_case], :title)
+    assert {:error, _diagnostics} = Selecto.Domain.validate(invalid)
+  end
+
   defp domain do
     %{
       schema_version: 1,

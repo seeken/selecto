@@ -565,7 +565,19 @@ defmodule Selecto.Schema.Join do
           "#{id}_display",
           %{
             name: "#{name}",
-            select: "#{association.field}.#{display_field}",
+            select:
+              if(Map.get(config, :display_fallback) in [:dimension_key, "dimension_key"],
+                do:
+                  {:coalesce,
+                   [
+                     "#{association.field}.#{display_field}",
+                     if(parent == :selecto_root,
+                       do: to_string(association.owner_key),
+                       else: "#{parent}.#{association.owner_key}"
+                     )
+                   ]},
+                else: "#{association.field}.#{display_field}"
+              ),
             group_by_format: fn {a, _id}, _def -> a end,
             filterable: true,
             # Mark as dimension for special handling
@@ -606,6 +618,7 @@ defmodule Selecto.Schema.Join do
       # Optimized for OLAP queries
       join_type: :star_dimension,
       display_field: display_field,
+      display_fallback: Map.get(config, :display_fallback),
       filters: Map.get(config, :filters, %{}),
       fields:
         Selecto.Schema.Column.configure_columns(

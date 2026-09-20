@@ -262,6 +262,8 @@ defmodule Selecto.Configuration do
       when is_list(extension_specs) do
     primary_key = source.primary_key
 
+    {query_domain, values_relations} = prepare_values_schemas(domain)
+
     fields =
       Selecto.Schema.Column.configure_columns(
         :selecto_root,
@@ -270,7 +272,13 @@ defmodule Selecto.Configuration do
         domain
       )
 
-    joins = Selecto.Schema.Join.recurse_joins(source, domain)
+    joins =
+      source
+      |> Selecto.Schema.Join.recurse_joins(query_domain)
+      |> Map.new(fn {id, join} ->
+        values = Map.get(values_relations, to_string(join.source))
+        {id, if(values, do: Map.put(join, :values_relation, values), else: join)}
+      end)
 
     # Combine fields from Joins into fields list
     fields =
@@ -303,5 +311,31 @@ defmodule Selecto.Configuration do
       domain_data: Map.get(domain, :domain_data),
       extensions: extension_specs
     }
+  end
+
+  defp prepare_values_schemas(domain) do
+    {schemas, values_relations} =
+      Enum.reduce(Map.get(domain, :schemas, %{}), {%{}, %{}}, fn {id, schema},
+                                                                 {schemas, relations} ->
+        case Map.fetch(schema, :values) do
+          {:ok, rows} ->
+            table = "__selecto_values_" <> to_string(id)
+
+            schema =
+              schema
+              |> Map.put(:source_table, table)
+              |> Map.put_new(:redact_fields, [])
+
+            {
+              Map.put(schemas, id, schema),
+              Map.put(relations, table, %{fields: schema.fields, rows: rows})
+            }
+
+          :error ->
+            {Map.put(schemas, id, schema), relations}
+        end
+      end)
+
+    {Map.put(domain, :schemas, schemas), values_relations}
   end
 end

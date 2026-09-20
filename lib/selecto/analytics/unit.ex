@@ -31,6 +31,7 @@ defmodule Selecto.Analytics.Unit do
     type = value(column, :type)
     unit = value(column, :unit)
     behavior = value(column, :behavior)
+    text_case = value(column, :text_case)
 
     cond do
       present?(column, :unit) and is_nil(unit) ->
@@ -45,13 +46,21 @@ defmodule Selecto.Analytics.Unit do
       present?(column, :behavior) and not numeric_type?(type) ->
         {:error, "behavior is available only for numeric columns"}
 
+      present?(column, :text_case) and normalize_text(type) != "string" ->
+        {:error, "text_case is available only for string columns"}
+
+      present?(column, :text_case) and is_nil(text_case) ->
+        {:error, "text_case must be uppercase or lowercase"}
+
       true ->
         with {:ok, normalized_unit} <- optional_unit(unit),
-             {:ok, normalized_behavior} <- optional_behavior(behavior) do
+             {:ok, normalized_behavior} <- optional_behavior(behavior),
+             {:ok, normalized_text_case} <- optional_text_case(text_case) do
           {:ok,
            column
            |> maybe_replace(:unit, normalized_unit)
-           |> maybe_replace(:behavior, normalized_behavior)}
+           |> maybe_replace(:behavior, normalized_behavior)
+           |> maybe_replace(:text_case, normalized_text_case)}
         end
     end
   end
@@ -226,6 +235,15 @@ defmodule Selecto.Analytics.Unit do
   defp optional_unit(unit), do: normalize_unit(unit)
   defp optional_behavior(nil), do: {:ok, nil}
   defp optional_behavior(behavior), do: normalize_behavior(behavior)
+  defp optional_text_case(nil), do: {:ok, nil}
+
+  defp optional_text_case(value) do
+    case normalize_text(value) do
+      "uppercase" -> {:ok, :uppercase}
+      "lowercase" -> {:ok, :lowercase}
+      _ -> {:error, "text_case must be uppercase or lowercase"}
+    end
+  end
 
   defp maybe_replace(map, _key, nil), do: map
   defp maybe_replace(map, key, value), do: put_existing(map, key, value)

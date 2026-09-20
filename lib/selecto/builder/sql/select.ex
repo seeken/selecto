@@ -1146,7 +1146,17 @@ defmodule Selecto.Builder.Sql.Select do
         else
           # Check if retargeting remaps this join alias.
           join_alias = Map.get(retarget_aliases, conf.requires_join, conf.requires_join)
-          field_iodata = [build_selector_string(selecto, join_alias, field_name)]
+
+          field_iodata =
+            display_fallback_sql(
+              selecto,
+              conf.requires_join,
+              join_alias,
+              field_name,
+              retarget_aliases
+            ) ||
+              [build_selector_string(selecto, join_alias, field_name)]
+
           {field_iodata, conf.requires_join, []}
         end
 
@@ -1158,6 +1168,36 @@ defmodule Selecto.Builder.Sql.Select do
       sub ->
         # For other selector types, process recursively
         prep_selector(selecto, sub, retarget_aliases)
+    end
+  end
+
+  defp display_fallback_sql(selecto, join_id, join_alias, field, retarget_aliases) do
+    joins = selecto.config.joins || %{}
+    join = Map.get(joins, join_id) || Map.get(joins, to_string(join_id))
+
+    if is_map(join) and Map.get(join, :join_type) == :star_dimension and
+         Map.get(join, :display_fallback) in [:dimension_key, "dimension_key"] and
+         to_string(field) == to_string(Map.get(join, :display_field, :name)) do
+      owner_alias = Map.get(retarget_aliases, join.requires_join, join.requires_join)
+      key_sql = build_selector_string(selecto, owner_alias, join.owner_key)
+      display_sql = build_selector_string(selecto, join_alias, field)
+      ["COALESCE(", display_sql, ", ", normalize_fallback_key(selecto, join, key_sql), ")"]
+    end
+  end
+
+  defp normalize_fallback_key(selecto, join, key_sql) do
+    columns =
+      if join.requires_join == :selecto_root,
+        do: get_in(selecto.domain, [:source, :columns]) || %{},
+        else: get_in(selecto.config.joins, [join.requires_join, :fields]) || %{}
+
+    column =
+      Map.get(columns, join.owner_key) || Map.get(columns, to_string(join.owner_key)) || %{}
+
+    case Map.get(column, :text_case) || Map.get(column, "text_case") do
+      value when value in [:uppercase, "uppercase"] -> ["UPPER(", key_sql, ")"]
+      value when value in [:lowercase, "lowercase"] -> ["LOWER(", key_sql, ")"]
+      _ -> key_sql
     end
   end
 
