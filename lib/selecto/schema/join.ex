@@ -136,7 +136,12 @@ defmodule Selecto.Schema.Join do
           # Standard association
           _ ->
             queryable = domain.schemas[association.queryable]
-            acc = acc ++ [configure(id, association, config, parent, source, queryable)]
+
+            join =
+              configure(id, association, config, parent, source, queryable)
+              |> attach_association_scope!(id, association, source, queryable)
+
+            acc = acc ++ [join]
 
             case Map.get(config, :joins) do
               nil -> acc
@@ -189,6 +194,12 @@ defmodule Selecto.Schema.Join do
               source,
               intermediate_queryable
             )
+            |> attach_association_scope!(
+              intermediate_assoc,
+              intermediate,
+              source,
+              intermediate_queryable
+            )
 
           # Now get the final association from the intermediate schema
           # We need to look it up from the actual intermediate queryable associations
@@ -206,6 +217,12 @@ defmodule Selecto.Schema.Join do
                 config,
                 # Parent is the intermediate join
                 intermediate_assoc,
+                intermediate_queryable,
+                final_queryable
+              )
+              |> attach_association_scope!(
+                id,
+                final_assoc_data,
                 intermediate_queryable,
                 final_queryable
               )
@@ -241,6 +258,7 @@ defmodule Selecto.Schema.Join do
 
           first_join =
             configure(first_assoc, first, %{implicit: true}, parent, source, first_queryable)
+            |> attach_association_scope!(first_assoc, first, source, first_queryable)
 
           # Recursively expand the remaining path
           acc = acc ++ [first_join]
@@ -959,6 +977,45 @@ defmodule Selecto.Schema.Join do
 
   defp parameterize(join) do
     join
+  end
+
+  defp attach_association_scope!(join, association_id, association, source, target) do
+    source_scope_key = map_value(association, :source_scope_key)
+    target_scope_key = map_value(association, :target_scope_key)
+
+    case {source_scope_key, target_scope_key} do
+      {nil, nil} ->
+        join
+
+      {nil, _target_scope_key} ->
+        raise ArgumentError,
+              "association #{inspect(association_id)} scope requires both :source_scope_key and :target_scope_key"
+
+      {_source_scope_key, nil} ->
+        raise ArgumentError,
+              "association #{inspect(association_id)} scope requires both :source_scope_key and :target_scope_key"
+
+      {source_scope_key, target_scope_key} ->
+        validate_scope_field!(association_id, :source, source, source_scope_key)
+        validate_scope_field!(association_id, :target, target, target_scope_key)
+
+        join
+        |> Map.put(:source_scope_key, source_scope_key)
+        |> Map.put(:target_scope_key, target_scope_key)
+    end
+  end
+
+  defp validate_scope_field!(association_id, side, relation, scope_key) do
+    fields = map_value(relation, :fields) || []
+
+    unless Enum.any?(fields, &(to_string(&1) == to_string(scope_key))) do
+      raise ArgumentError,
+            "association #{inspect(association_id)} #{side} scope field #{inspect(scope_key)} is not declared"
+    end
+  end
+
+  defp map_value(map, key) when is_map(map) do
+    Map.get(map, key, Map.get(map, Atom.to_string(key)))
   end
 
   defp make_filters(config) do

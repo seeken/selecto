@@ -1339,12 +1339,35 @@ defmodule Selecto.Builder.Sql do
           ]
       end
 
+    base_on = append_association_scope_to_on_clause(selecto, join, base_on, config)
+
     append_param_filters_to_on_clause(
       selecto,
       join,
       base_on,
       Map.get(config, :param_filters, %{})
     )
+  end
+
+  defp append_association_scope_to_on_clause(selecto, join, base_on, config) do
+    case {Map.get(config, :source_scope_key), Map.get(config, :target_scope_key)} do
+      {nil, nil} ->
+        base_on
+
+      {source_scope_key, target_scope_key}
+      when not is_nil(source_scope_key) and not is_nil(target_scope_key) ->
+        [
+          base_on,
+          " and ",
+          build_selector_string(selecto, config.requires_join, source_scope_key),
+          " = ",
+          build_selector_string(selecto, join, target_scope_key)
+        ]
+
+      _ ->
+        raise ArgumentError,
+              "join #{inspect(join)} scope requires both :source_scope_key and :target_scope_key"
+    end
   end
 
   defp values_owner_case(sql, config) do

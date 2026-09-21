@@ -1445,6 +1445,17 @@ defmodule Selecto.DomainTest do
       refute :schema_version_inferred in warning_codes(diagnostics)
     end
 
+    test "retains the tenant field needed by query consumers" do
+      domain =
+        query_contract_domain()
+        |> update_in([:source, :fields], &(&1 ++ [:tenant_id]))
+        |> put_in([:source, :columns, :tenant_id], %{type: :integer, internal: true})
+        |> put_in([:source, :tenant_field], :tenant_id)
+
+      assert {:ok, contract, _diagnostics} = Domain.query_contract(domain)
+      assert contract.source.tenant_field == :tenant_id
+    end
+
     test "returns diagnostics for invalid query contract inputs" do
       assert {:error, diagnostics} = Domain.query_contract(:not_a_domain)
 

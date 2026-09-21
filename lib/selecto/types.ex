@@ -189,7 +189,9 @@ defmodule Selecto.Types do
           required(:owner_key) => atom(),
           required(:related_key) => atom(),
           optional(:cardinality) => :one | :many,
-          optional(:through) => [atom()]
+          optional(:through) => [atom()],
+          optional(:source_scope_key) => atom() | String.t(),
+          optional(:target_scope_key) => atom() | String.t()
         }
 
   # Join configuration types
@@ -400,7 +402,9 @@ defmodule Selecto.Types do
           optional(:tag_field) => atom(),
           optional(:weight_field) => atom(),
           optional(:display_field) => atom(),
-          optional(:dimension_key) => atom()
+          optional(:dimension_key) => atom(),
+          optional(:source_scope_key) => atom() | String.t(),
+          optional(:target_scope_key) => atom() | String.t()
         }
 
   # SQL building types

@@ -178,6 +178,7 @@ defmodule Selecto.Domain.Projector do
       source_table: MapHelpers.map_value(source, :source_table),
       primary_key: MapHelpers.map_value(source, :primary_key)
     }
+    |> MapHelpers.maybe_put(:tenant_field, MapHelpers.map_value(source, :tenant_field))
   end
 
   def query_contract_defaults(query) do

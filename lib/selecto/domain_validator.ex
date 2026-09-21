@@ -356,10 +356,80 @@ defmodule Selecto.DomainValidator do
             inner_acc ++ [{:association_invalid_queryable, {schema_name, assoc_name, queryable}}]
 
           true ->
-            inner_acc
+            target_schema =
+              if queryable == :source, do: source, else: Map.fetch!(schemas, queryable)
+
+            validate_association_scope(
+              inner_acc,
+              schema_name,
+              assoc_name,
+              assoc,
+              schema,
+              target_schema
+            )
         end
       end)
     end)
+  end
+
+  defp validate_association_scope(
+         errors,
+         schema_name,
+         assoc_name,
+         association,
+         source,
+         target
+       ) do
+    source_scope_key = map_value(association, :source_scope_key)
+    target_scope_key = map_value(association, :target_scope_key)
+
+    case {source_scope_key, target_scope_key} do
+      {nil, nil} ->
+        errors
+
+      {nil, _target_scope_key} ->
+        errors ++ [{:association_scope_incomplete, {schema_name, assoc_name}}]
+
+      {_source_scope_key, nil} ->
+        errors ++ [{:association_scope_incomplete, {schema_name, assoc_name}}]
+
+      {source_scope_key, target_scope_key} ->
+        errors
+        |> validate_association_scope_field(
+          schema_name,
+          assoc_name,
+          :source,
+          source,
+          source_scope_key
+        )
+        |> validate_association_scope_field(
+          schema_name,
+          assoc_name,
+          :target,
+          target,
+          target_scope_key
+        )
+    end
+  end
+
+  defp validate_association_scope_field(
+         errors,
+         schema_name,
+         assoc_name,
+         side,
+         relation,
+         scope_key
+       ) do
+    fields = map_value(relation, :fields) || []
+
+    if Enum.any?(fields, &(to_string(&1) == to_string(scope_key))) do
+      errors
+    else
+      errors ++
+        [
+          {:association_scope_field_missing, {schema_name, assoc_name, side, scope_key}}
+        ]
+    end
   end
 
   defp write_only_association?(association) when is_map(association) do
@@ -1715,6 +1785,16 @@ defmodule Selecto.DomainValidator do
 
   defp format_error({:association_invalid_queryable, {schema_name, assoc_name, queryable}}) do
     "Association '#{assoc_name}' in schema '#{schema_name}' references invalid queryable '#{queryable}'"
+  end
+
+  defp format_error({:association_scope_incomplete, {schema_name, assoc_name}}) do
+    "Association '#{assoc_name}' in schema '#{schema_name}' scope requires source_scope_key and target_scope_key"
+  end
+
+  defp format_error(
+         {:association_scope_field_missing, {schema_name, assoc_name, side, scope_key}}
+       ) do
+    "Association '#{assoc_name}' in schema '#{schema_name}' #{side} scope field '#{scope_key}' is not declared"
   end
 
   defp format_error({:join_missing_association, {parent_name, join_name}}) do
