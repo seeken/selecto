@@ -145,17 +145,15 @@ defmodule Selecto.Importer do
     resolver = Keyword.get(opts, :key_resolver)
     trusted = Keyword.get(opts, :trusted_values, %{})
 
-    with :ok <- object(inspection, :invalid_import_file, "import inspection must be a map"),
+    with {:ok, columns, source_rows} <- preview_inspection(importer, inspection),
          true <- is_function(resolver, 3),
          true <- is_map(trusted),
          {:ok, normalized} <-
-           normalize_configuration(importer, configuration,
-             columns: get(inspection, :columns) || []
-           ),
+           normalize_configuration(importer, configuration, columns: columns),
          key_set when is_map(key_set) <-
            find_key_set(importer.runtime_contract.key_sets, normalized.match.key_set) do
       rows =
-        (get(inspection, :rows) || [])
+        source_rows
         |> Enum.filter(fn row ->
           number = get(row, :row_number)
 
@@ -178,6 +176,54 @@ defmodule Selecto.Importer do
       _ ->
         invalid(:import_key_set_not_found, "Published import key set is unavailable")
     end
+  end
+
+  defp preview_inspection(importer, inspection) do
+    columns = get(inspection, :columns)
+    rows = get(inspection, :rows)
+
+    cond do
+      not is_list(columns) or not is_list(rows) ->
+        invalid(:invalid_import_file, "Import inspection requires column and row lists")
+
+      length(columns) > importer.max_columns ->
+        invalid(:import_column_limit_exceeded, "Import file has too many columns", %{
+          maximum: importer.max_columns
+        })
+
+      length(rows) > importer.max_rows ->
+        invalid(:import_row_limit_exceeded, "Import file has too many rows", %{
+          maximum: importer.max_rows
+        })
+
+      true ->
+        ids = Enum.map(columns, &get(&1, :id))
+
+        if Enum.all?(ids, &(is_binary(&1) and &1 != "" and String.valid?(&1))) and
+             length(Enum.uniq(ids)) == length(ids) and valid_preview_rows?(rows, MapSet.new(ids)) do
+          {:ok, columns, rows}
+        else
+          invalid(:invalid_import_file, "Import inspection contains invalid columns or rows")
+        end
+    end
+  end
+
+  defp valid_preview_rows?(rows, column_ids) do
+    Enum.reduce_while(rows, MapSet.new(), fn row, seen ->
+      number = get(row, :row_number)
+      line = get(row, :physical_line)
+      values = get(row, :values)
+
+      valid =
+        is_integer(number) and number > 0 and not MapSet.member?(seen, number) and
+          (is_nil(line) or (is_integer(line) and line > 0)) and is_map(values) and
+          Enum.all?(values, fn {key, value} ->
+            MapSet.member?(column_ids, key) and
+              (is_nil(value) or (is_binary(value) and String.valid?(value)))
+          end)
+
+      if valid, do: {:cont, MapSet.put(seen, number)}, else: {:halt, false}
+    end) != false
   end
 
   defp do_inspect_csv(importer, content, delimiter, header?) do

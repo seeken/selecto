@@ -126,6 +126,58 @@ defmodule Selecto.ImporterTest do
     assert {:error, _diagnostics} = Selecto.Domain.validate(invalid)
   end
 
+  test "preview revalidates all inspection bounds and rows before resolving keys" do
+    assert {:ok, importer} = Importer.new(domain(), max_rows: 2, max_columns: 1)
+    assert {:ok, inspection} = Importer.inspect_csv(importer, "VIN\nA\nB\n")
+
+    configuration = %{
+      mappings: [%{target: "vin", source: %{kind: "column", column_id: "c1"}}],
+      match: %{key_set: "vin"},
+      rows: %{start: 1, end: 1}
+    }
+
+    resolver = fn _, _, _ ->
+      send(self(), :resolved)
+      %{matches: []}
+    end
+
+    [first, second] = inspection.rows
+
+    for {candidate, code} <- [
+          {Map.put(inspection, :rows, inspection.rows ++ [%{second | row_number: 3}]),
+           :import_row_limit_exceeded},
+          {Map.put(inspection, :columns, inspection.columns ++ [%{id: "c2"}]),
+           :import_column_limit_exceeded},
+          {Map.put(inspection, :rows, %{}), :invalid_import_file},
+          {Map.put(inspection, :columns, nil), :invalid_import_file},
+          {Map.put(inspection, :columns, ["c1"]), :invalid_import_file},
+          {Map.put(inspection, :rows, [first, %{second | row_number: "2"}]),
+           :invalid_import_file},
+          {Map.put(inspection, :rows, [first, first]), :invalid_import_file},
+          {Map.put(inspection, :rows, [first, %{second | values: []}]), :invalid_import_file},
+          {Map.put(inspection, :rows, [first, %{second | values: %{"unknown" => "x"}}]),
+           :invalid_import_file},
+          {Map.put(inspection, :rows, [first, %{second | values: %{"c1" => %{bad: true}}}]),
+           :invalid_import_file},
+          {Map.put(inspection, :rows, [first, %{second | values: %{"c1" => <<255>>}}]),
+           :invalid_import_file}
+        ] do
+      assert {:error, %{details: %{code: ^code}}} =
+               Importer.preview_rows(importer, candidate, configuration, key_resolver: resolver)
+
+      refute_received :resolved
+    end
+
+    # JSON-shaped inspections and valid row selection still work at the limit.
+    inspection = inspection |> Jason.encode!() |> Jason.decode!()
+
+    assert {:ok, %{returned: 1}} =
+             Importer.preview_rows(importer, inspection, configuration, key_resolver: resolver)
+
+    assert_received :resolved
+    refute_received :resolved
+  end
+
   defp domain do
     %{
       schema_version: 1,
