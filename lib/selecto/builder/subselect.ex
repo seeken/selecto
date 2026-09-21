@@ -363,15 +363,13 @@ defmodule Selecto.Builder.Subselect do
     association = Map.get(parent_schema_config.associations || %{}, child_assoc_name)
 
     if association do
-      condition = [
-        child_alias,
-        ".",
-        adapter_quote_identifier(selecto, to_string(association.related_key)),
-        " = ",
-        parent_alias,
-        ".",
-        adapter_quote_identifier(selecto, to_string(association.owner_key))
-      ]
+      condition =
+        build_association_correlation_condition(
+          selecto,
+          association,
+          child_alias,
+          parent_alias
+        )
 
       {condition, []}
     else
@@ -831,21 +829,13 @@ defmodule Selecto.Builder.Subselect do
       end
 
     if association do
-      # Use the proper foreign key from the association
-      # e.g., "user_id"
-      source_field = to_string(association.owner_key)
-      # e.g., "user_id"
-      target_field = to_string(association.related_key)
-
-      condition = [
-        target_alias,
-        ".",
-        adapter_quote_identifier(selecto, target_field),
-        " = ",
-        source_alias,
-        ".",
-        adapter_quote_identifier(selecto, source_field)
-      ]
+      condition =
+        build_association_correlation_condition(
+          selecto,
+          association,
+          target_alias,
+          source_alias
+        )
 
       {:ok, condition}
     else
@@ -877,19 +867,13 @@ defmodule Selecto.Builder.Subselect do
       end
 
     if association do
-      # Use the proper foreign key from the association
-      source_field = to_string(association.owner_key)
-      target_field = to_string(association.related_key)
-
-      condition = [
-        target_alias,
-        ".",
-        adapter_quote_identifier(selecto, target_field),
-        " = ",
-        source_alias,
-        ".",
-        adapter_quote_identifier(selecto, source_field)
-      ]
+      condition =
+        build_association_correlation_condition(
+          selecto,
+          association,
+          target_alias,
+          source_alias
+        )
 
       {:ok, condition}
     else
@@ -897,6 +881,63 @@ defmodule Selecto.Builder.Subselect do
       {:error,
        "Cannot find association #{assoc_name} from #{inspect(current_schema_config.source_table)}"}
     end
+  end
+
+  defp build_association_correlation_condition(
+         selecto,
+         association,
+         target_alias,
+         source_alias
+       ) do
+    key_condition =
+      correlation_equality(
+        selecto,
+        target_alias,
+        association.related_key,
+        source_alias,
+        association.owner_key
+      )
+
+    case {Map.get(association, :source_scope_key), Map.get(association, :target_scope_key)} do
+      {nil, nil} ->
+        key_condition
+
+      {source_scope_key, target_scope_key}
+      when not is_nil(source_scope_key) and not is_nil(target_scope_key) ->
+        [
+          key_condition,
+          " AND ",
+          correlation_equality(
+            selecto,
+            target_alias,
+            target_scope_key,
+            source_alias,
+            source_scope_key
+          )
+        ]
+
+      _incomplete_scope ->
+        raise ArgumentError,
+              "association scope requires both :source_scope_key and :target_scope_key"
+    end
+  end
+
+  defp correlation_equality(
+         selecto,
+         left_alias,
+         left_field,
+         right_alias,
+         right_field
+       ) do
+    [
+      left_alias,
+      ".",
+      adapter_quote_identifier(selecto, to_string(left_field)),
+      " = ",
+      right_alias,
+      ".",
+      adapter_quote_identifier(selecto, to_string(right_field))
+    ]
   end
 
   defp build_exists_correlation(selecto, target_schema, join_path, source_alias) do

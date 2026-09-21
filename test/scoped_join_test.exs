@@ -13,6 +13,27 @@ defmodule Selecto.ScopedJoinTest do
              "customer.id = selecto_root.customer_id and selecto_root.tenant_id = customer.tenant_id"
   end
 
+  test "adds the association tenant scope to a correlated collection subselect" do
+    query =
+      scoped_domain()
+      |> Selecto.configure(:mock_connection)
+      |> Selecto.select(["id"])
+      |> Selecto.subselect([
+        %{
+          fields: ["id", "company_name"],
+          target_schema: :customers,
+          format: :json_agg,
+          alias: "customers",
+          join_path: [:customer]
+        }
+      ])
+
+    {sql, []} = Selecto.to_sql(query)
+
+    assert sql =~
+             ~s(sub_customers."id" = selecto_root."customer_id" AND sub_customers."tenant_id" = selecto_root."tenant_id")
+  end
+
   test "rejects an association with only one scope key even when validation is disabled" do
     domain =
       update_in(
