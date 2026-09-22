@@ -255,6 +255,11 @@ defmodule Selecto.Builder.Subselect do
         child_alias
       )
 
+    {additional_where, additional_params} =
+      build_additional_filters(selecto, child_config, child_alias)
+
+    where_clause = build_combined_where_clause(correlation_where, additional_where)
+
     {empty_json, empty_params} = render_empty_json_array!(selecto)
 
     subquery = [
@@ -265,14 +270,14 @@ defmodule Selecto.Builder.Subselect do
       " ",
       child_alias,
       " WHERE ",
-      correlation_where,
+      where_clause,
       "), ",
       empty_json,
       ")"
     ]
 
     {[escape_string(child_key), ", ", subquery],
-     child_params ++ correlation_params ++ empty_params}
+     child_params ++ correlation_params ++ additional_params ++ empty_params}
   end
 
   defp build_nested_json_agg(selecto, subselect_config, target_alias) do

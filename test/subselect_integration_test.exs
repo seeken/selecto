@@ -178,7 +178,8 @@ defmodule Selecto.SubselectIntegrationTest do
                 fields: ["sku", "quantity"],
                 target_schema: :order_items,
                 format: :json_agg,
-                join_path: [:orders, :order_items]
+                join_path: [:orders, :order_items],
+                filters: [{"quantity", 2}]
               }
             ]
           }
@@ -192,7 +193,9 @@ defmodule Selecto.SubselectIntegrationTest do
       assert clause_sql =~ "'items', COALESCE((SELECT json_agg(json_build_object("
       assert clause_sql =~ ~r/from\s+order_items\s+sub_orders_items/i
       assert clause_sql =~ ~r/sub_orders_items\."order_id"\s*=\s*sub_orders\."order_id"/i
+      assert clause_sql =~ ~r/sub_orders_items\."quantity"\s*=\s*\$1/i
       assert clause_sql =~ ~r/as\s+"orders"/i
+      assert 2 in params
       assert params == finalized_params
     end
 

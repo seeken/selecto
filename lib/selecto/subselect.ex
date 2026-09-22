@@ -93,7 +93,12 @@ defmodule Selecto.Subselect do
   def validate_subselect_config(selecto, subselect_config) do
     with :ok <- validate_target_schema(selecto, subselect_config.target_schema),
          :ok <- validate_fields_exist(selecto, subselect_config),
+         :ok <- validate_filters_exist(selecto, subselect_config),
          :ok <- validate_relationship_path(selecto, subselect_config) do
+      Enum.each(Map.get(subselect_config, :nested, []), fn nested ->
+        validate_subselect_config(selecto, normalize_config_map(nested, :json_agg, "", []))
+      end)
+
       :ok
     else
       {:error, reason} -> raise ArgumentError, "Invalid subselect configuration: #{reason}"
@@ -394,6 +399,26 @@ defmodule Selecto.Subselect do
         {:error,
          "Fields #{inspect(fields)} not found in schema #{subselect_config.target_schema}"}
     end
+  end
+
+  defp validate_filters_exist(selecto, subselect_config) do
+    target_schema_config =
+      fetch_schema_config(selecto.domain.schemas, subselect_config.target_schema)
+
+    filters = Map.get(subselect_config, :filters, [])
+
+    invalid? =
+      not is_list(filters) or
+        Enum.any?(filters, fn
+          {field, _value} when is_binary(field) or is_atom(field) ->
+            field = to_string(field)
+            not Enum.any?(target_schema_config.fields, &(to_string(&1) == field))
+
+          _ ->
+            true
+        end)
+
+    if invalid?, do: {:error, "Subselect filters are invalid"}, else: :ok
   end
 
   defp validate_relationship_path(selecto, subselect_config) do
