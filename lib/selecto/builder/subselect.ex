@@ -365,7 +365,7 @@ defmodule Selecto.Builder.Subselect do
        ) do
     parent_schema_config = get_target_schema_config(selecto, parent_config.target_schema)
     child_assoc_name = child_assoc_name(parent_config, child_config)
-    association = Map.get(parent_schema_config.associations || %{}, child_assoc_name)
+    association = fetch_equivalent_key(parent_schema_config.associations || %{}, child_assoc_name)
 
     if association do
       condition =
@@ -424,6 +424,26 @@ defmodule Selecto.Builder.Subselect do
       ArgumentError -> to_string(segment)
     end
   end
+
+  defp fetch_equivalent_key(map, key) when is_map(map) do
+    case Map.fetch(map, key) do
+      {:ok, value} ->
+        value
+
+      :error ->
+        Enum.find_value(map, fn {candidate, value} ->
+          if equivalent_key?(candidate, key), do: value
+        end)
+    end
+  end
+
+  defp equivalent_key?(left, right) when is_atom(left) and is_binary(right),
+    do: Atom.to_string(left) == right
+
+  defp equivalent_key?(left, right) when is_binary(left) and is_atom(right),
+    do: left == Atom.to_string(right)
+
+  defp equivalent_key?(_left, _right), do: false
 
   defp json_field_key(field) do
     field

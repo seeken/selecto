@@ -91,6 +91,63 @@ defmodule Selecto.SubselectIntegrationTest do
     Selecto.configure(domain, :mock_connection, adapter: SelectoDBMSSQL.Adapter, validate: false)
   end
 
+  def create_string_keyed_test_selecto do
+    domain = %{
+      source: %{
+        source_table: "attendees",
+        primary_key: "attendee_id",
+        fields: ["attendee_id"],
+        redact_fields: [],
+        columns: %{"attendee_id" => %{type: :integer}},
+        associations: %{
+          "orders" => %{
+            queryable: "orders",
+            field: "orders",
+            owner_key: "attendee_id",
+            related_key: "attendee_id"
+          }
+        }
+      },
+      schemas: %{
+        "orders" => %{
+          source_table: "orders",
+          primary_key: "order_id",
+          fields: ["order_id", "attendee_id", "product_name"],
+          redact_fields: [],
+          columns: %{
+            "order_id" => %{type: :integer},
+            "attendee_id" => %{type: :integer},
+            "product_name" => %{type: :string}
+          },
+          associations: %{
+            "order_items" => %{
+              queryable: "order_items",
+              field: "order_items",
+              owner_key: "order_id",
+              related_key: "order_id"
+            }
+          }
+        },
+        "order_items" => %{
+          source_table: "order_items",
+          primary_key: "order_item_id",
+          fields: ["order_item_id", "order_id", "sku"],
+          redact_fields: [],
+          columns: %{
+            "order_item_id" => %{type: :integer},
+            "order_id" => %{type: :integer},
+            "sku" => %{type: :string}
+          },
+          associations: %{}
+        }
+      },
+      name: "Attendee",
+      joins: %{"orders" => %{type: :left, name: "orders"}}
+    }
+
+    Selecto.configure(domain, [hostname: "localhost", username: "test"], validate: false)
+  end
+
   describe "build_subselect_clauses/1" do
     test "builds JSON aggregation subselect" do
       selecto =
@@ -196,6 +253,37 @@ defmodule Selecto.SubselectIntegrationTest do
       assert clause_sql =~ ~r/sub_orders_items\."quantity"\s*=\s*\$1/i
       assert clause_sql =~ ~r/as\s+"orders"/i
       assert 2 in params
+      assert params == finalized_params
+    end
+
+    test "builds nested correlations when domain associations use string keys" do
+      selecto =
+        create_string_keyed_test_selecto()
+        |> Selecto.subselect([
+          %{
+            fields: ["product_name"],
+            target_schema: "orders",
+            format: :json_agg,
+            alias: "orders",
+            join_path: ["orders"],
+            nested: [
+              %{
+                key: "items",
+                fields: ["sku"],
+                target_schema: "order_items",
+                format: :json_agg,
+                join_path: ["orders", "order_items"],
+                filters: []
+              }
+            ]
+          }
+        ])
+
+      {clauses, params} = Subselect.build_subselect_clauses(selecto)
+      {clause_sql, finalized_params} = Params.finalize(clauses)
+
+      assert clause_sql =~ ~r/from\s+order_items\s+sub_orders_items/i
+      assert clause_sql =~ ~r/sub_orders_items\."order_id"\s*=\s*sub_orders\."order_id"/i
       assert params == finalized_params
     end
 
