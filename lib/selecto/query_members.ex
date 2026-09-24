@@ -70,7 +70,7 @@ defmodule Selecto.QueryMembers do
 
     Enum.find_value(members, fn {key, spec} ->
       if to_string(key) == member_name do
-        {member_name, spec}
+        {member_name, Selecto.QueryMembers.Data.to_runtime(selecto, kind, member_name, spec)}
       end
     end) ||
       raise ArgumentError,

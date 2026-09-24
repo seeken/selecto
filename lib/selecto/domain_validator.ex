@@ -1330,7 +1330,31 @@ defmodule Selecto.DomainValidator do
     end
   end
 
-  defp validate_query_member_spec(errors, group_key, member_id, spec) when is_map(spec) do
+  defp validate_query_member_spec(errors, group_key, member_id, spec)
+       when is_map(spec) and group_key in [:ctes, :laterals] do
+    if Selecto.QueryMembers.Data.data?(group_key, spec) do
+      errors ++
+        Enum.map(
+          Selecto.QueryMembers.Data.validation_errors(group_key, spec),
+          &{:query_members_invalid, {group_key, member_id, &1}}
+        )
+    else
+      validate_function_query_member_spec(errors, group_key, member_id, spec)
+    end
+  end
+
+  defp validate_query_member_spec(errors, group_key, member_id, spec) when is_map(spec),
+    do: validate_function_query_member_spec(errors, group_key, member_id, spec)
+
+  defp validate_query_member_spec(errors, group_key, member_id, _invalid_spec) do
+    errors ++
+      [
+        {:query_members_invalid,
+         {group_key, member_id, "query member '#{member_id}' must be a map"}}
+      ]
+  end
+
+  defp validate_function_query_member_spec(errors, group_key, member_id, spec) do
     case group_key do
       :ctes ->
         validate_cte_member(errors, member_id, spec)
@@ -1347,14 +1371,6 @@ defmodule Selecto.DomainValidator do
       :unnests ->
         validate_unnest_member(errors, member_id, spec)
     end
-  end
-
-  defp validate_query_member_spec(errors, group_key, member_id, _invalid_spec) do
-    errors ++
-      [
-        {:query_members_invalid,
-         {group_key, member_id, "query member '#{member_id}' must be a map"}}
-      ]
   end
 
   defp validate_cte_member(errors, member_id, spec) do

@@ -3,6 +3,14 @@
 
 ## Unreleased
 
+- Query members may be declared as portable data (`Selecto.QueryMembers.Data`):
+  `ctes`, recursive `ctes` (`kind: :recursive`, `base`, `step`, `step_join`),
+  and `laterals` whose queries are rooted at a relation in the domain's own
+  `schemas` and written as `select`/`filter`/`group_by`/`order_by`/`limit` data.
+  A recursive step may read the previous level with `["previous", column]`.
+  The named member APIs (`with_cte/2`, `with_lateral/2`) execute them; function
+  members are unchanged. The same data runs in the Perl runtime.
+
 - JSON containment (`{field, {:json_contains, map}}`) accepts `:jsonb`
   columns as well as `:json`.
 - `Selecto.unnest/3` registers its columns against the table function's own

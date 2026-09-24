@@ -108,9 +108,31 @@ defmodule Selecto.Domain.Contract.QueryMembers do
   end
 
   def validate_cte_member(errors, member_id, member_spec) do
-    errors
-    |> validate_cte_member_query(member_id, member_spec)
-    |> validate_query_member_join(:ctes, member_id, member_spec)
+    if Selecto.QueryMembers.Data.data?(:ctes, member_spec) do
+      validate_data_member(errors, :ctes, member_id, member_spec)
+    else
+      errors
+      |> validate_cte_member_query(member_id, member_spec)
+      |> validate_query_member_join(:ctes, member_id, member_spec)
+    end
+  end
+
+  # Portable data members (Selecto.QueryMembers.Data): a source schema and
+  # query data instead of functions.
+  def validate_data_member(errors, group_key, member_id, member_spec) do
+    Selecto.QueryMembers.Data.validation_errors(group_key, member_spec)
+    |> Enum.reduce(errors, fn message, acc ->
+      [
+        Core.error(
+          :invalid_query_member_spec,
+          [:query_members, group_key, member_id],
+          "query member #{inspect(member_id)} in #{group_key}: #{message}",
+          group: group_key,
+          member: member_id
+        )
+        | acc
+      ]
+    end)
   end
 
   def validate_cte_member_query(errors, member_id, member_spec) do
@@ -324,6 +346,14 @@ defmodule Selecto.Domain.Contract.QueryMembers do
   end
 
   def validate_lateral_member(errors, member_id, member_spec) do
+    if Selecto.QueryMembers.Data.data?(:laterals, member_spec) do
+      validate_data_member(errors, :laterals, member_id, member_spec)
+    else
+      validate_function_lateral_member(errors, member_id, member_spec)
+    end
+  end
+
+  defp validate_function_lateral_member(errors, member_id, member_spec) do
     errors
     |> validate_lateral_member_source(member_id, member_spec)
     |> validate_query_member_join_type(:laterals, member_id, member_spec, :join_type)

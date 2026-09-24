@@ -1860,8 +1860,15 @@ defmodule Selecto do
     |> Selecto.Policy.record_named_member(:laterals, member_name)
     |> Selecto.lateral_join(join_type, lateral_source, to_string(alias_name), lateral_opts)
     |> maybe_register_lateral_source_columns(lateral_source, to_string(alias_name), lateral_opts)
+    |> maybe_register_data_lateral_columns(Map.get(spec, :data_columns), to_string(alias_name))
     |> upsert_lateral_by_alias(to_string(alias_name))
   end
+
+  # Data members (Selecto.QueryMembers.Data) declare their output columns.
+  defp maybe_register_data_lateral_columns(selecto, nil, _alias_name), do: selecto
+
+  defp maybe_register_data_lateral_columns(selecto, columns, alias_name),
+    do: register_json_table_columns(selecto, alias_name, columns)
 
   defp apply_direct_lateral(selecto, lateral_source, opts) do
     normalized_overrides = QueryMembers.normalize_opts(opts)
