@@ -258,8 +258,10 @@ defmodule Selecto.Configuration do
 
   @spec configure_domain(Selecto.Types.domain(), [{module(), keyword()}]) ::
           Selecto.Types.processed_config()
-  def configure_domain(%{source: source} = domain, extension_specs)
+  def configure_domain(%{source: _source} = domain, extension_specs)
       when is_list(extension_specs) do
+    domain = default_association_fields(domain)
+    source = domain.source
     primary_key = source.primary_key
 
     {query_domain, values_relations} = prepare_values_schemas(domain)
@@ -312,6 +314,41 @@ defmodule Selecto.Configuration do
       extensions: extension_specs
     }
   end
+
+  # The canonical domain format names an association by its key; the join
+  # builder also reads that name as `field`. When a portable domain omits
+  # `field`, derive it from the association key. An explicit `field` is kept,
+  # because existing domains may name the join differently from the key.
+  defp default_association_fields(domain) do
+    domain
+    |> Map.update!(:source, &default_relation_association_fields/1)
+    |> Map.update(:schemas, %{}, fn
+      schemas when is_map(schemas) ->
+        Map.new(schemas, fn {name, schema} ->
+          {name, default_relation_association_fields(schema)}
+        end)
+
+      other ->
+        other
+    end)
+  end
+
+  defp default_relation_association_fields(%{associations: associations} = relation)
+       when is_map(associations) do
+    %{
+      relation
+      | associations:
+          Map.new(associations, fn
+            {name, association} when is_map(association) ->
+              {name, Map.put_new(association, :field, name)}
+
+            other ->
+              other
+          end)
+    }
+  end
+
+  defp default_relation_association_fields(relation), do: relation
 
   defp prepare_values_schemas(domain) do
     {schemas, values_relations} =

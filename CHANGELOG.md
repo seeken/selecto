@@ -3,6 +3,10 @@
 
 ## Unreleased
 
+- Canonical associations may omit `field`: configuration derives it from the
+  association key, so a domain that validates also configures. An explicit
+  `field` is preserved for existing domains.
+
 - Added governed computed value columns (`computed: %{kind: :expression}`): a
   closed, typed value AST (`field`, typed `literal`, `coalesce`, `case`,
   arithmetic, `cast`, `json_text`, `lower`, `upper`, `concat`) shared with the

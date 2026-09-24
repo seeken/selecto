@@ -67,7 +67,7 @@ defmodule Selecto.ComputedValueColumnsTest do
         redact_fields: [],
         columns: cols,
         associations: %{
-          person: %{queryable: :person, field: :person, owner_key: :person_id, related_key: :id}
+          person: %{queryable: :person, owner_key: :person_id, related_key: :id}
         }
       },
       schemas: %{
