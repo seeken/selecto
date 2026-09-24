@@ -124,7 +124,7 @@ defmodule Selecto.Json do
     columns = Map.get(domain, :columns, %{})
 
     case Map.get(columns, column) || Map.get(columns, safe_existing_atom(column)) do
-      %{type: :json} -> true
+      %{type: type} when type in [:json, :jsonb] -> true
       _ -> false
     end
   end

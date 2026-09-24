@@ -3,7 +3,7 @@ defmodule Selecto.ComputedValueColumnsTest do
 
   alias Selecto.Domain.Contract.ComputedValues
 
-  defp columns(extra \\ %{}) do
+  defp columns(extra) do
     Map.merge(
       %{
         id: %{type: :integer},

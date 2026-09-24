@@ -1302,10 +1302,12 @@ defmodule Selecto do
     current_columns = Map.get(updated_selecto.config, :columns, %{})
 
     # Add the unnested field as a column
+    # The table function names its columns `value` and the ordinality alias
+    # (`AS alias(value, ordinality)`), so the registered columns address them.
     unnested_column = %{
       name: alias_name,
-      field: alias_name,
-      requires_join: nil,
+      field: "value",
+      requires_join: alias_name,
       # Default type for unnested array elements
       type: :text
     }
@@ -1317,8 +1319,8 @@ defmodule Selecto do
           alias_name => unnested_column,
           "#{alias_name}_ordinality" => %{
             name: "#{alias_name}_ordinality",
-            field: "#{alias_name}_ordinality",
-            requires_join: nil,
+            field: to_string(ordinality),
+            requires_join: alias_name,
             type: :integer
           }
         }

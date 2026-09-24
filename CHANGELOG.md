@@ -3,6 +3,14 @@
 
 ## Unreleased
 
+- JSON containment (`{field, {:json_contains, map}}`) accepts `:jsonb`
+  columns as well as `:json`.
+- `Selecto.unnest/3` registers its columns against the table function's own
+  column names: selecting the alias reads `alias.value`, and the
+  `alias_ordinality` column reads the requested ordinality column. Previously
+  both compiled to identifiers the generated `AS alias(value, ordinality)`
+  clause did not define.
+
 - Canonical associations may omit `field`: configuration derives it from the
   association key, so a domain that validates also configures. An explicit
   `field` is preserved for existing domains.
