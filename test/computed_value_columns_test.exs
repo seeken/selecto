@@ -129,8 +129,11 @@ defmodule Selecto.ComputedValueColumnsTest do
       |> Selecto.order_by("order_band")
       |> sql()
 
-    assert String.downcase(sql) =~ "group by"
-    assert length(Regex.scan(~r/CASE WHEN/, sql)) >= 2
+    # Grouping and ordering refer to the selected output by position, so the
+    # separately numbered parameters cannot make the expressions differ.
+    assert String.downcase(sql) =~ ~r/group by 1\s/
+    assert String.downcase(sql) =~ ~r/order by 1 asc/
+    assert length(Regex.scan(~r/CASE WHEN/, sql)) == 2
   end
 
   defp rejected?(extra) do

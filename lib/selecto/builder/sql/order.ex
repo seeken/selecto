@@ -130,7 +130,12 @@ defmodule Selecto.Builder.Sql.Order do
   end
 
   defp build_order_selector(selecto, order) when is_binary(order) or is_atom(order) do
-    Selecto.Builder.Sql.Select.prep_selector(selecto, order)
+    {c, j, p} = Selecto.Builder.Sql.Select.prep_selector(selecto, order)
+
+    case Selecto.Builder.Sql.Select.selected_position(selecto, order, p) do
+      nil -> {c, j, p}
+      position -> {[Integer.to_string(position)], j, []}
+    end
   end
 
   defp build_order_selector(selecto, order) do

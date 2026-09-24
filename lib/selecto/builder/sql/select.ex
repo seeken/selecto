@@ -1969,4 +1969,27 @@ defmodule Selecto.Builder.Sql.Select do
   end
 
   defp wrap_joins({sql, joins, params}), do: {sql, List.wrap(joins), params}
+
+  @doc """
+  The 1-based SELECT position for a grouping or ordering term, when that term is
+  also selected and compiles with bound parameters.
+
+  Parameters are numbered per clause, so `CASE ... $1` in SELECT and
+  `CASE ... $12` in GROUP BY are different expressions to the database.
+  Referring to the selected output by position keeps them identical. SQL Server
+  does not accept positional GROUP BY, so it keeps the expression.
+  """
+  def selected_position(selecto, selector, params) do
+    with [_ | _] <- params,
+         false <- AdapterSupport.adapter_name(selecto.adapter) == :mssql,
+         index when is_integer(index) <-
+           Enum.find_index(
+             List.wrap(get_in(selecto, [Access.key(:set), :selected])),
+             &(&1 == selector)
+           ) do
+      index + 1
+    else
+      _ -> nil
+    end
+  end
 end

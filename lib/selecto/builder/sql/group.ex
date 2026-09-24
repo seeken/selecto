@@ -41,7 +41,11 @@ defmodule Selecto.Builder.Sql.Group do
 
   def group(selecto, group_by) do
     {c, j, p, _a} = Selecto.Builder.Sql.Select.build(selecto, group_by)
-    {j, c, p}
+
+    case Selecto.Builder.Sql.Select.selected_position(selecto, group_by, p) do
+      nil -> {j, c, p}
+      position -> {j, [Integer.to_string(position)], []}
+    end
   end
 
   def build(selecto) do
