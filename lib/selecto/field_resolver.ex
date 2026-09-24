@@ -450,6 +450,7 @@ defmodule Selecto.FieldResolver do
       Enum.flat_map(join_fields, fn {field_key, field_config} ->
         field_name = extract_field_name(field_key)
         qualified_name = "#{join_name}.#{field_name}"
+        full_name = Enum.join(join_path(selecto.config.joins, join_name), ".") <> ".#{field_name}"
 
         # Get the database field name from the configuration
         database_field_name =
@@ -469,10 +470,34 @@ defmodule Selecto.FieldResolver do
           parameter_signature: nil
         }
 
-        [{qualified_name, field_info}]
+        if full_name == qualified_name do
+          [{qualified_name, field_info}]
+        else
+          [
+            {qualified_name, field_info},
+            {full_name, %{field_info | qualified_name: full_name}}
+          ]
+        end
       end)
     end)
     |> Enum.into(%{})
+  end
+
+  defp join_path(joins, join_name, seen \\ MapSet.new()) do
+    name = to_string(join_name)
+
+    if MapSet.member?(seen, name) do
+      [name]
+    else
+      case lookup_join_config(joins, join_name) do
+        {:ok, _key, %{requires_join: parent}}
+        when parent not in [nil, :selecto_root, "selecto_root"] ->
+          join_path(joins, parent, MapSet.put(seen, name)) ++ [name]
+
+        _ ->
+          [name]
+      end
+    end
   end
 
   defp normalize_join_source(source) when is_atom(source), do: Atom.to_string(source)

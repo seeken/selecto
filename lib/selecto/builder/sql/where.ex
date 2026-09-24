@@ -288,6 +288,12 @@ defmodule Selecto.Builder.Sql.Where do
     build_regular_between(selecto, field, min, max)
   end
 
+  def build(selecto, {field, {:starts_with, value}}) when is_binary(value) do
+    pattern = String.replace(value, ~r/[!%_]/u, fn character -> "!" <> character end) <> "%"
+    {sel, join, param} = Select.prep_selector(selecto, field)
+    {List.wrap(join), [" ", sel, " LIKE ", {:param, pattern}, " ESCAPE '!' "], param}
+  end
+
   def build(selecto, {field, {:like, value}}) do
     # ### Value must have a % in it to work!
     {sel, join, param} = Select.prep_selector(selecto, field)

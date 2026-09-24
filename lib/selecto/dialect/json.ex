@@ -81,6 +81,7 @@ defmodule Selecto.Dialect.Json.Operation do
           | :json_object_agg
           | :json_build_object
           | :json_build_array
+          | :json_exact_decimal_value
           | :json_empty_array
           | :json_set
           | :json_remove

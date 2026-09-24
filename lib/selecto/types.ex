@@ -144,6 +144,8 @@ defmodule Selecto.Types do
           optional(:nested) => [map()],
           optional(:separator) => String.t(),
           optional(:order_by) => [order_spec()],
+          optional(:limit) => pos_integer(),
+          optional(:after) => %{parent_key: integer() | String.t(), values: [term()]},
           optional(:filters) => [filter()]
         }
 

@@ -237,6 +237,29 @@ defmodule Selecto do
   end
 
   @doc """
+  Rebinds an already authorized query to a host-owned transaction connection.
+
+  Only the runtime handle changes. Domain, policy, tenant scope, filters, and
+  compiled query state remain intact. The caller must pass a connection for
+  the same adapter and use it only inside its transaction lifetime.
+  """
+  @spec with_runtime_connection(t(), term()) :: t()
+  def with_runtime_connection(
+        %Selecto{runtime: %Selecto.Runtime.Context{} = runtime} = selecto,
+        connection
+      )
+      when not is_nil(connection) do
+    %{
+      selecto
+      | connection: connection,
+        runtime: %Selecto.Runtime.Context{runtime | connection: connection}
+    }
+  end
+
+  def with_runtime_connection(_selecto, _connection),
+    do: raise(ArgumentError, "expected a configured Selecto query and transaction connection")
+
+  @doc """
   Configures Selecto from a server-owned domain registry.
 
   Unlike `configure/3`, this boundary never accepts an authored map from the
@@ -943,6 +966,15 @@ defmodule Selecto do
   @spec offset(t(), non_neg_integer()) :: t()
   defdelegate offset(selecto, offset_value), to: Selecto.Query
 
+  @doc "Remove root LIMIT and OFFSET while preserving the filtered query."
+  defdelegate unpaginate(selecto), to: Selecto.Query
+
+  @doc "Build an unpaginated root-row count input while preserving membership filters."
+  defdelegate root_count_query(selecto, field), to: Selecto.Query
+
+  @doc "Keep authorized root membership for a page or the full filtered set."
+  defdelegate root_membership_query(selecto, field, scope), to: Selecto.Query
+
   @doc """
   Retarget the query to focus on a different table while preserving existing context.
 
@@ -1088,6 +1120,19 @@ defmodule Selecto do
 
     Selecto.Executor.execute_count_with_metadata(
       selecto,
+      Selecto.Tenant.merge_execution_opts(selecto, opts)
+    )
+  end
+
+  @doc "Execute a database-side sum over one named projection of a governed query."
+  @spec execute_projection_sum_with_metadata(t(), binary(), Selecto.Types.execute_options()) ::
+          {:ok, term(), map()} | {:error, Selecto.Error.t()}
+  def execute_projection_sum_with_metadata(selecto, column, opts \\ []) do
+    Selecto.OptionsValidator.validate_execute_opts!(opts)
+
+    Selecto.Executor.execute_projection_sum_with_metadata(
+      selecto,
+      column,
       Selecto.Tenant.merge_execution_opts(selecto, opts)
     )
   end

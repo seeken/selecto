@@ -414,6 +414,67 @@ defmodule Selecto.Query do
   end
 
   @doc """
+  Remove root LIMIT and OFFSET while retaining the query's authorization,
+  filters, selections, and ordering.
+
+  This is intended for a separately executed exact count of the same filtered
+  membership. It does not remove per-parent collection limits or mutate the
+  original query.
+  """
+  @spec unpaginate(Selecto.Types.t()) :: Selecto.Types.t()
+  def unpaginate(selecto) do
+    %{selecto | set: Map.drop(selecto.set, [:limit, :offset])}
+  end
+
+  @doc """
+  Build a root-row count input from a detail query without weakening its filters.
+
+  The returned query selects only the verified root field and removes selections
+  that cannot affect root membership, including correlated subselects, ordering,
+  and root pagination. Execute it with `Selecto.execute_count_with_metadata/2`.
+  Grouped queries require their own count semantics and are rejected.
+  """
+  @spec root_count_query(Selecto.Types.t(), Selecto.Types.field_name()) :: Selecto.Types.t()
+  def root_count_query(selecto, field) when is_binary(field) or is_atom(field) do
+    root_membership_query(selecto, field, :filtered)
+  end
+
+  @doc """
+  Keep one row per authorized root while discarding display projections.
+
+  `:page` retains root ordering and pagination; `:filtered` removes both.
+  The result can receive a correlated per-root projection before a database-side
+  fold. Grouped queries cannot define this root membership and are rejected.
+  """
+  @spec root_membership_query(Selecto.Types.t(), Selecto.Types.field_name(), :page | :filtered) ::
+          Selecto.Types.t()
+  def root_membership_query(selecto, field, scope)
+      when (is_binary(field) or is_atom(field)) and scope in [:page, :filtered] do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :select)
+
+    if Map.get(selecto.set, :group_by, []) != [] do
+      raise ArgumentError, "root count requires an ungrouped detail query"
+    end
+
+    selected = Selecto.Expr.normalize([field])
+    Selecto.QueryValidator.validate_selectors!(selecto, selected)
+
+    set =
+      selecto.set
+      |> Map.put(:selected, selected)
+      |> Map.put(:subselected, [])
+
+    set =
+      if scope == :filtered do
+        set |> Map.put(:order_by, []) |> Map.drop([:limit, :offset])
+      else
+        set
+      end
+
+    %{selecto | set: set}
+  end
+
+  @doc """
   Generate SQL without executing - useful for debugging and caching.
 
   ## Examples

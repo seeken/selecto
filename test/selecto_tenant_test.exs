@@ -62,6 +62,71 @@ defmodule Selecto.TenantTest do
     assert Selecto.required_filters(query) == [{"active", true}, {"tenant_id", "acme"}]
   end
 
+  test "transaction connection rebinding retains authorization and query state" do
+    scoped =
+      tenant_required_domain()
+      |> selecto()
+      |> Selecto.with_tenant(%{tenant_id: "acme", required: true})
+      |> Selecto.apply_tenant_scope()
+      |> Selecto.filter({"name", "Ada"})
+      |> Selecto.limit(1)
+
+    rebound = Selecto.with_runtime_connection(scoped, :transaction_handle)
+    assert rebound.runtime.connection == :transaction_handle
+    assert rebound.connection == :transaction_handle
+    assert rebound.runtime.adapter == scoped.runtime.adapter
+    assert rebound.domain == scoped.domain
+    assert rebound.policy == scoped.policy
+    assert rebound.tenant == scoped.tenant
+    assert rebound.set == scoped.set
+    assert scoped.connection != :transaction_handle
+  end
+
+  test "unpaginate keeps authorized filtered membership for a separate exact count" do
+    page =
+      tenant_required_domain()
+      |> selecto()
+      |> Selecto.with_tenant(%{tenant_id: "acme", required: true})
+      |> Selecto.apply_tenant_scope()
+      |> Selecto.filter({"name", "Ada"})
+      |> Selecto.select(["id"])
+      |> Selecto.order_by([{"id", :asc}])
+      |> Selecto.limit(1)
+      |> Selecto.offset(2)
+
+    full_filtered = Selecto.unpaginate(page)
+
+    assert page.set.limit == 1
+    assert page.set.offset == 2
+    refute Map.has_key?(full_filtered.set, :limit)
+    refute Map.has_key?(full_filtered.set, :offset)
+    assert full_filtered.set.selected == page.set.selected
+    assert full_filtered.set.order_by == page.set.order_by
+    assert Selecto.required_filters(full_filtered) == Selecto.required_filters(page)
+    assert Selecto.query_filters(full_filtered) == Selecto.query_filters(page)
+    assert :ok == Selecto.validate_tenant_scope(full_filtered)
+
+    {sql, _aliases, params} = Selecto.gen_sql(full_filtered, [])
+    refute sql =~ ~r/\b(?:LIMIT|OFFSET)\b/i
+    assert length(params) >= 2
+
+    count_input = Selecto.root_count_query(page, "id")
+    assert count_input.set.selected == ["id"]
+    assert count_input.set.order_by == []
+    assert count_input.set.subselected == []
+    assert Selecto.required_filters(count_input) == Selecto.required_filters(page)
+    assert Selecto.query_filters(count_input) == Selecto.query_filters(page)
+    assert :ok == Selecto.validate_tenant_scope(count_input)
+
+    {count_sql, _aliases, count_params} = Selecto.gen_sql(count_input, [])
+    refute count_sql =~ ~r/\b(?:ORDER BY|LIMIT|OFFSET)\b/i
+    assert count_params == params
+
+    assert_raise ArgumentError, "root count requires an ungrouped detail query", fn ->
+      page |> Selecto.group_by(["name"]) |> Selecto.root_count_query("id")
+    end
+  end
+
   test "apply_tenant_scope supports an explicit tenant id without prior context" do
     query =
       tenant_required_domain()

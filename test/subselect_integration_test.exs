@@ -256,6 +256,231 @@ defmodule Selecto.SubselectIntegrationTest do
       assert params == finalized_params
     end
 
+    test "limits each correlated parent and nested child before JSON aggregation" do
+      selecto =
+        create_test_selecto()
+        |> Selecto.subselect([
+          %{
+            fields: ["order_id", "product_name"],
+            target_schema: :orders,
+            format: :json_agg,
+            alias: "orders",
+            join_path: [:orders],
+            order_by: [{:asc, "order_id"}],
+            limit: 2,
+            nested: [
+              %{
+                key: "items",
+                fields: ["order_item_id", "sku"],
+                target_schema: :order_items,
+                format: :json_agg,
+                join_path: [:orders, :order_items],
+                order_by: [{:desc, "order_item_id"}],
+                limit: 1
+              }
+            ]
+          }
+        ])
+
+      {clauses, params} = Subselect.build_subselect_clauses(selecto)
+      {sql, finalized_params} = Params.finalize(clauses)
+
+      assert sql =~
+               ~s|FROM (SELECT sub_orders.* FROM orders sub_orders WHERE sub_orders."attendee_id" = selecto_root."attendee_id" ORDER BY sub_orders."order_id" ASC LIMIT 2) sub_orders|
+
+      assert sql =~
+               ~s|FROM (SELECT sub_orders_items.* FROM order_items sub_orders_items WHERE sub_orders_items."order_id" = sub_orders."order_id" ORDER BY sub_orders_items."order_item_id" DESC LIMIT 1) sub_orders_items|
+
+      assert params == finalized_params
+    end
+
+    test "per-parent limit requires positive size and explicit ordering" do
+      for config <- [
+            %{limit: 0, order_by: [{:asc, "order_id"}]},
+            %{limit: 2, order_by: []}
+          ] do
+        assert_raise ArgumentError, fn ->
+          create_test_selecto()
+          |> Selecto.subselect([
+            Map.merge(
+              %{
+                fields: ["order_id"],
+                target_schema: :orders,
+                format: :json_agg,
+                alias: "orders"
+              },
+              config
+            )
+          ])
+        end
+      end
+    end
+
+    test "per-parent limits use the target primary key to break ordering ties" do
+      selecto =
+        create_test_selecto()
+        |> Selecto.subselect([
+          %{
+            fields: ["order_id", "product_name"],
+            target_schema: :orders,
+            format: :json_agg,
+            alias: "orders",
+            join_path: [:orders],
+            order_by: [{:asc, "product_name"}],
+            limit: 2,
+            nested: [
+              %{
+                key: "items",
+                fields: ["order_item_id", "sku"],
+                target_schema: :order_items,
+                format: :json_agg,
+                join_path: [:orders, :order_items],
+                order_by: [{:desc, "sku"}],
+                limit: 1
+              }
+            ]
+          }
+        ])
+
+      {clauses, _params} = Subselect.build_subselect_clauses(selecto)
+      {sql, _finalized_params} = Params.finalize(clauses)
+
+      assert sql =~ ~s|ORDER BY sub_orders."product_name" ASC, sub_orders."order_id" ASC LIMIT 2|
+
+      assert sql =~
+               ~s|ORDER BY sub_orders_items."sku" DESC, sub_orders_items."order_item_id" ASC LIMIT 1|
+    end
+
+    test "a collection cursor seeks only within its parent and binds every value" do
+      selecto =
+        create_test_selecto()
+        |> Selecto.subselect([
+          %{
+            fields: ["order_id", "product_name"],
+            target_schema: :orders,
+            format: :json_agg,
+            alias: "orders",
+            join_path: [:orders],
+            order_by: [{:asc, "product_name"}],
+            limit: 2,
+            after: %{parent_key: 7, values: ["Apple", 12]}
+          }
+        ])
+
+      {clauses, params} = Subselect.build_subselect_clauses(selecto)
+      {sql, finalized_params} = Params.finalize(clauses)
+
+      assert sql =~ ~s|sub_orders."attendee_id" = selecto_root."attendee_id"|
+      assert sql =~ ~s|selecto_root."attendee_id" IS DISTINCT FROM $1|
+      assert sql =~ ~s|sub_orders."product_name" > $2 OR sub_orders."product_name" IS NULL|
+      assert sql =~ ~s|sub_orders."product_name" IS NOT DISTINCT FROM $3|
+      assert sql =~ ~s|sub_orders."order_id" > $4|
+
+      assert sql =~ ~s|ORDER BY sub_orders."product_name" ASC, sub_orders."order_id" ASC LIMIT 2|
+      assert params == [7, "Apple", "Apple", 12]
+      assert params == finalized_params
+    end
+
+    test "descending collection cursor continues after null and rejects a short tuple" do
+      config = %{
+        fields: ["order_id", "product_name"],
+        target_schema: :orders,
+        format: :json_agg,
+        alias: "orders",
+        join_path: [:orders],
+        order_by: [{:desc, "product_name"}],
+        limit: 2,
+        after: %{parent_key: 7, values: [nil, 12]}
+      }
+
+      {clauses, params} =
+        create_test_selecto()
+        |> Selecto.subselect([config])
+        |> Subselect.build_subselect_clauses()
+
+      {sql, finalized_params} = Params.finalize(clauses)
+      assert sql =~ ~s|sub_orders."product_name" IS NOT NULL|
+      assert sql =~ ~s|sub_orders."product_name" IS NULL AND (sub_orders."order_id" >|
+      assert params == finalized_params
+
+      assert_raise ArgumentError, ~r/wrong ordering tuple size/, fn ->
+        create_test_selecto()
+        |> Selecto.subselect([put_in(config, [:after, :values], [nil])])
+      end
+    end
+
+    test "correlated sum stays separate from a nested collection" do
+      selecto =
+        create_test_selecto()
+        |> Selecto.subselect([
+          %{
+            fields: ["quantity"],
+            target_schema: :orders,
+            format: :sum,
+            alias: "total_quantity",
+            join_path: [:orders]
+          },
+          %{
+            fields: ["order_id", "quantity"],
+            target_schema: :orders,
+            format: :json_agg,
+            alias: "orders",
+            join_path: [:orders],
+            nested: [
+              %{
+                key: "items",
+                fields: ["order_item_id", "quantity"],
+                target_schema: :order_items,
+                format: :json_agg,
+                join_path: [:orders, :order_items]
+              }
+            ]
+          }
+        ])
+
+      {clauses, _params} = Subselect.build_subselect_clauses(selecto)
+      {sql, _finalized_params} = Params.finalize(clauses)
+
+      assert sql =~
+               ~s|(SELECT COALESCE(SUM(sub_orders."quantity"), 0) FROM orders sub_orders WHERE sub_orders."attendee_id" = selecto_root."attendee_id") AS "total_quantity"|
+
+      assert sql =~ ~s|AS "orders"|
+      refute sql =~ ~s|JOIN order_items|
+    end
+
+    test "related sum rejects a nonnumeric field" do
+      assert_raise ArgumentError, ~r/related sum requires a numeric field/, fn ->
+        create_test_selecto()
+        |> Selecto.subselect([
+          %{
+            fields: ["product_name"],
+            target_schema: :orders,
+            format: :sum,
+            alias: "invalid_total"
+          }
+        ])
+      end
+    end
+
+    test "uncertified dialect rejects a per-parent limit" do
+      selecto =
+        create_mssql_test_selecto()
+        |> Selecto.subselect([
+          %{
+            fields: ["order_id"],
+            target_schema: :orders,
+            format: :json_agg,
+            alias: "orders",
+            order_by: [{:asc, "order_id"}],
+            limit: 1
+          }
+        ])
+
+      assert_raise ArgumentError, "per-parent collection limits require PostgreSQL", fn ->
+        Subselect.build_subselect_clauses(selecto)
+      end
+    end
+
     test "builds nested correlations when domain associations use string keys" do
       selecto =
         create_string_keyed_test_selecto()

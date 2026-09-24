@@ -68,7 +68,7 @@ defmodule Selecto.ExprTest do
 
     assert X.field_exists("metadata.zone") == {"metadata.zone", :exists}
     assert X.array_contains("tags", ["featured"]) == {:array_contains, "tags", ["featured"]}
-    assert X.starts_with("name", "Ch") == {"name", {:like, "Ch%"}}
+    assert X.starts_with("name", "Ch") == {"name", {:starts_with, "Ch"}}
     assert X.when_present(nil, &X.eq("name", &1)) == nil
 
     assert X.compact_and([
@@ -77,6 +77,17 @@ defmodule Selecto.ExprTest do
              X.when_present("", &X.case_insensitive_like("name", "%#{&1}%")),
              X.gte("price", 100)
            ]) == {:and, [{"status", "active"}, {"price", {:gte, 100}}]}
+  end
+
+  test "prefix searches bind literal LIKE wildcard characters" do
+    query =
+      selecto()
+      |> Selecto.Query.select(["id"])
+      |> Selecto.Query.filter(X.starts_with("name", "A%_!\\"))
+
+    {sql, params} = Selecto.to_sql(query)
+    assert sql =~ ~s(LIKE $1 ESCAPE '!')
+    assert params == ["A!%!_!!\\%"]
   end
 
   test "builds selector helpers with aliases and case literals" do

@@ -294,9 +294,9 @@ defmodule Selecto.Expr do
   @spec contains(term(), term()) :: tuple()
   def contains(field, value), do: {field, {:contains, value}}
 
-  @doc "Builds a prefix `LIKE` filter."
+  @doc "Builds a literal text-prefix filter; LIKE wildcards in the prefix are escaped."
   @spec starts_with(term(), String.t()) :: tuple()
-  def starts_with(field, value), do: like(field, "#{value}%")
+  def starts_with(field, value) when is_binary(value), do: {field, {:starts_with, value}}
 
   @doc "Builds a suffix `LIKE` filter."
   @spec ends_with(term(), String.t()) :: tuple()

@@ -1454,6 +1454,35 @@ defmodule Selecto.DomainTest do
 
       assert {:ok, contract, _diagnostics} = Domain.query_contract(domain)
       assert contract.source.tenant_field == :tenant_id
+      tenant = Enum.find(contract.fields, &(&1.id == "tenant_id"))
+      refute tenant.detail_selectable
+      refute tenant.sortable
+      refute tenant.aggregatable
+    end
+
+    test "uses full paths for nested join fields" do
+      domain =
+        query_contract_domain()
+        |> put_in([:schemas, :customers, :fields], [:id, :name, :region_id])
+        |> put_in([:schemas, :customers, :columns, :region_id], %{type: :integer})
+        |> put_in([:schemas, :customers, :associations, :region], %{
+          queryable: :regions,
+          owner_key: :region_id,
+          related_key: :id
+        })
+        |> put_in([:schemas, :regions], %{
+          source_table: "regions",
+          primary_key: :id,
+          fields: [:id, :name],
+          columns: %{id: %{type: :integer}, name: %{type: :string}},
+          associations: %{}
+        })
+        |> put_in([:joins, :customer, :joins], %{region: %{type: :left}})
+
+      assert {:ok, contract, _diagnostics} = Domain.query_contract(domain)
+      assert Enum.any?(contract.fields, &(&1.id == "customer.region.name"))
+      assert Enum.any?(contract.fields, &(&1.id == "region.name"))
+      assert Enum.any?(contract.joins, &(&1.path == ["customer", "region"]))
     end
 
     test "returns diagnostics for invalid query contract inputs" do

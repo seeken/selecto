@@ -10,6 +10,7 @@ defmodule Selecto.ExecutorTest do
 
   defmodule Adapter do
     def placeholder(_index), do: "?"
+    def quote_identifier(identifier), do: ~s("#{identifier}")
 
     def execute(:single, _query, _params, _opts), do: {:ok, %{rows: [[1]], columns: ["id"]}}
     def execute(:empty, _query, _params, _opts), do: {:ok, %{rows: [], columns: ["id"]}}
@@ -43,6 +44,7 @@ defmodule Selecto.ExecutorTest do
     end
 
     def supports?(:stream), do: true
+    def supports?(:projection_sum), do: true
     def supports?(_feature), do: false
   end
 
@@ -516,6 +518,31 @@ defmodule Selecto.ExecutorTest do
     assert metadata.sql =~ ") AS selecto_count_source"
     assert is_list(metadata.params)
     assert is_integer(metadata.execution_time)
+  end
+
+  test "projection sum folds a governed query in the database without returning root rows" do
+    assert {:ok, 1, metadata} =
+             Selecto.execute_projection_sum_with_metadata(selecto_for(:single), "id",
+               analyze_complexity: false
+             )
+
+    assert metadata.sql =~ "SUM(selecto_projection_source.\"id\")"
+    assert metadata.sql =~ ~r/FROM \(\s*select\b/i
+    assert metadata.sql =~ ") AS selecto_projection_source"
+    assert is_list(metadata.params)
+    assert is_integer(metadata.execution_time)
+
+    assert {:error, %Selecto.Error{}} =
+             Selecto.execute_projection_sum_with_metadata(selecto_for(:single), "id);DROP")
+
+    assert {:error, %Selecto.Error{}} =
+             Selecto.execute_projection_sum_with_metadata(selecto_for(:single), "missing")
+
+    assert {:error, %Selecto.Error{}} =
+             Selecto.execute_projection_sum_with_metadata(
+               selecto_for(:single, NoStreamCapabilityAdapter),
+               "id"
+             )
   end
 
   test "validate_connection delegates pid lifecycle checks to the adapter" do

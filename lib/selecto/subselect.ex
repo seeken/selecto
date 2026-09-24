@@ -32,6 +32,7 @@ defmodule Selecto.Subselect do
   - `:array_agg` - Returns a collection value when supported by the adapter
   - `:string_agg` - Returns delimited string
   - `:count` - Returns count of related records
+  - `:sum` - Returns a zero-filled sum of one related numeric field
   """
 
   alias Selecto.Types
@@ -65,6 +66,12 @@ defmodule Selecto.Subselect do
   - `:format` - Default aggregation format (`:json_agg`, `:array_agg`, `:string_agg`, `:count`)
   - `:alias_prefix` - Prefix for generated field aliases
   - `:order_by` - Default ordering for aggregated results
+  - `:limit` - Per-parent JSON collection limit; requires explicit ordering and
+    the PostgreSQL adapter
+  - `:after` - Optional parent-bound keyset position, `%{parent_key: value,
+    values: [...]}`. The values contain the complete ordering tuple, including
+    the target primary-key tie breaker. The caller must reauthorize the parent
+    and bind the cursor to its source/filter/release context.
 
   ## Returns
 
@@ -94,6 +101,9 @@ defmodule Selecto.Subselect do
     with :ok <- validate_target_schema(selecto, subselect_config.target_schema),
          :ok <- validate_fields_exist(selecto, subselect_config),
          :ok <- validate_filters_exist(selecto, subselect_config),
+         :ok <- validate_sum_config(selecto, subselect_config),
+         :ok <- validate_collection_limit(subselect_config),
+         :ok <- validate_collection_cursor(selecto, subselect_config),
          :ok <- validate_relationship_path(selecto, subselect_config) do
       Enum.each(Map.get(subselect_config, :nested, []), fn nested ->
         validate_subselect_config(selecto, normalize_config_map(nested, :json_agg, "", []))
@@ -356,9 +366,134 @@ defmodule Selecto.Subselect do
       nested: Map.get(config, :nested, []),
       separator: Map.get(config, :separator, ","),
       order_by: Map.get(config, :order_by, default_order_by),
+      limit: Map.get(config, :limit),
+      after: Map.get(config, :after),
       filters: Map.get(config, :filters, [])
     }
   end
+
+  defp validate_collection_limit(config) do
+    case Map.get(config, :limit) do
+      nil ->
+        :ok
+
+      limit
+      when is_integer(limit) and limit > 0 and
+             config.format == :json_agg ->
+        if Map.get(config, :order_by, []) != [] do
+          :ok
+        else
+          {:error, "per-parent collection limit requires explicit ordering"}
+        end
+
+      _ ->
+        {:error, "per-parent collection limit requires a positive JSON aggregation limit"}
+    end
+  end
+
+  defp validate_collection_cursor(selecto, config) do
+    case Map.get(config, :after) do
+      nil ->
+        :ok
+
+      %{parent_key: parent_key, values: values} = cursor
+      when map_size(cursor) == 2 and not is_nil(parent_key) and is_list(values) ->
+        orders = Map.get(config, :order_by, [])
+        schema = fetch_schema_config(selecto.domain.schemas, config.target_schema)
+        primary_key = Map.get(schema, :primary_key)
+
+        cond do
+          is_nil(Map.get(config, :limit)) ->
+            {:error, "per-parent collection cursor requires a positive limit"}
+
+          not (is_integer(parent_key) or is_binary(parent_key)) ->
+            {:error, "per-parent collection cursor requires a scalar parent key"}
+
+          not valid_cursor_order?(orders, schema.fields) or is_nil(primary_key) ->
+            {:error, "per-parent collection cursor requires valid ordering"}
+
+          length(values) != stable_cursor_order_size(orders, primary_key) ->
+            {:error, "per-parent collection cursor has the wrong ordering tuple size"}
+
+          not Enum.all?(values, &cursor_value?/1) ->
+            {:error, "per-parent collection cursor has an invalid ordering value"}
+
+          true ->
+            :ok
+        end
+
+      _ ->
+        {:error, "per-parent collection cursor requires a parent key and ordering values"}
+    end
+  end
+
+  defp valid_cursor_order?(orders, fields) when is_list(orders) and orders != [] do
+    Enum.all?(orders, fn
+      {direction, field}
+      when direction in [:asc, :desc] and (is_atom(field) or is_binary(field)) ->
+        Enum.any?(fields, &(to_string(&1) == to_string(field)))
+
+      field when is_atom(field) or is_binary(field) ->
+        Enum.any?(fields, &(to_string(&1) == to_string(field)))
+
+      _ ->
+        false
+    end)
+  end
+
+  defp valid_cursor_order?(_orders, _fields), do: false
+
+  defp stable_cursor_order_size(orders, primary_key) do
+    length(orders) +
+      if Enum.any?(orders, fn
+           {_direction, field} -> to_string(field) == to_string(primary_key)
+           field -> to_string(field) == to_string(primary_key)
+         end) do
+        0
+      else
+        1
+      end
+  end
+
+  defp cursor_value?(value),
+    do:
+      is_nil(value) or is_number(value) or is_binary(value) or is_boolean(value) or
+        is_struct(value)
+
+  defp validate_sum_config(selecto, %{format: :sum, fields: fields} = config) do
+    if length(fields) != 1 or Map.get(config, :nested, []) != [] do
+      {:error, "related sum requires exactly one field and no nested collections"}
+    else
+      [field] = fields
+      schema = fetch_schema_config(selecto.domain.schemas, config.target_schema)
+
+      column =
+        Enum.find_value(Map.get(schema, :columns, %{}), fn {name, metadata} ->
+          if to_string(name) == to_string(field), do: metadata
+        end)
+
+      type = column && (Map.get(column, :type) || Map.get(column, "type"))
+
+      if type in [
+           :integer,
+           :decimal,
+           :float,
+           :number,
+           :numeric,
+           "integer",
+           "decimal",
+           "float",
+           "number",
+           "numeric"
+         ] do
+        :ok
+      else
+        {:error, "related sum requires a numeric field"}
+      end
+    end
+  end
+
+  defp validate_sum_config(_selecto, _config), do: :ok
 
   defp generate_alias(target_schema, prefix) do
     base_name = to_string(target_schema)

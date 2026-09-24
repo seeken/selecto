@@ -313,6 +313,97 @@ defmodule Selecto.Executor do
     end)
   end
 
+  @doc """
+  Execute one database-side sum over a named numeric projection of a governed
+  Selecto query. The input query retains its own filters and pagination. This
+  is intended for totals over per-root correlated contributions; no root rows
+  are returned to the caller. Adapters must advertise `:projection_sum`.
+  """
+  @spec execute_projection_sum_with_metadata(
+          Selecto.Types.t(),
+          binary(),
+          Selecto.Types.execute_options()
+        ) :: {:ok, term(), map()} | {:error, Selecto.Error.t()}
+  def execute_projection_sum_with_metadata(selecto, column, opts \\ []) do
+    Selecto.Telemetry.operation(:projection_sum, selecto, fn ->
+      do_execute_projection_sum_with_metadata(selecto, column, opts)
+    end)
+  end
+
+  defp do_execute_projection_sum_with_metadata(selecto, column, opts) do
+    adapter = runtime_adapter(selecto)
+
+    cond do
+      not is_binary(column) or not String.match?(column, ~r/\A[A-Za-z][A-Za-z0-9_]*\z/) ->
+        {:error, Selecto.Error.query_error("Projection sum column is invalid", "", [], %{})}
+
+      not Selecto.AdapterSupport.callback_available?(adapter, :supports?, 1) or
+        not adapter.supports?(:projection_sum) or
+          not Selecto.AdapterSupport.callback_available?(adapter, :quote_identifier, 1) ->
+        {:error, Selecto.Error.query_error("Projection sum is unavailable", "", [], %{})}
+
+      true ->
+        execute_projection_sum_query(selecto, adapter, column, opts)
+    end
+  end
+
+  defp execute_projection_sum_query(selecto, adapter, column, opts) do
+    start_time = System.monotonic_time(:millisecond)
+
+    with :ok <- Selecto.Tenant.validate_scope(selecto, opts) do
+      try do
+        {query, aliases, params} = Selecto.gen_sql(selecto, opts)
+
+        selected_aliases =
+          aliases ++
+            Enum.map(Map.get(selecto.set, :subselected, []), fn config ->
+              Map.get(config, :alias)
+            end)
+
+        if Enum.any?(selected_aliases, &(is_binary(&1) and &1 == column)) do
+          quoted_column = adapter.quote_identifier(column)
+
+          sum_query =
+            "SELECT COALESCE(SUM(selecto_projection_source.#{quoted_column}), 0) " <>
+              "AS selecto_projection_sum FROM (" <>
+              String.trim_trailing(query, ";") <> ") AS selecto_projection_source"
+
+          result = execute_for_context(selecto, sum_query, params, ["selecto_projection_sum"])
+          duration = System.monotonic_time(:millisecond) - start_time
+          metadata = %{sql: sum_query, params: params, execution_time: duration}
+
+          case result do
+            {:ok, {[[value]], _columns, _aliases}} when not is_nil(value) ->
+              {:ok, value, metadata}
+
+            {:ok, other} ->
+              {:error,
+               Selecto.Error.query_error(
+                 "Projection sum returned an invalid result",
+                 sum_query,
+                 params,
+                 %{result: inspect(other)}
+               )}
+
+            error ->
+              error
+          end
+        else
+          {:error,
+           Selecto.Error.query_error("Projection sum column is not selected", query, params, %{})}
+        end
+      rescue
+        error -> {:error, Selecto.Error.from_reason(error)}
+      catch
+        :exit, reason ->
+          {:error,
+           Selecto.Error.connection_error("Database projection sum execution failed", %{
+             exit_reason: reason
+           })}
+      end
+    end
+  end
+
   defp do_execute_count_with_metadata(selecto, opts) do
     start_time = System.monotonic_time(:millisecond)
 

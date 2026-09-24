@@ -100,6 +100,10 @@ defmodule Selecto.Builder.Subselect do
     target_alias = generate_subquery_alias(subselect_config.target_schema)
     adapter_name = AdapterSupport.adapter_name(Map.get(selecto, :adapter))
 
+    if Map.get(subselect_config, :limit) && adapter_name != :postgresql do
+      raise ArgumentError, "per-parent collection limits require PostgreSQL"
+    end
+
     cond do
       adapter_name == :mssql and subselect_config.format == :json_agg ->
         build_mssql_json_agg_subselect(
@@ -144,14 +148,22 @@ defmodule Selecto.Builder.Subselect do
           if length(subselect_config.fields) == 1 and nested_subselects(subselect_config) == [] do
             [field] = subselect_config.fields
             field_name = adapter_quote_identifier(selecto, to_string(field))
-            render_json_aggregate!(selecto, [target_alias, ".", field_name])
+
+            render_json_aggregate!(
+              selecto,
+              [target_alias, ".", field_name],
+              subselect_config,
+              target_alias
+            )
           else
             # Multiple fields - build JSON objects
             {json_pairs, nested_params} =
               build_json_object_pairs(selecto, subselect_config, target_alias)
 
             {json_object, object_params} = render_json_object!(selecto, json_pairs)
-            {json_build, aggregate_params} = render_json_aggregate!(selecto, json_object)
+
+            {json_build, aggregate_params} =
+              render_json_aggregate!(selecto, json_object, subselect_config, target_alias)
 
             {json_build, nested_params ++ object_params ++ aggregate_params}
           end
@@ -177,6 +189,11 @@ defmodule Selecto.Builder.Subselect do
 
         :count ->
           {["count(*)"], []}
+
+        :sum ->
+          [field] = subselect_config.fields
+          field_name = adapter_quote_identifier(selecto, to_string(field))
+          {["COALESCE(SUM(", target_alias, ".", field_name, "), 0)"], []}
       end
 
     # Build correlation WHERE clause
@@ -196,10 +213,23 @@ defmodule Selecto.Builder.Subselect do
         target_alias
       )
 
+    parent_primary_key =
+      if Map.get(subselect_config, :after), do: root_parent_primary_key(selecto), else: nil
+
+    {cursor_where, cursor_params} =
+      build_collection_cursor_condition(
+        selecto,
+        subselect_config,
+        target_alias,
+        source_alias,
+        parent_primary_key
+      )
+
     # Combine all WHERE conditions
     all_where_conditions =
       [correlation_where] ++
-        if additional_where != [], do: [additional_where], else: []
+        if(additional_where != [], do: [additional_where], else: []) ++
+        if cursor_where != [], do: [cursor_where], else: []
 
     where_clause =
       case all_where_conditions do
@@ -207,28 +237,30 @@ defmodule Selecto.Builder.Subselect do
         multiple -> Enum.intersperse(multiple, [" AND "])
       end
 
-    # Build complete subquery
+    # A per-parent limit belongs inside the correlated rowset, before JSON
+    # aggregation. Limiting the aggregate query itself would not limit children.
     subselect_iodata = [
       "SELECT ",
       select_clause,
       " FROM ",
-      target_table,
-      " ",
-      target_alias,
-      " WHERE ",
-      where_clause
+      collection_from_clause(
+        selecto,
+        subselect_config,
+        target_table,
+        target_alias,
+        where_clause
+      )
     ]
 
-    all_params = select_params ++ correlation_params ++ additional_params
+    all_params = select_params ++ correlation_params ++ additional_params ++ cursor_params
     {subselect_iodata, all_params}
   end
 
   defp build_json_object_pairs(selecto, subselect_config, target_alias) do
     field_pairs =
       Enum.map(subselect_config.fields, fn field ->
-        field_name = adapter_quote_identifier(selecto, to_string(field))
         field_key = escape_string(json_field_key(field))
-        [field_key, ", ", target_alias, ".", field_name]
+        [field_key, ", ", nested_json_field_value(selecto, subselect_config, target_alias, field)]
       end)
 
     {nested_pairs, nested_params} =
@@ -238,6 +270,31 @@ defmodule Selecto.Builder.Subselect do
       |> Enum.unzip()
 
     {field_pairs ++ nested_pairs, List.flatten(nested_params)}
+  end
+
+  defp nested_json_field_value(selecto, subselect_config, target_alias, field) do
+    field_sql = [target_alias, ".", adapter_quote_identifier(selecto, to_string(field))]
+    schema = get_target_schema_config(selecto, subselect_config.target_schema)
+    columns = Map.get(schema, :columns) || %{}
+
+    column = Map.get(columns, to_string(field)) || Map.get(columns, field)
+    type = if is_map(column), do: Map.get(column, :type) || Map.get(column, "type")
+
+    if type in [:decimal, :numeric, :number, "decimal", "numeric", "number"] and
+         AdapterSupport.adapter_name(Map.get(selecto, :adapter)) == :postgresql do
+      # JSON decoders commonly turn JSON numeric literals into IEEE floats.
+      # Project declared exact decimals as strings before JSON serialization.
+      {value_sql, []} =
+        render_json_operation!(selecto, %JsonOperation{
+          operation: :json_exact_decimal_value,
+          clause: :select,
+          options: %{column_sql: field_sql}
+        })
+
+      value_sql
+    else
+      field_sql
+    end
   end
 
   defp build_nested_json_pair(selecto, parent_config, child_config, parent_alias) do
@@ -258,7 +315,25 @@ defmodule Selecto.Builder.Subselect do
     {additional_where, additional_params} =
       build_additional_filters(selecto, child_config, child_alias)
 
-    where_clause = build_combined_where_clause(correlation_where, additional_where)
+    parent_primary_key =
+      if Map.get(child_config, :after) do
+        get_target_schema_config(selecto, parent_config.target_schema).primary_key
+      end
+
+    {cursor_where, cursor_params} =
+      build_collection_cursor_condition(
+        selecto,
+        child_config,
+        child_alias,
+        parent_alias,
+        parent_primary_key
+      )
+
+    where_clause =
+      build_combined_where_clause(
+        build_combined_where_clause(correlation_where, additional_where),
+        cursor_where
+      )
 
     {empty_json, empty_params} = render_empty_json_array!(selecto)
 
@@ -266,18 +341,14 @@ defmodule Selecto.Builder.Subselect do
       "COALESCE((SELECT ",
       child_select,
       " FROM ",
-      child_table,
-      " ",
-      child_alias,
-      " WHERE ",
-      where_clause,
+      collection_from_clause(selecto, child_config, child_table, child_alias, where_clause),
       "), ",
       empty_json,
       ")"
     ]
 
     {[escape_string(child_key), ", ", subquery],
-     child_params ++ correlation_params ++ additional_params ++ empty_params}
+     child_params ++ correlation_params ++ additional_params ++ cursor_params ++ empty_params}
   end
 
   defp build_nested_json_agg(selecto, subselect_config, target_alias) do
@@ -286,14 +357,22 @@ defmodule Selecto.Builder.Subselect do
         length(subselect_config.fields) == 1 and nested_subselects(subselect_config) == [] ->
         [field] = subselect_config.fields
         field_name = adapter_quote_identifier(selecto, to_string(field))
-        render_json_aggregate!(selecto, [target_alias, ".", field_name])
+
+        render_json_aggregate!(
+          selecto,
+          [target_alias, ".", field_name],
+          subselect_config,
+          target_alias
+        )
 
       subselect_config.format == :json_agg ->
         {json_pairs, nested_params} =
           build_json_object_pairs(selecto, subselect_config, target_alias)
 
         {json_object, object_params} = render_json_object!(selecto, json_pairs)
-        {json_build, aggregate_params} = render_json_aggregate!(selecto, json_object)
+
+        {json_build, aggregate_params} =
+          render_json_aggregate!(selecto, json_object, subselect_config, target_alias)
 
         {json_build, nested_params ++ object_params ++ aggregate_params}
 
@@ -303,12 +382,48 @@ defmodule Selecto.Builder.Subselect do
     end
   end
 
-  defp render_json_aggregate!(selecto, expression) do
+  defp render_json_aggregate!(selecto, expression, subselect_config, target_alias) do
+    {order_by_sql, []} = build_subquery_order_by(selecto, subselect_config, target_alias)
+
     render_json_operation!(selecto, %JsonOperation{
       operation: :json_agg,
       clause: :select,
-      options: %{column_sql: expression}
+      options: %{column_sql: expression, order_by_sql: order_by_sql}
     })
+  end
+
+  defp collection_from_clause(selecto, config, table, target_alias, where_clause) do
+    case Map.get(config, :limit) do
+      nil ->
+        [table, " ", target_alias, " WHERE ", where_clause]
+
+      limit when is_integer(limit) and limit > 0 ->
+        if AdapterSupport.adapter_name(Map.get(selecto, :adapter)) != :postgresql do
+          raise ArgumentError, "per-parent collection limits require PostgreSQL"
+        end
+
+        {order_by_sql, []} = build_subquery_order_by(selecto, config, target_alias)
+
+        [
+          "(SELECT ",
+          target_alias,
+          ".* FROM ",
+          table,
+          " ",
+          target_alias,
+          " WHERE ",
+          where_clause,
+          " ORDER BY ",
+          order_by_sql,
+          " LIMIT ",
+          Integer.to_string(limit),
+          ") ",
+          target_alias
+        ]
+
+      _ ->
+        raise ArgumentError, "per-parent collection limit must be a positive integer"
+    end
   end
 
   defp render_json_object!(selecto, pairs) do
@@ -1342,7 +1457,7 @@ defmodule Selecto.Builder.Subselect do
   end
 
   defp build_additional_filters(selecto, subselect_config, target_alias) do
-    case subselect_config.filters do
+    case Map.get(subselect_config, :filters, []) do
       [] ->
         {[], []}
 
@@ -1353,7 +1468,7 @@ defmodule Selecto.Builder.Subselect do
   end
 
   defp build_subquery_order_by(selecto, subselect_config, target_alias) do
-    case subselect_config.order_by do
+    case stable_collection_order(selecto, subselect_config) do
       [] ->
         {[], []}
 
@@ -1385,6 +1500,123 @@ defmodule Selecto.Builder.Subselect do
         {order_clause, []}
     end
   end
+
+  defp stable_collection_order(selecto, config) do
+    orders = Map.get(config, :order_by, [])
+
+    if Map.get(config, :limit) do
+      primary_key = get_target_schema_config(selecto, config.target_schema).primary_key
+
+      if not (is_atom(primary_key) or is_binary(primary_key)) do
+        raise ArgumentError, "per-parent collection limit requires a target primary key"
+      end
+
+      if Enum.any?(orders, fn
+           {_direction, field} -> to_string(field) == to_string(primary_key)
+           field -> to_string(field) == to_string(primary_key)
+         end) do
+        orders
+      else
+        orders ++ [{:asc, primary_key}]
+      end
+    else
+      orders
+    end
+  end
+
+  defp root_parent_primary_key(selecto) do
+    if Selecto.Retarget.has_retarget?(selecto) do
+      selecto
+      |> Selecto.Retarget.get_retarget_config()
+      |> Map.fetch!(:target_schema)
+      |> then(&get_target_schema_config(selecto, &1))
+      |> Map.fetch!(:primary_key)
+    else
+      Map.fetch!(selecto.domain.source, :primary_key)
+    end
+  end
+
+  defp build_collection_cursor_condition(selecto, config, child_alias, parent_alias, parent_key) do
+    case Map.get(config, :after) do
+      nil ->
+        {[], []}
+
+      cursor ->
+        do_build_collection_cursor_condition(
+          selecto,
+          config,
+          child_alias,
+          parent_alias,
+          parent_key,
+          cursor
+        )
+    end
+  end
+
+  defp do_build_collection_cursor_condition(
+         selecto,
+         config,
+         child_alias,
+         parent_alias,
+         parent_key,
+         %{parent_key: parent_value, values: values}
+       ) do
+    orders = stable_collection_order(selecto, config)
+
+    order_columns =
+      Enum.map(orders, fn
+        {direction, field} ->
+          {[child_alias, ".", adapter_quote_identifier(selecto, to_string(field))], direction}
+
+        field ->
+          {[child_alias, ".", adapter_quote_identifier(selecto, to_string(field))], :asc}
+      end)
+
+    seek_terms =
+      order_columns
+      |> Enum.with_index()
+      |> Enum.map(fn {{column, direction}, index} ->
+        prefix =
+          order_columns
+          |> Enum.take(index)
+          |> Enum.zip(Enum.take(values, index))
+          |> Enum.map(fn {{prior_column, _}, prior_value} ->
+            if is_nil(prior_value) do
+              [prior_column, " IS NULL"]
+            else
+              [prior_column, " IS NOT DISTINCT FROM ", {:param, prior_value}]
+            end
+          end)
+
+        comparison = cursor_after_comparison(column, direction, Enum.at(values, index))
+
+        ["(", Enum.intersperse(prefix ++ [comparison], " AND "), ")"]
+      end)
+
+    parent_column = [parent_alias, ".", adapter_quote_identifier(selecto, to_string(parent_key))]
+
+    clause = [
+      "(",
+      parent_column,
+      " IS DISTINCT FROM ",
+      {:param, parent_value},
+      " OR (",
+      Enum.intersperse(seek_terms, " OR "),
+      "))"
+    ]
+
+    {clause, extract_params(clause)}
+  end
+
+  # PostgreSQL places NULL last for ASC and first for DESC by default.
+  defp cursor_after_comparison(_column, :asc, nil), do: "FALSE"
+  defp cursor_after_comparison(column, :desc, nil), do: [column, " IS NOT NULL"]
+
+  defp cursor_after_comparison(column, :asc, value),
+    do: ["(", column, " > ", {:param, value}, " OR ", column, " IS NULL)"]
+
+  defp cursor_after_comparison(column, :desc, value),
+    do: [column, " < ", {:param, value}]
 
   defp build_filter_conditions(selecto, filters, target_alias) do
     # Use existing filter building logic, adapted for subquery context

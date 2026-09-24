@@ -242,7 +242,8 @@ defmodule Selecto.Domain.Projector do
       Map.get(normalized, :source),
       Map.get(normalized, :schemas, %{}),
       choice_index,
-      filterable_fields
+      filterable_fields,
+      []
     )
   end
 
@@ -251,7 +252,8 @@ defmodule Selecto.Domain.Projector do
         parent_relation,
         schemas,
         choice_index,
-        filterable_fields
+        filterable_fields,
+        path
       )
       when is_map(joins) do
     joins
@@ -263,19 +265,43 @@ defmodule Selecto.Domain.Projector do
       target_relation =
         query_contract_join_target_relation(target_schema, parent_relation, schemas)
 
-      query_contract_relation_fields(
-        join_id,
-        target_relation,
-        :join,
-        choice_index,
-        filterable_fields
-      ) ++
+      join_path = path ++ [MapHelpers.field_id(join_id)]
+      field_prefix = Enum.join(join_path, ".")
+
+      full_fields =
+        query_contract_relation_fields(
+          field_prefix,
+          target_relation,
+          :join,
+          choice_index,
+          filterable_fields
+        )
+        |> Enum.map(&Map.put(&1, :relation, if(path == [], do: join_id, else: field_prefix)))
+
+      # Keep Selecto's established local join names available to query clients,
+      # while also exposing unambiguous paths for nested template requirements.
+      local_fields =
+        if path == [] do
+          []
+        else
+          query_contract_relation_fields(
+            join_id,
+            target_relation,
+            :join,
+            choice_index,
+            filterable_fields
+          )
+        end
+
+      full_fields ++
+        local_fields ++
         query_contract_join_field_tree(
           MapHelpers.map_value(join_config, :joins),
           target_relation,
           schemas,
           choice_index,
-          filterable_fields
+          filterable_fields,
+          join_path
         )
     end)
   end
@@ -285,7 +311,8 @@ defmodule Selecto.Domain.Projector do
         _parent_relation,
         _schemas,
         _choice_index,
-        _filterable_fields
+        _filterable_fields,
+        _path
       ),
       do: []
 
@@ -535,11 +562,12 @@ defmodule Selecto.Domain.Projector do
   defp query_contract_default(_column, _key), do: nil
 
   def query_contract_detail_selectable?(column) do
-    query_contract_bool(
-      column,
-      [:detail_selectable, :detail_selectable?, :selectable, :selectable?],
-      true
-    )
+    query_contract_default(column, :internal) != true and
+      query_contract_bool(
+        column,
+        [:detail_selectable, :detail_selectable?, :selectable, :selectable?],
+        true
+      )
   end
 
   def query_contract_filterable?(column, id, source_kind, filterable_fields) do
