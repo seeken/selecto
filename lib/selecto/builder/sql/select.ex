@@ -969,6 +969,24 @@ defmodule Selecto.Builder.Sql.Select do
     {func_call_iodata, join, param}
   end
 
+  # Governed computed values (computed.kind: :expression). The AST is closed and
+  # typed; literals and JSON path segments are bound, never interpolated.
+  def prep_selector(selecto, {:computed_value, expression}, retarget_aliases) do
+    adapter = AdapterSupport.adapter_name(selecto.adapter)
+
+    unless adapter in [nil, :postgresql, :postgres] do
+      raise Error.to_exception(
+              Error.configuration_error("adapter does not support computed value expressions", %{
+                adapter: adapter
+              })
+            )
+    end
+
+    {:ok, normalized} = Selecto.Domain.Contract.ComputedValues.normalize(expression)
+    {iodata, joins, params} = compile_value(selecto, normalized, retarget_aliases)
+    {["(", iodata, ")"], joins, params}
+  end
+
   def prep_selector(selecto, {:computed_predicate, expression}, _retarget_aliases) do
     filter = Selecto.Domain.Contract.ComputedPredicates.to_filter(expression)
     {joins, predicate, params} = Selecto.Builder.Sql.Where.build(selecto, filter)
@@ -1859,4 +1877,96 @@ defmodule Selecto.Builder.Sql.Select do
         field_ref
     end
   end
+
+  defp compile_value(selecto, ["field", path], retarget_aliases),
+    do: prep_selector(selecto, path, retarget_aliases) |> wrap_joins()
+
+  defp compile_value(selecto, ["literal", value, type], retarget_aliases) do
+    {param, _join, params} = prep_selector(selecto, {:param, value}, retarget_aliases)
+
+    {["CAST(", param, " AS ", Selecto.Domain.Contract.ComputedValues.postgres_type(type), ")"],
+     [], params}
+  end
+
+  defp compile_value(selecto, ["coalesce" | values], retarget_aliases) do
+    {parts, joins, params} = compile_values(selecto, values, retarget_aliases)
+    {["COALESCE(", Enum.intersperse(parts, ", "), ")"], joins, params}
+  end
+
+  defp compile_value(selecto, ["concat" | values], retarget_aliases) do
+    {parts, joins, params} = compile_values(selecto, values, retarget_aliases)
+
+    {["CONCAT(", Enum.intersperse(Enum.map(parts, &["CAST(", &1, " AS TEXT)"]), ", "), ")"],
+     joins, params}
+  end
+
+  defp compile_value(selecto, ["divide", left, right], retarget_aliases) do
+    {[l, r], joins, params} = compile_values(selecto, [left, right], retarget_aliases)
+    {["(CAST(", l, " AS NUMERIC) / CAST(", r, " AS NUMERIC))"], joins, params}
+  end
+
+  defp compile_value(selecto, [op, left, right], retarget_aliases)
+       when op in ["add", "subtract", "multiply"] do
+    symbol = %{"add" => " + ", "subtract" => " - ", "multiply" => " * "}[op]
+    {[l, r], joins, params} = compile_values(selecto, [left, right], retarget_aliases)
+    {["(", l, symbol, r, ")"], joins, params}
+  end
+
+  defp compile_value(selecto, [op, value], retarget_aliases) when op in ["lower", "upper"] do
+    {sql, joins, params} = compile_value(selecto, value, retarget_aliases)
+    {[String.upcase(op), "(", sql, ")"], joins, params}
+  end
+
+  defp compile_value(selecto, ["cast", value, type], retarget_aliases) do
+    {sql, joins, params} = compile_value(selecto, value, retarget_aliases)
+
+    {["CAST(", sql, " AS ", Selecto.Domain.Contract.ComputedValues.postgres_type(type), ")"],
+     joins, params}
+  end
+
+  defp compile_value(selecto, ["json_text", path, segments], retarget_aliases) do
+    {field, joins, params} = compile_value(selecto, ["field", path], retarget_aliases)
+
+    {markers, segment_params} =
+      Enum.reduce(segments, {[], []}, fn segment, {markers, acc} ->
+        {marker, _join, param} = prep_selector(selecto, {:param, segment}, retarget_aliases)
+        {markers ++ [marker], acc ++ param}
+      end)
+
+    {[
+       "JSONB_EXTRACT_PATH_TEXT(CAST(",
+       field,
+       " AS JSONB), ",
+       Enum.intersperse(markers, ", "),
+       ")"
+     ], joins, params ++ segment_params}
+  end
+
+  defp compile_value(selecto, ["case" | branches], retarget_aliases) do
+    {parts, joins, params} =
+      Enum.reduce(branches, {[], [], []}, fn
+        ["else", value], {parts, joins, params} ->
+          {sql, j, p} = compile_value(selecto, value, retarget_aliases)
+          {parts ++ [["ELSE ", sql]], joins ++ j, params ++ p}
+
+        [condition, value], {parts, joins, params} ->
+          filter = Selecto.Domain.Contract.ComputedPredicates.to_filter(condition)
+          {join_w, predicate, param_w} = Selecto.Builder.Sql.Where.build(selecto, filter)
+          {sql, j, p} = compile_value(selecto, value, retarget_aliases)
+
+          {parts ++ [["WHEN ", predicate, " THEN ", sql]], joins ++ List.wrap(join_w) ++ j,
+           params ++ param_w ++ p}
+      end)
+
+    {["CASE ", Enum.intersperse(parts, " "), " END"], joins, params}
+  end
+
+  defp compile_values(selecto, values, retarget_aliases) do
+    Enum.reduce(values, {[], [], []}, fn value, {parts, joins, params} ->
+      {sql, j, p} = compile_value(selecto, value, retarget_aliases)
+      {parts ++ [sql], joins ++ j, params ++ p}
+    end)
+  end
+
+  defp wrap_joins({sql, joins, params}), do: {sql, List.wrap(joins), params}
 end

@@ -3,6 +3,14 @@
 
 ## Unreleased
 
+- Added governed computed value columns (`computed: %{kind: :expression}`): a
+  closed, typed value AST (`field`, typed `literal`, `coalesce`, `case`,
+  arithmetic, `cast`, `json_text`, `lower`, `upper`, `concat`) shared with the
+  native Perl runtime. Expressions are validated with the canonical contract,
+  type-checked against declared root column types, compiled with bound
+  literals and JSON path segments, and may cross associations. PostgreSQL only;
+  other adapters fail closed.
+
 - Documented and validated explicit write-only source associations backed by a
   complete `write.domain`, without granting query or join capability.
 - Accepted option-free `%Regex{}` values in portable legacy `{:format, regex}`

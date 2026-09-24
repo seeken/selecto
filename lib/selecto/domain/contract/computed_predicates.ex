@@ -1,6 +1,7 @@
 defmodule Selecto.Domain.Contract.ComputedPredicates do
   @moduledoc false
 
+  alias Selecto.Domain.Contract.ComputedValues
   alias Selecto.Domain.Contract.Shared.Core
 
   @comparison ~w(eq ne neq gt gte lt lte)
@@ -15,8 +16,11 @@ defmodule Selecto.Domain.Contract.ComputedPredicates do
     {errors, graph} =
       Enum.reduce(columns, {errors, %{}}, fn {field, column}, {acc, graph} ->
         case Core.map_value(column, :computed) do
-          nil -> {acc, graph}
-          computed -> validate_column(acc, graph, Core.field_id(field), column, computed, fields)
+          nil ->
+            {acc, graph}
+
+          computed ->
+            validate_column(acc, graph, Core.field_id(field), column, computed, fields, columns)
         end
       end)
 
@@ -50,9 +54,70 @@ defmodule Selecto.Domain.Contract.ComputedPredicates do
     end
   end
 
-  defp validate_column(errors, graph, field, column, computed, fields) when is_map(computed) do
+  defp validate_column(errors, graph, field, column, computed, fields, columns)
+       when is_map(computed) do
     kind = Core.map_value(computed, :kind)
 
+    if kind in [:expression, "expression"] do
+      validate_value_column(errors, graph, field, column, computed, fields, columns)
+    else
+      validate_predicate_column(errors, graph, field, column, computed, fields, kind)
+    end
+  end
+
+  defp validate_column(errors, graph, field, _column, _computed, _fields, _columns),
+    do:
+      {[
+         error(:invalid_computed_predicate, field, "computed column metadata must be a map")
+         | errors
+       ], graph}
+
+  # Governed computed values (kind: :expression). Root fields are type-checked
+  # here; paths across associations are typed when the query builder resolves them.
+  defp validate_value_column(errors, graph, field, column, computed, fields, columns) do
+    errors =
+      if Enum.all?(Map.keys(computed), &(to_string(&1) in ["kind", "expression"])),
+        do: errors,
+        else: [error(:invalid_computed_value, field, "unknown computed value key") | errors]
+
+    resolve = fn path ->
+      if MapSet.member?(fields, path) do
+        Enum.find_value(columns, :unknown, fn {name, spec} ->
+          if to_string(name) == path, do: Core.map_value(spec, :type) || :unknown
+        end)
+      else
+        :unknown
+      end
+    end
+
+    with {:ok, normalized, dependencies} <-
+           ComputedValues.validate(Core.map_value(computed, :expression)),
+         :ok <- root_dependencies_known(dependencies, fields),
+         {:ok, category} <- ComputedValues.infer(normalized, resolve),
+         :ok <- declared_type(Core.map_value(column, :type), category) do
+      {errors, Map.put(graph, field, Enum.reject(dependencies, &String.contains?(&1, ".")))}
+    else
+      {:error, message} -> {[error(:invalid_computed_value, field, message) | errors], graph}
+    end
+  end
+
+  defp root_dependencies_known(dependencies, fields) do
+    case Enum.find(
+           dependencies,
+           &(not String.contains?(&1, ".") and not MapSet.member?(fields, &1))
+         ) do
+      nil -> :ok
+      unknown -> {:error, "computed value references unknown field #{inspect(unknown)}"}
+    end
+  end
+
+  defp declared_type(declared, category) do
+    if ComputedValues.compatible?(declared, category),
+      do: :ok,
+      else: {:error, "computed value type #{category} does not match declared type #{declared}"}
+  end
+
+  defp validate_predicate_column(errors, graph, field, column, computed, fields, kind) do
     if kind in [:predicate, "predicate"] do
       type = Core.map_value(column, :type)
 
@@ -89,13 +154,6 @@ defmodule Selecto.Domain.Contract.ComputedPredicates do
        graph}
     end
   end
-
-  defp validate_column(errors, graph, field, _column, _computed, _fields),
-    do:
-      {[
-         error(:invalid_computed_predicate, field, "computed column metadata must be a map")
-         | errors
-       ], graph}
 
   defp validate_expression([op, operands], fields, owner)
        when op in [:and, :or, "and", "or"] and is_list(operands) and operands != [] do

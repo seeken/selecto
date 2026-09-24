@@ -167,6 +167,10 @@ defmodule Selecto.Schema.Column do
               expression = Map.get(computed, :expression, Map.get(computed, "expression"))
               Map.put(base_col, :select, {:computed_predicate, expression})
 
+            kind when kind in [:expression, "expression"] ->
+              expression = Map.get(computed, :expression, Map.get(computed, "expression"))
+              Map.put(base_col, :select, {:computed_value, expression})
+
             _ ->
               base_col
           end
