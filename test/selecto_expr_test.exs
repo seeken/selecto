@@ -90,6 +90,20 @@ defmodule Selecto.ExprTest do
     assert params == ["A!%!_!!\\%"]
   end
 
+  test "substring searches bind literal LIKE wildcard characters" do
+    assert X.text_contains("name", "Ch") == {"name", {:text_contains, "Ch"}}
+    assert X.normalize({:text_contains, "name", "Ch"}) == {"name", {:text_contains, "Ch"}}
+
+    query =
+      selecto()
+      |> Selecto.Query.select(["id"])
+      |> Selecto.Query.filter(X.text_contains("name", "A%_!"))
+
+    {sql, params} = Selecto.to_sql(query)
+    assert sql =~ ~s(LIKE $1 ESCAPE '!')
+    assert params == ["%A!%!_!!%"]
+  end
+
   test "builds selector helpers with aliases and case literals" do
     assert X.field("name") == {:field, "name"}
     assert X.lit("Open") == {:literal, "Open"}

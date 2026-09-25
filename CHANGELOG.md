@@ -3,6 +3,10 @@
 
 ## Unreleased
 
+- `Selecto.Expr.text_contains/2` builds a literal substring filter
+  (`LIKE '%value%' ESCAPE '!'`) with `%`, `_`, and `!` in the value escaped,
+  matching the query contract's text `contains` comparator. `contains/2`
+  remains JSON/array containment.
 - Query members may be declared as portable data (`Selecto.QueryMembers.Data`):
   `ctes`, recursive `ctes` (`kind: :recursive`, `base`, `step`, `step_join`),
   and `laterals` whose queries are rooted at a relation in the domain's own

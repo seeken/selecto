@@ -289,7 +289,13 @@ defmodule Selecto.Builder.Sql.Where do
   end
 
   def build(selecto, {field, {:starts_with, value}}) when is_binary(value) do
-    pattern = String.replace(value, ~r/[!%_]/u, fn character -> "!" <> character end) <> "%"
+    pattern = escape_like_literal(value) <> "%"
+    {sel, join, param} = Select.prep_selector(selecto, field)
+    {List.wrap(join), [" ", sel, " LIKE ", {:param, pattern}, " ESCAPE '!' "], param}
+  end
+
+  def build(selecto, {field, {:text_contains, value}}) when is_binary(value) do
+    pattern = "%" <> escape_like_literal(value) <> "%"
     {sel, join, param} = Select.prep_selector(selecto, field)
     {List.wrap(join), [" ", sel, " LIKE ", {:param, pattern}, " ESCAPE '!' "], param}
   end
@@ -1229,4 +1235,7 @@ defmodule Selecto.Builder.Sql.Where do
   end
 
   defp in_subquery_fragment(query), do: ["(", query, ")"]
+
+  defp escape_like_literal(value),
+    do: String.replace(value, ~r/[!%_]/u, fn character -> "!" <> character end)
 end

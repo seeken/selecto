@@ -45,6 +45,7 @@ defmodule Selecto.Expr do
 
   def normalize({:contains, field, value}), do: contains(field, value)
   def normalize({:starts_with, field, value}), do: starts_with(field, value)
+  def normalize({:text_contains, field, value}), do: text_contains(field, value)
   def normalize({:ends_with, field, value}), do: ends_with(field, value)
   def normalize({:is_null, field}), do: is_null(field)
   def normalize({:not_null, field}), do: not_null(field)
@@ -297,6 +298,10 @@ defmodule Selecto.Expr do
   @doc "Builds a literal text-prefix filter; LIKE wildcards in the prefix are escaped."
   @spec starts_with(term(), String.t()) :: tuple()
   def starts_with(field, value) when is_binary(value), do: {field, {:starts_with, value}}
+
+  @doc "Builds a literal substring filter; LIKE wildcards in the value are escaped."
+  @spec text_contains(term(), String.t()) :: tuple()
+  def text_contains(field, value) when is_binary(value), do: {field, {:text_contains, value}}
 
   @doc "Builds a suffix `LIKE` filter."
   @spec ends_with(term(), String.t()) :: tuple()
