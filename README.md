@@ -124,6 +124,30 @@ selecto = Selecto.configure(domain, Repo)
   |> Selecto.execute()
 ```
 
+## Configuration Providers
+
+A trusted application provider can derive a domain from another configuration
+system and execute reads through that system. For example, with the matching
+`selecto_ash` integration:
+
+```elixir
+Selecto.configure(MyApp.Blog.Post, MyApp.Repo,
+  provider: SelectoAsh,
+  adapter: SelectoDBPostgreSQL.Adapter,
+  actor: current_user,
+  tenant: tenant
+)
+|> Selecto.select(["title"])
+|> Selecto.execute()
+```
+
+Providers implement `Selecto.Configuration.Provider`: `configure/2` supplies
+the domain, core configuration options, and opaque execution context;
+`execute/3` returns the normal Selecto row result. `execute_one/2` also uses the
+provider. SQL metadata and streaming helpers reject provider queries. Each
+provider defines its supported query subset and enforces its authorization.
+Existing domain-map configuration continues to use the SQL executor.
+
 ## Strict Mode
 
 Use strict mode when query callers—including UI builders, saved queries, APIs,

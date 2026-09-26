@@ -6,6 +6,8 @@ defmodule Selecto do
     :connection,
     :domain,
     :domain_ref,
+    :provider,
+    :provider_context,
     :config,
     :set,
     :extensions,
@@ -174,6 +176,8 @@ defmodule Selecto do
 
     ## Options
 
+    - `:provider` - Optional configuration/execution provider, such as `SelectoAsh`.
+      Provider-specific options are validated by the provider.
     - `:validate` - (boolean, default: true) Whether to validate the domain configuration
       before processing. When `true`, will raise `Selecto.DomainValidator.ValidationError`
       if the domain has structural issues like missing schemas, circular join dependencies,
@@ -230,10 +234,16 @@ defmodule Selecto do
         :ok = Selecto.DomainValidator.validate_domain!(domain)
         selecto = Selecto.configure(domain, connection_input)
   """
-  @spec configure(Selecto.Types.domain(), term(), keyword()) :: t()
+  @spec configure(term(), term(), keyword()) :: t()
   def configure(domain, connection_input, opts \\ []) do
-    Selecto.OptionsValidator.validate_configure_opts!(opts)
-    Selecto.Configuration.configure(domain, connection_input, opts)
+    case Keyword.pop(opts, :provider) do
+      {nil, opts} ->
+        Selecto.OptionsValidator.validate_configure_opts!(opts)
+        Selecto.Configuration.configure(domain, connection_input, opts)
+
+      {provider, opts} ->
+        Selecto.Configuration.Provider.configure(provider, domain, connection_input, opts)
+    end
   end
 
   @doc """

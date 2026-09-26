@@ -3,6 +3,10 @@
 
 ## Unreleased
 
+- Add `Selecto.Configuration.Provider` for host-owned source definitions and
+  provider execution through `Selecto.execute/2` and `execute_one/2`.
+  Provider queries reject SQL-only metadata and streaming helpers.
+
 - `Selecto.Expr.text_contains/2` builds a literal substring filter
   (`LIKE '%value%' ESCAPE '!'`) with `%`, `_`, and `!` in the value escaped,
   matching the query contract's text `contains` comparator. `contains/2`

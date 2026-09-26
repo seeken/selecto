@@ -29,6 +29,49 @@ defmodule Selecto.ConfigurationAdapterTest do
     def supports?(_feature), do: true
   end
 
+  defmodule FakeProvider do
+    @behaviour Selecto.Configuration.Provider
+
+    @impl true
+    def configure(domain, opts) do
+      {context, core_opts} = Keyword.pop(opts, :context)
+      {domain, core_opts, context}
+    end
+
+    @impl true
+    def execute(query, context, opts) do
+      send(self(), {:provider_execute, context, query.set.selected, opts})
+      {:ok, {[[9]], ["id"], ["id"]}}
+    end
+  end
+
+  test "provider configuration preserves context and dispatches execution" do
+    query =
+      Selecto.configure(domain(), Selecto.Runtime.Context.new(FakeAdapter, nil),
+        provider: FakeProvider,
+        context: %{actor: "actor-secret"}
+      )
+      |> Selecto.select(["id"])
+
+    assert query.provider == FakeProvider
+    refute inspect(query) =~ "actor-secret"
+    assert {:ok, {[[9]], ["id"], ["id"]}} = Selecto.execute(query)
+    assert_receive {:provider_execute, %{actor: "actor-secret"}, ["id"], []}
+    assert {:ok, {[9], ["id"]}} = Selecto.execute_one(query)
+  end
+
+  test "provider configuration still validates ordinary options and provider modules" do
+    runtime = Selecto.Runtime.Context.new(FakeAdapter, nil)
+
+    assert_raise NimbleOptions.ValidationError, fn ->
+      Selecto.configure(domain(), runtime, provider: FakeProvider, validate: :invalid)
+    end
+
+    assert_raise ArgumentError, fn ->
+      Selecto.configure(domain(), runtime, provider: String)
+    end
+  end
+
   defmodule FakeRepo do
   end
 
