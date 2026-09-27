@@ -1,5 +1,9 @@
 # Selecto
 
+Authored search pages with promoted filters and exact facet counts are described
+in the [canned-page guide](guides/canned_pages.md). Their reusable LiveView host
+lives in `selecto_views`.
+
 Canonical co-domain lookups and SQL-backed selection eligibility are documented
 in the [lookup guide](docs/governed-lookups.md). Runtime, adapter, and frontend
 claims remain profile-specific.

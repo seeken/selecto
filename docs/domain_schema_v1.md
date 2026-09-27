@@ -826,6 +826,104 @@ composition contract. Generic `:query`, `:write`, `:ui`, `:api`, and
 `:query_contract` projections do not expose these registries. Consumers that
 need them MUST use a projection-specific consumer release.
 
+## Canned Search Pages (Implemented Consumer Contract)
+
+Canned pages were implemented first in `selecto-perl` and adapted to Elixir
+`selecto` with a `selecto_views` UI. They use an existing domain without adding
+a domain top-level section or changing `schema_version`. The current native
+entry points are Perl `Selecto::CannedPage->new(...)` and Elixir
+`Selecto.CannedPage.new!(authorized_base, opts)`. Definitions are authored in
+application code using native Selecto query objects; they are not loaded from
+`experiences`, `published_views`, or `query_library` automatically.
+
+`experiences` remains a possible discovery envelope for a future versioned
+canned-page vocabulary, not an implemented page registration mechanism.
+`published_views` continues to describe database views and materialized views.
+The canonical `components` metadata name is unchanged by using the
+`selecto_views` package.
+
+### Ownership And Native Definitions
+
+The domain supplies the root relation, primary key, field types, relationships,
+query capabilities, and required restrictions. A page supplies an immutable
+dataset query, authored detail/aggregate views, promoted controls, and initial
+state. The host supplies the connection/adapter, current authorization and
+request scope, routes, and presentation configuration. A page definition does
+not grant access to fields or records.
+
+The native authoring surfaces differ:
+
+| Concern | Perl | Elixir |
+| --- | --- | --- |
+| Domain and fixed dataset | `domain` plus `dataset.query` | Base `%Selecto{}` passed to `new!/2` |
+| Entity identity | `dataset.entity_key`, one root primary key | Root primary key, optionally asserted with `entity_key` |
+| Views | `views` containing native query objects | `views` containing native query objects |
+| Controls and defaults | `controls`, `initial_state` | `controls`, `initial_state` |
+| Fresh execution scope | Authorized engine and optional request predicate passed to `run` | Freshly authorized, unprojected `%Selecto{}` passed to `run/3` |
+
+View queries provide selections and grouping; their predicates are rejected.
+Fixed predicates belong to the dataset, and request restrictions belong to the
+host's execution scope. Both profiles support entity-grain detail fields,
+direct related collections, and aggregate group fields with distinct-root
+counts. Selecting a scalar from a many-valued relationship must not multiply
+detail records; supported related collections carry child rows separately.
+Authorization of related data remains a host/domain responsibility.
+
+Controls expose only authored facet, numeric-range, and text fields. Browser
+state cannot introduce fields, query expressions, grouping, ordering, SQL, or
+connections. Users can also choose an authored view, paginate, and drill into
+an authored aggregate group. This is a restricted search surface over native
+queries, not a second general-purpose query builder.
+
+### State And Facet Semantics
+
+The canonical state keys are `version`, `view`, `filters`, `facet_search`,
+`drilldown`, `page`, and `limit`; HTTP encoding belongs to the UI consumer.
+An absent `filters` object uses authored defaults, while an explicit empty
+object clears them. Unknown state keys, views, and control ids are rejected.
+
+Facet selections combine with OR within a control and AND across controls.
+Each facet's count query excludes only that control's selected-value predicate.
+Dataset restrictions, required domain restrictions, request authorization,
+other controls, and drilldown remain in effect. Counts use distinct root
+entities, so duplicate relationship membership does not inflate totals.
+Selected values outside a bounded or searched option window remain available
+with their exact counts, including zero. Fixed options retain authored order
+and zero-count entries. Option search narrows options without changing result
+membership. `choice_sources` is not automatically used as a facet-count source.
+
+Text controls match literal prefixes, including literal `%` and `_` characters.
+Perl additionally supports `ignore_case => 1`; the current Elixir profile
+supports case-sensitive prefixes and rejects that extension. Composite entity
+identities, null facet buckets, and ordinary sums across many-valued joins are
+outside the implemented common profile. Separate result/count/facet statements
+do not provide a snapshot guarantee unless the host supplies an appropriate
+transaction.
+
+### UI Policy And Portability Status
+
+Perl's `Selecto::Components::CannedPage` reuses Explorer rendering and observes
+the domain's `components.query_params` policy for public/private URL state.
+Elixir's `SelectoViews.CannedPage` reuses Explorer results and styles and defaults
+to private state through its `private` assign. At present, the Elixir canned
+component does not derive that assign from `components.query_params`; hosts
+must enforce the domain policy, including ignoring inbound URL state. Automatic
+domain-policy enforcement is an outstanding adaptation gap, not a different
+domain contract. Private URL state is not record authorization.
+
+The sibling `selecto-protocol` repository contains versioned canned-page
+definition, state, and result schemas plus ten shared relational fixture cases
+observed independently through Perl/SQLite and Elixir/PostgreSQL. These schemas
+describe the bounded fixture interchange profile, not a complete serializer
+for native query objects, links, or layouts. Domain-version/fingerprint binding
+for published pages, discovery through `experiences`, and full portable
+link/error contracts remain future work. No new domain registry or portable
+page-publication support is implied by the native implementation.
+
+See [the Elixir core authoring guide](../guides/canned_pages.md), the sibling
+`selecto_views/docs/canned-pages.md` integration guide, and the canned-page
+section of `selecto-perl/README.md` for executable native authoring examples.
+
 ## Portable Data Rules
 
 The optional `rules` map declares portable validation and normalization under
