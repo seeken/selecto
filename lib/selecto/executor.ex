@@ -378,7 +378,7 @@ defmodule Selecto.Executor do
 
     with :ok <- Selecto.Tenant.validate_scope(selecto, opts) do
       try do
-        {query, aliases, params} = Selecto.gen_sql(selecto, opts)
+        {query, aliases, params} = Selecto.gen_sql(unordered_source(selecto), opts)
 
         selected_aliases =
           aliases ++
@@ -430,12 +430,26 @@ defmodule Selecto.Executor do
     end
   end
 
+  # A derived table used only for COUNT or SUM does not need its ORDER BY,
+  # and SQL Server rejects ORDER BY in a derived table without TOP/OFFSET.
+  # Keep the ordering when LIMIT/OFFSET select which rows are aggregated.
+  defp unordered_source(%{set: set} = selecto) when is_map(set) do
+    if is_nil(Map.get(set, :limit)) and is_nil(Map.get(set, :offset)) and
+         Map.has_key?(set, :order_by) do
+      put_in(selecto.set.order_by, [])
+    else
+      selecto
+    end
+  end
+
+  defp unordered_source(selecto), do: selecto
+
   defp do_execute_count_with_metadata(selecto, opts) do
     start_time = System.monotonic_time(:millisecond)
 
     with :ok <- Selecto.Tenant.validate_scope(selecto, opts) do
       try do
-        {query, _aliases, params} = Selecto.gen_sql(selecto, opts)
+        {query, _aliases, params} = Selecto.gen_sql(unordered_source(selecto), opts)
 
         count_query =
           "SELECT COUNT(*) AS selecto_total_count FROM (" <>

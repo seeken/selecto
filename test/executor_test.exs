@@ -520,6 +520,29 @@ defmodule Selecto.ExecutorTest do
     assert is_integer(metadata.execution_time)
   end
 
+  test "count and projection sum drop an unpaginated ORDER BY from their derived table" do
+    ordered = Selecto.order_by(selecto_for(:single), "id")
+
+    assert {:ok, 1, count} =
+             Executor.execute_count_with_metadata(ordered, analyze_complexity: false)
+
+    refute count.sql =~ ~r/order by/i
+
+    assert {:ok, 1, sum} =
+             Selecto.execute_projection_sum_with_metadata(ordered, "id",
+               analyze_complexity: false
+             )
+
+    refute sum.sql =~ ~r/order by/i
+
+    paged = ordered |> Selecto.limit(1) |> Selecto.offset(0)
+
+    assert {:ok, 1, paged_count} =
+             Executor.execute_count_with_metadata(paged, analyze_complexity: false)
+
+    assert paged_count.sql =~ ~r/order by/i
+  end
+
   test "projection sum folds a governed query in the database without returning root rows" do
     assert {:ok, 1, metadata} =
              Selecto.execute_projection_sum_with_metadata(selecto_for(:single), "id",
