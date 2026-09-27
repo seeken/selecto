@@ -378,16 +378,25 @@ defmodule Selecto.Executor do
 
     with :ok <- Selecto.Tenant.validate_scope(selecto, opts) do
       try do
-        {query, aliases, params} = Selecto.gen_sql(unordered_source(selecto), opts)
+        {query, aliases, params} = derived_source_sql(selecto, opts)
 
-        selected_aliases =
-          aliases ++
-            Enum.map(Map.get(selecto.set, :subselected, []), fn config ->
-              Map.get(config, :alias)
-            end)
+        subselect_aliases =
+          Enum.map(Map.get(selecto.set, :subselected, []), fn config ->
+            Map.get(config, :alias)
+          end)
 
-        if Enum.any?(selected_aliases, &(is_binary(&1) and &1 == column)) do
-          quoted_column = adapter.quote_identifier(column)
+        source_column =
+          case Enum.find_index(aliases, &(is_binary(&1) and &1 == column)) do
+            nil ->
+              if Enum.any?(subselect_aliases, &(is_binary(&1) and &1 == column)),
+                do: column
+
+            index ->
+              Selecto.Builder.Sql.projection_alias(index + 1)
+          end
+
+        if source_column do
+          quoted_column = adapter.quote_identifier(source_column)
 
           sum_query =
             "SELECT COALESCE(SUM(selecto_projection_source.#{quoted_column}), 0) " <>
@@ -430,6 +439,17 @@ defmodule Selecto.Executor do
     end
   end
 
+  # Compile the governed query for use as a COUNT or SUM derived table. Every
+  # selected column gets a unique positional alias because MySQL, MariaDB and
+  # SQL Server reject derived tables whose columns share a name (for example
+  # `name` and `category.name`) or have no name. Aliases never change rows.
+  defp derived_source_sql(selecto, opts) do
+    Selecto.gen_sql(
+      unordered_source(selecto),
+      Keyword.put(opts, :unique_projection_aliases, true)
+    )
+  end
+
   # A derived table used only for COUNT or SUM does not need its ORDER BY,
   # and SQL Server rejects ORDER BY in a derived table without TOP/OFFSET.
   # Keep the ordering when LIMIT/OFFSET select which rows are aggregated.
@@ -449,7 +469,7 @@ defmodule Selecto.Executor do
 
     with :ok <- Selecto.Tenant.validate_scope(selecto, opts) do
       try do
-        {query, _aliases, params} = Selecto.gen_sql(unordered_source(selecto), opts)
+        {query, _aliases, params} = derived_source_sql(selecto, opts)
 
         count_query =
           "SELECT COUNT(*) AS selecto_total_count FROM (" <>

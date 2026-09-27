@@ -8,6 +8,14 @@ defmodule Selecto.Builder.Sql do
 
   The public `build/2` function returns `{sql, aliases, params}` where `sql` is
   the finalized query string and `params` is the ordered bind parameter list.
+
+  Passing `unique_projection_aliases: true` names every selected column
+  `selecto_projection_<n>` (1-based position, see `projection_alias/1`). Use it
+  when the query becomes a derived table: MySQL, MariaDB and SQL Server reject
+  a derived table with duplicate or unnamed columns, such as `name` selected
+  from both the root and a joined table. The aliases change only the output
+  column names, never the rows, so DISTINCT, GROUP BY and ORDER BY keep their
+  meaning.
   """
 
   import Selecto.Builder.Sql.Helpers
@@ -39,6 +47,14 @@ defmodule Selecto.Builder.Sql do
         build_standard_query(selecto, opts)
     end
   end
+
+  @doc """
+  Output column name given to the selected column at 1-based `position` when
+  building with `unique_projection_aliases: true`.
+  """
+  @spec projection_alias(pos_integer()) :: String.t()
+  def projection_alias(position) when is_integer(position) and position > 0,
+    do: "selecto_projection_#{position}"
 
   @doc false
   def benchmark_components(selecto) do
@@ -188,7 +204,8 @@ defmodule Selecto.Builder.Sql do
 
   defp build_standard_query(selecto, opts) do
     # Phase 4: All SQL builders now use iodata parameterization.
-    {aliases, sel_joins, select_iodata, select_params} = build_select_with_subselects(selecto)
+    {aliases, sel_joins, select_iodata, select_params} =
+      build_select_with_subselects(selecto, %{}, opts)
 
     {window_joins, window_iodata, window_params} =
       Selecto.Builder.Window.build_window_functions(selecto)
@@ -505,7 +522,7 @@ defmodule Selecto.Builder.Sql do
     end
   end
 
-  defp build_retarget_query(selecto, _opts) do
+  defp build_retarget_query(selecto, opts) do
     # Use Retarget builder to construct the entire query
     retarget_config = Selecto.Retarget.get_retarget_config(selecto)
 
@@ -514,7 +531,7 @@ defmodule Selecto.Builder.Sql do
     retarget_aliases = get_retarget_aliases(retarget_config)
 
     {aliases, sel_joins, select_iodata, select_params} =
-      build_select_with_subselects(selecto, retarget_aliases)
+      build_select_with_subselects(selecto, retarget_aliases, opts)
 
     # Build retarget FROM clause and WHERE conditions
     {from_iodata, retarget_where_iodata, from_params, join_deps} =
@@ -702,7 +719,7 @@ defmodule Selecto.Builder.Sql do
     end
   end
 
-  defp build_set_operation_query(selecto, _opts) do
+  defp build_set_operation_query(selecto, opts) do
     case Selecto.Builder.SetOperations.validate_set_operations_for_sql(selecto) do
       :ok ->
         :ok
@@ -714,7 +731,8 @@ defmodule Selecto.Builder.Sql do
     :ok = Selecto.Policy.validate_query!(selecto)
 
     # Build set operations using the dedicated builder
-    {set_op_iodata, _set_op_params} = Selecto.Builder.SetOperations.build_set_operations(selecto)
+    {set_op_iodata, _set_op_params} =
+      Selecto.Builder.SetOperations.build_set_operations(selecto, opts)
 
     # Check if we need to add ORDER BY to the entire set operation result
     {order_by_iodata, _order_by_params} =
@@ -799,15 +817,16 @@ defmodule Selecto.Builder.Sql do
 
   # Enhanced SELECT builder that includes subselects
   defp build_select_with_subselects(selecto) do
-    build_select_with_subselects(selecto, %{})
+    build_select_with_subselects(selecto, %{}, [])
   end
 
-  defp build_select_with_subselects(selecto, retarget_aliases) do
+  defp build_select_with_subselects(selecto, retarget_aliases, opts) do
     # Determine the source alias to use for subselect correlation
     source_alias = get_source_alias_for_subselects(retarget_aliases)
 
     # Build regular SELECT fields
-    {aliases, sel_joins, select_iodata, select_params} = build_select(selecto, retarget_aliases)
+    {aliases, sel_joins, select_iodata, select_params} =
+      build_select(selecto, retarget_aliases, opts)
 
     # Build JSON operations SELECT fields if they exist
     {json_select_clauses, json_select_params} =
@@ -1035,7 +1054,7 @@ defmodule Selecto.Builder.Sql do
   end
 
   # Phase 4: SELECT now uses iodata by default
-  defp build_select(selecto, retarget_aliases) do
+  defp build_select(selecto, retarget_aliases, opts) do
     {aliases, joins, selects_iodata, params} =
       selecto.set.selected
       |> Enum.map(fn s -> Selecto.Builder.Sql.Select.build(selecto, s, retarget_aliases) end)
@@ -1048,13 +1067,25 @@ defmodule Selecto.Builder.Sql do
 
     aliases = Enum.reverse(aliases)
     joins = Enum.reverse(joins)
-    selects_iodata = Enum.reverse(selects_iodata)
+    selects_iodata = selects_iodata |> Enum.reverse() |> maybe_alias_projections(selecto, opts)
     params = Enum.reverse(params)
 
     # SELECT clauses are now native iodata, just intersperse with commas
     final_select_iodata = Enum.intersperse(selects_iodata, ", ")
 
     {aliases, joins, final_select_iodata, params}
+  end
+
+  defp maybe_alias_projections(selects_iodata, selecto, opts) do
+    if Keyword.get(opts, :unique_projection_aliases, false) do
+      selects_iodata
+      |> Enum.with_index(1)
+      |> Enum.map(fn {select_iodata, position} ->
+        [select_iodata, " AS ", quote_identifier(selecto, projection_alias(position))]
+      end)
+    else
+      selects_iodata
+    end
   end
 
   # Phase 1: Enhanced FROM builder with CTE detection and hierarchy support

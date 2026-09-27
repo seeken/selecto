@@ -14,7 +14,7 @@ defmodule Selecto.Builder.SetOperations do
   Returns {iodata, [params]} where iodata contains the set operation SQL
   and params contains the bound parameters from all participating queries.
   """
-  def build_set_operations(selecto) do
+  def build_set_operations(selecto, opts \\ []) do
     set_operations = Map.get(selecto.set, :set_operations, [])
 
     case set_operations do
@@ -22,17 +22,17 @@ defmodule Selecto.Builder.SetOperations do
         {[], []}
 
       [operation] ->
-        build_single_set_operation(operation)
+        build_single_set_operation(operation, opts)
 
       multiple_operations ->
-        build_chained_set_operations(multiple_operations)
+        build_chained_set_operations(multiple_operations, opts)
     end
   end
 
   # Build SQL for a single set operation
-  defp build_single_set_operation(spec) do
-    {left_sql, left_params} = query_to_iodata_with_params(spec.left_query)
-    {right_sql, right_params} = query_to_iodata_with_params(spec.right_query)
+  defp build_single_set_operation(spec, opts) do
+    {left_sql, left_params} = query_to_iodata_with_params(spec.left_query, opts)
+    {right_sql, right_params} = query_to_iodata_with_params(spec.right_query, opts)
 
     operation_sql = build_operation_sql(spec.operation, spec.options.all)
 
@@ -54,14 +54,14 @@ defmodule Selecto.Builder.SetOperations do
   end
 
   # Build SQL for chained set operations  
-  defp build_chained_set_operations([first_op | rest_ops]) do
+  defp build_chained_set_operations([first_op | rest_ops], opts) do
     # Start with the first operation
-    {base_sql, base_params} = build_single_set_operation(first_op)
+    {base_sql, base_params} = build_single_set_operation(first_op, opts)
 
     # Chain additional operations
     {final_sql, final_params} =
       Enum.reduce(rest_ops, {base_sql, base_params}, fn op, {acc_sql, acc_params} ->
-        {right_sql, right_params} = query_to_iodata_with_params(op.right_query)
+        {right_sql, right_params} = query_to_iodata_with_params(op.right_query, opts)
         operation_sql = build_operation_sql(op.operation, op.options.all)
 
         chained_sql = [
@@ -84,7 +84,7 @@ defmodule Selecto.Builder.SetOperations do
   end
 
   # Convert a Selecto query to SQL with parameters
-  defp query_to_iodata_with_params(selecto) do
+  defp query_to_iodata_with_params(selecto, opts) do
     # Create a copy of the query without set operations to avoid recursion
     clean_selecto = %{selecto | set: Map.delete(selecto.set, :set_operations)}
 
@@ -92,7 +92,9 @@ defmodule Selecto.Builder.SetOperations do
     # Each operand is finalized independently and therefore starts numbering at
     # one. Restoring markers lets the outer builder finalize the complete set
     # expression once with globally coordinated placeholder numbers.
-    {sql, _aliases, params} = Sql.build(clean_selecto, [])
+    {sql, _aliases, params} =
+      Sql.build(clean_selecto, Keyword.take(opts, [:unique_projection_aliases]))
+
     {Selecto.SQL.Params.rebind_finalized(sql, params, clean_selecto.adapter), params}
   end
 
@@ -135,8 +137,8 @@ defmodule Selecto.Builder.SetOperations do
     set_operations = Map.get(selecto.set, :set_operations, [])
 
     Enum.flat_map(set_operations, fn spec ->
-      {_left_sql, left_params} = query_to_iodata_with_params(spec.left_query)
-      {_right_sql, right_params} = query_to_iodata_with_params(spec.right_query)
+      {_left_sql, left_params} = query_to_iodata_with_params(spec.left_query, [])
+      {_right_sql, right_params} = query_to_iodata_with_params(spec.right_query, [])
       left_params ++ right_params
     end)
   end

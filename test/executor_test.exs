@@ -549,7 +549,7 @@ defmodule Selecto.ExecutorTest do
                analyze_complexity: false
              )
 
-    assert metadata.sql =~ "SUM(selecto_projection_source.\"id\")"
+    assert metadata.sql =~ "SUM(selecto_projection_source.\"selecto_projection_1\")"
     assert metadata.sql =~ ~r/FROM \(\s*select\b/i
     assert metadata.sql =~ ") AS selecto_projection_source"
     assert is_list(metadata.params)

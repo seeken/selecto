@@ -19,6 +19,7 @@ defmodule Selecto.CrossDBBaselineTest do
 
     assert_single_value_query(SelectoDBPostgreSQL.Adapter, conn, "SELECT 1 AS value")
     assert_query_shape_suite(SelectoDBPostgreSQL.Adapter, conn)
+    assert_duplicate_column_name_count(SelectoDBPostgreSQL.Adapter, conn)
   end
 
   @tag :mysql
@@ -32,6 +33,7 @@ defmodule Selecto.CrossDBBaselineTest do
 
     assert_single_value_query(MySQL, conn, "SELECT 1 AS value")
     assert_query_shape_suite(MySQL, conn)
+    assert_duplicate_column_name_count(MySQL, conn)
     assert_stream_capability_error(MySQL, conn)
   end
 
@@ -46,6 +48,7 @@ defmodule Selecto.CrossDBBaselineTest do
 
     assert_single_value_query(MariaDB, conn, "SELECT 1 AS value")
     assert_query_shape_suite(MariaDB, conn)
+    assert_duplicate_column_name_count(MariaDB, conn)
     assert_stream_capability_error(MariaDB, conn)
   end
 
@@ -60,6 +63,7 @@ defmodule Selecto.CrossDBBaselineTest do
 
     assert_single_value_query(MSSQL, conn, "SELECT CAST(1 AS INT) AS value")
     assert_query_shape_suite(MSSQL, conn)
+    assert_duplicate_column_name_count(MSSQL, conn)
     assert_stream_capability_error(MSSQL, conn)
   end
 
@@ -73,6 +77,7 @@ defmodule Selecto.CrossDBBaselineTest do
 
     assert_single_value_query(SelectoDBSQLite.Adapter, conn, "SELECT 1 AS value")
     assert_query_shape_suite(SelectoDBSQLite.Adapter, conn)
+    assert_duplicate_column_name_count(SelectoDBSQLite.Adapter, conn)
     assert_stream_capability_error(SelectoDBSQLite.Adapter, conn)
   end
 
@@ -114,6 +119,128 @@ defmodule Selecto.CrossDBBaselineTest do
       |> Enum.sort()
 
     assert grouped_result == [{"x", "2"}, {"y", "1"}]
+  end
+
+  # Count and projection-sum wrap the query in a derived table. MySQL, MariaDB
+  # and SQL Server reject duplicate derived-table column names, so selecting
+  # both `name` and `category.name` must still count correctly everywhere.
+  defp assert_duplicate_column_name_count(adapter, conn) do
+    suffix = System.unique_integer([:positive])
+    products = "selecto_dup_products_#{suffix}"
+    categories = "selecto_dup_categories_#{suffix}"
+
+    ddl = [
+      "CREATE TABLE #{categories} (id INT PRIMARY KEY, name VARCHAR(40))",
+      "CREATE TABLE #{products} (id INT PRIMARY KEY, name VARCHAR(40), category_id INT, price INT)",
+      "INSERT INTO #{categories} (id, name) VALUES (1, 'tools'), (2, 'toys')",
+      "INSERT INTO #{products} (id, name, category_id, price) VALUES " <>
+        "(1, 'hammer', 1, 5), (2, 'saw', 1, 10), (3, 'ball', 2, 2), (4, 'hammer', 1, 7)"
+    ]
+
+    try do
+      Enum.each(ddl, fn sql -> assert {:ok, _} = adapter.execute(conn, sql, [], []) end)
+
+      query =
+        products
+        |> duplicate_name_domain(categories)
+        |> Selecto.configure(conn, adapter: adapter, validate: false)
+        |> Selecto.select(["name", "category.name", {:field, "price", "total"}])
+        |> Selecto.filter({"price", {:gt, 3}})
+
+      assert {:ok, 3, count} =
+               Selecto.Executor.execute_count_with_metadata(query, analyze_complexity: false)
+
+      assert count.params == [3]
+
+      grouped =
+        query
+        |> Map.update!(:set, &Map.put(&1, :selected, ["name", "category.name"]))
+        |> Selecto.group_by(["name", "category.name"])
+
+      assert {:ok, 2, _grouped} =
+               Selecto.Executor.execute_count_with_metadata(grouped, analyze_complexity: false)
+
+      assert {:ok, total, _sum} =
+               Selecto.Executor.execute_projection_sum_with_metadata(
+                 %{query | adapter: sum_adapter(adapter)},
+                 "total",
+                 analyze_complexity: false
+               )
+
+      assert normalize_scalar(total) == "22"
+    after
+      Enum.each([products, categories], fn table ->
+        adapter.execute(conn, "DROP TABLE #{table}", [], [])
+      end)
+    end
+  end
+
+  defmodule ProjectionSumAdapter do
+    @moduledoc false
+    # Wraps a live fixture adapter to advertise :projection_sum.
+    def wrap(adapter) do
+      module = Module.concat(__MODULE__, adapter)
+
+      unless Code.ensure_loaded?(module) do
+        Module.create(
+          module,
+          quote do
+            def name, do: unquote(adapter).name()
+            defdelegate connect(opts), to: unquote(adapter)
+            defdelegate execute(conn, query, params, opts), to: unquote(adapter)
+            defdelegate placeholder(index), to: unquote(adapter)
+            defdelegate quote_identifier(identifier), to: unquote(adapter)
+            defdelegate dialect(), to: unquote(adapter)
+            def supports?(:projection_sum), do: true
+            def supports?(feature), do: unquote(adapter).supports?(feature)
+          end,
+          Macro.Env.location(__ENV__)
+        )
+      end
+
+      module
+    end
+  end
+
+  defp sum_adapter(adapter) do
+    if adapter.supports?(:projection_sum), do: adapter, else: ProjectionSumAdapter.wrap(adapter)
+  end
+
+  defp duplicate_name_domain(products, categories) do
+    %{
+      name: "CrossDB duplicate column names",
+      source: %{
+        source_table: products,
+        primary_key: :id,
+        fields: [:id, :name, :category_id, :price],
+        redact_fields: [],
+        columns: %{
+          id: %{type: :integer},
+          name: %{type: :string},
+          category_id: %{type: :integer},
+          price: %{type: :integer}
+        },
+        associations: %{
+          category: %{
+            queryable: :categories,
+            field: :category,
+            owner_key: :category_id,
+            related_key: :id
+          }
+        }
+      },
+      schemas: %{
+        categories: %{
+          source_table: categories,
+          primary_key: :id,
+          fields: [:id, :name],
+          redact_fields: [],
+          columns: %{id: %{type: :integer}, name: %{type: :string}},
+          associations: %{}
+        }
+      },
+      joins: %{category: %{type: :left, name: "category"}}
+    }
   end
 
   defp assert_stream_capability_error(adapter, conn) do
