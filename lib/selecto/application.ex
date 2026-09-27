@@ -6,7 +6,8 @@ defmodule Selecto.Application do
   The optional connection pool runtime (`Selecto.ConnectionPool.Runtime`)
   and the performance query cache (`Selecto.Performance.QueryCache`) are
   started lazily on first use; hosts that prefer supervised lifecycle
-  management may add them to their own supervision tree instead.
+  management may add them to their own supervision tree instead (for the
+  pool runtime, `children = [Selecto.ConnectionPool.Runtime, ...]`).
   """
 
   use Application

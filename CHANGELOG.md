@@ -3,6 +3,15 @@
 
 ## Unreleased
 
+- Fix a race when concurrent first pooled queries start the connection-pool
+  runtime lazily: `Selecto.ConnectionPool.Runtime.ensure_started/0` now waits
+  until the pool registry and manager supervisor are ready, instead of
+  returning as soon as the runtime name is registered. Previously some callers
+  raised `ArgumentError` (`unknown registry` / `not a key that exists in the
+  table`) or exited with `:noproc`. `Selecto.ConnectionPool.Runtime` now has
+  public docs, `child_spec/1` for hosts that supervise it explicitly, and
+  `ready?/0`.
+
 - Resolve custom-column aliases in window expressions, including cycle detection.
 
 - Add `Selecto.Configuration.Provider` for host-owned source definitions and
