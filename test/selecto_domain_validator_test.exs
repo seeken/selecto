@@ -4,6 +4,36 @@ defmodule Selecto.DomainValidatorTest do
   alias Selecto.DomainValidator.ValidationError
   alias Selecto.ViewPublisher
 
+  test "relation contracts preserve composite keys and validate each member" do
+    relation = %{primary_key: [:order_id, "product_id"], fields: [:order_id, :product_id]}
+
+    validate = fn relation ->
+      Selecto.Domain.Contract.Relations.validate_relation_primary_key(
+        [],
+        :order_detail,
+        relation,
+        [:schemas, :order_detail]
+      )
+    end
+
+    assert validate.(relation) == []
+
+    domain = %{
+      source: %{
+        associations: %{details: %{queryable: :details, related_key: :order_id, owner_key: :id}}
+      },
+      schemas: %{details: relation}
+    }
+
+    assert Selecto.Domain.Values.foreign_keys(domain) == {%{}, []}
+
+    assert [%{code: :primary_key_not_found}] = validate.(%{relation | fields: [:order_id]})
+
+    for key <- [[], [:order_id, "order_id"], [:order_id, 2]] do
+      assert [%{code: :invalid_primary_key}] = validate.(%{relation | primary_key: key})
+    end
+  end
+
   describe "validate_domain/1" do
     test "validates successful domain configuration" do
       valid_domain = %{

@@ -250,6 +250,18 @@ defmodule Selecto.Domain.Contract.Relations do
       not Core.has_key?(relation, :primary_key) ->
         errors
 
+      is_list(primary_key) and primary_key != [] and
+        Enum.all?(primary_key, &Core.field_ref?/1) and
+          length(Enum.uniq(Enum.map(primary_key, &to_string/1))) == length(primary_key) ->
+        Enum.reduce(primary_key, errors, fn field, acc ->
+          validate_relation_primary_key(
+            acc,
+            relation_id,
+            Map.put(relation, :primary_key, field),
+            path
+          )
+        end)
+
       not is_nil(primary_key) and Core.field_ref?(primary_key) and not is_list(fields) ->
         errors
 
@@ -274,9 +286,9 @@ defmodule Selecto.Domain.Contract.Relations do
           Core.error(
             :invalid_primary_key,
             path ++ [:primary_key],
-            "domain relation #{inspect(relation_id)} primary_key must be an atom or string",
+            "domain relation #{inspect(relation_id)} primary_key must be an atom, string, or non-empty list of distinct fields",
             relation: relation_id,
-            expected: "atom or string",
+            expected: "atom, string, or non-empty list of distinct fields",
             actual: Core.value_type(primary_key)
           )
           | errors

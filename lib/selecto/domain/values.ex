@@ -21,7 +21,8 @@ defmodule Selecto.Domain.Values do
 
       one? =
         cardinality in [:one, "one"] or
-          (is_nil(cardinality) and to_string(related_key) == to_string(primary_key))
+          (is_nil(cardinality) and Core.field_ref?(related_key) and
+             Core.field_ref?(primary_key) and to_string(related_key) == to_string(primary_key))
 
       if is_list(rows) and direct? and one? do
         key = to_string(owner_key)

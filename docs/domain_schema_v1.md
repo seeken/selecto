@@ -269,7 +269,10 @@ Validation checks:
 
 - `source` and `schemas` must be present in the authored domain.
 - `source_table` must be an atom or string.
-- `primary_key` must be an atom or string and must appear in `fields`.
+- `primary_key` is an atom/string field reference or a non-empty list of distinct
+  field references for a composite identity. Every member must appear in `fields`.
+  This preserves composite relation metadata; features requiring a scalar root
+  identity (such as canned pages) retain their own scalar-key restrictions.
 - `fields` must be a list.
 - `columns` must be a map.
 - Every listed field must have a matching column definition.
