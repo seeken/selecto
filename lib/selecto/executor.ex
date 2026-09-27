@@ -41,7 +41,7 @@ defmodule Selecto.Executor do
   end
 
   defp do_execute(%Selecto{provider: provider} = selecto, opts) when not is_nil(provider) do
-    provider.execute(selecto, selecto.provider_context, opts)
+    Selecto.Configuration.Provider.invoke(selecto, :execute, [opts])
   end
 
   defp do_execute(selecto, opts) do
@@ -234,9 +234,13 @@ defmodule Selecto.Executor do
   """
   @spec execute_with_metadata(Selecto.Types.t(), Selecto.Types.execute_options()) ::
           {:ok, Selecto.Types.execute_result(), map()} | {:error, Selecto.Error.t()}
-  def execute_with_metadata(selecto, opts \\ []) do
-    Selecto.Configuration.Provider.ensure_sql_execution!(selecto)
+  def execute_with_metadata(selecto, opts \\ [])
 
+  def execute_with_metadata(%Selecto{provider: provider} = selecto, opts)
+      when not is_nil(provider),
+      do: Selecto.Configuration.Provider.invoke(selecto, :execute_with_metadata, [opts])
+
+  def execute_with_metadata(selecto, opts) do
     Selecto.Telemetry.operation(:execute_with_metadata, selecto, fn ->
       do_execute_with_metadata(selecto, opts)
     end)
@@ -313,9 +317,13 @@ defmodule Selecto.Executor do
   """
   @spec execute_count_with_metadata(Selecto.Types.t(), Selecto.Types.execute_options()) ::
           {:ok, non_neg_integer(), map()} | {:error, Selecto.Error.t()}
-  def execute_count_with_metadata(selecto, opts \\ []) do
-    Selecto.Configuration.Provider.ensure_sql_execution!(selecto)
+  def execute_count_with_metadata(selecto, opts \\ [])
 
+  def execute_count_with_metadata(%Selecto{provider: provider} = selecto, opts)
+      when not is_nil(provider),
+      do: Selecto.Configuration.Provider.invoke(selecto, :execute_count_with_metadata, [opts])
+
+  def execute_count_with_metadata(selecto, opts) do
     Selecto.Telemetry.operation(:count, selecto, fn ->
       do_execute_count_with_metadata(selecto, opts)
     end)
@@ -332,9 +340,17 @@ defmodule Selecto.Executor do
           binary(),
           Selecto.Types.execute_options()
         ) :: {:ok, term(), map()} | {:error, Selecto.Error.t()}
-  def execute_projection_sum_with_metadata(selecto, column, opts \\ []) do
-    Selecto.Configuration.Provider.ensure_sql_execution!(selecto)
+  def execute_projection_sum_with_metadata(selecto, column, opts \\ [])
 
+  def execute_projection_sum_with_metadata(%Selecto{provider: provider} = selecto, column, opts)
+      when not is_nil(provider),
+      do:
+        Selecto.Configuration.Provider.invoke(selecto, :execute_projection_sum_with_metadata, [
+          column,
+          opts
+        ])
+
+  def execute_projection_sum_with_metadata(selecto, column, opts) do
     Selecto.Telemetry.operation(:projection_sum, selecto, fn ->
       do_execute_projection_sum_with_metadata(selecto, column, opts)
     end)
@@ -466,8 +482,12 @@ defmodule Selecto.Executor do
   support and implements `stream/4`.
   """
   @spec execute_stream(Selecto.Types.t(), keyword()) :: Selecto.Types.safe_execute_stream_result()
-  def execute_stream(selecto, opts \\ []) do
-    Selecto.Configuration.Provider.ensure_sql_execution!(selecto)
+  def execute_stream(selecto, opts \\ [])
+
+  def execute_stream(%Selecto{provider: provider} = selecto, opts) when not is_nil(provider),
+    do: Selecto.Configuration.Provider.invoke(selecto, :execute_stream, [opts])
+
+  def execute_stream(selecto, opts) do
     Selecto.Telemetry.operation(:stream_open, selecto, fn -> do_execute_stream(selecto, opts) end)
   end
 

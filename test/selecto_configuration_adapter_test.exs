@@ -60,6 +60,18 @@ defmodule Selecto.ConfigurationAdapterTest do
     assert {:ok, {[9], ["id"]}} = Selecto.execute_one(query)
   end
 
+  test "unsupported optional provider callbacks return structured errors" do
+    query =
+      Selecto.configure(domain(), Selecto.Runtime.Context.new(FakeAdapter, nil),
+        provider: FakeProvider
+      )
+
+    assert {:error, %Selecto.Error{type: :validation_error}} =
+             Selecto.execute_with_metadata(query)
+
+    assert {:error, %Selecto.Error{type: :validation_error}} = Selecto.execute_stream(query)
+  end
+
   test "provider configuration still validates ordinary options and provider modules" do
     runtime = Selecto.Runtime.Context.new(FakeAdapter, nil)
 

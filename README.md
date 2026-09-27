@@ -144,8 +144,10 @@ Selecto.configure(MyApp.Blog.Post, MyApp.Repo,
 Providers implement `Selecto.Configuration.Provider`: `configure/2` supplies
 the domain, core configuration options, and opaque execution context;
 `execute/3` returns the normal Selecto row result. `execute_one/2` also uses the
-provider. SQL metadata and streaming helpers reject provider queries. Each
-provider defines its supported query subset and enforces its authorization.
+provider. Optional provider callbacks handle metadata, counts, projection sums,
+and streaming; missing callbacks return structured errors. Strict governance
+is checked before dispatch. Each provider defines its query capabilities and
+enforces its authorization.
 Existing domain-map configuration continues to use the SQL executor.
 
 ## Strict Mode

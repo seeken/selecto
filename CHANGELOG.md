@@ -3,9 +3,12 @@
 
 ## Unreleased
 
+- Resolve custom-column aliases in window expressions, including cycle detection.
+
 - Add `Selecto.Configuration.Provider` for host-owned source definitions and
   provider execution through `Selecto.execute/2` and `execute_one/2`.
-  Provider queries reject SQL-only metadata and streaming helpers.
+  Optional provider callbacks handle metadata, counts, sums, and streams, with
+  strict governance validation before dispatch.
 
 - `Selecto.Expr.text_contains/2` builds a literal substring filter
   (`LIKE '%value%' ESCAPE '!'`) with `%`, `_`, and `!` in the value escaped,

@@ -282,19 +282,24 @@ defmodule Selecto.Builder.Window do
   end
 
   # Resolve field references (handle joins if needed)
-  defp resolve_field_reference(_selecto, field) when is_binary(field) do
-    # Simple implementation - use field resolver or just return field
-    # This should integrate with Selecto's field resolution system
-    if String.contains?(field, ".") do
-      # Already qualified
-      field
-    else
-      # Root fields should reference the query alias used in FROM.
-      "selecto_root.#{field}"
+  defp resolve_field_reference(selecto, field), do: resolve_field_reference(selecto, field, [])
+
+  defp resolve_field_reference(selecto, field, seen) when is_binary(field) or is_atom(field) do
+    name = to_string(field)
+    if name in seen, do: raise(ArgumentError, "Cyclic window field alias: #{name}")
+
+    field_info = if is_map(selecto.config), do: Selecto.field(selecto, field), else: nil
+
+    case field_info do
+      %{select: source} when is_binary(source) and source != name ->
+        resolve_field_reference(selecto, source, [name | seen])
+
+      _ ->
+        if String.contains?(name, "."), do: name, else: "selecto_root.#{name}"
     end
   end
 
-  defp resolve_field_reference(_selecto, field), do: to_string(field)
+  defp resolve_field_reference(_selecto, field, _seen), do: to_string(field)
 
   # Extract joins required for window function fields
   defp extract_required_joins(selecto, %Spec{
