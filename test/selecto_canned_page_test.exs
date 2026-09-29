@@ -143,6 +143,54 @@ defmodule Selecto.CannedPageTest do
     end
   end
 
+  test "pages over a tenant_field domain require a tenant boundary" do
+    domain = base().domain
+    domain = put_in(domain, [:source, :fields], domain.source.fields ++ [:tenant_id])
+    domain = put_in(domain, [:source, :columns, :tenant_id], %{type: :string})
+    domain = put_in(domain, [:source, :tenant_field], :tenant_id)
+    query = Selecto.configure(domain, :mock_connection)
+    page = page(query)
+
+    # The domain's required `active = true` and the page's `price >= 1` are
+    # not tenant boundaries, and browser state never supplies one.
+    for {authorized, input} <- [
+          {query, %{}},
+          {Selecto.filter(query, {:or, [{"tenant_id", "acme"}, {"id", 1}]}), %{}},
+          {Selecto.filter(query, {:not, {"tenant_id", "beta"}}), %{}},
+          {query, %{"filters" => %{"category" => ["acme"]}}}
+        ] do
+      assert {:error, %Selecto.Error{details: %{code: :missing_tenant_scope}}} =
+               CannedPage.plan(page, authorized, input)
+
+      assert {:error, %Selecto.Error{details: %{code: :missing_tenant_scope}}} =
+               CannedPage.run(page, authorized, input)
+    end
+
+    for authorized <- [
+          Selecto.filter(query, {"tenant_id", "acme"}),
+          Selecto.filter(query, {:and, [{"tenant_id", {:in, ["acme"]}}, {"id", {:gt, 0}}]})
+        ] do
+      assert {:ok, _plan} = CannedPage.plan(page, authorized, %{})
+    end
+
+    # A page whose server-authored dataset filters carry the tenant is bounded.
+    tenant_page =
+      CannedPage.new!(Selecto.filter(query, {"tenant_id", "acme"}),
+        id: "tenant_products",
+        views: [%{id: "detail", kind: :detail, query: Selecto.select(query, ["id", "name"])}]
+      )
+
+    assert {:ok, _plan} = CannedPage.plan(tenant_page, query, %{})
+
+    # A trusted tenant bounds the page and is ANDed into every derived query.
+    attached = Selecto.with_tenant(query, %{tenant_id: "acme", tenant_field: "tenant_id"})
+    assert {:ok, plan} = CannedPage.plan(page, attached, %{})
+
+    for derived <- [plan.query, plan.total_query] do
+      assert {"tenant_id", "acme"} in Selecto.required_filters(derived)
+    end
+  end
+
   test "tenant authorization survives every derived query" do
     base = base()
     domain = base.domain

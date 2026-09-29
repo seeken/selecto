@@ -27,6 +27,16 @@ state without a database; `plan/3` returns query objects for inspection;
 `run/3` executes through public metadata APIs in the caller's process,
 preserving a host-owned transaction or sandbox checkout.
 
+On a domain that declares `source.tenant_field`, `plan/3` and `run/3` require a
+tenant boundary (certification specification 2.19.0): a positive tenant
+conjunct (equality to a defined scalar, or a nonempty IN list, at the top level
+or beneath AND) in the authorized query's required or host filters or in the
+definition's dataset filters, or a trusted tenant attached with
+`Selecto.with_tenant/2`, which is then ANDed into every derived query. Other
+filters, tenant conditions beneath OR or NOT, and browser state never count;
+without a boundary both return `{:error, %Selecto.Error{details: %{code:
+:missing_tenant_scope}}}`. Domains without `tenant_field` are unchanged.
+
 State has string keys: `version`, `view`, `filters`, `facet_search`, `drilldown`,
 `page`, `limit`. Unknown keys, views and control IDs fail closed. Missing filters
 use initial defaults; an empty filters map clears them. Results include rows,

@@ -24,6 +24,17 @@ value, label, and description fields, this host-side fragment executes a lookup:
   )
 ```
 
+When the target domain declares `source.tenant_field`, the lookup requires a
+tenant boundary (certification specification 2.19.0): a positive tenant
+conjunct (equality to a defined scalar, or a nonempty IN list, at the top level
+or beneath AND) in the target's required or host filters or in `scope`, or a
+trusted tenant attached with `Selecto.with_tenant/2`, which is then ANDed into
+the lookup. Any other scope, including a tenant condition beneath OR or NOT,
+fails: `lookup/5` returns `{:error, %Selecto.Error{details: %{code:
+:missing_tenant_scope}}}` and `plan/5` raises a `RuntimeError` whose message
+starts with `missing_tenant_scope`. Domains without `tenant_field`
+are unchanged. See `Selecto.Tenant.tenant_boundary/2`.
+
 Return only `results` to the browser; the returned `query` is host-side metadata.
 `Selecto.CoDomain.plan/5` builds the same query without executing it. Target
 required filters are retained and host scope is conjoined. Lookup text is

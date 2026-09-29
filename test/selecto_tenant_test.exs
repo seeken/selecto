@@ -338,6 +338,170 @@ defmodule Selecto.TenantTest do
              Selecto.execute(query, analyze_complexity: false)
   end
 
+  defp tenant_field_domain(required_filters, writes \\ nil) do
+    domain =
+      domain()
+      |> put_in([:source, :tenant_field], :tenant_id)
+      |> Map.put(:required_filters, required_filters)
+
+    if writes, do: Map.put(domain, :writes, writes), else: domain
+  end
+
+  defp scoped_writes,
+    do: %{scope: %{tenant: %{required: true, field: :tenant_id}}}
+
+  describe "tenant boundary (specification 2.19.0)" do
+    test "tenant_conjunct? admits only positive equality or nonempty IN at top level or beneath AND" do
+      admitted = [
+        [{"tenant_id", "acme"}],
+        [{:tenant_id, 7}],
+        [{"tenant_id", {:eq, "acme"}}],
+        [{"tenant_id", {:=, "acme"}}],
+        [{"tenant_id", {"=", "acme"}}],
+        [{"tenant_id", {:in, ["acme", "beta"]}}],
+        [{"tenant_id", ["acme"]}],
+        [{"active", true}, {"tenant_id", "acme"}],
+        [{:and, [{"active", true}, {:and, [{"tenant_id", {:in, ["acme"]}}]}]}]
+      ]
+
+      for filters <- admitted do
+        assert Selecto.Tenant.tenant_conjunct?(filters, "tenant_id"), inspect(filters)
+        assert Selecto.Tenant.tenant_conjunct?(filters, :tenant_id), inspect(filters)
+      end
+
+      refused = [
+        [],
+        [{"id", 4}],
+        [{"active", true}],
+        [{:or, [{"tenant_id", "acme"}, {"id", 4}]}],
+        [{:not, {"tenant_id", "beta"}}],
+        [{:and, [{:or, [{"tenant_id", "acme"}]}]}],
+        [{"tenant_id", nil}],
+        [{"tenant_id", {:eq, nil}}],
+        [{"tenant_id", :not_null}],
+        [{"tenant_id", {:in, []}}],
+        [{"tenant_id", []}],
+        [{"tenant_id", {:in, ["acme", nil]}}],
+        [{"tenant_id", {:ref, "id"}}],
+        [{"tenant_id", {:eq, {:ref, "id"}}}],
+        [{"tenant_id", {:not_in, ["beta"]}}],
+        [{"tenant_id", {:!=, "beta"}}],
+        [{"tenant_id", {:gt, "a"}}],
+        [{"tenant_id", {:like, "a%"}}],
+        [{"other.tenant_id", "acme"}],
+        [{:and, []}]
+      ]
+
+      for filters <- refused do
+        refute Selecto.Tenant.tenant_conjunct?(filters, "tenant_id"), inspect(filters)
+      end
+    end
+
+    test "domains without tenant_field need no boundary" do
+      assert Selecto.Tenant.domain_tenant_field(domain()) == nil
+      assert {:ok, :not_required} = Selecto.Tenant.tenant_boundary(selecto(domain()))
+
+      assert {:ok, :not_required} =
+               Selecto.Tenant.tenant_boundary(selecto(domain()), access: :write)
+    end
+
+    test "a tenant conjunct in the trusted host scope bounds reads and writes" do
+      for required <- [
+            [{"tenant_id", "acme"}],
+            [{:and, [{"tenant_id", {:in, ["acme"]}}, {"id", {:in, [1, 2]}}]}]
+          ],
+          access <- [:read, :write] do
+        query = selecto(tenant_field_domain(required))
+        assert Selecto.Tenant.domain_tenant_field(query) == "tenant_id"
+        assert {:ok, :host_scope} = Selecto.Tenant.tenant_boundary(query, access: access)
+      end
+
+      host_filtered =
+        tenant_field_domain([]) |> selecto() |> Selecto.filter({"tenant_id", "acme"})
+
+      assert {:ok, :host_scope} = Selecto.Tenant.tenant_boundary(host_filtered, access: :write)
+
+      assert {:ok, :host_scope} =
+               Selecto.Tenant.tenant_boundary(selecto(tenant_field_domain([])),
+                 scope: {"tenant_id", "acme"}
+               )
+    end
+
+    test "non-tenant, OR, NOT and absent host scopes fail with missing_tenant_scope" do
+      for required <- [
+            [{"id", 4}],
+            [{"active", true}],
+            [{:or, [{"tenant_id", "acme"}, {"id", 4}]}],
+            [{:not, {"tenant_id", "beta"}}],
+            []
+          ],
+          access <- [:read, :write] do
+        query = selecto(tenant_field_domain(required))
+
+        assert {:error, %Selecto.Error{details: %{code: :missing_tenant_scope}}} =
+                 Selecto.Tenant.tenant_boundary(query, access: access)
+
+        assert {:error, %Selecto.Error{details: %{code: :missing_tenant_scope}}} =
+                 Selecto.Tenant.require_read_boundary(query, scope: [{"id", 4}])
+      end
+    end
+
+    test "a trusted tenant bounds reads, and writes only under writes.scope.tenant" do
+      attached =
+        tenant_field_domain([])
+        |> selecto()
+        |> Selecto.with_tenant(%{tenant_id: "acme", tenant_field: "tenant_id"})
+
+      assert {:ok, {:tenant, "acme"}} = Selecto.Tenant.tenant_boundary(attached)
+
+      assert {:error, %Selecto.Error{details: %{code: :missing_tenant_scope}}} =
+               Selecto.Tenant.tenant_boundary(attached, access: :write)
+
+      scoped =
+        tenant_field_domain([], scoped_writes())
+        |> selecto()
+        |> Selecto.with_tenant(%{tenant_id: "acme", tenant_field: "tenant_id"})
+
+      assert {:ok, {:tenant, "acme"}} = Selecto.Tenant.tenant_boundary(scoped, access: :write)
+
+      # A tenant attached for another field is not this domain's boundary.
+      other =
+        tenant_field_domain([], scoped_writes())
+        |> selecto()
+        |> Selecto.with_tenant(%{tenant_id: "acme", tenant_field: "account_id"})
+
+      assert {:error, _} = Selecto.Tenant.tenant_boundary(other)
+      assert {:error, _} = Selecto.Tenant.tenant_boundary(other, access: :write)
+    end
+
+    test "require_read_boundary ANDs a trusted tenant into the read" do
+      attached =
+        tenant_field_domain([])
+        |> selecto()
+        |> Selecto.with_tenant(%{tenant_id: "acme", tenant_field: "tenant_id"})
+        |> Selecto.select(["id"])
+
+      assert {:ok, bounded} = Selecto.Tenant.require_read_boundary(attached)
+      assert {"tenant_id", "acme"} in Selecto.required_filters(bounded)
+      {_sql, params} = Selecto.to_sql(bounded)
+      assert "acme" in params
+
+      conjunct = tenant_field_domain([{"tenant_id", "acme"}]) |> selecto()
+      assert {:ok, ^conjunct} = Selecto.Tenant.require_read_boundary(conjunct)
+    end
+
+    test "direct reads stay permissive" do
+      query =
+        tenant_field_domain([])
+        |> selecto()
+        |> Selecto.select(["id"])
+        |> Map.put(:adapter, Adapter)
+        |> Map.put(:connection, :ok)
+
+      assert {:ok, {[[1]], ["id"], _aliases}} = Selecto.execute(query, analyze_complexity: false)
+    end
+  end
+
   test "execute succeeds when tenant required scope is present" do
     query =
       tenant_required_domain()

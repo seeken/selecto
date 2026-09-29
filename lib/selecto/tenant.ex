@@ -5,6 +5,11 @@ defmodule Selecto.Tenant do
   This module provides a lightweight tenant context contract for read-path
   queries. Tenant scope is enforced by appending tenant constraints to the
   query's required filter bucket (`set.required_filters`).
+
+  `tenant_boundary/2` is the tenant boundary that public surfaces (the API
+  query and write handlers, canned pages and co-domain lookups) require on a
+  domain that declares `source.tenant_field`; `tenant_conjunct?/2` is its
+  positive-tenant-conjunct rule.
   """
 
   @default_tenant_field "tenant_id"
@@ -199,6 +204,125 @@ defmodule Selecto.Tenant do
     case validate_scope(selecto, opts) do
       :ok -> :ok
       {:error, error} -> raise Selecto.Error.to_exception(error)
+    end
+  end
+
+  @doc """
+  Return the tenant field a domain declares at `source.tenant_field`, or `nil`.
+
+  Accepts a Selecto query or a domain map. The field is returned as a string.
+  """
+  @spec domain_tenant_field(Selecto.Types.t() | map()) :: String.t() | nil
+  def domain_tenant_field(%Selecto{domain: domain}), do: domain_tenant_field(domain)
+
+  def domain_tenant_field(domain) when is_map(domain) do
+    case domain |> lenient_get(:source) |> lenient_get(:tenant_field) do
+      nil -> nil
+      field -> normalize_field(field)
+    end
+  end
+
+  def domain_tenant_field(_domain), do: nil
+
+  @doc """
+  Return whether `filters` hold a positive tenant conjunct on `tenant_field`.
+
+  A positive tenant conjunct is an equality of the tenant field to a defined
+  scalar (a string, number or boolean), or a nonempty IN list of defined
+  scalars, either at the top level of the filter list or beneath `:and`.
+  Conditions beneath `:or` or `:not`, `nil` values, references, subqueries and
+  any other operator never count. A list of filters is read as a conjunction,
+  as Selecto applies required and query filters.
+
+  This is the query-enforced-write tenant rule, and it is the second way to
+  satisfy `tenant_boundary/2`.
+  """
+  @spec tenant_conjunct?(Selecto.Types.filter() | [Selecto.Types.filter()], atom() | String.t()) ::
+          boolean()
+  def tenant_conjunct?(filters, tenant_field) when is_list(filters),
+    do: Enum.any?(filters, &conjunct?(&1, normalize_field(tenant_field)))
+
+  def tenant_conjunct?(filter, tenant_field),
+    do: conjunct?(filter, normalize_field(tenant_field))
+
+  @doc """
+  Check the tenant boundary a public surface requires on a domain that declares
+  `source.tenant_field` (certification specification 2.19.0).
+
+  Public surfaces are the API query and write handlers, canned pages and
+  co-domain lookups. Direct `Selecto.execute/2` reads are not public surfaces
+  and remain available for trusted reads that span tenants.
+
+  A surface has a boundary when either holds:
+
+    1. The query carries a trusted tenant attached with `with_tenant/2` whose
+       tenant field is the domain's tenant field. For writes the domain must
+       also declare `writes.scope.tenant` on that field, and the write executor
+       applies the tenant. For reads the caller ANDs the tenant into the read,
+       as `require_read_boundary/2` does.
+    2. The trusted host scope holds a positive tenant conjunct (see
+       `tenant_conjunct?/2`). The trusted host scope is the domain and query
+       required filters, the filters the host applied before handing the query
+       to the surface, and any `:scope` the surface itself accepts. Request
+       input never contributes to it, so call this before applying any.
+
+  Options:
+
+    * `:access` - `:read` (default) or `:write`.
+    * `:scope` - a filter or list of filters the surface accepts from the host,
+      such as a co-domain lookup scope.
+
+  Returns `{:ok, :not_required}` when the domain declares no tenant field,
+  `{:ok, {:tenant, tenant_id}}` when the trusted tenant bounds the surface,
+  `{:ok, :host_scope}` when a tenant conjunct does, and otherwise an error whose
+  `details.code` is `:missing_tenant_scope`.
+  """
+  @spec tenant_boundary(Selecto.Types.t(), keyword()) ::
+          {:ok, :not_required | :host_scope | {:tenant, term()}} | {:error, Selecto.Error.t()}
+  def tenant_boundary(selecto, opts \\ []) do
+    access = Keyword.get(opts, :access, :read)
+
+    unless access in [:read, :write],
+      do: raise(ArgumentError, "tenant boundary access must be :read or :write")
+
+    case domain_tenant_field(selecto) do
+      nil ->
+        {:ok, :not_required}
+
+      field ->
+        tenant_id = trusted_tenant(selecto, field)
+
+        cond do
+          not is_nil(tenant_id) and (access == :read or write_scope_field(selecto) == field) ->
+            {:ok, {:tenant, tenant_id}}
+
+          tenant_conjunct?(trusted_host_scope(selecto, opts), field) ->
+            {:ok, :host_scope}
+
+          true ->
+            {:error,
+             Selecto.Error.validation_error("Trusted tenant scope is required", %{
+               code: :missing_tenant_scope,
+               tenant_field: field
+             })}
+        end
+    end
+  end
+
+  @doc """
+  Require the read tenant boundary of `tenant_boundary/2` and AND a trusted
+  tenant into the query's required filters when the tenant is the boundary.
+
+  Returns the query to execute or the `:missing_tenant_scope` error. Accepts the
+  same `:scope` option.
+  """
+  @spec require_read_boundary(Selecto.Types.t(), keyword()) ::
+          {:ok, Selecto.Types.t()} | {:error, Selecto.Error.t()}
+  def require_read_boundary(selecto, opts \\ []) do
+    case tenant_boundary(selecto, Keyword.put(opts, :access, :read)) do
+      {:ok, {:tenant, _tenant_id}} -> {:ok, apply_tenant_scope(selecto)}
+      {:ok, _boundary} -> {:ok, selecto}
+      {:error, _error} = error -> error
     end
   end
 
@@ -505,6 +629,58 @@ defmodule Selecto.Tenant do
 
   defp present_string?(value) when is_binary(value), do: byte_size(value) > 0
   defp present_string?(_), do: false
+
+  # Boolean composition is matched before the field clauses, so an `:or` or
+  # `:not` branch can never read as a field named "or" or "not".
+  defp conjunct?({:and, filters}, field) when is_list(filters),
+    do: Enum.any?(filters, &conjunct?(&1, field))
+
+  defp conjunct?({operator, _filters}, _field) when operator in [:or, :not], do: false
+
+  defp conjunct?({filter_field, value}, field)
+       when is_atom(filter_field) or is_binary(filter_field),
+       do: normalize_field(filter_field) == field and positive_tenant_value?(value)
+
+  defp conjunct?(_filter, _field), do: false
+
+  defp positive_tenant_value?({:in, values}) when is_list(values), do: defined_scalars?(values)
+
+  defp positive_tenant_value?({operator, value}) when operator in [:eq, :=, "="],
+    do: defined_scalar?(value)
+
+  defp positive_tenant_value?(values) when is_list(values), do: defined_scalars?(values)
+  defp positive_tenant_value?(value), do: defined_scalar?(value)
+
+  defp defined_scalars?(values), do: values != [] and Enum.all?(values, &defined_scalar?/1)
+
+  defp defined_scalar?(value), do: is_binary(value) or is_number(value) or is_boolean(value)
+
+  defp trusted_tenant(selecto, field) do
+    context = tenant(selecto) || %{}
+    tenant_id = Map.get(context, :tenant_id)
+
+    if defined_scalar?(tenant_id) and normalize_field(Map.get(context, :tenant_field)) == field,
+      do: tenant_id
+  end
+
+  defp write_scope_field(%Selecto{domain: domain}) do
+    tenant = domain |> lenient_get(:writes) |> lenient_get(:scope) |> lenient_get(:tenant)
+
+    case lenient_get(tenant, :field) || lenient_get(tenant, :tenant_field) do
+      nil -> nil
+      field -> normalize_field(field)
+    end
+  end
+
+  defp trusted_host_scope(selecto, opts) do
+    Selecto.Query.required_filters(selecto) ++
+      Selecto.Query.pre_retarget_filters(selecto) ++ List.wrap(Keyword.get(opts, :scope))
+  end
+
+  defp lenient_get(map, key) when is_map(map),
+    do: Map.get(map, key, Map.get(map, Atom.to_string(key)))
+
+  defp lenient_get(_map, _key), do: nil
 
   defp uniq_filters(filters) do
     Enum.reduce(filters, [], fn filter, acc ->

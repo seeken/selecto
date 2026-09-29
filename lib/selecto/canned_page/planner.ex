@@ -7,7 +7,12 @@ defmodule Selecto.CannedPage.Planner do
     Definition.plain!(authorized)
     if authorized.domain != page.domain, do: raise(ArgumentError, "page domain mismatch")
 
-    with {:ok, state} <- State.normalize(page, input) do
+    # A page over a tenant_field domain needs a tenant boundary in the
+    # authorized query or the page's server-authored dataset filters; browser
+    # state never supplies one. A trusted tenant is ANDed into every query.
+    with {:ok, authorized} <-
+           Selecto.Tenant.require_read_boundary(authorized, scope: page.dataset_filters),
+         {:ok, state} <- State.normalize(page, input) do
       base = Selecto.filter(authorized, page.dataset_filters)
       view = Enum.find(page.views, &(&1.id == state["view"]))
       filtered = apply_controls(base, page, state)

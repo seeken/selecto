@@ -3,6 +3,17 @@
 
 ## Unreleased
 
+- Add the tenant boundary of certification specification 2.19.0.
+  `Selecto.Tenant.tenant_boundary/2` and `require_read_boundary/2` check a
+  domain that declares `source.tenant_field` for a trusted tenant (attached with
+  `with_tenant/2`; for writes only under `writes.scope.tenant` on that field) or
+  a positive tenant conjunct in the trusted host scope, as defined by the new
+  public `tenant_conjunct?/2`. `Selecto.CannedPage.plan/3`, `run/3`,
+  `Selecto.CoDomain.plan/5` and `lookup/5` now fail with
+  `missing_tenant_scope` without one, and AND a trusted tenant into their
+  queries. Direct `Selecto.execute/2` reads and domains without `tenant_field`
+  are unchanged.
+
 - Fix a race when concurrent first pooled queries start the connection-pool
   runtime lazily: `Selecto.ConnectionPool.Runtime.ensure_started/0` now waits
   until the pool registry and manager supervisor are ready, instead of

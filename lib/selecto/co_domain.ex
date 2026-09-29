@@ -23,8 +23,21 @@ defmodule Selecto.CoDomain do
     end
   end
 
-  @doc "Builds a bounded lookup query using the host-supplied target and scope."
+  @doc """
+  Builds a bounded lookup query using the host-supplied target and scope.
+
+  A target over a `tenant_field` domain needs a tenant boundary in its required
+  filters, its host filters, its trusted tenant, or the host `:scope`; without
+  one this raises a `RuntimeError` whose message starts with
+  `missing_tenant_scope`.
+  """
   def plan(source, %Selecto{} = target, id, text, opts \\ []) do
+    target =
+      case Selecto.Tenant.require_read_boundary(target, scope: Keyword.get(opts, :scope)) do
+        {:ok, target} -> target
+        {:error, _error} -> raise "missing_tenant_scope: trusted tenant scope is required"
+      end
+
     definition = definition(source, id)
     limit = Keyword.get(opts, :limit, 20)
 
@@ -112,20 +125,28 @@ defmodule Selecto.CoDomain do
     %{query: Selecto.limit(query, limit), result: result, indices: indices, empty?: text == ""}
   end
 
-  @doc "Executes the governed lookup through the host-supplied target adapter."
+  @doc """
+  Executes the governed lookup through the host-supplied target adapter.
+
+  Returns `{:error, %Selecto.Error{details: %{code: :missing_tenant_scope}}}`
+  when the target lacks the tenant boundary `plan/5` requires.
+  """
   def lookup(source, %Selecto{} = target, id, text, opts \\ []) do
-    plan = plan(source, target, id, text, opts)
+    with {:ok, target} <-
+           Selecto.Tenant.require_read_boundary(target, scope: Keyword.get(opts, :scope)) do
+      plan = plan(source, target, id, text, opts)
 
-    if plan.empty? do
-      {:ok, %{results: [], query: plan.query}}
-    else
-      case Selecto.execute(plan.query) do
-        {:ok, {rows, _columns, _aliases}} ->
-          results = Enum.flat_map(rows, &result_row(&1, plan))
-          {:ok, %{results: results, query: plan.query}}
+      if plan.empty? do
+        {:ok, %{results: [], query: plan.query}}
+      else
+        case Selecto.execute(plan.query) do
+          {:ok, {rows, _columns, _aliases}} ->
+            results = Enum.flat_map(rows, &result_row(&1, plan))
+            {:ok, %{results: results, query: plan.query}}
 
-        {:error, reason} ->
-          {:error, reason}
+          {:error, reason} ->
+            {:error, reason}
+        end
       end
     end
   end
