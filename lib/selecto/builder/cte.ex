@@ -152,13 +152,13 @@ defmodule Selecto.Builder.CteSql do
     # For recursive CTEs, we need special handling of the CTE reference
     cte_ref = create_cte_reference(spec.name)
 
+    {base_selecto, recursive_selecto, columns} =
+      bound_recursion(spec, spec.base_query.(), spec.recursive_query.(cte_ref))
+
     # Execute base query
-    base_selecto = spec.base_query.()
     {base_sql, _base_aliases, base_params} = Sql.build(base_selecto, emit_user_ctes: false)
 
     # Execute recursive query with CTE reference
-    recursive_selecto = spec.recursive_query.(cte_ref)
-
     {recursive_sql, _recursive_aliases, recursive_params} =
       Sql.build(recursive_selecto, emit_user_ctes: false)
 
@@ -182,7 +182,7 @@ defmodule Selecto.Builder.CteSql do
     cte_name = escape_identifier(spec.name)
 
     cte_definition =
-      case spec.columns do
+      case columns do
         nil ->
           [
             cte_name,
@@ -211,6 +211,60 @@ defmodule Selecto.Builder.CteSql do
     combined_params = base_params ++ recursive_params
     {cte_definition, combined_params}
   end
+
+  @depth_column "selecto_depth"
+
+  # A recursive CTE carries its level in a trailing selecto_depth column: 1 in
+  # the anchor and the previous level + 1 in the step, which stops at
+  # max_depth (default 100), so a cyclic or attacker-shaped hierarchy ends
+  # instead of running until the database gives up. The step must reach the
+  # CTE through a Selecto join; an explicit bound it cannot carry fails.
+  defp bound_recursion(%Spec{} = spec, base_selecto, recursive_selecto) do
+    explicit? = not is_nil(spec.max_depth) or spec.cycle_detection == true
+    max_depth = spec.max_depth || Selecto.Advanced.CTE.default_max_depth()
+
+    case recursive_join(recursive_selecto, spec.name) do
+      nil when explicit? ->
+        raise ArgumentError,
+              "recursive CTE #{spec.name} max_depth and cycle_detection require its " <>
+                "recursive query to join #{spec.name} with Selecto.join/3"
+
+      nil ->
+        {base_selecto, recursive_selecto, spec.columns}
+
+      join_id ->
+        if @depth_column in List.wrap(spec.columns) do
+          raise ArgumentError, "recursive CTE column #{@depth_column} is reserved"
+        end
+
+        base_selecto =
+          update_in(base_selecto.set.selected, &(&1 ++ [{:recursion_depth, :seed}]))
+
+        recursive_selecto =
+          update_in(
+            recursive_selecto.set.selected,
+            &(&1 ++ [{:recursion_depth, {:step, join_id}}])
+          )
+
+        recursive_selecto =
+          update_in(
+            recursive_selecto.set.filtered,
+            &(&1 ++ [{:recursion_depth_below, join_id, max_depth}])
+          )
+
+        {base_selecto, recursive_selecto, spec.columns && spec.columns ++ [@depth_column]}
+    end
+  end
+
+  defp recursive_join(%{set: set} = selecto, cte_name) when is_map(set) do
+    selecto
+    |> Selecto.joins()
+    |> Enum.find_value(fn {join_id, config} ->
+      if is_map(config) and to_string(Map.get(config, :source)) == cte_name, do: join_id
+    end)
+  end
+
+  defp recursive_join(_selecto, _cte_name), do: nil
 
   @doc """
   Create a CTE reference that can be used in joins and queries.

@@ -73,6 +73,15 @@ defmodule Selecto.Domain.WriteContract do
   @spec field_spec(t(), atom() | String.t()) :: map() | nil
   def field_spec(%__MODULE__{fields: fields}, field), do: Map.get(fields, Core.field_id(field))
 
+  @doc """
+  Whether the domain grants `field` to `operation` (`insertable` for insert
+  and upsert, `updatable` for update).
+
+  This is the grant only. The narrowing flags in `field_spec/2` still apply:
+  a write consumer refuses `server_managed` fields for every caller write and
+  `immutable` fields on update, sets `write_once` fields only while they are
+  `NULL`, and never rewrites any of them in an upsert's conflict update.
+  """
   @spec writable?(t(), atom(), atom() | String.t()) :: boolean()
   def writable?(%__MODULE__{} = contract, operation, field)
       when operation in [:insert, :upsert] do

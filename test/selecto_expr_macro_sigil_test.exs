@@ -24,7 +24,7 @@ defmodule Selecto.ExprMacroSigilTest do
     suffix = "air"
 
     assert where(starts_with(name, ^prefix) and ends_with(name, ^suffix)) ==
-             {:and, [{"name", {:starts_with, "Ch"}}, {"name", {:like, "%air"}}]}
+             {:and, [{"name", {:starts_with, "Ch"}}, {"name", {:ends_with, "air"}}]}
   end
 
   test "where macro supports text, array, and existence helpers" do

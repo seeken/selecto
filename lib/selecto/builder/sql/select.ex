@@ -873,6 +873,17 @@ defmodule Selecto.Builder.Sql.Select do
     {[sql], :selecto_root, []}
   end
 
+  # Level column of a depth-bounded recursive CTE (see Selecto.Builder.CteSql):
+  # 1 in the anchor, the joined previous level + 1 in the step.
+  def prep_selector(_selecto, {:recursion_depth, :seed}, _retarget_aliases) do
+    {["1 AS selecto_depth"], :selecto_root, []}
+  end
+
+  def prep_selector(selecto, {:recursion_depth, {:step, join_id}}, _retarget_aliases)
+      when is_atom(join_id) do
+    {[build_join_string(selecto, join_id), ".selecto_depth + 1"], join_id, []}
+  end
+
   # Handle count_age_bucket for age-based buckets
   def prep_selector(selecto, {:count_age_bucket, field, min, max}, retarget_aliases) do
     {field_iodata, join, param} = prep_selector(selecto, field, retarget_aliases)

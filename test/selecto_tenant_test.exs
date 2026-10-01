@@ -210,6 +210,26 @@ defmodule Selecto.TenantTest do
     assert {_sql, _params} = Selecto.to_sql(query, validate_tenant: false)
   end
 
+  test "gen_sql enforces tenant scope as to_sql does" do
+    required = tenant_required_domain() |> selecto() |> Selecto.select(["name"])
+
+    unapplied =
+      domain()
+      |> selecto()
+      |> Selecto.select(["name"])
+      |> Selecto.with_tenant(%{tenant_id: "acme"})
+
+    mismatched = Selecto.require_tenant_filter(unapplied, {"tenant_id", "other"})
+
+    for query <- [required, unapplied, mismatched] do
+      assert_raise RuntimeError, ~r/Tenant scope is/, fn -> Selecto.gen_sql(query, []) end
+      assert {_sql, _aliases, _params} = Selecto.gen_sql(query, validate_tenant: false)
+    end
+
+    assert {_sql, _aliases, params} = Selecto.gen_sql(Selecto.apply_tenant_scope(unapplied), [])
+    assert "acme" in params
+  end
+
   test "validate_tenant_scope returns error when tenant is required but missing" do
     query =
       tenant_required_domain()

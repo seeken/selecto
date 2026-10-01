@@ -209,6 +209,19 @@ defmodule Selecto.Builder.Sql.Where do
     {[], [" ", filter_iodata, " "], []}
   end
 
+  # The step of a depth-bounded recursive CTE stops at max_depth.
+  def build(selecto, {:recursion_depth_below, join_id, max_depth})
+      when is_atom(join_id) and is_integer(max_depth) and max_depth > 0 do
+    {[join_id],
+     [
+       " ",
+       build_join_string(selecto, join_id),
+       ".selecto_depth < ",
+       Integer.to_string(max_depth),
+       " "
+     ], []}
+  end
+
   def build(selecto, {field, {:datetime_part, part, predicate}}) do
     build_datetime_predicate(selecto, field, :extract_part, part, predicate)
   end
@@ -296,6 +309,12 @@ defmodule Selecto.Builder.Sql.Where do
 
   def build(selecto, {field, {:text_contains, value}}) when is_binary(value) do
     pattern = "%" <> escape_like_literal(value) <> "%"
+    {sel, join, param} = Select.prep_selector(selecto, field)
+    {List.wrap(join), [" ", sel, " LIKE ", {:param, pattern}, " ESCAPE '!' "], param}
+  end
+
+  def build(selecto, {field, {:ends_with, value}}) when is_binary(value) do
+    pattern = "%" <> escape_like_literal(value)
     {sel, join, param} = Select.prep_selector(selecto, field)
     {List.wrap(join), [" ", sel, " LIKE ", {:param, pattern}, " ESCAPE '!' "], param}
   end
@@ -1236,6 +1255,8 @@ defmodule Selecto.Builder.Sql.Where do
 
   defp in_subquery_fragment(query), do: ["(", query, ")"]
 
+  # Literal text for LIKE ... ESCAPE '!': `%` and `_` everywhere, plus `[`,
+  # which opens a character class on SQL Server.
   defp escape_like_literal(value),
-    do: String.replace(value, ~r/[!%_]/u, fn character -> "!" <> character end)
+    do: String.replace(value, ~r/[!%_\[]/u, fn character -> "!" <> character end)
 end

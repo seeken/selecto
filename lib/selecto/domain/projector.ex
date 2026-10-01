@@ -570,8 +570,12 @@ defmodule Selecto.Domain.Projector do
       )
   end
 
+  # Internal fields are not filterable unless the column says so or a declared
+  # query filter names them; a filter on a hidden column is a value oracle.
   def query_contract_filterable?(column, id, source_kind, filterable_fields) do
-    default = source_kind in [:source, :schema] or MapSet.member?(filterable_fields, id)
+    default =
+      MapSet.member?(filterable_fields, id) or
+        (source_kind in [:source, :schema] and query_contract_default(column, :internal) != true)
 
     query_contract_bool(
       column,

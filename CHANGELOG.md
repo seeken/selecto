@@ -3,6 +3,42 @@
 
 ## Unreleased
 
+- Security: harden the read path against the adversarial scenarios in the
+  vault plan `selecto-adversarial-api-and-backend-test-scenarios`.
+  - Data query members (CTE, recursive CTE and lateral) over a schema that
+    declares `tenant_field` carry the root's tenant conditions as the root
+    stands when it is compiled; a scoped root without a tenant condition fails
+    with a `Selecto.PolicyViolation` of type `:missing_tenant_scope`.
+  - Recursive CTEs whose recursive query joins the CTE are bounded at
+    `max_depth` levels (default 100, at most 10000) through a trailing
+    `selecto_depth` column. `max_depth` and `cycle_detection` are honored
+    instead of dropped, and fail when the recursive query cannot carry them.
+    Recursive data members accept `max_depth`.
+  - Query-contract fields marked `internal` are no longer filterable unless
+    the column sets `filterable: true` or a declared query filter names them.
+  - `starts_with`, `text_contains` and the new `{:ends_with, text}` filter
+    match literal text on every dialect: `[` is escaped as well as `%`, `_`
+    and `!`. `Selecto.Expr.ends_with/2` builds `{:ends_with, text}` instead of
+    an unescaped `{:like, "%" <> text}`.
+  - Database and driver errors returned by `execute/2`, the metadata, count,
+    projection sum and stream variants carry a fixed message and `details`
+    with `category`, `sqlstate`, `recoverable?` and the `reason` kind, never
+    SQL, parameters, server detail, constraint or column names, connection
+    options or exit reasons (`Selecto.Error.from_driver/2`).
+  - `execute_with_metadata/2`, `execute_count_with_metadata/2` and
+    `execute_projection_sum_with_metadata/3` apply the complexity check and
+    task timeout of `execute/2`; `execute_stream/2` applies the complexity
+    check before it opens.
+  - `Selecto.gen_sql/2` enforces the tenant scope as `to_sql/2` does unless
+    `validate_tenant: false` is given.
+  - `Selecto.Expr.normalize/1` normalizes nested `:and`, `:or` and `:not`
+    groups once; it re-normalized every child per level, so a filter nested
+    n deep cost O(2^n) (30 nested `not`s took about ten seconds).
+  - Foreign-key `references.tenant_field` is validated: a field of the
+    referenced relation, or `false`/`nil` for a relation shared by every
+    tenant. The domain schema documents it and the write semantics of
+    `immutable`, `write_once` and `server_managed`.
+
 - Rebuild `Selecto.retarget/3` to the portable `query_retarget` 1.1.0
   semantics (certification specification 2.22.0). A retarget now returns a
   query configured on a domain rooted at the target relation, named by a join

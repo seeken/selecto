@@ -442,26 +442,19 @@ defmodule Selecto.Retarget do
 
       target_field ->
         target_field = to_string(target_field)
-        required = Selecto.Query.required_filters(origin)
-        root_field = Selecto.Tenant.domain_tenant_field(origin)
 
-        carried =
-          if root_field,
-            do: Enum.flat_map(required, &carry_conjunct(&1, root_field, target_field)),
-            else: []
-
-        cond do
-          required == [] ->
+        case Selecto.Tenant.carry_conditions(origin, target_field) do
+          :unscoped ->
             retargeted
 
-          carried == [] ->
+          :error ->
             fail!(
               :missing_tenant_scope,
               "retarget to #{plan.path} reads a tenant-scoped relation but the root tenant scope cannot be applied to it",
               tenant_field: target_field
             )
 
-          true ->
+          {:ok, carried} ->
             retargeted =
               Enum.reduce(carried, retargeted, &Selecto.Tenant.require_tenant_filter(&2, &1))
 
@@ -472,26 +465,6 @@ defmodule Selecto.Retarget do
         end
     end
   end
-
-  defp carry_conjunct({:and, filters}, root_field, target_field) when is_list(filters),
-    do: Enum.flat_map(filters, &carry_conjunct(&1, root_field, target_field))
-
-  defp carry_conjunct({field, value}, root_field, target_field)
-       when is_binary(field) or is_atom(field) do
-    if to_string(field) == root_field and tenant_value?(value),
-      do: [{target_field, value}],
-      else: []
-  end
-
-  defp carry_conjunct(_filter, _root_field, _target_field), do: []
-
-  defp tenant_value?(value) when is_binary(value) or is_number(value), do: true
-  defp tenant_value?({:in, values}) when is_list(values) and values != [], do: true
-
-  defp tenant_value?(values) when is_list(values) and values != [],
-    do: Enum.all?(values, &(is_binary(&1) or is_number(&1)))
-
-  defp tenant_value?(_value), do: false
 
   ## Helpers
 

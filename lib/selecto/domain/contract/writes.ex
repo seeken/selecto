@@ -3,11 +3,15 @@ defmodule Selecto.Domain.Contract.Writes do
 
   alias Selecto.Domain.Contract.Shared.Core
 
-  def validate(errors, writes, field_index) do
-    validate_writes(errors, writes, field_index)
+  # `relations` holds the domain's `source` and `schemas`, which resolve the
+  # relation a foreign key references.
+  def validate(errors, writes, field_index, relations \\ %{}) do
+    validate_writes(errors, writes, field_index, relations)
   end
 
-  def validate_writes(errors, writes, field_index) when is_map(writes) do
+  def validate_writes(errors, writes, field_index, relations \\ %{})
+
+  def validate_writes(errors, writes, field_index, relations) when is_map(writes) do
     errors
     |> validate_operations(Core.map_value(writes, :operations), field_index)
     |> validate_fields(Core.map_value(writes, :fields), field_index)
@@ -16,11 +20,11 @@ defmodule Selecto.Domain.Contract.Writes do
       field_index
     )
     |> validate_relationships(Core.map_value(writes, :relationships))
-    |> validate_constraints(Core.map_value(writes, :constraints), field_index)
+    |> validate_constraints(Core.map_value(writes, :constraints), field_index, relations)
     |> validate_transitions(Core.map_value(writes, :transitions), field_index)
   end
 
-  def validate_writes(errors, writes, _field_index) do
+  def validate_writes(errors, writes, _field_index, _relations) do
     [
       Core.error(
         :invalid_section_shape,
@@ -1382,19 +1386,21 @@ defmodule Selecto.Domain.Contract.Writes do
   defp valid_policy_identifier?(value) when is_binary(value), do: String.trim(value) != ""
   defp valid_policy_identifier?(_value), do: false
 
-  defp validate_constraints(errors, nil, _field_index), do: errors
+  defp validate_constraints(errors, nil, _field_index, _relations), do: errors
 
-  defp validate_constraints(errors, constraints, _field_index) when is_list(constraints),
-    do: errors
+  defp validate_constraints(errors, constraints, _field_index, _relations)
+       when is_list(constraints),
+       do: errors
 
-  defp validate_constraints(errors, constraints, field_index) when is_map(constraints) do
+  defp validate_constraints(errors, constraints, field_index, relations)
+       when is_map(constraints) do
     errors
     |> validate_optimistic_lock(Core.map_value(constraints, :optimistic_lock), field_index)
-    |> validate_foreign_keys(Core.map_value(constraints, :foreign_keys), field_index)
+    |> validate_foreign_keys(Core.map_value(constraints, :foreign_keys), field_index, relations)
     |> reject_unsafe_terms(constraints, [:writes, :constraints])
   end
 
-  defp validate_constraints(errors, constraints, _field_index) do
+  defp validate_constraints(errors, constraints, _field_index, _relations) do
     [
       Core.error(
         :invalid_section_shape,
@@ -1439,9 +1445,10 @@ defmodule Selecto.Domain.Contract.Writes do
     ]
   end
 
-  defp validate_foreign_keys(errors, nil, _field_index), do: errors
+  defp validate_foreign_keys(errors, nil, _field_index, _relations), do: errors
 
-  defp validate_foreign_keys(errors, foreign_keys, field_index) when is_map(foreign_keys) do
+  defp validate_foreign_keys(errors, foreign_keys, field_index, relations)
+       when is_map(foreign_keys) do
     Enum.reduce(foreign_keys, errors, fn {field, spec}, acc ->
       path = [:writes, :constraints, :foreign_keys, field]
 
@@ -1471,14 +1478,14 @@ defmodule Selecto.Domain.Contract.Writes do
         true ->
           acc
           |> validate_foreign_key_source(field, spec, path)
-          |> validate_foreign_key_reference(field, spec, path)
+          |> validate_foreign_key_reference(field, spec, path, relations)
           |> validate_foreign_key_required(field, spec, path)
           |> reject_unsafe_terms(spec, path)
       end
     end)
   end
 
-  defp validate_foreign_keys(errors, foreign_keys, _field_index) do
+  defp validate_foreign_keys(errors, foreign_keys, _field_index, _relations) do
     [
       Core.error(
         :invalid_foreign_keys,
@@ -1536,14 +1543,14 @@ defmodule Selecto.Domain.Contract.Writes do
     end
   end
 
-  defp validate_foreign_key_reference(errors, field, spec, path) do
+  defp validate_foreign_key_reference(errors, field, spec, path, relations) do
     case Core.map_value(spec, :references) do
       reference when is_map(reference) ->
         relation = Core.map_value(reference, :relation)
         target_field = Core.map_value(reference, :field)
 
         if relation_ref?(relation) and Core.field_ref?(target_field) do
-          errors
+          validate_foreign_key_tenant_field(errors, field, reference, path, relations)
         else
           [
             Core.error(
@@ -1566,6 +1573,86 @@ defmodule Selecto.Domain.Contract.Writes do
           )
           | errors
         ]
+    end
+  end
+
+  # `references.tenant_field` names the referenced relation's tenant field so a
+  # write consumer can scope its existence guard to the trusted tenant; `false`
+  # or `nil` declares a relation shared by every tenant. A named field must
+  # exist on every domain relation backed by the referenced table.
+  defp validate_foreign_key_tenant_field(errors, field, reference, path, relations) do
+    path = path ++ [:references, :tenant_field]
+
+    case Core.map_value(reference, :tenant_field) do
+      value when value in [nil, false] ->
+        errors
+
+      value when (is_atom(value) and not is_boolean(value)) or is_binary(value) ->
+        tenant_field = Core.field_id(value)
+
+        missing =
+          relations
+          |> referenced_relations(to_string(Core.map_value(reference, :relation)))
+          |> Enum.reject(&Core.field_in_list?(Core.relation_fields(&1), tenant_field))
+
+        cond do
+          String.trim(tenant_field) == "" ->
+            [invalid_foreign_key_tenant_field(field, path, value) | errors]
+
+          missing != [] ->
+            [
+              Core.error(
+                :unknown_foreign_key_tenant_field,
+                path,
+                "foreign key #{inspect(field)} tenant_field is not a field of the referenced relation",
+                field: field,
+                tenant_field: tenant_field
+              )
+              | errors
+            ]
+
+          true ->
+            errors
+        end
+
+      value ->
+        [invalid_foreign_key_tenant_field(field, path, value) | errors]
+    end
+  end
+
+  defp invalid_foreign_key_tenant_field(field, path, value) do
+    Core.error(
+      :invalid_foreign_key_tenant_field,
+      path,
+      "foreign key #{inspect(field)} tenant_field must be a field name, false, or nil",
+      field: field,
+      actual: Core.value_type(value)
+    )
+  end
+
+  # The domain relations backed by a referenced table: the source and every
+  # schema whose table matches (a schema key stands in for a schema without
+  # one). A table outside the domain resolves to none.
+  defp referenced_relations(relations, table) do
+    source = Core.map_value(relations, :source)
+
+    schemas =
+      case Core.map_value(relations, :schemas) do
+        schemas when is_map(schemas) -> schemas
+        _schemas -> %{}
+      end
+
+    [{nil, source} | Enum.to_list(schemas)]
+    |> Enum.filter(fn {key, relation} ->
+      is_map(relation) and referenced_table(relation, key) == table
+    end)
+    |> Enum.map(&elem(&1, 1))
+  end
+
+  defp referenced_table(relation, key) do
+    case Core.map_value(relation, :source_table) || Core.map_value(relation, :table) do
+      nil -> key && to_string(key)
+      table -> to_string(table)
     end
   end
 

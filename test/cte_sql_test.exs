@@ -185,4 +185,119 @@ defmodule Selecto.CteSqlTest do
     assert ref.source == "hierarchy"
     assert ref.type == :cte
   end
+
+  describe "recursion depth" do
+    defp employees do
+      %{
+        name: "Employees",
+        source: %{
+          source_table: "employees",
+          primary_key: :id,
+          fields: [:id, :manager_id, :name],
+          redact_fields: [],
+          columns: %{id: %{type: :integer}, manager_id: %{type: :integer}, name: %{type: :string}},
+          associations: %{}
+        },
+        schemas: %{},
+        joins: %{}
+      }
+    end
+
+    defp base_query do
+      fn ->
+        Selecto.configure(employees(), nil, validate: false)
+        |> Selecto.select(["id", "manager_id"])
+        |> Selecto.filter({"manager_id", nil})
+      end
+    end
+
+    defp step_query do
+      fn _cte_ref ->
+        Selecto.configure(employees(), nil, validate: false)
+        |> Selecto.join(:reports,
+          source: "reports",
+          type: :inner,
+          owner_key: :manager_id,
+          related_key: :id,
+          fields: %{"id" => %{type: :integer}}
+        )
+        |> Selecto.select(["id", "manager_id"])
+      end
+    end
+
+    defp recursive_sql(opts) do
+      employees()
+      |> Selecto.configure(nil, validate: false)
+      |> Selecto.with_recursive_cte(
+        "reports",
+        [base_query: base_query(), recursive_query: step_query(), columns: ["id", "manager_id"]] ++
+          opts
+      )
+      |> Selecto.select(["name"])
+      |> Selecto.to_sql()
+      |> elem(0)
+      |> String.replace(~r/\s+/, " ")
+    end
+
+    test "a recursive CTE is bounded at 100 levels by default" do
+      sql = recursive_sql([])
+
+      assert sql =~ "reports (id, manager_id, selecto_depth) AS ("
+      assert sql =~ ~r/select cte_reports\.id, cte_reports\.manager_id, 1 AS selecto_depth from/
+      assert sql =~ "reports.selecto_depth + 1"
+      assert sql =~ "reports.selecto_depth < 100"
+    end
+
+    test "max_depth and cycle_detection are honored" do
+      assert recursive_sql(max_depth: 3) =~ "reports.selecto_depth < 3"
+      assert recursive_sql(max_depth: 3, cycle_detection: true) =~ "reports.selecto_depth < 3"
+
+      inline =
+        employees()
+        |> Selecto.configure(nil, validate: false)
+        |> Selecto.with_recursive_cte("reports", base_query(), step_query(),
+          columns: ["id", "manager_id"],
+          max_depth: 4
+        )
+        |> Selecto.select(["name"])
+        |> Selecto.to_sql()
+        |> elem(0)
+
+      assert inline =~ "reports.selecto_depth < 4"
+    end
+
+    test "invalid bounds are rejected" do
+      for bad <- [0, -1, 10_001, "5", 1.5] do
+        assert_raise CTE.ValidationError, ~r/max_depth/, fn -> recursive_sql(max_depth: bad) end
+      end
+
+      assert_raise CTE.ValidationError, ~r/cycle_detection/, fn ->
+        recursive_sql(cycle_detection: :yes)
+      end
+    end
+
+    test "an explicit bound the recursive query cannot carry fails closed" do
+      unjoined = fn _cte_ref ->
+        Selecto.configure(employees(), nil, validate: false)
+        |> Selecto.select(["id", "manager_id"])
+      end
+
+      build = fn opts ->
+        employees()
+        |> Selecto.configure(nil, validate: false)
+        |> Selecto.with_recursive_cte(
+          "reports",
+          [base_query: base_query(), recursive_query: unjoined, columns: ["id", "manager_id"]] ++
+            opts
+        )
+        |> Selecto.to_sql()
+      end
+
+      assert {sql, _params} = build.([])
+      refute sql =~ "selecto_depth"
+
+      assert_raise ArgumentError, ~r/max_depth/, fn -> build.(max_depth: 5) end
+      assert_raise ArgumentError, ~r/max_depth/, fn -> build.(cycle_detection: true) end
+    end
+  end
 end

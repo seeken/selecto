@@ -603,6 +603,153 @@ defmodule Selecto.ExecutorTest do
     assert %{type: :unknown, status: :invalid, value: 123} = unknown
   end
 
+  describe "execution guards" do
+    test "metadata, count and projection sum execution apply the task timeout" do
+      opts = [analyze_complexity: false, timeout: 1]
+
+      for run <- [
+            &Executor.execute_with_metadata(&1, opts),
+            &Executor.execute_count_with_metadata(&1, opts),
+            &Executor.execute_projection_sum_with_metadata(&1, "id", opts)
+          ] do
+        assert {:error, %Selecto.Error{type: :timeout_error}} = run.(selecto_for(:sleep))
+      end
+    end
+
+    test "metadata, count, projection sum and stream execution apply the complexity check" do
+      opts = [max_complexity: 0]
+
+      for {connection, run} <- [
+            single: &Executor.execute_with_metadata(&1, opts),
+            single: &Executor.execute_count_with_metadata(&1, opts),
+            single: &Executor.execute_projection_sum_with_metadata(&1, "id", opts),
+            single_stream: &Executor.execute_stream(&1, opts)
+          ] do
+        assert {:error,
+                %Selecto.Error{
+                  type: :validation_error,
+                  message: "Query too complex to execute safely"
+                }} = run.(selecto_for(connection))
+      end
+    end
+  end
+
+  describe "driver error disclosure" do
+    defmodule LeakyDriverAdapter do
+      def placeholder(_index), do: "?"
+      def quote_identifier(identifier), do: ~s("#{identifier}")
+      def supports?(:stream), do: true
+      def supports?(_feature), do: false
+
+      def execute(:raise_encode, _query, _params, _opts),
+        do: raise(DBConnection.EncodeError, "Postgrex expected an integer, got \"canary-param\"")
+
+      def execute(:exit, query, params, _opts),
+        do: exit({:timeout, {Postgrex, :call, [query, params]}})
+
+      def execute([password: _] = connection, _query, _params, _opts),
+        do: {:error, {:invalid_connection, connection}}
+
+      def execute(_connection, query, _params, _opts), do: {:error, unique_violation(query)}
+      def stream(_connection, query, _params, _opts), do: {:error, unique_violation(query)}
+
+      def unique_violation(query) do
+        %Postgrex.Error{
+          postgres: %{
+            code: :unique_violation,
+            pg_code: "23505",
+            severity: "ERROR",
+            message: ~s(duplicate key value violates unique constraint "users_email_key"),
+            detail: "Key (email)=(canary@example.com) already exists.",
+            constraint: "users_email_key",
+            table: "users"
+          },
+          query: query
+        }
+      end
+    end
+
+    # Normalizes as SelectoDBPostgreSQL.Adapter does: the driver message
+    # (with its query and detail) plus constraint and column names.
+    defmodule NormalizingDriverAdapter do
+      defdelegate placeholder(index), to: LeakyDriverAdapter
+      defdelegate quote_identifier(identifier), to: LeakyDriverAdapter
+      defdelegate supports?(feature), to: LeakyDriverAdapter
+      defdelegate execute(connection, query, params, opts), to: LeakyDriverAdapter
+      defdelegate stream(connection, query, params, opts), to: LeakyDriverAdapter
+
+      def normalize_error(%Postgrex.Error{} = error) do
+        Selecto.Error.query_error(Exception.message(error), nil, [], %{
+          category: :unique_violation,
+          constraint: error.postgres.constraint,
+          column: "email",
+          recoverable?: true
+        })
+      end
+
+      def normalize_error(reason), do: Selecto.Error.from_reason(reason)
+    end
+
+    defp leaky_selecto(adapter, connection \\ :leaky) do
+      selecto_for(connection, adapter) |> Selecto.filter({"name", "canary-param"})
+    end
+
+    defp entry_points do
+      opts = [analyze_complexity: false]
+
+      [
+        execute: &Executor.execute(&1, opts),
+        execute_with_metadata: &Executor.execute_with_metadata(&1, opts),
+        execute_count_with_metadata: &Executor.execute_count_with_metadata(&1, opts),
+        execute_stream: &Executor.execute_stream(&1, opts)
+      ]
+    end
+
+    defp assert_undisclosed(%Selecto.Error{} = error) do
+      rendered = inspect(error, limit: :infinity, printable_limit: :infinity)
+
+      for secret <- ["canary", "users_email_key", "email", "selecto_root", "users", "select"] do
+        refute rendered =~ secret, "#{secret} disclosed by #{rendered}"
+      end
+
+      assert error.query == nil
+      assert error.params in [nil, []]
+    end
+
+    test "database errors reach callers without SQL, parameters or server detail" do
+      for adapter <- [LeakyDriverAdapter, NormalizingDriverAdapter],
+          {_entry, run} <- entry_points() do
+        assert {:error, %Selecto.Error{type: :query_error} = error} = run.(leaky_selecto(adapter))
+        assert_undisclosed(error)
+        assert error.details.category == :unique_violation
+        assert error.details.sqlstate == "23505"
+      end
+    end
+
+    test "raised driver errors, exits and connection options are not disclosed" do
+      for connection <- [:raise_encode, :exit, [password: "canary-password"]],
+          {_entry, run} <- entry_points() do
+        case run.(leaky_selecto(LeakyDriverAdapter, connection)) do
+          {:error, %Selecto.Error{} = error} -> assert_undisclosed(error)
+          {:ok, _stream} -> :ok
+        end
+      end
+
+      for reason <- [
+            %Postgrex.Error{
+              postgres: %{code: :undefined_table, pg_code: "42P01"},
+              query: "select"
+            },
+            {:invalid_connection, [password: "canary-password"]},
+            {:invalid_connection_options, [password: "canary-password"]},
+            {:exit, {:timeout, {Postgrex, :call, ["select", ["canary-param"]]}}},
+            %{message: "canary", statement: "select"}
+          ] do
+        assert_undisclosed(Selecto.Error.from_reason(reason))
+      end
+    end
+  end
+
   defp drain_span_events(acc \\ []) do
     receive do
       {:executor_span_event, _event, _measurements, _metadata} = payload ->

@@ -1456,8 +1456,31 @@ defmodule Selecto.DomainTest do
       assert contract.source.tenant_field == :tenant_id
       tenant = Enum.find(contract.fields, &(&1.id == "tenant_id"))
       refute tenant.detail_selectable
+      refute tenant.filterable
+      assert tenant.comparators == []
       refute tenant.sortable
       refute tenant.aggregatable
+    end
+
+    test "internal fields are filterable only when the domain says so" do
+      internal = %{type: :integer, internal: true}
+
+      domain =
+        query_contract_domain()
+        |> update_in([:source, :fields], &(&1 ++ [:secret_score, :exposed_score]))
+        |> put_in([:source, :columns, :secret_score], internal)
+        |> put_in([:source, :columns, :exposed_score], Map.put(internal, :filterable, true))
+
+      assert {:ok, contract, _diagnostics} = Domain.query_contract(domain)
+
+      secret = Enum.find(contract.fields, &(&1.id == "secret_score"))
+      refute secret.filterable
+      assert secret.comparators == []
+
+      exposed = Enum.find(contract.fields, &(&1.id == "exposed_score"))
+      assert exposed.filterable
+      refute exposed.sortable
+      assert :gt in exposed.comparators
     end
 
     test "uses full paths for nested join fields" do

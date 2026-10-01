@@ -70,7 +70,11 @@ defmodule Selecto.Advanced.CTE do
       # List of other CTEs this depends on
       :dependencies,
       # Boolean indicating if CTE has been validated
-      :validated
+      :validated,
+      # For recursive CTEs - the deepest level returned (default 100)
+      :max_depth,
+      # For recursive CTEs - true requires the depth bound to apply
+      :cycle_detection
     ]
 
     @type cte_type :: :normal | :recursive
@@ -84,7 +88,9 @@ defmodule Selecto.Advanced.CTE do
             base_query: (-> struct()) | nil,
             recursive_query: (struct() -> struct()) | nil,
             dependencies: [String.t()],
-            validated: boolean()
+            validated: boolean(),
+            max_depth: pos_integer() | nil,
+            cycle_detection: boolean() | nil
           }
   end
 
@@ -155,6 +161,18 @@ defmodule Selecto.Advanced.CTE do
     end
   end
 
+  @default_max_depth 100
+  @max_depth_limit 10_000
+
+  @doc """
+  The depth a recursive CTE is bounded at when it declares no `max_depth`.
+  """
+  def default_max_depth, do: @default_max_depth
+
+  @doc false
+  def valid_max_depth?(max_depth),
+    do: is_nil(max_depth) or (is_integer(max_depth) and max_depth in 1..@max_depth_limit)
+
   @doc """
   Create a recursive CTE specification.
 
@@ -163,7 +181,17 @@ defmodule Selecto.Advanced.CTE do
   - `name` - CTE name for the WITH clause
   - `base_query` - Function that returns the anchor query
   - `recursive_query` - Function that takes the CTE reference and returns recursive query
-  - `opts` - Options including :columns, :dependencies
+  - `opts` - Options including :columns, :dependencies, :max_depth, :cycle_detection
+
+  Every recursive CTE whose recursive query joins the CTE through
+  `Selecto.join/3` (`source: name`) is depth-bounded: the anchor is level 1 and
+  the recursion stops at `max_depth` (default 100, at most 10000), so a cyclic
+  or attacker-shaped hierarchy ends instead of running until the database gives
+  up. The level is carried in a trailing `selecto_depth` CTE column.
+  `cycle_detection: true` requires that bound, so a cycle stops at
+  `max_depth`; repeated rows are not removed. An explicit `max_depth` or
+  `cycle_detection` that the recursive query cannot carry fails when the SQL
+  is built.
 
   ## Examples
 
@@ -205,7 +233,9 @@ defmodule Selecto.Advanced.CTE do
       base_query: base_query,
       recursive_query: recursive_query,
       dependencies: Keyword.get(opts, :dependencies, []),
-      validated: false
+      validated: false,
+      max_depth: Keyword.get(opts, :max_depth),
+      cycle_detection: Keyword.get(opts, :cycle_detection)
     }
 
     case validate_cte(spec) do
@@ -224,6 +254,7 @@ defmodule Selecto.Advanced.CTE do
   def validate_cte(%Spec{} = spec) do
     with :ok <- validate_cte_name(spec.name),
          :ok <- validate_cte_queries(spec),
+         :ok <- validate_recursion_bounds(spec),
          :ok <- validate_cte_dependencies(spec) do
       validated_spec = %{spec | validated: true}
       {:ok, validated_spec}
@@ -307,6 +338,29 @@ defmodule Selecto.Advanced.CTE do
            type: :missing_recursive_parts,
            message: "Recursive CTE must have a recursive_query function with arity 1",
            details: %{}
+         }}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_recursion_bounds(%Spec{max_depth: max_depth, cycle_detection: cycle_detection}) do
+    cond do
+      not valid_max_depth?(max_depth) ->
+        {:error,
+         %ValidationError{
+           type: :invalid_query,
+           message: "Recursive CTE max_depth must be an integer from 1 to #{@max_depth_limit}",
+           details: %{max_depth: max_depth}
+         }}
+
+      cycle_detection not in [nil, true, false] ->
+        {:error,
+         %ValidationError{
+           type: :invalid_query,
+           message: "Recursive CTE cycle_detection must be a boolean",
+           details: %{cycle_detection: cycle_detection}
          }}
 
       true ->

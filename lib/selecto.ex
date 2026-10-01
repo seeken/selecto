@@ -1047,7 +1047,15 @@ defmodule Selecto do
 
   @spec gen_sql(t(), keyword()) :: {String.t(), list(), list()}
   def gen_sql(selecto, opts) do
-    Selecto.Builder.Sql.build(selecto, opts)
+    sql = Selecto.Builder.Sql.build(selecto, opts)
+
+    # A required, mismatched or ambiguous tenant scope fails closed here as in
+    # to_sql/2 and execute/2; `validate_tenant: false` opts out explicitly.
+    if Keyword.get(opts, :validate_tenant, true) do
+      Selecto.Tenant.ensure_scope!(selecto, opts)
+    end
+
+    sql
   end
 
   @doc """

@@ -252,6 +252,40 @@ defmodule Selecto.RetargetTest do
       assert params == [7, 7]
     end
 
+    test "a retarget before any filter keeps domain required filters and the tenant" do
+      {sql, params} =
+        tenant_domain()
+        |> Map.put(:required_filters, [{"region", "west"}])
+        |> configure()
+        |> Selecto.Tenant.with_tenant(%{tenant_id: 7, tenant_field: "tenant_id"})
+        |> Selecto.Tenant.apply_tenant_scope()
+        |> Selecto.retarget(:orders)
+        |> Selecto.filter({"total", {:gt, 5}})
+        |> Selecto.select(["order_id"])
+        |> sql()
+
+      assert sql =~ "selecto_root.tenant_id = $1"
+      assert sql =~ "selecto_root.total > $2"
+      assert sql =~ "subq_root_events.region = $3"
+      assert sql =~ "subq_root_events.tenant_id = $4"
+      assert params == [7, 5, "west", 7]
+    end
+
+    test "an attached tenant that was never applied still fails closed after a retarget" do
+      for target <- [:orders, :product] do
+        retargeted =
+          tenant_domain()
+          |> configure()
+          |> Selecto.Tenant.with_tenant(%{tenant_id: 7, tenant_field: "tenant_id"})
+          |> Selecto.retarget(target)
+          |> Selecto.Tenant.apply_tenant_scope()
+
+        assert_raise RuntimeError, ~r/Tenant scope is required but missing/, fn ->
+          Selecto.to_sql(retargeted)
+        end
+      end
+    end
+
     test "a scope that cannot reach a tenant-scoped target fails closed" do
       scoped =
         tenant_domain()

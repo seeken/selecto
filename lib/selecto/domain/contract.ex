@@ -85,7 +85,7 @@ defmodule Selecto.Domain.Contract do
     |> Query.validate(query, field_index)
     |> QueryMembersValidator.validate(query)
     |> PublishedViews.validate(query)
-    |> Writes.validate(writes, field_index)
+    |> Writes.validate(writes, field_index, %{source: source, schemas: schemas})
     |> Kernel.++(RuleContract.errors(normalized_domain))
     |> Capabilities.validate(capabilities)
     |> Capabilities.validate_query_references(query, detail_actions, capabilities)

@@ -411,6 +411,10 @@ defmodule Selecto.Performance.ComplexityAnalyzer do
         {_field, {:like, value}} when is_binary(value) ->
           String.starts_with?(value, "%")
 
+        # Literal substring and suffix searches always lead with a wildcard
+        {_field, {op, value}} when op in [:text_contains, :ends_with] and is_binary(value) ->
+          true
+
         # Map format with comp: "LIKE"
         %{"comp" => comp, "value" => value}
         when comp in ["LIKE", "like", "CASE_INSENSITIVE_LIKE", "case_insensitive_like"] and

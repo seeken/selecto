@@ -1141,6 +1141,28 @@ insert/upsert; `updatable: true` grants it to update. Missing or false flags do
 not grant permission. Portable write metadata MUST NOT contain
 `{:unsafe_sql, ...}` or `{:unsafe_fragment, ...}` terms.
 
+The other three flags only ever narrow those grants. A write consumer (Selecto
+Updato enforces all three) MUST treat them as follows, even when the field is
+also marked `insertable` or `updatable`:
+
+- `immutable: true` — the field is set at insert and never changes: an update
+  that assigns it is rejected (`forbidden_field`, reason `immutable`).
+- `write_once: true` — an update may set the field only while it is still
+  `NULL`. The guard is an `is_null` condition in the update's own predicate,
+  not a prior read, so an update of a row whose value is already set matches no
+  row and fails as `cardinality_mismatch` instead of overwriting it.
+- `server_managed: true` — the value is supplied by the database or the server
+  (identity, timestamps, versions) and is never written by a caller. Such a
+  field MUST NOT also be `insertable` or `updatable`; a consumer rejects that
+  combination as an invalid domain or refuses every caller write to it
+  (`forbidden_field`, reason `server_managed`).
+
+An upsert's conflict update (`DO UPDATE` / `ON DUPLICATE KEY UPDATE` / `MERGE`)
+rewrites only fields that are `updatable` and none of `immutable`,
+`write_once`, or `server_managed`. `Selecto.Domain.WriteContract.writable?/3`
+reports the insertable/updatable grant only; the three narrowing flags are
+read from `WriteContract.field_spec/2`.
+
 Authoring and downstream write consumers also use metadata such as
 `required_on`, `forbidden_on`, validators, and default providers. These values
 are preserved in the field spec, but their execution belongs to the write
@@ -1247,8 +1269,29 @@ release and certification workflow.
 
 - `source: :input` or `source: {:context, key}` (the equivalent map form is
   accepted);
-- `references: %{relation: relation_id, field: field_id}`;
+- `references: %{relation: relation_id, field: field_id}`, where `relation` is
+  the referenced physical table;
 - optional boolean `required`.
+
+`references` MAY also declare `tenant_field`, the tenant field of the
+referenced relation:
+
+- a field name (atom or non-empty string): the referenced relation is
+  tenant-scoped, and the consumer's existence guard for the referenced row
+  also requires that field to equal the trusted tenant, so a caller can neither
+  attach a row to another tenant's parent nor probe whether it exists. Without
+  a trusted tenant the write fails with `missing_tenant_scope`;
+- `false` or `nil`: the referenced relation is shared by every tenant (for
+  example a country list), and the guard is not tenant-scoped.
+
+Core validation rejects any other value (`invalid_foreign_key_tenant_field`)
+and a field name missing from a domain relation backed by the referenced table
+(the source or a schema whose `source_table` matches;
+`unknown_foreign_key_tenant_field`). A table outside the domain is checked by
+the consumer. When `tenant_field` is omitted, Selecto Updato derives it from
+the domain relations backed by the referenced table that declare
+`tenant_field`, and requires it to be declared for an input foreign key on a
+tenant-scoped write that it cannot resolve.
 
 These declarations let adapters preflight portable behavior. Database-native
 constraints remain authoritative and MUST still be enabled and tested.

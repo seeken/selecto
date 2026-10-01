@@ -837,6 +837,59 @@ defmodule Selecto.WriteProtocolTest do
            |> Map.fetch!(:source) == {:context, :account_id}
   end
 
+  test "validates the referenced relation's tenant field on a foreign key" do
+    accounts = %{
+      source_table: "accounts",
+      primary_key: :id,
+      fields: [:id, :name, :tenant_id],
+      columns: %{id: %{type: :integer}, name: %{type: :string}, tenant_id: %{type: :integer}},
+      associations: %{}
+    }
+
+    domain =
+      write_domain()
+      |> put_in([:source, :fields], [:id, :name, :tenant_id, :account_id])
+      |> put_in([:source, :columns, :account_id], %{type: :integer})
+      |> put_in([:schemas], %{account: accounts})
+      |> put_in([:writes, :fields, :account_id], %{insertable: true})
+
+    with_reference = fn references ->
+      put_in(domain, [:writes, :constraints], %{
+        foreign_keys: %{account_id: %{source: :input, references: references}}
+      })
+    end
+
+    for tenant_field <- [:tenant_id, "tenant_id", false, nil] do
+      reference = %{relation: "accounts", field: :id, tenant_field: tenant_field}
+      assert {:ok, _contract} = WriteContract.compile(with_reference.(reference))
+    end
+
+    # A relation outside the domain cannot be resolved, so only the shape is checked.
+    assert {:ok, _contract} =
+             WriteContract.compile(
+               with_reference.(%{relation: "ledgers", field: :id, tenant_field: :org_id})
+             )
+
+    for {tenant_field, code} <- [
+          {true, :invalid_foreign_key_tenant_field},
+          {"", :invalid_foreign_key_tenant_field},
+          {7, :invalid_foreign_key_tenant_field},
+          {:org_id, :unknown_foreign_key_tenant_field}
+        ] do
+      reference = %{relation: "accounts", field: :id, tenant_field: tenant_field}
+      assert {:error, diagnostics} = Selecto.Domain.validate(with_reference.(reference))
+
+      assert Enum.any?(
+               diagnostics.errors,
+               &(&1.code == code and
+                   &1.path ==
+                     [:writes, :constraints, :foreign_keys, :account_id, :references]
+                     |> Kernel.++([:tenant_field]))
+             ),
+             "#{inspect(tenant_field)} was not rejected with #{code}"
+    end
+  end
+
   defp command!(operation) do
     {:ok, command} =
       Command.new(%{

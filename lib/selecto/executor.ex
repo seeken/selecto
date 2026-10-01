@@ -46,12 +46,7 @@ defmodule Selecto.Executor do
 
   defp do_execute(selecto, opts) do
     start_time = System.monotonic_time(:millisecond)
-
-    query_id =
-      case Selecto.Telemetry.Context.current_operation() do
-        %{operation_id: operation_id} -> operation_id
-        _ -> :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)
-      end
+    query_id = query_id()
 
     with :ok <- Selecto.Tenant.validate_scope(selecto, opts) do
       execute_safe(selecto, opts, query_id, start_time)
@@ -61,9 +56,30 @@ defmodule Selecto.Executor do
     end
   end
 
+  defp query_id do
+    case Selecto.Telemetry.Context.current_operation() do
+      %{operation_id: operation_id} -> operation_id
+      _ -> :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)
+    end
+  end
+
+  # The complexity check and task timeout of execute/2, for the other
+  # execution entry points (metadata, count and projection sum).
+  defp guarded(selecto, opts, work) do
+    start_time = System.monotonic_time(:millisecond)
+    query_id = query_id()
+
+    with :ok <- check_query_complexity(selecto, opts, query_id) do
+      with_timeout_protection(opts, query_id, start_time, work)
+    end
+  end
+
   defp execute_safe(selecto, opts, query_id, start_time) do
     with :ok <- check_query_complexity(selecto, opts, query_id) do
-      result = execute_with_timeout_protection(selecto, opts, query_id, start_time)
+      result =
+        with_timeout_protection(opts, query_id, start_time, fn ->
+          execute_with_hooks(selecto, opts, query_id, start_time)
+        end)
 
       # Apply output format transformation if specified
       case result do
@@ -143,8 +159,8 @@ defmodule Selecto.Executor do
     end
   end
 
-  # Execute query with timeout protection
-  defp execute_with_timeout_protection(selecto, opts, query_id, start_time) do
+  # Run the execution work with timeout protection
+  defp with_timeout_protection(opts, query_id, start_time, work) do
     # Get timeout from options or default
     # Default 30 seconds
     timeout = opts[:timeout] || 30_000
@@ -157,7 +173,7 @@ defmodule Selecto.Executor do
     task =
       Selecto.TaskSupervisor.async(fn ->
         Selecto.Performance.Hooks.restore_hooks(hook_snapshot)
-        execute_with_hooks(selecto, opts, query_id, start_time)
+        work.()
       end)
 
     # Wait for task with timeout
@@ -178,9 +194,10 @@ defmodule Selecto.Executor do
         )
 
         {:error,
-         Selecto.Error.connection_error("Database execution process exited", %{
-           exit_reason: reason
-         })}
+         Selecto.Error.connection_error(
+           "Database execution process exited",
+           Selecto.Error.exit_details(reason)
+         )}
 
       nil ->
         # Task was killed due to timeout
@@ -221,6 +238,11 @@ defmodule Selecto.Executor do
   - `:params` - The query parameters
   - `:execution_time` - Query execution time in milliseconds
 
+  As in `execute/2`, the query passes the complexity check
+  (`analyze_complexity: false` skips it) and runs under the `:timeout`
+  option (default 30 seconds, at most 5 minutes). The count and projection
+  sum variants apply the same guards.
+
   ## Examples
 
       case Selecto.Executor.execute_with_metadata(selecto) do
@@ -247,64 +269,71 @@ defmodule Selecto.Executor do
   end
 
   defp do_execute_with_metadata(selecto, opts) do
-    start_time = System.monotonic_time(:millisecond)
-
     with :ok <- Selecto.Tenant.validate_scope(selecto, opts) do
-      try do
-        {query, aliases, params} = Selecto.gen_sql(selecto, opts)
-
-        # Track the SQL and params for metadata
-        sql_metadata = %{
-          sql: query,
-          params: params
-        }
-
-        # Handle different execution contexts: adapters, repos, or direct connections
-        result =
-          execute_for_context(selecto, query, params, aliases)
-
-        # Calculate execution time
-        duration = System.monotonic_time(:millisecond) - start_time
-
-        # Apply output format transformation if specified and add metadata
-        case result do
-          {:ok, {rows, columns, aliases}} ->
-            format = Keyword.get(opts, :format, :raw)
-            format_options = Keyword.get(opts, :format_options, [])
-
-            transformed_result =
-              case Selecto.Telemetry.span([:transform], %{}, fn ->
-                     Selecto.Output.Formats.transform(
-                       {rows, columns, aliases},
-                       format,
-                       format_options
-                     )
-                   end) do
-                {:ok, transformed} -> transformed
-                {:error, _transform_error} -> {rows, columns, aliases}
-              end
-
-            metadata = Map.put(sql_metadata, :execution_time, duration)
-            {:ok, transformed_result, metadata}
-
-          error_result ->
-            error_result
-        end
-      rescue
-        error ->
-          error_result = {:error, Selecto.Error.from_reason(error)}
-          error_result
-      catch
-        :exit, reason ->
-          error_result =
-            {:error,
-             Selecto.Error.connection_error("Database connection failed", %{exit_reason: reason})}
-
-          error_result
-      end
+      guarded(selecto, opts, fn -> execute_with_metadata_work(selecto, opts) end)
     else
       {:error, %Selecto.Error{} = error} ->
         {:error, error}
+    end
+  end
+
+  defp execute_with_metadata_work(selecto, opts) do
+    start_time = System.monotonic_time(:millisecond)
+
+    try do
+      {query, aliases, params} = Selecto.gen_sql(selecto, opts)
+
+      # Track the SQL and params for metadata
+      sql_metadata = %{
+        sql: query,
+        params: params
+      }
+
+      # Handle different execution contexts: adapters, repos, or direct connections
+      result =
+        execute_for_context(selecto, query, params, aliases)
+
+      # Calculate execution time
+      duration = System.monotonic_time(:millisecond) - start_time
+
+      # Apply output format transformation if specified and add metadata
+      case result do
+        {:ok, {rows, columns, aliases}} ->
+          format = Keyword.get(opts, :format, :raw)
+          format_options = Keyword.get(opts, :format_options, [])
+
+          transformed_result =
+            case Selecto.Telemetry.span([:transform], %{}, fn ->
+                   Selecto.Output.Formats.transform(
+                     {rows, columns, aliases},
+                     format,
+                     format_options
+                   )
+                 end) do
+              {:ok, transformed} -> transformed
+              {:error, _transform_error} -> {rows, columns, aliases}
+            end
+
+          metadata = Map.put(sql_metadata, :execution_time, duration)
+          {:ok, transformed_result, metadata}
+
+        error_result ->
+          error_result
+      end
+    rescue
+      error ->
+        error_result = {:error, Selecto.Error.from_reason(error)}
+        error_result
+    catch
+      :exit, reason ->
+        error_result =
+          {:error,
+           Selecto.Error.connection_error(
+             "Database connection failed",
+             Selecto.Error.exit_details(reason)
+           )}
+
+        error_result
     end
   end
 
@@ -377,65 +406,61 @@ defmodule Selecto.Executor do
     start_time = System.monotonic_time(:millisecond)
 
     with :ok <- Selecto.Tenant.validate_scope(selecto, opts) do
-      try do
-        {query, aliases, params} = derived_source_sql(selecto, opts)
+      guarded(selecto, opts, fn ->
+        try do
+          {query, aliases, params} = derived_source_sql(selecto, opts)
 
-        subselect_aliases =
-          Enum.map(Map.get(selecto.set, :subselected, []), fn config ->
-            Map.get(config, :alias)
-          end)
+          subselect_aliases =
+            Enum.map(Map.get(selecto.set, :subselected, []), fn config ->
+              Map.get(config, :alias)
+            end)
 
-        source_column =
-          case Enum.find_index(aliases, &(is_binary(&1) and &1 == column)) do
-            nil ->
-              if Enum.any?(subselect_aliases, &(is_binary(&1) and &1 == column)),
-                do: column
+          source_column =
+            case Enum.find_index(aliases, &(is_binary(&1) and &1 == column)) do
+              nil ->
+                if Enum.any?(subselect_aliases, &(is_binary(&1) and &1 == column)),
+                  do: column
 
-            index ->
-              Selecto.Builder.Sql.projection_alias(index + 1)
+              index ->
+                Selecto.Builder.Sql.projection_alias(index + 1)
+            end
+
+          if source_column do
+            quoted_column = adapter.quote_identifier(source_column)
+
+            sum_query =
+              "SELECT COALESCE(SUM(selecto_projection_source.#{quoted_column}), 0) " <>
+                "AS selecto_projection_sum FROM (" <>
+                String.trim_trailing(query, ";") <> ") AS selecto_projection_source"
+
+            result = execute_for_context(selecto, sum_query, params, ["selecto_projection_sum"])
+            duration = System.monotonic_time(:millisecond) - start_time
+            metadata = %{sql: sum_query, params: params, execution_time: duration}
+
+            case result do
+              {:ok, {[[value]], _columns, _aliases}} when not is_nil(value) ->
+                {:ok, value, metadata}
+
+              {:ok, _other} ->
+                {:error, Selecto.Error.query_error("Projection sum returned an invalid result")}
+
+              error ->
+                error
+            end
+          else
+            {:error, Selecto.Error.query_error("Projection sum column is not selected")}
           end
-
-        if source_column do
-          quoted_column = adapter.quote_identifier(source_column)
-
-          sum_query =
-            "SELECT COALESCE(SUM(selecto_projection_source.#{quoted_column}), 0) " <>
-              "AS selecto_projection_sum FROM (" <>
-              String.trim_trailing(query, ";") <> ") AS selecto_projection_source"
-
-          result = execute_for_context(selecto, sum_query, params, ["selecto_projection_sum"])
-          duration = System.monotonic_time(:millisecond) - start_time
-          metadata = %{sql: sum_query, params: params, execution_time: duration}
-
-          case result do
-            {:ok, {[[value]], _columns, _aliases}} when not is_nil(value) ->
-              {:ok, value, metadata}
-
-            {:ok, other} ->
-              {:error,
-               Selecto.Error.query_error(
-                 "Projection sum returned an invalid result",
-                 sum_query,
-                 params,
-                 %{result: inspect(other)}
-               )}
-
-            error ->
-              error
-          end
-        else
-          {:error,
-           Selecto.Error.query_error("Projection sum column is not selected", query, params, %{})}
+        rescue
+          error -> {:error, Selecto.Error.from_reason(error)}
+        catch
+          :exit, reason ->
+            {:error,
+             Selecto.Error.connection_error(
+               "Database projection sum execution failed",
+               Selecto.Error.exit_details(reason)
+             )}
         end
-      rescue
-        error -> {:error, Selecto.Error.from_reason(error)}
-      catch
-        :exit, reason ->
-          {:error,
-           Selecto.Error.connection_error("Database projection sum execution failed", %{
-             exit_reason: reason
-           })}
-      end
+      end)
     end
   end
 
@@ -468,42 +493,39 @@ defmodule Selecto.Executor do
     start_time = System.monotonic_time(:millisecond)
 
     with :ok <- Selecto.Tenant.validate_scope(selecto, opts) do
-      try do
-        {query, _aliases, params} = derived_source_sql(selecto, opts)
+      guarded(selecto, opts, fn ->
+        try do
+          {query, _aliases, params} = derived_source_sql(selecto, opts)
 
-        count_query =
-          "SELECT COUNT(*) AS selecto_total_count FROM (" <>
-            String.trim_trailing(query, ";") <> ") AS selecto_count_source"
+          count_query =
+            "SELECT COUNT(*) AS selecto_total_count FROM (" <>
+              String.trim_trailing(query, ";") <> ") AS selecto_count_source"
 
-        result = execute_for_context(selecto, count_query, params, ["selecto_total_count"])
-        duration = System.monotonic_time(:millisecond) - start_time
-        metadata = %{sql: count_query, params: params, execution_time: duration}
+          result = execute_for_context(selecto, count_query, params, ["selecto_total_count"])
+          duration = System.monotonic_time(:millisecond) - start_time
+          metadata = %{sql: count_query, params: params, execution_time: duration}
 
-        case result do
-          {:ok, {[[count]], _columns, _aliases}} when is_integer(count) and count >= 0 ->
-            {:ok, count, metadata}
+          case result do
+            {:ok, {[[count]], _columns, _aliases}} when is_integer(count) and count >= 0 ->
+              {:ok, count, metadata}
 
-          {:ok, other} ->
+            {:ok, _other} ->
+              {:error, Selecto.Error.query_error("Count query returned an invalid result")}
+
+            error ->
+              error
+          end
+        rescue
+          error -> {:error, Selecto.Error.from_reason(error)}
+        catch
+          :exit, reason ->
             {:error,
-             Selecto.Error.query_error(
-               "Count query returned an invalid result",
-               count_query,
-               params,
-               %{result: inspect(other)}
+             Selecto.Error.connection_error(
+               "Database count execution failed",
+               Selecto.Error.exit_details(reason)
              )}
-
-          error ->
-            error
         end
-      rescue
-        error -> {:error, Selecto.Error.from_reason(error)}
-      catch
-        :exit, reason ->
-          {:error,
-           Selecto.Error.connection_error("Database count execution failed", %{
-             exit_reason: reason
-           })}
-      end
+      end)
     else
       {:error, %Selecto.Error{} = error} -> {:error, error}
     end
@@ -513,7 +535,9 @@ defmodule Selecto.Executor do
   Execute a query as a stream of `{row, columns, aliases}` tuples.
 
   Streaming is available only when the configured adapter advertises stream
-  support and implements `stream/4`.
+  support and implements `stream/4`. The query passes the complexity check
+  before the stream opens; row delivery is bounded by the adapter's stream
+  options, not by `:timeout`.
   """
   @spec execute_stream(Selecto.Types.t(), keyword()) :: Selecto.Types.safe_execute_stream_result()
   def execute_stream(selecto, opts \\ [])
@@ -525,8 +549,12 @@ defmodule Selecto.Executor do
     Selecto.Telemetry.operation(:stream_open, selecto, fn -> do_execute_stream(selecto, opts) end)
   end
 
+  # A stream is checked for complexity before it opens. Its rows are read
+  # lazily by the caller, so the task timeout of execute/2 cannot bound it;
+  # adapters bound row delivery (for example `:receive_timeout`).
   defp do_execute_stream(selecto, opts) do
-    with :ok <- Selecto.Tenant.validate_scope(selecto, opts) do
+    with :ok <- Selecto.Tenant.validate_scope(selecto, opts),
+         :ok <- check_query_complexity(selecto, opts, query_id()) do
       try do
         stream_sql_opts =
           Keyword.drop(opts, [
@@ -549,9 +577,10 @@ defmodule Selecto.Executor do
       catch
         :exit, reason ->
           {:error,
-           Selecto.Error.connection_error("Database stream execution failed", %{
-             exit_reason: reason
-           })}
+           Selecto.Error.connection_error(
+             "Database stream execution failed",
+             Selecto.Error.exit_details(reason)
+           )}
       end
     else
       {:error, %Selecto.Error{} = error} ->
@@ -606,6 +635,10 @@ defmodule Selecto.Executor do
 
   This function delegates to the adapter's execute/4 function, allowing
   for different database types like SQLite, MySQL, etc.
+
+  Adapter and driver failures are returned as `Selecto.Error.from_driver/2`
+  errors: they never carry the SQL, parameters, connection, or the
+  database's own message and detail.
   """
   def execute_with_adapter(adapter, connection, query, params, aliases, opts \\ []) do
     try do
@@ -616,29 +649,31 @@ defmodule Selecto.Executor do
               {:ok, {Map.get(normalized, :rows, []), Map.get(normalized, :columns, []), aliases}}
 
             {:error, reason} ->
-              {:error, Selecto.AdapterSupport.normalize_error(adapter, reason)}
+              {:error, driver_error(adapter, reason)}
           end
 
         {:error, reason} ->
-          {:error, Selecto.AdapterSupport.normalize_error(adapter, reason)}
+          {:error, driver_error(adapter, reason)}
       end
     rescue
       error ->
         {:error,
          Selecto.Error.connection_error("Adapter execution failed", %{
            adapter: adapter,
-           connection: inspect(connection),
-           error: inspect(error)
+           reason: Selecto.Error.reason_kind(error)
          })}
     catch
       :exit, reason ->
         {:error,
-         Selecto.Error.connection_error("Adapter connection failed", %{
-           adapter: adapter,
-           exit_reason: reason
-         })}
+         Selecto.Error.connection_error(
+           "Adapter connection failed",
+           Map.put(Selecto.Error.exit_details(reason), :adapter, adapter)
+         )}
     end
   end
+
+  defp driver_error(adapter, reason),
+    do: Selecto.Error.from_driver(reason, Selecto.AdapterSupport.normalize_error(adapter, reason))
 
   @doc """
   Execute query using connection pool.
@@ -651,10 +686,7 @@ defmodule Selecto.Executor do
         {:ok, {rows, columns, aliases}}
 
       {:error, reason} ->
-        {:error,
-         Selecto.Error.query_error("Pooled query execution failed", query, params, %{
-           reason: reason
-         })}
+        {:error, Selecto.Error.from_driver(reason, Selecto.Error.from_reason(reason))}
     end
   end
 
@@ -806,26 +838,22 @@ defmodule Selecto.Executor do
                  details
                )}
 
-            {:error, {:invalid_connection, connection}} ->
+            {:error, {:invalid_connection, _connection}} ->
               {:error,
                Selecto.Error.validation_error(
                  "Streaming requires adapter stream support for this connection",
-                 %{adapter: adapter, connection: inspect(connection)}
+                 %{adapter: adapter}
                )}
 
             {:error, reason} ->
-              {:error,
-               Selecto.Error.query_error("Adapter stream execution failed", query, params, %{
-                 adapter: adapter,
-                 reason: reason
-               })}
+              {:error, driver_error(adapter, reason)}
           end
         rescue
           FunctionClauseError ->
             {:error,
              Selecto.Error.validation_error(
                "Streaming requires adapter stream support for this connection",
-               %{adapter: adapter, connection: inspect(connection)}
+               %{adapter: adapter}
              )}
 
           UndefinedFunctionError ->

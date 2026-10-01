@@ -140,4 +140,154 @@ defmodule Selecto.QueryMemberDataTest do
 
     assert {:error, _} = Selecto.Domain.validate(domain(bad))
   end
+
+  describe "recursion depth" do
+    defp team_tree_sql(member_overrides) do
+      members = %{
+        ctes: %{team_tree: Map.merge(domain().query_members.ctes.team_tree, member_overrides)}
+      }
+
+      domain(members)
+      |> Selecto.configure(:compile_only)
+      |> Selecto.with_cte(:team_tree)
+      |> Selecto.select(["name", "team_tree.depth"])
+      |> sql()
+    end
+
+    test "a recursive member is bounded at 100 levels by default" do
+      {sql, _params} = team_tree_sql(%{})
+
+      assert sql =~ "team_tree (id, parent_id, name, depth, selecto_depth) AS ("
+      assert sql =~ "1 AS selecto_depth"
+      assert sql =~ "team_tree.selecto_depth + 1"
+      assert sql =~ "team_tree.selecto_depth < 100"
+    end
+
+    test "a recursive member declares its own max_depth" do
+      {sql, _params} = team_tree_sql(%{max_depth: 7})
+      assert sql =~ "team_tree.selecto_depth < 7"
+      assert {:ok, _, _} = Selecto.Domain.validate(domain(%{ctes: %{t: tree_member(7)}}))
+
+      for bad <- [0, 10_001, "7"] do
+        assert {:error, _} = Selecto.Domain.validate(domain(%{ctes: %{t: tree_member(bad)}}))
+      end
+    end
+
+    defp tree_member(max_depth),
+      do: Map.put(domain().query_members.ctes.team_tree, :max_depth, max_depth)
+  end
+
+  describe "tenant scope" do
+    defp tenant_domain do
+      tenant_scoped = fn relation ->
+        %{
+          relation
+          | fields: Enum.sort([:tenant_id | relation.fields]),
+            columns: Map.put(relation.columns, :tenant_id, %{type: :integer})
+        }
+        |> Map.put(:tenant_field, :tenant_id)
+      end
+
+      domain()
+      |> Map.update!(:source, tenant_scoped)
+      |> update_in([:schemas, :order], tenant_scoped)
+      |> update_in([:schemas, :team], tenant_scoped)
+    end
+
+    defp tenant_query do
+      tenant_domain()
+      |> Selecto.configure(:compile_only)
+      |> Selecto.with_tenant(%{tenant_id: 7, tenant_field: "tenant_id"})
+      |> Selecto.apply_tenant_scope()
+    end
+
+    test "a CTE member over a tenant-scoped schema carries the root tenant" do
+      {sql, params} =
+        tenant_query()
+        |> Selecto.with_cte(:order_totals)
+        |> Selecto.select(["name", "order_totals.spent"])
+        |> sql()
+
+      [member, _root] = split_member(sql)
+      assert member =~ "cte_order_totals.tenant_id = $"
+      assert sql =~ "selecto_root.tenant_id = $"
+      assert Enum.count(params, &(&1 == 7)) == 2
+    end
+
+    test "the tenant applied after the member is added still scopes the member" do
+      {sql, params} =
+        tenant_domain()
+        |> Selecto.configure(:compile_only)
+        |> Selecto.with_cte(:order_totals)
+        |> Selecto.with_tenant(%{tenant_id: 7, tenant_field: "tenant_id"})
+        |> Selecto.apply_tenant_scope()
+        |> Selecto.select(["name", "order_totals.spent"])
+        |> sql()
+
+      [member, _root] = split_member(sql)
+      assert member =~ "cte_order_totals.tenant_id = $"
+      assert Enum.count(params, &(&1 == 7)) == 2
+    end
+
+    test "both levels of a recursive member carry the root tenant" do
+      {sql, params} =
+        tenant_query()
+        |> Selecto.with_cte(:team_tree)
+        |> Selecto.select(["name", "team_tree.depth"])
+        |> sql()
+
+      [member, _root] = split_member(sql)
+      [base, step] = String.split(member, "UNION ALL")
+      assert base =~ "cte_team_tree.tenant_id = $"
+      assert step =~ "cte_team_tree.tenant_id = $"
+      assert Enum.count(params, &(&1 == 7)) == 3
+    end
+
+    test "a lateral member carries the root tenant" do
+      {sql, params} =
+        tenant_query()
+        |> Selecto.with_lateral(:latest_order)
+        |> Selecto.select(["name", "latest_order.total"])
+        |> sql()
+
+      [lateral] = Regex.run(~r/LATERAL \((.*)\) AS latest_order/s, sql, capture: :all_but_first)
+      assert lateral =~ ~r/subq_root_orders\.tenant_id = \$\d/
+      assert Enum.count(params, &(&1 == 7)) == 2
+    end
+
+    test "a scoped root whose scope has no tenant condition fails closed" do
+      scoped =
+        tenant_domain()
+        |> Selecto.configure(:compile_only)
+        |> Selecto.require_tenant_filter({"name", "Ann"})
+
+      assert_raise Selecto.PolicyViolation, ~r/tenant/, fn ->
+        scoped |> Selecto.with_cte(:order_totals) |> Selecto.select(["name"]) |> sql()
+      end
+
+      assert_raise Selecto.PolicyViolation, ~r/tenant/, fn ->
+        scoped |> Selecto.with_cte(:team_tree) |> Selecto.select(["name"]) |> sql()
+      end
+
+      assert_raise Selecto.Advanced.LateralJoin.CorrelationError, ~r/missing_tenant_scope/, fn ->
+        Selecto.with_lateral(scoped, :latest_order)
+      end
+    end
+
+    test "an unscoped root leaves members unscoped" do
+      {sql, _params} =
+        tenant_domain()
+        |> Selecto.configure(:compile_only)
+        |> Selecto.with_cte(:order_totals)
+        |> Selecto.select(["name", "order_totals.spent"])
+        |> sql()
+
+      refute sql =~ "tenant_id ="
+    end
+
+    defp split_member(sql) do
+      [_with, rest] = String.split(sql, " AS (", parts: 2)
+      String.split(rest, ~r/\n\)\n/, parts: 2)
+    end
+  end
 end

@@ -93,17 +93,14 @@ defmodule Selecto.Expr do
     {:window, normalize_window_call(window_call), normalize_window_opts(opts)}
   end
 
-  def normalize({:and, filters}) when is_list(filters) do
-    unquote(:and)(Enum.map(filters, &normalize/1))
-  end
+  # Boolean groups are built here rather than through and/1, or/1 and not/1,
+  # which normalize their children again: each nesting level would double the
+  # work, so a deep filter cost O(2^depth).
+  def normalize({:and, filters}) when is_list(filters),
+    do: {:and, Enum.map(filters, &normalize/1)}
 
-  def normalize({:or, filters}) when is_list(filters) do
-    unquote(:or)(Enum.map(filters, &normalize/1))
-  end
-
-  def normalize({:not, filter}) do
-    unquote(:not)(normalize(filter))
-  end
+  def normalize({:or, filters}) when is_list(filters), do: {:or, Enum.map(filters, &normalize/1)}
+  def normalize({:not, filter}), do: {:not, normalize(filter)}
 
   def normalize({:field, selector}) do
     {:field, normalize_selector_input(selector)}
@@ -303,9 +300,9 @@ defmodule Selecto.Expr do
   @spec text_contains(term(), String.t()) :: tuple()
   def text_contains(field, value) when is_binary(value), do: {field, {:text_contains, value}}
 
-  @doc "Builds a suffix `LIKE` filter."
+  @doc "Builds a literal text-suffix filter; LIKE wildcards in the suffix are escaped."
   @spec ends_with(term(), String.t()) :: tuple()
-  def ends_with(field, value), do: like(field, "%#{value}")
+  def ends_with(field, value) when is_binary(value), do: {field, {:ends_with, value}}
 
   @doc "Builds an `IS NULL` filter."
   @spec is_null(term()) :: tuple()

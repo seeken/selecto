@@ -104,6 +104,83 @@ defmodule Selecto.ExprTest do
     assert params == ["%A!%!_!!%"]
   end
 
+  test "suffix searches bind literal LIKE wildcard characters" do
+    assert X.ends_with("name", "Ch") == {"name", {:ends_with, "Ch"}}
+    assert X.normalize({:ends_with, "name", "Ch"}) == {"name", {:ends_with, "Ch"}}
+
+    query =
+      selecto()
+      |> Selecto.Query.select(["id"])
+      |> Selecto.Query.filter(X.ends_with("name", "50%_!"))
+
+    {sql, params} = Selecto.to_sql(query)
+    assert sql =~ ~s(LIKE $1 ESCAPE '!')
+    assert params == ["%50!%!_!!"]
+  end
+
+  test "literal text searches escape the SQL Server character class bracket" do
+    for {filter, pattern} <- [
+          {X.starts_with("name", "[a-z]"), "![a-z]%"},
+          {X.text_contains("name", "[a-z]"), "%![a-z]%"},
+          {X.ends_with("name", "[a-z]"), "%![a-z]"}
+        ] do
+      {sql, params} =
+        selecto()
+        |> Selecto.Query.select(["id"])
+        |> Selecto.Query.filter(filter)
+        |> Selecto.to_sql()
+
+      assert sql =~ ~s(LIKE $1 ESCAPE '!')
+      assert params == [pattern]
+    end
+  end
+
+  test "literal text searches match only the literal text on SQLite" do
+    assert {:ok, connection} = SelectoDBSQLite.Adapter.connect(database: ":memory:")
+
+    assert {:ok, _} =
+             SelectoDBSQLite.Adapter.execute(
+               connection,
+               "CREATE TABLE products (id INTEGER, name TEXT, nickname TEXT, status TEXT, active INTEGER, price REAL)",
+               [],
+               []
+             )
+
+    names = ["50%", "50x", "a_b", "axb", "[a-z]", "q", "\\x", "x\\", "!x", "x!"]
+
+    for {name, id} <- Enum.with_index(names, 1) do
+      assert {:ok, _} =
+               SelectoDBSQLite.Adapter.execute(
+                 connection,
+                 "INSERT INTO products (id, name) VALUES (?, ?)",
+                 [id, name],
+                 []
+               )
+    end
+
+    matches = fn filter ->
+      {sql, _aliases, params} =
+        selecto()
+        |> Map.put(:adapter, SelectoDBSQLite.Adapter)
+        |> Selecto.Query.select(["name"])
+        |> Selecto.Query.filter(filter)
+        |> Selecto.Query.order_by(["id"])
+        |> Selecto.gen_sql([])
+
+      {:ok, %{rows: rows}} = SelectoDBSQLite.Adapter.execute(connection, sql, params, [])
+      List.flatten(rows)
+    end
+
+    assert matches.(X.starts_with("name", "50%")) == ["50%"]
+    assert matches.(X.text_contains("name", "_")) == ["a_b"]
+    assert matches.(X.ends_with("name", "%")) == ["50%"]
+    assert matches.(X.text_contains("name", "[a-z]")) == ["[a-z]"]
+    assert matches.(X.starts_with("name", "\\")) == ["\\x"]
+    assert matches.(X.ends_with("name", "\\")) == ["x\\"]
+    assert matches.(X.starts_with("name", "!")) == ["!x"]
+    assert matches.(X.ends_with("name", "!")) == ["x!"]
+  end
+
   test "builds selector helpers with aliases and case literals" do
     assert X.field("name") == {:field, "name"}
     assert X.lit("Open") == {:literal, "Open"}
@@ -132,6 +209,38 @@ defmodule Selecto.ExprTest do
                 {{"status", "active"}, {:literal, "Open"}},
                 {{"status", "archived"}, {:literal, "Closed"}}
               ], {:literal, "Other"}}
+  end
+
+  test "deeply nested boolean filters normalize and compile in linear time" do
+    leaf = {:eq, "status", "active"}
+
+    nested = %{
+      not: Enum.reduce(1..200, leaf, fn _, acc -> {:not, acc} end),
+      and: Enum.reduce(1..200, leaf, fn _, acc -> {:and, [acc]} end),
+      or: Enum.reduce(1..200, leaf, fn _, acc -> {:or, [acc, {:gt, "price", 1}]} end),
+      mixed:
+        Enum.reduce(1..200, leaf, fn depth, acc ->
+          Enum.at([{:not, acc}, {:and, [acc, leaf]}, {:or, [acc]}], rem(depth, 3))
+        end)
+    }
+
+    for {kind, filter} <- nested do
+      task =
+        Task.async(fn ->
+          normalized = X.normalize(filter)
+          {sql, _params} = selecto() |> Selecto.filter(filter) |> Selecto.to_sql()
+          built = Enum.reduce(1..200, X.eq("status", "active"), fn _, acc -> X.not(acc) end)
+          {normalized, sql, built}
+        end)
+
+      result = Task.yield(task, 1_000) || Task.shutdown(task, :brutal_kill)
+      assert match?({:ok, _}, result), "#{kind} nesting did not finish within a second"
+      {:ok, {normalized, sql, built}} = result
+
+      assert normalized == X.normalize(normalized)
+      assert sql =~ "status"
+      assert built == X.normalize(nested.not)
+    end
   end
 
   test "normalizes helper tuples into Selecto AST" do

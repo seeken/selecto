@@ -80,7 +80,7 @@ defmodule Selecto.Builder.Sql do
     user_ctes =
       case Map.get(selecto.set, :ctes) do
         nil -> []
-        ctes when is_list(ctes) -> Enum.map(ctes, &convert_user_cte_spec/1)
+        ctes when is_list(ctes) -> Enum.map(ctes, &convert_user_cte_spec(&1, selecto))
       end
 
     all_required_ctes = required_ctes ++ values_ctes ++ user_ctes
@@ -236,7 +236,7 @@ defmodule Selecto.Builder.Sql do
             []
 
           ctes when is_list(ctes) ->
-            Enum.map(ctes, &convert_user_cte_spec/1)
+            Enum.map(ctes, &convert_user_cte_spec(&1, selecto))
         end
       else
         []
@@ -1393,29 +1393,41 @@ defmodule Selecto.Builder.Sql do
     {unnest_clause, field_params ++ collection_params}
   end
 
-  # Convert user CTE spec to builder format
-  defp convert_user_cte_spec(%{type: :recursive} = spec) do
+  # Convert user CTE spec to builder format. Query members over a
+  # tenant-scoped relation take the root's tenant scope as the root stands
+  # when it is compiled, whatever order the query was built in.
+  defp convert_user_cte_spec(%{type: :recursive} = spec, root) do
     %Selecto.Advanced.CTE.Spec{
       name: spec.name,
       type: :recursive,
-      base_query: spec.base_query,
-      recursive_query: spec.recursive_query,
+      base_query: scoped_member_query(spec.base_query, root),
+      recursive_query: scoped_member_query(spec.recursive_query, root),
       validated: true,
       dependencies: Map.get(spec, :dependencies, []),
-      columns: Map.get(spec, :columns)
+      columns: Map.get(spec, :columns),
+      max_depth: Map.get(spec, :max_depth),
+      cycle_detection: Map.get(spec, :cycle_detection)
     }
   end
 
-  defp convert_user_cte_spec(%{type: type} = spec) when type in [:normal, nil] do
+  defp convert_user_cte_spec(%{type: type} = spec, root) when type in [:normal, nil] do
     %Selecto.Advanced.CTE.Spec{
       name: spec.name,
       type: :normal,
-      query_builder: spec.query_builder || spec.query,
+      query_builder: scoped_member_query(spec.query_builder || spec.query, root),
       validated: true,
       columns: Map.get(spec, :columns),
       dependencies: Map.get(spec, :dependencies, [])
     }
   end
+
+  defp scoped_member_query(builder, root) when is_function(builder, 0),
+    do: fn -> Selecto.QueryMembers.Data.scope_member(builder.(), root) end
+
+  defp scoped_member_query(builder, root) when is_function(builder, 1),
+    do: fn cte_ref -> Selecto.QueryMembers.Data.scope_member(builder.(cte_ref), root) end
+
+  defp scoped_member_query(builder, _root), do: builder
 
   # Phase 4.2: VALUES clause integration as CTEs
   defp build_values_clauses_as_ctes(selecto, requested_joins) do

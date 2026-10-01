@@ -38,7 +38,13 @@ defmodule Selecto.QueryMembers.Data do
   `select` entries are field names, `%{as: name, value: VALUE_AST}`, or
   `%{as: name, aggregate: count|sum|avg|min|max, field: field}`; `filter` is the
   portable filter AST. `["previous", column]` is accepted only in a recursive
-  `step` and reads the previous level's row.
+  `step` and reads the previous level's row. A recursive member is bounded at
+  `max_depth` levels (default 100, at most 10000).
+
+  A member reads its own relation, so the root's tenant scope does not reach it
+  through a join. When the member's schema declares `tenant_field`, the root's
+  tenant conditions are required of the member too, and a scoped root whose
+  scope has no tenant condition fails with `:missing_tenant_scope`.
 
   `to_runtime/4` rewrites a data member into the function form the named
   member APIs (`Selecto.with_cte/2`, `Selecto.with_lateral/2`) already execute;
@@ -75,6 +81,9 @@ defmodule Selecto.QueryMembers.Data do
             check_query!(get(spec, :base), false)
             check_query!(get(spec, :step), true)
             check_keys!(get(spec, :step_join), [:owner_key, :related_key])
+
+            unless Selecto.Advanced.CTE.valid_max_depth?(get(spec, :max_depth)),
+              do: raise(ArgumentError, "max_depth must be an integer from 1 to 10000")
           else
             check_query!(get(spec, :query), false)
           end
@@ -115,6 +124,7 @@ defmodule Selecto.QueryMembers.Data do
         type: :recursive,
         columns: columns,
         join: join,
+        max_depth: get(spec, :max_depth),
         base_query: fn -> build(selecto, source, base, nil) end,
         recursive_query: fn _cte_ref ->
           selecto
@@ -143,7 +153,7 @@ defmodule Selecto.QueryMembers.Data do
   defp rewrite(selecto, :laterals, _member_name, spec) do
     correlations = get(spec, :correlations)
 
-    source = fn _base_query ->
+    source = fn base_query ->
       selecto
       |> member_selecto(get(spec, :source))
       |> apply_query(get(spec, :query), nil)
@@ -152,6 +162,7 @@ defmodule Selecto.QueryMembers.Data do
           {to_string(child), {:ref, "selecto_root.#{parent}"}}
         end)
       )
+      |> scope_member(base_query)
     end
 
     %{
@@ -192,11 +203,43 @@ defmodule Selecto.QueryMembers.Data do
       joins: %{}
     }
 
-    Selecto.configure(domain, Map.get(selecto, :runtime) || :compile_only,
-      adapter: selecto.adapter,
-      validate: false
-    )
+    member =
+      Selecto.configure(domain, Map.get(selecto, :runtime) || :compile_only,
+        adapter: selecto.adapter,
+        validate: false
+      )
+
+    # A member over a tenant-scoped relation is marked so the root's tenant
+    # scope can be applied when the root is compiled (see scope_member/2).
+    case Selecto.Tenant.domain_tenant_field(domain) do
+      nil -> member
+      field -> put_in(member.set[:query_member_tenant_field], field)
+    end
   end
+
+  @doc false
+  # A member reads its own relation, so the root's tenant scope does not reach
+  # it through any join. When the member's relation declares tenant_field, the
+  # root's tenant conditions are re-expressed on that field and required of the
+  # member. A scoped root whose tenant condition cannot be carried fails closed
+  # rather than reading every tenant's rows.
+  def scope_member(%Selecto{set: %{query_member_tenant_field: field}} = member, root) do
+    case Selecto.Tenant.carry_conditions(root, field) do
+      :unscoped ->
+        member
+
+      {:ok, carried} ->
+        Enum.reduce(carried, member, &Selecto.Tenant.require_tenant_filter(&2, &1))
+
+      :error ->
+        raise Selecto.PolicyViolation,
+          type: :missing_tenant_scope,
+          message:
+            "query member #{member.domain.name} reads a tenant-scoped relation but the root tenant scope cannot be applied to it"
+    end
+  end
+
+  def scope_member(member, _root), do: member
 
   defp apply_query(selecto, query, previous) do
     selecto

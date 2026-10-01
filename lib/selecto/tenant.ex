@@ -224,6 +224,50 @@ defmodule Selecto.Tenant do
 
   def domain_tenant_field(_domain), do: nil
 
+  @doc false
+  # The query's tenant conditions re-expressed on `target_field` of a relation
+  # the query reads outside its own joins: a retarget target or a query member.
+  # `:unscoped` when the query has no required filters; `:error` when it has
+  # some but none is a tenant condition on the root tenant field.
+  @spec carry_conditions(Selecto.Types.t(), atom() | String.t()) ::
+          {:ok, [Selecto.Types.filter()]} | :unscoped | :error
+  def carry_conditions(selecto, target_field) do
+    target_field = normalize_field(target_field)
+    required = Selecto.Query.required_filters(selecto)
+    root_field = domain_tenant_field(selecto)
+
+    carried =
+      if root_field,
+        do: Enum.flat_map(required, &carry_conjunct(&1, root_field, target_field)),
+        else: []
+
+    cond do
+      required == [] -> :unscoped
+      carried == [] -> :error
+      true -> {:ok, carried}
+    end
+  end
+
+  defp carry_conjunct({:and, filters}, root_field, target_field) when is_list(filters),
+    do: Enum.flat_map(filters, &carry_conjunct(&1, root_field, target_field))
+
+  defp carry_conjunct({field, value}, root_field, target_field)
+       when is_binary(field) or is_atom(field) do
+    if to_string(field) == root_field and carried_value?(value),
+      do: [{target_field, value}],
+      else: []
+  end
+
+  defp carry_conjunct(_filter, _root_field, _target_field), do: []
+
+  defp carried_value?(value) when is_binary(value) or is_number(value), do: true
+  defp carried_value?({:in, values}) when is_list(values) and values != [], do: true
+
+  defp carried_value?(values) when is_list(values) and values != [],
+    do: Enum.all?(values, &(is_binary(&1) or is_number(&1)))
+
+  defp carried_value?(_value), do: false
+
   @doc """
   Return whether `filters` hold a positive tenant conjunct on `tenant_field`.
 

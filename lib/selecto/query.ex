@@ -406,11 +406,8 @@ defmodule Selecto.Query do
   """
   @spec to_sql(Selecto.Types.t(), keyword()) :: {String.t(), list()}
   def to_sql(selecto, opts \\ []) do
+    # gen_sql/2 enforces the tenant scope unless `validate_tenant: false`.
     {query, _aliases, params} = Selecto.gen_sql(selecto, opts)
-
-    if Keyword.get(opts, :validate_tenant, true) do
-      Selecto.Tenant.ensure_scope!(selecto)
-    end
 
     query =
       if Keyword.get(opts, :pretty, false) do
