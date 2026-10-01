@@ -74,6 +74,7 @@ defmodule Selecto.Domain.Examples do
         owners: %{
           source_table: "users",
           primary_key: :id,
+          tenant_field: :tenant_id,
           fields: [:id, :name, :active, :tenant_id],
           columns: %{
             id: %{type: :integer},
@@ -327,6 +328,15 @@ defmodule Selecto.Domain.Examples do
         },
         scope: %{
           tenant: %{required: true, field: :tenant_id, satisfied_by: [:trusted_context]}
+        },
+        # Cabins are shared camp inventory scoped by session, not tenant data.
+        constraints: %{
+          foreign_keys: %{
+            cabin_id: %{
+              source: :input,
+              references: %{relation: "camp_cabins", field: :id, tenant_field: false}
+            }
+          }
         },
         transitions: %{
           status: %{

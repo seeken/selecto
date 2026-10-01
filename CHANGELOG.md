@@ -23,6 +23,10 @@
     `:write_policy_missing` until the fields are declared. A registry that
     enables no operation compiles and executes nothing. There is no
     permissive mode.
+  - The canonical examples declare the write tenancy of their references:
+    `work_items` owners carry `tenant_field: :tenant_id`, and
+    `camp_registrations.cabin_id` is a declared foreign key to the shared
+    `camp_cabins` relation (`references.tenant_field: false`).
 
 - Security: harden the read path against the adversarial scenarios in the
   vault plan `selecto-adversarial-api-and-backend-test-scenarios`.
