@@ -3,9 +3,8 @@
 
 ## Unreleased
 
-- Rebuild `Selecto.retarget/3` to the portable `query_retarget` 1.0.0
-  semantics (query_retarget 1.1.0, certification specification 2.22.0). A
-  retarget now returns a
+- Rebuild `Selecto.retarget/3` to the portable `query_retarget` 1.1.0
+  semantics (certification specification 2.22.0). A retarget now returns a
   query configured on a domain rooted at the target relation, named by a join
   id (`:orders`) or a dotted join path (`"attendees.orders"`). The earlier
   query becomes the context: the result is the distinct target rows its
