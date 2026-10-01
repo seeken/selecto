@@ -3,6 +3,27 @@
 
 ## Unreleased
 
+- Security: close the ungoverned-write boundary. Writes execute only through
+  the governed entry point, `SelectoUpdato`.
+  - `Selecto.Write.execute/3`, `Selecto.Write.execute_prepared/3` and every
+    adapter's `execute_write/3` and `execute_prepared_write/3` refuse a write
+    without a `Selecto.Write.Authorization` for exactly that command, batch or
+    graph, with `{:error, %Selecto.Write.Error{type: :ungoverned_write}}`. An
+    authorization is opaque, single-use, bound to its payload, local to the
+    issuing process, and issued only by `SelectoUpdato`.
+  - `Selecto.Write.execute_unsafe/3`, `Selecto.Write.execute_prepared_unsafe/3`
+    and the optional adapter callbacks `execute_write_unsafe/3` and
+    `execute_prepared_write_unsafe/3` keep the raw path for trusted tooling and
+    adapter tests only. A governed prepared write's preparation returns
+    `{:ok, write, context, authorization}`.
+  - `Selecto.Domain.WriteContract.compile/1` returns `:write_policy_missing`
+    (previously `:write_not_declared`) for a domain without
+    `writes.operations`. A contract now compiles without `writes.fields`, and
+    `require_write_policy/2` refuses every operation but a delete with
+    `:write_policy_missing` until the fields are declared. A registry that
+    enables no operation compiles and executes nothing. There is no
+    permissive mode.
+
 - Security: harden the read path against the adversarial scenarios in the
   vault plan `selecto-adversarial-api-and-backend-test-scenarios`.
   - Data query members (CTE, recursive CTE and lateral) over a schema that

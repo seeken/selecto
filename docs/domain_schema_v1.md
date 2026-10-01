@@ -1098,9 +1098,18 @@ field. These declarations do not replace database constraints.
 The optional `writes` map declares the only portable write authority granted by
 a domain. Read fields, associations, database introspection, and queryability
 MUST NOT imply write permission. An executable contract requires a non-empty
-`writes.operations` registry containing at least one operation with
-`enabled: true`; otherwise `Selecto.Domain.WriteContract.compile/1` returns
-`:write_not_declared`.
+`writes.operations` registry; otherwise `Selecto.Domain.WriteContract.compile/1`
+returns `:write_policy_missing`. Only operations declared with `enabled: true`
+execute. Every operation except a delete also requires a non-empty
+`writes.fields` registry, and fails with `:write_policy_missing` without one
+(`Selecto.Domain.WriteContract.require_write_policy/2`). There is no permissive
+mode.
+
+Governance is enforced at execution, not only at authoring time. The governed
+entry point (`SelectoUpdato`) validates each command, batch, or graph against
+this contract every time it executes and issues a single-use
+`Selecto.Write.Authorization` for exactly that payload. Write adapters refuse
+a write without one with `:ungoverned_write`; see `Selecto.DB.WriteAdapter`.
 
 The canonical sections are:
 

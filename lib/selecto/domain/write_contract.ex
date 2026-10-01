@@ -4,7 +4,14 @@ defmodule Selecto.Domain.WriteContract do
 
   Read-domain structure and database introspection never grant write access.
   A caller receives a contract only when the domain declares a non-empty
-  `writes.operations` registry with explicitly enabled operations.
+  `writes.operations` registry; only operations it explicitly enables are
+  executable. A domain without that registry fails with
+  `:write_policy_missing`.
+
+  `writes.fields` grants assignment fields. A contract compiles without it so
+  a domain may enable deletes alone, but `require_write_policy/2` refuses every
+  other operation with `:write_policy_missing` until the fields are declared.
+  There is no permissive mode.
   """
 
   alias Selecto.Domain
@@ -27,7 +34,8 @@ defmodule Selecto.Domain.WriteContract do
           constraints: term(),
           transitions: map(),
           rules: Selecto.Rule.Contract.t(),
-          fingerprint: String.t() | nil
+          fingerprint: String.t() | nil,
+          fields_declared?: boolean()
         }
 
   @enforce_keys [:source, :operations, :fields]
@@ -39,7 +47,8 @@ defmodule Selecto.Domain.WriteContract do
             constraints: %{},
             transitions: %{},
             rules: nil,
-            fingerprint: nil
+            fingerprint: nil,
+            fields_declared?: false
 
   @spec compile(term()) :: {:ok, t()} | {:error, Error.t()}
   def compile(input) do
@@ -59,7 +68,8 @@ defmodule Selecto.Domain.WriteContract do
          constraints: map_section(writes, :constraints),
          transitions: map_section(writes, :transitions),
          rules: rules,
-         fingerprint: Map.get(normalized, :domain_fingerprint)
+         fingerprint: Map.get(normalized, :domain_fingerprint),
+         fields_declared?: map_size(fields) > 0
        }}
     end
   end
@@ -68,6 +78,24 @@ defmodule Selecto.Domain.WriteContract do
   def operation_enabled?(%__MODULE__{operations: operations}, operation)
       when is_atom(operation) do
     match?(%{enabled: true}, Map.get(operations, operation))
+  end
+
+  @doc """
+  Requires the declared write policy that `operation` depends on.
+
+  Every operation needs `writes.operations`, which `compile/1` already
+  requires. Every operation except a delete also needs `writes.fields`;
+  without it the write fails with `:write_policy_missing`.
+  """
+  @spec require_write_policy(t(), atom()) :: :ok | {:error, Error.t()}
+  def require_write_policy(%__MODULE__{}, :delete), do: :ok
+  def require_write_policy(%__MODULE__{fields_declared?: true}, _operation), do: :ok
+
+  def require_write_policy(%__MODULE__{}, operation) do
+    {:error,
+     Error.new(:write_policy_missing, "domain declares no writes.fields",
+       details: %{operation: operation, required: [:writes, :fields]}
+     )}
   end
 
   @spec field_spec(t(), atom() | String.t()) :: map() | nil
@@ -147,11 +175,14 @@ defmodule Selecto.Domain.WriteContract do
 
     cond do
       not is_map(writes) ->
-        {:error, Error.new(:write_not_declared, "domain does not declare a write contract")}
+        {:error,
+         Error.new(:write_policy_missing, "domain does not declare a write contract",
+           details: %{required: [:writes, :operations]}
+         )}
 
       not is_map(operations) or map_size(operations) == 0 ->
         {:error,
-         Error.new(:write_not_declared, "domain does not declare any enabled write operations",
+         Error.new(:write_policy_missing, "domain declares no writes.operations",
            details: %{required: [:writes, :operations]}
          )}
 
@@ -192,17 +223,6 @@ defmodule Selecto.Domain.WriteContract do
         end
       end)
     end
-    |> case do
-      {:ok, operations} when map_size(operations) > 0 ->
-        {:ok, operations}
-
-      {:ok, _operations} ->
-        {:error,
-         Error.new(:write_not_declared, "domain has no explicitly enabled write operations")}
-
-      error ->
-        error
-    end
   end
 
   defp compile_fields(writes, normalized) do
@@ -214,7 +234,7 @@ defmodule Selecto.Domain.WriteContract do
         {:error, Error.new(:invalid_domain, "writes.fields must be a map")}
 
       map_size(fields) == 0 ->
-        {:error, Error.new(:write_not_declared, "domain must explicitly declare writable fields")}
+        {:ok, %{}}
 
       true ->
         with :ok <-

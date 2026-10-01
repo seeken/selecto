@@ -9,7 +9,10 @@ defmodule Selecto.Write.AdapterConformance do
 
   Conformance does not grant write capability and does not execute a command.
   An adapter remains read-only unless it explicitly implements
-  `Selecto.DB.WriteAdapter`.
+  `Selecto.DB.WriteAdapter`. Adapter suites must also prove, against a real
+  database, that `execute_write/3` refuses a command without a
+  `Selecto.Write.Authorization` (`:ungoverned_write`) and leaves every row
+  unchanged; see `Selecto.DB.WriteAdapter`.
   """
 
   alias Selecto.Write

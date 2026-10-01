@@ -14,16 +14,48 @@ configured `selecto_db_*` adapter owns SQL generation, bound parameters, the
 native driver, connection affinity, transactions, returning values, logical
 affected-row normalization, and rollback.
 
+## Governed execution boundary
+
+Every write executes through the governed entry point. `selecto_updato`
+validates the exact command, batch, or graph against the governing domain's
+`writes` contract each time it executes, then issues a single-use
+`Selecto.Write.Authorization` bound to exactly that payload and passes it to
+`Selecto.Write.execute/3` (or returns it from its preparation for
+`Selecto.Write.execute_prepared/3`). The authorization is opaque, valid once,
+valid only for that payload, and valid only in the issuing process; only the
+governed entry point can issue one.
+
+`Selecto.Write.execute/3`, `Selecto.Write.execute_prepared/3`, and every
+adapter's `execute_write/3` and `execute_prepared_write/3` refuse a write
+without a matching authorization with `:ungoverned_write`, before any
+statement runs. An adapter's `execute_write/3` calls
+`Selecto.Write.Authorization.require_for/2` and delegates to
+`execute_write_unsafe/3`; `execute_prepared_write/3` wraps the preparation with
+`Selecto.Write.Authorization.governed_preparation/1` and delegates to
+`execute_prepared_write_unsafe/3`.
+
+The `*_unsafe` functions (`Selecto.Write.execute_unsafe/3`,
+`Selecto.Write.execute_prepared_unsafe/3`, and the adapter callbacks of the
+same names) skip domain governance. They exist for trusted tooling and adapter
+tests only. Application code, request handlers, examples, and READMEs use
+`SelectoUpdato`.
+
+A domain without `writes.operations` fails every write with
+`:write_policy_missing`; a domain without `writes.fields` fails every write
+except a delete the same way. There is no permissive mode. Previews need no
+authorization because they never execute; `SelectoUpdato.preview/3` runs the
+same governance pipeline as execution.
+
 No layer requires an Ecto Repo, schema, changeset, or application Ecto
 configuration. An adapter may offer an optional integration, but native driver
 connections remain sufficient.
 
 ```text
-domain policy -> selecto_updato -> Selecto.Write value
+domain policy -> selecto_updato -> Selecto.Write value + authorization
                                       |
                               selecto preflight
                                       |
-                              selecto_db adapter
+                              selecto_db adapter (consumes authorization)
                                       |
                           native driver and database
 ```

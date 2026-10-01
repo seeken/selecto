@@ -19,6 +19,7 @@ defmodule Selecto.WriteProtocolTest do
 
   alias Selecto.Write.Graph.{Binding, Node, Row}
   alias Selecto.Domain.WriteContract
+  alias SelectoUpdato.GovernedWrite
 
   defmodule WriteAdapter do
     @behaviour Selecto.DB.Adapter
@@ -93,7 +94,15 @@ defmodule Selecto.WriteProtocolTest do
     def preview_write(_connection, _command, _opts), do: {:ok, %Preview{statements: []}}
     def execute_write(_connection, _command, _opts), do: raise("ordinary path must not run")
 
-    def execute_prepared_write(pid, prepare_fun, _opts) do
+    def execute_prepared_write(pid, prepare_fun, opts) do
+      execute_prepared_write_unsafe(
+        pid,
+        Selecto.Write.Authorization.governed_preparation(prepare_fun),
+        opts
+      )
+    end
+
+    def execute_prepared_write_unsafe(pid, prepare_fun, _opts) do
       loader = fn
         %RecordRequest{} = request ->
           send(pid, {:record_request, request})
@@ -197,7 +206,8 @@ defmodule Selecto.WriteProtocolTest do
     command = command!(:insert)
     selecto = %Selecto{adapter: WriteAdapter, connection: :connection}
 
-    assert {:ok, %Result{operation: :insert, affected_rows: 1}} = Write.execute(selecto, command)
+    assert {:ok, %Result{operation: :insert, affected_rows: 1}} =
+             GovernedWrite.execute(selecto, command)
 
     assert {:ok, %Preview{statements: [%{text: "adapter-owned preview"}]}} =
              Write.preview(selecto, command)
@@ -224,7 +234,7 @@ defmodule Selecto.WriteProtocolTest do
 
     prepare = fn loader ->
       assert {:ok, %Selecto.Write.CandidateState{protection: :locked}} = loader.(request)
-      {:ok, command!(:insert), %{candidate_revision: 1}}
+      GovernedWrite.prepared(command!(:insert), %{candidate_revision: 1})
     end
 
     assert {:ok, %Result{operation: :insert}} = Write.execute_prepared(selecto, prepare)
@@ -254,7 +264,7 @@ defmodule Selecto.WriteProtocolTest do
 
     prepare = fn loader ->
       assert {:ok, %RecordState{values: %{"id" => 11}, protection: :locked}} = loader.(request)
-      {:ok, command!(:update), %{}}
+      GovernedWrite.prepared(command!(:update), %{})
     end
 
     assert {:ok, %Result{operation: :update}} = Write.execute_prepared(selecto, prepare)
@@ -269,7 +279,7 @@ defmodule Selecto.WriteProtocolTest do
             %Error{
               type: :write_capability_missing,
               details: %{missing: [:committed_effect_sink]}
-            }} = Write.execute(selecto, command!(:insert), committed_effect_sink: sink)
+            }} = GovernedWrite.execute(selecto, command!(:insert), committed_effect_sink: sink)
   end
 
   test "passes a committed-effect sink only to an adapter that declares support" do
@@ -278,9 +288,10 @@ defmodule Selecto.WriteProtocolTest do
     selecto = %Selecto{adapter: EffectAdapter, connection: agent}
 
     assert {:ok, %Result{operation: :insert}} =
-             Write.execute(selecto, command!(:insert), committed_effect_sink: sink)
+             GovernedWrite.execute(selecto, command!(:insert), committed_effect_sink: sink)
 
-    assert [[committed_effect_sink: ^sink]] = Agent.get(agent, & &1)
+    assert [opts] = Agent.get(agent, & &1)
+    assert Keyword.fetch!(opts, :committed_effect_sink) == sink
   end
 
   test "committed-effect sink normalizes failures without exposing values" do
@@ -333,7 +344,7 @@ defmodule Selecto.WriteProtocolTest do
     selecto = %Selecto{adapter: MissingProtocolAdapter, connection: agent}
 
     assert {:error, %Error{type: :invalid_write_capabilities}} =
-             Write.execute(selecto, command!(:insert))
+             GovernedWrite.execute(selecto, command!(:insert))
 
     assert {:error, %Error{type: :invalid_write_capabilities}} =
              Write.preview(selecto, command!(:insert))
@@ -349,7 +360,7 @@ defmodule Selecto.WriteProtocolTest do
             %Error{
               type: :invalid_write_capabilities,
               details: %{adapter: RaisingCapabilitiesAdapter}
-            } = error} = Write.execute(selecto, command!(:insert))
+            } = error} = GovernedWrite.execute(selecto, command!(:insert))
 
     refute inspect(error) =~ "capability probe secret"
     assert Agent.get(agent, & &1) == 0
@@ -373,13 +384,13 @@ defmodule Selecto.WriteProtocolTest do
     selecto = %Selecto{adapter: OperationReturningAdapter, connection: :connection}
 
     assert {:ok, %Result{operation: :insert}} =
-             Write.execute(selecto, %{command!(:insert) | returning: [:id]})
+             GovernedWrite.execute(selecto, %{command!(:insert) | returning: [:id]})
 
     assert {:error,
             %Error{
               type: :write_capability_missing,
               details: %{missing: [{:returning, :update}]}
-            }} = Write.execute(selecto, %{command!(:update) | returning: [:id]})
+            }} = GovernedWrite.execute(selecto, %{command!(:update) | returning: [:id]})
   end
 
   test "graph preflight requires returning only for the root operation" do
@@ -598,7 +609,7 @@ defmodule Selecto.WriteProtocolTest do
             [
               %Result{operation: :insert, affected_rows: 1},
               %Result{operation: :delete, affected_rows: 1}
-            ]} = Write.execute(selecto, batch)
+            ]} = GovernedWrite.execute(selecto, batch)
   end
 
   test "validates topologically ordered generated-key write graphs" do
@@ -643,7 +654,10 @@ defmodule Selecto.WriteProtocolTest do
     assert {:ok, graph} = Graph.new(nodes, {"root", "root"})
 
     assert {:ok, %Result{operation: :graph}} =
-             Write.execute(%Selecto{adapter: WriteAdapter, connection: :connection}, graph)
+             GovernedWrite.execute(
+               %Selecto{adapter: WriteAdapter, connection: :connection},
+               graph
+             )
   end
 
   test "rejects forward references and caller overrides of generated bindings" do
@@ -730,11 +744,11 @@ defmodule Selecto.WriteProtocolTest do
     selecto = %Selecto{adapter: ReadOnlyAdapter, connection: :connection}
 
     assert {:error, %Error{type: :write_not_supported}} =
-             Write.execute(selecto, command!(:delete))
+             GovernedWrite.execute(selecto, command!(:delete))
   end
 
   test "compiles only an explicit write surface and never treats a read domain as writable" do
-    assert {:error, %Error{type: :write_not_declared}} = WriteContract.compile(read_domain())
+    assert {:error, %Error{type: :write_policy_missing}} = WriteContract.compile(read_domain())
 
     assert {:ok, contract} = WriteContract.compile(write_domain())
     assert WriteContract.operation_enabled?(contract, :insert)

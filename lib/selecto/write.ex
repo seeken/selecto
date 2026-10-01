@@ -3,34 +3,74 @@ defmodule Selecto.Write do
   Portable write-command entrypoint.
 
   `Selecto.Write` deliberately contains no database dialect, driver, or ORM
-  knowledge. `selecto_updato` compiles governed domain intent into these
-  commands; a configured database adapter previews or executes them.
+  knowledge. `selecto_updato` validates domain intent against the domain's
+  `writes` contract, compiles it into these portable commands, and executes
+  them here with a `Selecto.Write.Authorization` for exactly that command,
+  batch, or graph. A configured database adapter previews or executes them.
+
+  Applications write through `SelectoUpdato`. `execute/3` and
+  `execute_prepared/3` refuse a write that did not come from that governed
+  entry point with `{:error, %Selecto.Write.Error{type: :ungoverned_write}}`.
+
+  `execute_unsafe/3` and `execute_prepared_unsafe/3` skip domain governance.
+  They exist for trusted tooling and adapter tests only; application code,
+  examples, and request handlers never call them.
+
+  `preview/3` compiles a write without executing it and needs no
+  authorization; `SelectoUpdato.preview/3` previews through the same
+  governance pipeline as execution.
   """
 
-  alias Selecto.Write.{Capabilities, Command, Error, Preview}
+  alias Selecto.Write.{Authorization, Capabilities, Command, Error, Preview}
 
   @type command :: Command.t() | Selecto.Write.Batch.t() | Selecto.Write.Graph.t()
   @type execution_result :: Selecto.Write.Result.t() | [Selecto.Write.Result.t()]
 
+  @doc """
+  Executes a governed write.
+
+  `opts` must carry the `:authorization` the governed entry point issued for
+  exactly `command`; without it the write fails with `:ungoverned_write`
+  before the adapter is called. The authorization is spent by this call.
+  """
   @spec execute(Selecto.t(), command(), keyword()) ::
           {:ok, execution_result()} | {:error, Error.t()}
-  def execute(%Selecto{adapter: adapter, connection: connection}, command, opts \\ []) do
-    with :ok <- validate_command(command),
-         :ok <- ensure_callback(adapter, :execute_write, 3),
-         {:ok, capabilities} <- adapter_capabilities(adapter, connection),
-         :ok <- Capabilities.require(capabilities, command),
-         :ok <- require_committed_effect_sink(capabilities, opts) do
+  def execute(selecto, command, opts \\ [])
+
+  def execute(%Selecto{adapter: adapter, connection: connection}, command, opts) do
+    with :ok <- Authorization.check(command, opts),
+         :ok <- preflight(adapter, connection, command, :execute_write, opts) do
       adapter.execute_write(connection, command, opts)
+    end
+  after
+    Authorization.revoke(opts)
+  end
+
+  @doc """
+  Executes a write without domain governance.
+
+  For trusted tooling and adapter tests only. It runs the same command,
+  capability, and committed-effect checks as `execute/3` and dispatches to the
+  adapter's `execute_write_unsafe/3`.
+  """
+  @spec execute_unsafe(Selecto.t(), command(), keyword()) ::
+          {:ok, execution_result()} | {:error, Error.t()}
+  def execute_unsafe(%Selecto{adapter: adapter, connection: connection}, command, opts \\ []) do
+    with :ok <- preflight(adapter, connection, command, :execute_write_unsafe, opts) do
+      adapter.execute_write_unsafe(connection, command, opts)
     end
   end
 
   @doc """
-  Executes a write whose portable command must be prepared from protected
-  database state inside the adapter's transaction.
+  Executes a governed write whose portable command must be prepared from
+  protected database state inside the adapter's transaction.
 
-  The adapter supplies the preparation function with a typed protected-state loader.
-  Only adapters that explicitly report `:prepared_candidate_state` support this
-  boundary.
+  The adapter supplies the preparation function with a typed protected-state
+  loader. The governed entry point's preparation returns `{:ok, write,
+  context, authorization}`; a preparation that returns an unauthorized
+  `{:ok, write, context}` fails with `:ungoverned_write` and the transaction
+  rolls back. Only adapters that explicitly report `:prepared_candidate_state`
+  support this boundary.
   """
   @spec execute_prepared(Selecto.t(), Selecto.DB.WriteAdapter.prepare_fun(), keyword()) ::
           {:ok, execution_result()} | {:error, Error.t()} | {:error, term()}
@@ -40,11 +80,51 @@ defmodule Selecto.Write do
         opts \\ []
       )
       when is_function(prepare_fun, 1) do
-    with :ok <- ensure_callback(adapter, :execute_prepared_write, 3),
+    with :ok <- prepared_preflight(adapter, connection, :execute_prepared_write, opts) do
+      Authorization.dispatch_prepared(prepare_fun, fn checked ->
+        adapter.execute_prepared_write(connection, checked, opts)
+      end)
+    end
+  end
+
+  @doc """
+  Executes a prepared write without domain governance.
+
+  For trusted tooling and adapter tests only. The preparation returns
+  `{:ok, write, context}` and the adapter's
+  `execute_prepared_write_unsafe/3` executes it.
+  """
+  @spec execute_prepared_unsafe(
+          Selecto.t(),
+          Selecto.DB.WriteAdapter.unsafe_prepare_fun(),
+          keyword()
+        ) ::
+          {:ok, execution_result()} | {:error, Error.t()} | {:error, term()}
+  def execute_prepared_unsafe(
+        %Selecto{adapter: adapter, connection: connection},
+        prepare_fun,
+        opts \\ []
+      )
+      when is_function(prepare_fun, 1) do
+    with :ok <- prepared_preflight(adapter, connection, :execute_prepared_write_unsafe, opts) do
+      adapter.execute_prepared_write_unsafe(connection, prepare_fun, opts)
+    end
+  end
+
+  defp preflight(adapter, connection, command, callback, opts) do
+    with :ok <- validate_command(command),
+         :ok <- ensure_callback(adapter, callback, 3),
          {:ok, capabilities} <- adapter_capabilities(adapter, connection),
-         :ok <- require_prepared_candidate_state(capabilities),
-         :ok <- require_committed_effect_sink(capabilities, opts) do
-      adapter.execute_prepared_write(connection, prepare_fun, opts)
+         :ok <- Capabilities.require(capabilities, command) do
+      require_committed_effect_sink(capabilities, opts)
+    end
+  end
+
+  defp prepared_preflight(adapter, connection, callback, opts) do
+    with :ok <- ensure_callback(adapter, callback, 3),
+         {:ok, capabilities} <- adapter_capabilities(adapter, connection),
+         :ok <- require_prepared_candidate_state(capabilities) do
+      require_committed_effect_sink(capabilities, opts)
     end
   end
 

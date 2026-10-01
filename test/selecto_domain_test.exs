@@ -510,8 +510,12 @@ defmodule Selecto.DomainTest do
       refute Map.has_key?(normalized.writes, :fields)
       refute Map.has_key?(normalized.writes, :relationships)
 
-      assert {:error, %Selecto.Write.Error{type: :write_not_declared}} =
-               Selecto.Domain.WriteContract.compile(domain)
+      assert {:ok, contract} = Selecto.Domain.WriteContract.compile(domain)
+      refute contract.fields_declared?
+      refute Selecto.Domain.WriteContract.writable?(contract, :update, :status)
+
+      assert {:error, %Selecto.Write.Error{type: :write_policy_missing}} =
+               Selecto.Domain.WriteContract.require_write_policy(contract, :update)
     end
 
     test "merges colocated policy with non-overlapping canonical write fields" do
