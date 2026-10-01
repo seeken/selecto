@@ -1,241 +1,545 @@
 defmodule Selecto.Retarget do
   @moduledoc """
-  Retarget functionality for retargeting joined tables as primary query focus.
+  Retarget moves a query's row grain from the domain root to the relation at
+  a join path.
 
-  The Retarget feature allows you to shift the perspective of a Selecto query from the 
-  source table to any joined table, while preserving existing filters through subqueries.
+  The query's filters at the time of the retarget become its context. The
+  retargeted query returns the distinct target rows that the original query's
+  joined read reaches under that context and its required filters. A filter
+  on a join of the path therefore constrains that join's rows: filtering
+  attendees by name and retargeting to their orders returns those attendees'
+  orders.
 
-  ## Examples
+  `retarget/3` returns a query configured on a domain rooted at the target
+  relation. Selections, filters, grouping, ordering, pagination, and
+  subselects added afterwards resolve against the target and its own joins.
+  The original query is kept as the context; `reset_retarget/1` returns it.
 
-      # Basic retarget - shift from events to orders
       selecto
-      |> Selecto.filter([{"event_id", 123}])
-      |> Selecto.retarget(:orders)
-      |> Selecto.select(["product_name", "quantity"])
+      |> Selecto.filter({"region", "west"})
+      |> Selecto.retarget("attendees.orders")
+      |> Selecto.filter({"total", {:gt, 10}})
+      |> Selecto.select(["id", "total", "product.name"])
 
-      # This generates SQL like:
-      # SELECT o.product_name, o.quantity 
-      # FROM orders o 
-      # WHERE o.attendee_id IN (
-      #   SELECT a.attendee_id FROM events e 
-      #   JOIN attendees a ON e.event_id = a.event_id 
-      #   WHERE e.event_id = 123
-      # )
+  ## Target paths
 
-  ## Configuration Options
+  A target is a join id (`:orders`) or a dotted join path from the root
+  (`"attendees.orders"`) that names the domain's join tree. Each hop keeps
+  its declared join semantics. The target must be a table-backed relation
+  whose primary key is one of its fields.
 
-  - `:preserve_filters` - Whether to preserve existing filters in subquery (default: true)
-  - `:subquery_strategy` - How to generate the subquery (`:in`, `:exists`, `:join`)
+  ## Domain governance
+
+  A domain's `retarget` section may declare `targets`, an allow-list keyed by
+  join path with optional `label` and `default_selected`, and a
+  `default_target`. When `targets` is declared, only those paths can be
+  retargeted to.
+
+  ## Tenant scope
+
+  The context keeps the original required filters, including an applied
+  tenant scope. When the target relation declares `tenant_field`, the root's
+  tenant conditions are re-expressed on it and required of the target too. A
+  scoped root whose tenant condition cannot be carried to a tenant-scoped
+  target fails closed with `:missing_tenant_scope`.
+
+  ## Options
+
+    * `:strategy` - `:in` (default) or `:exists`. Both return the same rows.
   """
 
   alias Selecto.Types
 
+  defmodule Error do
+    @moduledoc "Raised when a retarget is not allowed or cannot be planned."
+    defexception [:code, :message, details: %{}]
+  end
+
+  @strategies [:in, :exists]
+  @context_alias "selecto_retarget_context"
+
   @doc """
-  Retarget the query to focus on a different table while preserving existing context.
+  Retarget `selecto` to the relation at `target`.
 
-  ## Parameters
-
-  - `selecto` - The Selecto struct to retarget
-  - `target_schema` - Atom representing the target table to retarget to
-  - `opts` - Optional configuration (see module docs)
-
-  ## Returns
-
-  Updated Selecto struct with retarget configuration applied.
-
-  ## Examples
-
-      selecto
-      |> Selecto.filter([{"event_id", 123}])
-      |> Selecto.retarget(:orders)
-      |> Selecto.select(["product_name"])
+  See the module documentation for semantics and options.
   """
-  @spec retarget(Types.t(), atom(), keyword()) :: Types.t()
-  def retarget(selecto, target_schema, opts \\ []) do
+  @spec retarget(Types.t(), atom() | String.t(), keyword()) :: Types.t()
+  def retarget(%Selecto{} = selecto, target, opts \\ []) do
     :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :retarget)
+    strategy = strategy!(opts)
 
-    with {:ok, join_path} <- calculate_join_path(selecto, target_schema),
-         :ok <- validate_retarget_path(selecto, join_path) do
-      retarget_config = %{
-        target_schema: target_schema,
-        join_path: join_path,
-        preserve_filters: Keyword.get(opts, :preserve_filters, true),
-        subquery_strategy: Keyword.get(opts, :subquery_strategy, :in),
-        # :subquery or :cte
-        strategy: Keyword.get(opts, :strategy, :subquery)
-      }
-
-      put_in(selecto.set[:retarget_state], retarget_config)
-    else
-      {:error, reason} ->
-        raise ArgumentError, "Invalid retarget configuration: #{reason}"
+    if has_retarget?(selecto) do
+      fail!(:invalid_query, "a query can be retargeted only once")
     end
+
+    ensure_root_sources_absent!(selecto)
+
+    plan = plan!(selecto, target)
+
+    retargeted =
+      plan.domain
+      |> Selecto.configure(selecto.runtime, configure_options(selecto))
+      |> carry_tenant_scope!(selecto, plan)
+
+    put_in(retargeted.set[:retarget_state], %{
+      path: plan.path,
+      join: plan.join,
+      target_schema: plan.target_schema,
+      primary_key: plan.primary_key,
+      strategy: strategy,
+      origin: selecto
+    })
   end
 
-  @doc """
-  Calculate the join path from the source table to the target table.
-
-  This function analyzes the domain configuration to find the shortest path
-  of associations from the current source to the target schema.
-  """
-  @spec calculate_join_path(Types.t(), atom()) :: {:ok, [atom()]} | {:error, String.t()}
-  def calculate_join_path(selecto, target_schema) do
-    source_name = get_source_schema_name(selecto)
-
-    case find_join_path(selecto.domain, source_name, target_schema, []) do
-      {:ok, path} -> {:ok, path}
-      :not_found -> {:error, "No join path found from #{source_name} to #{target_schema}"}
-    end
-  end
-
-  @doc """
-  Validate that a retarget path exists and is traversable.
-  """
-  @spec validate_retarget_path(Types.t(), [atom()]) :: :ok | {:error, String.t()}
-  def validate_retarget_path(selecto, join_path) do
-    case verify_join_chain(selecto.domain, join_path) do
-      true -> :ok
-      false -> {:error, "Join path validation failed"}
-    end
-  end
-
-  @doc """
-  Check if a Selecto query has retarget configuration applied.
-  """
+  @doc "Whether `selecto` is a retargeted query."
   @spec has_retarget?(Types.t()) :: boolean()
-  def has_retarget?(selecto) do
-    not is_nil(selecto.set[:retarget_state])
-  end
+  def has_retarget?(%{set: set}) when is_map(set), do: Map.has_key?(set, :retarget_state)
+  def has_retarget?(_selecto), do: false
 
   @doc """
-  Get the retarget configuration from a Selecto query.
+  The retarget of a retargeted query: its `path`, target `join` id,
+  `target_schema`, target `primary_key`, `strategy`, and the `origin` query
+  whose filters are the context. `nil` for an ordinary query.
   """
-  @spec get_retarget_config(Types.t()) :: Types.retarget_config() | nil
-  def get_retarget_config(selecto) do
-    selecto.set[:retarget_state]
-  end
+  @spec get_retarget_config(Types.t()) :: map() | nil
+  def get_retarget_config(%{set: set}) when is_map(set), do: Map.get(set, :retarget_state)
+  def get_retarget_config(_selecto), do: nil
 
-  @doc """
-  Reset/remove retarget configuration from a Selecto query.
-  """
+  @doc "Return the query a retargeted query was retargeted from."
   @spec reset_retarget(Types.t()) :: Types.t()
   def reset_retarget(selecto) do
     :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :reset_retarget)
-    updated_set = Map.delete(selecto.set, :retarget_state)
-    %{selecto | set: updated_set}
+
+    case get_retarget_config(selecto) do
+      %{origin: origin} -> origin
+      nil -> selecto
+    end
   end
 
-  # Private helper functions
+  @doc """
+  The context query of a retargeted query: the origin with its filters,
+  selecting the target's primary key through the join path.
+  """
+  @spec context(Types.t()) :: Types.t()
+  def context(selecto) do
+    %{origin: origin, join: join, primary_key: primary_key} = get_retarget_config(selecto)
 
-  defp get_source_schema_name(_selecto) do
-    # The source is always the starting point for path finding
-    :source
+    set =
+      origin.set
+      |> Map.merge(%{selected: ["#{join}.#{primary_key}"], order_by: [], group_by: []})
+      |> Map.drop([
+        :limit,
+        :offset,
+        :subselected,
+        :window_functions,
+        :json_selects,
+        :json_order_by,
+        :array_operations
+      ])
+
+    %{origin | set: set}
   end
 
-  defp find_join_path(domain, from_schema, to_schema, visited) do
-    cond do
-      from_schema == to_schema ->
-        {:ok, []}
+  @doc false
+  # The WHERE condition that restricts a retargeted query to the target rows
+  # its context reaches.
+  @spec context_filter(Types.t()) :: Types.filter() | nil
+  def context_filter(selecto) do
+    case get_retarget_config(selecto) do
+      nil ->
+        nil
 
-      from_schema in visited ->
-        :not_found
+      %{strategy: :in, primary_key: primary_key} ->
+        {to_string(primary_key), {:subquery, :in, context(selecto)}}
 
-      true ->
-        # First, try looking in the hierarchical joins structure
-        case find_path_in_joins_hierarchy(domain, to_schema) do
-          {:ok, path} ->
-            {:ok, path}
+      %{strategy: :exists, primary_key: primary_key} ->
+        # The context selects only the target key, so its one column carries
+        # the key's name; correlate on it outside the derived table.
+        {sql, params} = Selecto.to_sql(context(selecto))
+        quote_id = &Selecto.Builder.Sql.Helpers.quote_identifier(selecto, &1)
+        key = quote_id.(to_string(primary_key))
 
-          :not_found ->
-            # Fall back to the association-based search
-            from_schema_config =
-              case from_schema do
-                :source -> domain.source
-                schema_name -> Map.get(domain.schemas, schema_name)
-              end
+        correlated =
+          "select 1 from (#{sql}) #{quote_id.(@context_alias)} where " <>
+            "#{quote_id.(@context_alias)}.#{key} = selecto_root.#{key}"
 
-            if from_schema_config do
-              find_path_through_associations(
-                domain,
-                from_schema_config.associations,
-                to_schema,
-                [from_schema | visited]
-              )
-            else
-              :not_found
-            end
+        {:exists, correlated, params}
+    end
+  end
+
+  @doc """
+  The domain's declared retarget targets, keyed by join path, or `nil` when
+  the domain declares none.
+  """
+  @spec declared_targets(Types.t() | map()) :: %{String.t() => map()} | nil
+  def declared_targets(%Selecto{domain: domain}), do: declared_targets(domain)
+
+  def declared_targets(domain) when is_map(domain) do
+    case domain |> Map.get(:retarget) |> section_value(:targets) do
+      targets when is_map(targets) -> Map.new(targets, fn {k, v} -> {to_string(k), v} end)
+      _ -> nil
+    end
+  end
+
+  @doc """
+  Calculate the join path from the domain root to `target_schema`, a join id
+  in the domain's join tree or, failing that, a schema reached through the
+  root's associations. Subselects use it to correlate related rows.
+  """
+  @spec calculate_join_path(Types.t(), atom()) :: {:ok, [atom()]} | {:error, String.t()}
+  def calculate_join_path(selecto, target_schema) do
+    domain = selecto.domain
+
+    case find_join_path(Map.get(domain, :joins, %{}), target_schema, []) do
+      {:ok, path} ->
+        {:ok, path}
+
+      :not_found ->
+        case find_association_path(domain, :source, target_schema, []) do
+          {:ok, path} -> {:ok, path}
+          :not_found -> {:error, "No join path found from source to #{target_schema}"}
         end
     end
   end
 
-  defp find_path_in_joins_hierarchy(domain, target) do
-    # Search the joins structure hierarchically
+  @doc "Validate that each join of `join_path` follows a declared association."
+  @spec validate_retarget_path(Types.t(), [atom()]) :: :ok | {:error, String.t()}
+  def validate_retarget_path(selecto, join_path) do
+    case walk(selecto.domain, join_path) do
+      {:ok, _hops} -> :ok
+      {:error, _code, message} -> {:error, message}
+    end
+  end
+
+  ## Planning
+
+  defp plan!(selecto, target) do
+    domain = selecto.domain
+    path = resolve_path!(domain, target)
+    path_string = Enum.map_join(path, ".", &to_string/1)
+
+    case declared_targets(domain) do
+      nil ->
+        :ok
+
+      targets ->
+        unless Map.has_key?(targets, path_string) do
+          fail!(:retarget_not_allowed, "retarget to #{path_string} is not allowed by the domain",
+            path: path_string
+          )
+        end
+    end
+
+    validate_default_target!(domain, targets_or_nil(domain))
+
+    hops =
+      case walk(domain, path) do
+        {:ok, hops} -> hops
+        {:error, code, message} -> fail!(code, message, path: path_string)
+      end
+
+    %{schema_key: target_schema, relation: relation} = List.last(hops)
+
+    if Map.has_key?(relation, :values) or not Map.has_key?(relation, :source_table) do
+      fail!(
+        :unsupported_feature,
+        "retarget targets must be table-backed relations",
+        path: path_string
+      )
+    end
+
+    primary_key = Map.get(relation, :primary_key, :id)
+
+    unless primary_key in List.wrap(Map.get(relation, :fields)) do
+      fail!(:invalid_query, "the retarget target must expose its primary key", path: path_string)
+    end
+
+    join = List.last(path)
+
+    %{
+      path: path_string,
+      join: join,
+      target_schema: target_schema,
+      primary_key: primary_key,
+      relation: relation,
+      domain: target_domain(domain, relation, join_subtree(domain, path))
+    }
+  end
+
+  defp targets_or_nil(domain), do: declared_targets(domain)
+
+  defp validate_default_target!(domain, targets) do
+    case domain |> Map.get(:retarget) |> section_value(:default_target) do
+      nil ->
+        :ok
+
+      default ->
+        default = to_string(default)
+
+        if is_map(targets) and not Map.has_key?(targets, default) do
+          fail!(
+            :invalid_retarget,
+            "retarget default_target must be one of the declared targets",
+            path: default
+          )
+        end
+
+        resolve_path!(domain, default)
+        :ok
+    end
+  end
+
+  # A join id names its position in the tree; a dotted path must follow the
+  # tree from the root.
+  defp resolve_path!(domain, target) do
     joins = Map.get(domain, :joins, %{})
-    find_in_joins_tree(joins, target, [])
+
+    segments =
+      case target do
+        atom when is_atom(atom) and not is_nil(atom) -> [to_string(atom)]
+        string when is_binary(string) -> String.split(string, ".")
+        _ -> fail!(:invalid_query, "retarget requires a join id or join path")
+      end
+
+    unless Enum.all?(segments, &(&1 =~ ~r/\A[A-Za-z_][A-Za-z0-9_]*\z/)) do
+      fail!(:invalid_query, "retarget requires a join id or join path")
+    end
+
+    case segments do
+      [single] ->
+        case find_join_path(joins, single, []) do
+          {:ok, path} -> path
+          :not_found -> fail!(:unknown_association, "unknown join #{single}", path: single)
+        end
+
+      many ->
+        follow_joins!(joins, many, [])
+    end
   end
 
-  defp find_in_joins_tree(joins, target, path) when is_map(joins) do
-    Enum.reduce_while(joins, :not_found, fn {join_name, join_config}, _acc ->
-      if join_name == target do
-        # Found it at this level
-        {:halt, {:ok, path ++ [join_name]}}
-      else
-        # Check nested joins
-        case Map.get(join_config, :joins) do
-          nil ->
-            {:cont, :not_found}
+  defp follow_joins!(_joins, [], acc), do: Enum.reverse(acc)
 
-          nested_joins ->
-            case find_in_joins_tree(nested_joins, target, path ++ [join_name]) do
-              {:ok, found_path} -> {:halt, {:ok, found_path}}
-              :not_found -> {:cont, :not_found}
+  defp follow_joins!(joins, [segment | rest], acc) do
+    case Enum.find(joins || %{}, fn {id, _config} -> to_string(id) == segment end) do
+      {id, config} ->
+        follow_joins!(Map.get(config || %{}, :joins, %{}), rest, [id | acc])
+
+      nil ->
+        path = Enum.join(Enum.reverse([segment | Enum.map(acc, &to_string/1)]), ".")
+        fail!(:unknown_association, "unknown join #{path}", path: path)
+    end
+  end
+
+  defp find_join_path(joins, target, prefix) when is_map(joins) do
+    target = to_string(target)
+
+    Enum.reduce_while(joins, :not_found, fn {id, config}, _acc ->
+      cond do
+        to_string(id) == target ->
+          {:halt, {:ok, Enum.reverse([id | prefix])}}
+
+        is_map(config) and is_map(Map.get(config, :joins)) ->
+          case find_join_path(config.joins, target, [id | prefix]) do
+            {:ok, path} -> {:halt, {:ok, path}}
+            :not_found -> {:cont, :not_found}
+          end
+
+        true ->
+          {:cont, :not_found}
+      end
+    end)
+  end
+
+  defp find_join_path(_joins, _target, _prefix), do: :not_found
+
+  defp find_association_path(_domain, schema, schema, _visited), do: {:ok, []}
+
+  defp find_association_path(domain, from_schema, to_schema, visited) do
+    relation =
+      case from_schema do
+        :source -> domain.source
+        name -> Map.get(Map.get(domain, :schemas, %{}), name)
+      end
+
+    if is_nil(relation) or from_schema in visited do
+      :not_found
+    else
+      relation
+      |> Map.get(:associations, %{})
+      |> Enum.reduce_while(:not_found, fn {name, association}, _acc ->
+        case find_association_path(
+               domain,
+               Map.get(association, :queryable),
+               to_schema,
+               [from_schema | visited]
+             ) do
+          {:ok, path} -> {:halt, {:ok, [name | path]}}
+          :not_found -> {:cont, :not_found}
+        end
+      end)
+    end
+  end
+
+  # Follows each join's association from the root relation through the
+  # domain's schemas.
+  defp walk(domain, path) do
+    path
+    |> Enum.reduce_while({:ok, domain.source, []}, fn join, {:ok, relation, hops} ->
+      association = relation |> Map.get(:associations, %{}) |> Map.get(join)
+      queryable = association && Map.get(association, :queryable)
+      target = queryable && Map.get(Map.get(domain, :schemas, %{}), queryable)
+
+      cond do
+        is_nil(association) ->
+          {:halt, {:error, :unknown_association, "join #{join} does not follow an association"}}
+
+        is_nil(target) ->
+          {:halt, {:error, :unknown_association, "join #{join} names no domain schema"}}
+
+        true ->
+          {:cont, {:ok, target, hops ++ [%{join: join, schema_key: queryable, relation: target}]}}
+      end
+    end)
+    |> case do
+      {:ok, _relation, []} -> {:error, :invalid_query, "retarget requires a join path"}
+      {:ok, _relation, hops} -> {:ok, hops}
+      {:error, _code, _message} = error -> error
+    end
+  end
+
+  defp join_subtree(domain, path) do
+    Enum.reduce(path, %{joins: Map.get(domain, :joins, %{})}, fn join, node ->
+      node |> Map.get(:joins, %{}) |> Map.get(join, %{}) |> Kernel.||(%{})
+    end)
+    |> Map.get(:joins, %{})
+  end
+
+  # The domain rooted at the target relation: its own associations and the
+  # join subtree below the target, over the same schemas.
+  defp target_domain(domain, relation, joins) do
+    %{
+      source: Map.put_new(relation, :associations, %{}),
+      schemas: Map.get(domain, :schemas, %{}),
+      joins: joins || %{}
+    }
+    |> maybe_put(:name, Map.get(domain, :name))
+  end
+
+  defp configure_options(selecto) do
+    policy = selecto.policy || %Selecto.Policy{}
+    [adapter: selecto.adapter, mode: policy.mode, domain_sql: policy.domain_sql]
+  end
+
+  ## Tenant scope
+
+  # A target relation that declares tenant_field gets the root's tenant
+  # conditions on that field. A root whose required filters cannot reach it
+  # fails closed rather than reading every tenant's target rows.
+  defp carry_tenant_scope!(retargeted, origin, plan) do
+    case Map.get(plan.relation, :tenant_field) do
+      nil ->
+        retargeted
+
+      target_field ->
+        target_field = to_string(target_field)
+        required = Selecto.Query.required_filters(origin)
+        root_field = Selecto.Tenant.domain_tenant_field(origin)
+
+        carried =
+          if root_field,
+            do: Enum.flat_map(required, &carry_conjunct(&1, root_field, target_field)),
+            else: []
+
+        cond do
+          required == [] ->
+            retargeted
+
+          carried == [] ->
+            fail!(
+              :missing_tenant_scope,
+              "retarget to #{plan.path} reads a tenant-scoped relation but the root tenant scope cannot be applied to it",
+              tenant_field: target_field
+            )
+
+          true ->
+            retargeted =
+              Enum.reduce(carried, retargeted, &Selecto.Tenant.require_tenant_filter(&2, &1))
+
+            case Selecto.Tenant.tenant(origin) do
+              nil -> retargeted
+              tenant -> %{retargeted | tenant: Map.put(tenant, :tenant_field, target_field)}
             end
         end
-      end
-    end)
-  end
-
-  defp find_in_joins_tree(_, _, _), do: :not_found
-
-  defp find_path_through_associations(domain, associations, target, visited) do
-    associations
-    |> Enum.reduce_while(:not_found, fn {assoc_name, assoc_config}, _acc ->
-      next_schema = assoc_config.queryable
-
-      case find_join_path(domain, next_schema, target, visited) do
-        {:ok, path} -> {:halt, {:ok, [assoc_name | path]}}
-        :not_found -> {:cont, :not_found}
-      end
-    end)
-  end
-
-  defp verify_join_chain(domain, join_path) do
-    # Verify each step in the join path exists and is valid
-    # Start from source and validate each association step
-    verify_join_step(domain, :source, join_path)
-  end
-
-  defp verify_join_step(_domain, _current_schema, []) do
-    true
-  end
-
-  defp verify_join_step(domain, current_schema, [next_assoc | remaining_path]) do
-    current_config =
-      case current_schema do
-        :source -> domain.source
-        schema_name -> Map.get(domain.schemas, schema_name)
-      end
-
-    if current_config do
-      case Map.get(current_config.associations, next_assoc) do
-        nil ->
-          false
-
-        assoc_config ->
-          verify_join_step(domain, assoc_config.queryable, remaining_path)
-      end
-    else
-      false
     end
+  end
+
+  defp carry_conjunct({:and, filters}, root_field, target_field) when is_list(filters),
+    do: Enum.flat_map(filters, &carry_conjunct(&1, root_field, target_field))
+
+  defp carry_conjunct({field, value}, root_field, target_field)
+       when is_binary(field) or is_atom(field) do
+    if to_string(field) == root_field and tenant_value?(value),
+      do: [{target_field, value}],
+      else: []
+  end
+
+  defp carry_conjunct(_filter, _root_field, _target_field), do: []
+
+  defp tenant_value?(value) when is_binary(value) or is_number(value), do: true
+  defp tenant_value?({:in, values}) when is_list(values) and values != [], do: true
+
+  defp tenant_value?(values) when is_list(values) and values != [],
+    do: Enum.all?(values, &(is_binary(&1) or is_number(&1)))
+
+  defp tenant_value?(_value), do: false
+
+  ## Helpers
+
+  defp strategy!(opts) do
+    unknown = Keyword.keys(opts) -- [:strategy]
+
+    if unknown != [] do
+      fail!(:invalid_query, "retarget contains unsupported options #{inspect(unknown)}")
+    end
+
+    strategy = Keyword.get(opts, :strategy, :in)
+    strategy = if is_binary(strategy), do: String.to_existing_atom(strategy), else: strategy
+
+    unless strategy in @strategies do
+      fail!(:invalid_query, "retarget strategy must be :in or :exists")
+    end
+
+    strategy
+  rescue
+    ArgumentError -> fail!(:invalid_query, "retarget strategy must be :in or :exists")
+  end
+
+  # Query sources and projections built for the root cannot follow the grain.
+  defp ensure_root_sources_absent!(selecto) do
+    present =
+      [:ctes, :lateral_joins, :unnest, :values_clauses]
+      |> Enum.filter(fn key -> Map.get(selecto.set, key) not in [nil, []] end)
+
+    if present != [] do
+      fail!(
+        :invalid_query,
+        "retarget must precede CTEs, lateral joins, unnest operations, and values clauses",
+        sources: present
+      )
+    end
+  end
+
+  defp section_value(nil, _key), do: nil
+
+  defp section_value(section, key) when is_map(section),
+    do: Map.get(section, key, Map.get(section, to_string(key)))
+
+  defp section_value(_section, _key), do: nil
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp fail!(code, message, details \\ []) do
+    raise Error, code: code, message: message, details: Map.new(details)
   end
 end

@@ -91,28 +91,33 @@ defmodule Selecto.QueryEnhancementsTest do
     assert String.contains?(highlighted_sql, "\e[")
   end
 
-  test "pre_retarget_filter and post_retarget_filter update explicit filter buckets" do
-    query =
-      domain()
-      |> selecto()
-      |> Selecto.pre_retarget_filter({"status", "delivered"})
-      |> Selecto.retarget(:order_items)
-      |> Selecto.post_retarget_filter({"order_items.quantity", {:gt, 2}})
-
-    assert query.set.filtered == [{"status", "delivered"}]
-    assert query.set.post_retarget_filters == [{"order_items.quantity", {:gt, 2}}]
-  end
-
-  test "post_retarget_filter accepts unqualified target-root fields after retarget" do
+  test "pre_retarget_filter and post_retarget_filter address the context and the target" do
     query =
       domain()
       |> selecto()
       |> Selecto.pre_retarget_filter({"status", "delivered"})
       |> Selecto.retarget(:order_items)
       |> Selecto.post_retarget_filter({"quantity", {:gt, 2}})
+      |> Selecto.pre_retarget_filter({"total", {:gt, 10}})
 
-    assert query.set.filtered == [{"status", "delivered"}]
-    assert query.set.post_retarget_filters == [{"quantity", {:gt, 2}}]
+    assert Selecto.pre_retarget_filters(query) == [
+             {"status", "delivered"},
+             {"total", {:gt, 10}}
+           ]
+
+    assert Selecto.post_retarget_filters(query) == [{"quantity", {:gt, 2}}]
+    assert query.set.filtered == [{"quantity", {:gt, 2}}]
+  end
+
+  test "post_retarget_filter resolves fields against the target root" do
+    query =
+      domain()
+      |> selecto()
+      |> Selecto.retarget(:order_items)
+
+    assert_raise ArgumentError, ~r/order_items/, fn ->
+      Selecto.post_retarget_filter(query, {"order_items.quantity", {:gt, 2}})
+    end
   end
 
   test "filter after retarget validates against the target root" do
@@ -122,29 +127,22 @@ defmodule Selecto.QueryEnhancementsTest do
       |> Selecto.retarget(:order_items)
       |> Selecto.filter({"quantity", 2})
 
-    assert query.set.filtered == []
-    assert query.set.post_retarget_filters == [{"quantity", 2}]
+    assert query.set.filtered == [{"quantity", 2}]
+    assert Selecto.pre_retarget_filters(query) == []
   end
 
-  test "query_filters exposes unified filters with optional post-retarget inclusion" do
+  test "query_filters exposes unified filters and refuses a retargeted query" do
     query =
       domain()
       |> selecto()
-      |> Selecto.pre_retarget_filter({"status", "delivered"})
-      |> Selecto.retarget(:order_items)
-      |> Selecto.post_retarget_filter({"order_items.quantity", {:gt, 2}})
+      |> Selecto.filter({"status", "delivered"})
 
-    assert Selecto.pre_retarget_filters(query) == [{"status", "delivered"}]
-    assert Selecto.post_retarget_filters(query) == [{"order_items.quantity", {:gt, 2}}]
+    assert Selecto.query_filters(query) == [{"status", "delivered"}]
+    assert Selecto.query_filters(query, include_post_retarget: false) == [{"status", "delivered"}]
 
-    assert Selecto.query_filters(query) == [
-             {"status", "delivered"},
-             {"order_items.quantity", {:gt, 2}}
-           ]
-
-    assert Selecto.query_filters(query, include_post_retarget: false) == [
-             {"status", "delivered"}
-           ]
+    assert_raise ArgumentError, ~r/retarget context/, fn ->
+      query |> Selecto.retarget(:order_items) |> Selecto.query_filters()
+    end
   end
 
   test "missing field error includes computed alias hint" do

@@ -38,10 +38,6 @@ defmodule Selecto.Builder.Sql do
       Selecto.Builder.SetOperations.has_set_operations?(selecto) ->
         build_set_operation_query(selecto, opts)
 
-      Selecto.Retarget.has_retarget?(selecto) ->
-        :ok = Selecto.Policy.validate_query!(selecto)
-        build_retarget_query(selecto, opts)
-
       true ->
         :ok = Selecto.Policy.validate_query!(selecto)
         build_standard_query(selecto, opts)
@@ -522,105 +518,6 @@ defmodule Selecto.Builder.Sql do
     end
   end
 
-  defp build_retarget_query(selecto, opts) do
-    # Use Retarget builder to construct the entire query
-    retarget_config = Selecto.Retarget.get_retarget_config(selecto)
-
-    # Build retarget-specific SELECT with subselects if needed
-    # Pass retarget alias information to SELECT builder
-    retarget_aliases = get_retarget_aliases(retarget_config)
-
-    {aliases, sel_joins, select_iodata, select_params} =
-      build_select_with_subselects(selecto, retarget_aliases, opts)
-
-    # Build retarget FROM clause and WHERE conditions
-    {from_iodata, retarget_where_iodata, from_params, join_deps} =
-      Selecto.Builder.Retarget.build_retarget_query(selecto, [])
-
-    # Check if we have a CTE spec
-    {cte_clause, cte_params} =
-      case join_deps do
-        [{:cte, cte_spec}] ->
-          # Build the WITH clause
-          cte_iodata = [
-            "WITH ",
-            cte_spec.name,
-            " AS (\n        ",
-            cte_spec.query,
-            "\n        )\n        "
-          ]
-
-          {cte_iodata, cte_spec.params}
-
-        _ ->
-          {[], []}
-      end
-
-    # Build joins from the retarget target to other tables needed for selected columns.
-    {join_iodata, join_params} =
-      build_retarget_joins(
-        selecto,
-        collect_requested_joins(selecto, [sel_joins]),
-        retarget_config
-      )
-
-    # Assemble final query
-    base_iodata =
-      if cte_clause != [] do
-        [cte_clause, "select ", select_iodata, "\n        from ", from_iodata]
-      else
-        ["\n        select ", select_iodata, "\n        from ", from_iodata]
-      end
-
-    # Add joins if needed
-    base_iodata =
-      if join_iodata != [] do
-        base_iodata ++ [join_iodata]
-      else
-        base_iodata
-      end
-
-    final_iodata =
-      if retarget_where_iodata != [] do
-        base_iodata ++ ["\n        where ", retarget_where_iodata]
-      else
-        base_iodata
-      end
-
-    _all_params = select_params ++ cte_params ++ from_params ++ join_params
-
-    {sql, final_params} =
-      Params.finalize(final_iodata,
-        adapter: Map.get(selecto, :adapter, Selecto.AdapterSupport.default_adapter())
-      )
-
-    {sql, aliases, final_params}
-  end
-
-  defp build_retarget_joins(selecto, sel_joins, retarget_config) do
-    # After retargeting, add joins from the retarget target to any other tables
-    # that are referenced in the selected columns
-
-    # Filter out joins that are part of the retarget path (already in subquery)
-    needed_joins =
-      Enum.reject(sel_joins, fn join ->
-        # Don't add joins that are part of the path to the retarget target
-        join == :selecto_root || join == retarget_config.target_schema
-      end)
-
-    if needed_joins == [] do
-      {[], []}
-    else
-      # Build JOIN clauses for the needed tables
-      join_clauses =
-        Enum.map(needed_joins, fn join_name ->
-          build_retarget_join_clause(selecto, retarget_config.target_schema, join_name)
-        end)
-
-      {Enum.join(join_clauses, "\n        "), []}
-    end
-  end
-
   defp collect_requested_joins(selecto, inferred_join_groups) do
     explicit_joins = selecto.set |> Map.get(:active_joins, []) |> List.wrap()
 
@@ -628,95 +525,6 @@ defmodule Selecto.Builder.Sql do
     |> List.flatten()
     |> Kernel.++(explicit_joins)
     |> Enum.uniq()
-  end
-
-  defp build_retarget_join_clause(selecto, from_schema, to_schema) do
-    # Build a JOIN clause from the retarget target to another schema
-    # Look up the association/join configuration
-
-    # For film -> language, we need: LEFT JOIN language ON t.language_id = language.language_id
-    case find_join_config_between(selecto, from_schema, to_schema) do
-      {:ok, join_config} ->
-        to_table = get_table_name(selecto, to_schema)
-        owner_key = Map.get(join_config, :owner_key, "#{to_schema}_id")
-        related_key = Map.get(join_config, :related_key, "#{to_schema}_id")
-
-        [
-          "\n        LEFT JOIN ",
-          to_table,
-          " ",
-          to_string(to_schema),
-          " ON t.",
-          to_string(owner_key),
-          " = ",
-          to_string(to_schema),
-          ".",
-          to_string(related_key)
-        ]
-
-      _ ->
-        # Fallback - try standard foreign key pattern
-        to_table = get_table_name(selecto, to_schema)
-
-        [
-          "\n        LEFT JOIN ",
-          to_table,
-          " ",
-          to_string(to_schema),
-          " ON t.",
-          to_string(to_schema),
-          "_id = ",
-          to_string(to_schema),
-          ".",
-          to_string(to_schema),
-          "_id"
-        ]
-    end
-  end
-
-  defp find_join_config_between(selecto, from_schema, to_schema) do
-    # Find the join configuration from from_schema to to_schema
-    # First check if from_schema has a direct association to to_schema
-
-    from_config =
-      case from_schema do
-        :source -> selecto.domain.source
-        schema_name -> Map.get(selecto.domain.schemas, schema_name)
-      end
-
-    if from_config do
-      associations = Map.get(from_config, :associations, %{})
-
-      case Map.get(associations, to_schema) do
-        nil ->
-          # Also check in the joins structure
-          joins = Map.get(selecto.domain, :joins, %{})
-          find_join_in_structure(joins, from_schema, to_schema)
-
-        config ->
-          {:ok, config}
-      end
-    else
-      {:error, :not_found}
-    end
-  end
-
-  defp find_join_in_structure(joins, _from, to) when is_map(joins) do
-    # Look for the target in the joins structure
-    case Map.get(joins, to) do
-      nil -> {:error, :not_found}
-      config -> {:ok, config}
-    end
-  end
-
-  defp find_join_in_structure(_, _, _), do: {:error, :not_found}
-
-  defp get_table_name(selecto, schema_name) do
-    # Get the actual table name for a schema
-    case Map.get(selecto.domain.schemas, schema_name) do
-      %{source_table: table} -> table
-      _ -> to_string(schema_name)
-    end
   end
 
   defp build_set_operation_query(selecto, opts) do
@@ -821,8 +629,7 @@ defmodule Selecto.Builder.Sql do
   end
 
   defp build_select_with_subselects(selecto, retarget_aliases, opts) do
-    # Determine the source alias to use for subselect correlation
-    source_alias = get_source_alias_for_subselects(retarget_aliases)
+    source_alias = "selecto_root"
 
     # Build regular SELECT fields
     {aliases, sel_joins, select_iodata, select_params} =
@@ -908,34 +715,6 @@ defmodule Selecto.Builder.Sql do
     end
   end
 
-  defp get_retarget_aliases(retarget_config) do
-    # Extract table aliases from retarget configuration.
-    # The retarget builder uses "t" for target table and "s" for source table.
-    if retarget_config do
-      target_schema = Map.get(retarget_config, :target_schema)
-
-      %{
-        # Target table alias
-        target_schema => "t",
-        # Source table alias (if needed)
-        :source => "s"
-      }
-    else
-      %{}
-    end
-  end
-
-  defp get_source_alias_for_subselects(retarget_aliases) do
-    # If we have retarget aliases, use the target alias for correlation; otherwise use default.
-    if retarget_aliases != %{} do
-      # In retarget context, correlate with the main query's target table.
-      target_schema = Map.keys(retarget_aliases) |> Enum.find(fn k -> k != :source end)
-      Map.get(retarget_aliases, target_schema, "selecto_root")
-    else
-      "selecto_root"
-    end
-  end
-
   # Phase 4: SELECT now uses iodata by default.
 
   @spec build_where(Selecto.Types.t()) ::
@@ -990,7 +769,10 @@ defmodule Selecto.Builder.Sql do
           end)
       end
 
-    all_filters = regular_filters ++ json_filters ++ array_filters
+    # A retargeted query is restricted to the target rows its context reaches.
+    retarget_filters = List.wrap(Selecto.Retarget.context_filter(selecto))
+
+    all_filters = regular_filters ++ json_filters ++ array_filters ++ retarget_filters
 
     Selecto.Builder.Sql.Where.build(selecto, {:and, all_filters})
   end

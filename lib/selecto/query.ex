@@ -51,30 +51,19 @@ defmodule Selecto.Query do
   def filter(selecto, filters) when is_list(filters) do
     :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :filter)
     normalized_filters = Selecto.Expr.normalize(filters)
-
-    # Track whether this filter is applied before or after retargeting.
-    has_retarget = Selecto.Retarget.has_retarget?(selecto)
-    retarget_config = Selecto.Retarget.get_retarget_config(selecto)
-    validate_filters_for_active_root!(selecto, normalized_filters, has_retarget)
+    Selecto.QueryValidator.validate_filters!(selecto, normalized_filters)
 
     required_filters = required_filters(selecto)
 
-    # Separate filters into pre-retarget and post-retarget
-    {pre_retarget_filters, post_retarget_filters} =
-      case {has_retarget, retarget_config} do
-        {false, _} ->
-          {uniq_filters(selecto.set.filtered ++ normalized_filters ++ required_filters), []}
-
-        {true, _} ->
-          {selecto.set.filtered, normalized_filters}
-      end
-
-    # Update the set with new filter lists
+    # A retargeted query is rooted at its target, so its filters resolve and
+    # apply there; its context filters live on the origin query.
     updated_set =
       selecto.set
-      |> Map.put(:filtered, pre_retarget_filters)
+      |> Map.put(
+        :filtered,
+        uniq_filters(selecto.set.filtered ++ normalized_filters ++ required_filters)
+      )
       |> Map.put(:required_filters, required_filters)
-      |> Map.put(:post_retarget_filters, post_retarget_filters)
 
     %{selecto | set: updated_set}
   end
@@ -85,14 +74,34 @@ defmodule Selecto.Query do
   end
 
   @doc """
-  Explicitly append filters to the pre-retarget filter list (`set.filtered`).
+  Append filters to the retarget context.
 
-  Use this when you want filters to be preserved as source-root constraints even
-  when composing a retargeted query.
+  On a retargeted query the filters apply to the origin query, whose filters
+  decide which target rows are reached. On any other query they are ordinary
+  root filters.
   """
   @spec pre_retarget_filter(Selecto.Types.t(), [Selecto.Types.filter()]) :: Selecto.Types.t()
   def pre_retarget_filter(selecto, filters) when is_list(filters) do
     :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :pre_retarget_filter)
+
+    case Selecto.Retarget.get_retarget_config(selecto) do
+      %{origin: origin} = state ->
+        put_in(selecto.set[:retarget_state], %{
+          state
+          | origin: pre_retarget_filter(origin, filters)
+        })
+
+      nil ->
+        root_filter(selecto, filters)
+    end
+  end
+
+  @spec pre_retarget_filter(Selecto.Types.t(), Selecto.Types.filter()) :: Selecto.Types.t()
+  def pre_retarget_filter(selecto, filter) do
+    pre_retarget_filter(selecto, [filter])
+  end
+
+  defp root_filter(selecto, filters) do
     normalized_filters = Selecto.Expr.normalize(filters)
     Selecto.QueryValidator.validate_filters!(selecto, normalized_filters)
     current_required = required_filters(selecto)
@@ -103,29 +112,21 @@ defmodule Selecto.Query do
     )
   end
 
-  @spec pre_retarget_filter(Selecto.Types.t(), Selecto.Types.filter()) :: Selecto.Types.t()
-  def pre_retarget_filter(selecto, filter) do
-    pre_retarget_filter(selecto, [filter])
-  end
-
   @doc """
-  Explicitly append filters to the post-retarget filter list (`set.post_retarget_filters`).
+  Append filters to the target of a retargeted query.
 
-  Use this when constraints should apply to the retargeted target root.
+  This is `filter/2` on a retargeted query. A query that has not been
+  retargeted has no target to filter, so it is refused.
   """
   @spec post_retarget_filter(Selecto.Types.t(), [Selecto.Types.filter()]) :: Selecto.Types.t()
   def post_retarget_filter(selecto, filters) when is_list(filters) do
     :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :post_retarget_filter)
-    normalized_filters = Selecto.Expr.normalize(filters)
-    validate_post_retarget_filters!(selecto, normalized_filters)
 
-    current = Map.get(selecto.set, :post_retarget_filters, [])
+    unless Selecto.Retarget.has_retarget?(selecto) do
+      raise ArgumentError, "post_retarget_filter requires a retargeted query; retarget first"
+    end
 
-    updated_set =
-      selecto.set
-      |> Map.put(:post_retarget_filters, current ++ normalized_filters)
-
-    %{selecto | set: updated_set}
+    filter(selecto, filters)
   end
 
   @spec post_retarget_filter(Selecto.Types.t(), Selecto.Types.filter()) :: Selecto.Types.t()
@@ -134,21 +135,26 @@ defmodule Selecto.Query do
   end
 
   @doc """
-  Return only pre-retarget filters currently attached to the query.
-
-  This reads `set.filtered` and does not include post-retarget buckets.
+  Return the root filters: on a retargeted query, the context filters of its
+  origin query; otherwise `set.filtered`.
   """
   @spec pre_retarget_filters(Selecto.Types.t()) :: [Selecto.Types.filter()]
   def pre_retarget_filters(selecto) do
-    Map.get(selecto.set, :filtered, [])
+    case Selecto.Retarget.get_retarget_config(selecto) do
+      %{origin: origin} -> Map.get(origin.set, :filtered, [])
+      nil -> Map.get(selecto.set, :filtered, [])
+    end
   end
 
   @doc """
-  Return only post-retarget filters currently attached to the query.
+  Return the filters applied to the target of a retargeted query, or `[]`
+  for a query that has not been retargeted.
   """
   @spec post_retarget_filters(Selecto.Types.t()) :: [Selecto.Types.filter()]
   def post_retarget_filters(selecto) do
-    Map.get(selecto.set, :post_retarget_filters, [])
+    if Selecto.Retarget.has_retarget?(selecto),
+      do: Map.get(selecto.set, :filtered, []),
+      else: []
   end
 
   @doc """
@@ -180,10 +186,20 @@ defmodule Selecto.Query do
 
   ## Options
 
-  - `:include_post_retarget` - include `set.post_retarget_filters` (default: `true`)
+  - `:include_post_retarget` - accepted for compatibility; a retargeted query
+    keeps its target filters in `set.filtered`.
+
+  A retargeted query is refused: its filters describe the target rows, and
+  its context restriction is not a filter list, so they cannot scope writes
+  or be copied to another query.
   """
   @spec query_filters(Selecto.Types.t(), keyword()) :: [Selecto.Types.filter()]
   def query_filters(selecto, opts \\ []) do
+    if Selecto.Retarget.has_retarget?(selecto) do
+      raise ArgumentError,
+            "query filters of a retargeted query do not include its retarget context"
+    end
+
     include_post_retarget = Keyword.get(opts, :include_post_retarget, true)
 
     validate_tenant = Keyword.get(opts, :validate_tenant, true)
@@ -217,107 +233,6 @@ defmodule Selecto.Query do
       _ -> []
     end)
     |> uniq_filters()
-  end
-
-  defp validate_filters_for_active_root!(selecto, filters, true),
-    do: validate_post_retarget_filters!(selecto, filters)
-
-  defp validate_filters_for_active_root!(selecto, filters, _has_retarget),
-    do: Selecto.QueryValidator.validate_filters!(selecto, filters)
-
-  defp validate_post_retarget_filters!(selecto, filters) do
-    case retarget_validation_context(selecto) do
-      nil ->
-        Selecto.QueryValidator.validate_filters!(selecto, filters)
-
-      {validation_selecto, target_schema} ->
-        target_filters = normalize_retarget_filter_prefixes(filters, target_schema)
-        Selecto.QueryValidator.validate_filters!(validation_selecto, target_filters)
-    end
-  end
-
-  defp retarget_validation_context(selecto) do
-    with %{target_schema: target_schema} <- Selecto.Retarget.get_retarget_config(selecto),
-         {:ok, target_source} <- fetch_target_source(selecto, target_schema) do
-      validation_config =
-        selecto.config
-        |> Map.put(:source, target_source)
-        |> Map.put(:source_table, Map.get(target_source, :source_table))
-        |> Map.put(:primary_key, Map.get(target_source, :primary_key))
-        |> Map.put(:columns, target_columns(target_source))
-        |> Map.put(:joins, %{})
-
-      {%{selecto | config: validation_config}, target_schema}
-    else
-      _ -> nil
-    end
-  end
-
-  defp fetch_target_source(selecto, target_schema) do
-    schemas = Map.get(selecto.domain, :schemas, %{})
-
-    case Map.get(schemas, target_schema) || Map.get(schemas, to_string(target_schema)) do
-      nil -> :error
-      target_source -> {:ok, target_source}
-    end
-  end
-
-  defp target_columns(%{fields: fields, columns: columns})
-       when is_list(fields) and is_map(columns) do
-    Enum.into(fields, %{}, fn field ->
-      field_string = to_string(field)
-      field_config = Map.get(columns, field) || Map.get(columns, field_string) || %{}
-
-      {field_string,
-       field_config
-       |> Map.put_new(:field, field)
-       |> Map.put_new(:colid, field_string)
-       |> Map.put_new(:requires_join, :selecto_root)}
-    end)
-  end
-
-  defp target_columns(_target_source), do: %{}
-
-  defp normalize_retarget_filter_prefixes(filters, target_schema) when is_list(filters),
-    do: Enum.map(filters, &normalize_retarget_filter_prefixes(&1, target_schema))
-
-  defp normalize_retarget_filter_prefixes({:and, filters}, target_schema) when is_list(filters),
-    do: {:and, normalize_retarget_filter_prefixes(filters, target_schema)}
-
-  defp normalize_retarget_filter_prefixes({:or, filters}, target_schema) when is_list(filters),
-    do: {:or, normalize_retarget_filter_prefixes(filters, target_schema)}
-
-  defp normalize_retarget_filter_prefixes({:not, filter}, target_schema),
-    do: {:not, normalize_retarget_filter_prefixes(filter, target_schema)}
-
-  defp normalize_retarget_filter_prefixes({op, field, values}, target_schema)
-       when op in [:array_contains, :array_contained, :array_overlap, :array_eq] and
-              (is_binary(field) or is_atom(field)) and is_list(values) do
-    {op, strip_retarget_field_prefix(field, target_schema), values}
-  end
-
-  defp normalize_retarget_filter_prefixes({field, operator, value}, target_schema)
-       when is_binary(field) or is_atom(field) do
-    {strip_retarget_field_prefix(field, target_schema), operator, value}
-  end
-
-  defp normalize_retarget_filter_prefixes({field, value}, target_schema)
-       when is_binary(field) or is_atom(field) do
-    {strip_retarget_field_prefix(field, target_schema), value}
-  end
-
-  defp normalize_retarget_filter_prefixes(filter, _target_schema), do: filter
-
-  defp strip_retarget_field_prefix(field, target_schema)
-       when is_binary(field) or is_atom(field) do
-    field_string = to_string(field)
-    target_prefix = "#{target_schema}."
-
-    if String.starts_with?(field_string, target_prefix) do
-      String.replace_prefix(field_string, target_prefix, "")
-    else
-      field
-    end
   end
 
   defp uniq_filters(filters) do

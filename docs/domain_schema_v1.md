@@ -368,7 +368,7 @@ query metadata from the structural relation contract:
 | `subfilters` | map | Named advanced subfilter metadata consumed by supporting query paths. |
 | `window_functions` | map | Named window-function metadata for supporting consumers. |
 | `pagination` | map | Domain pagination metadata. |
-| `retarget` | map | Domain retargeting metadata for query consumers. |
+| `retarget` | map | Retarget governance: `targets` (join path → `label`, `default_selected`) is an allow-list for `Selecto.retarget/3`, and `default_target` must be one of them. |
 | `redact_fields` | list | Projection redaction declarations; composition unions them and runtime overlay merging also unions them into `source.redact_fields`. |
 
 Except for the references and shapes explicitly validated elsewhere in this

@@ -674,7 +674,7 @@ defmodule Selecto.Tenant do
 
   defp trusted_host_scope(selecto, opts) do
     Selecto.Query.required_filters(selecto) ++
-      Selecto.Query.pre_retarget_filters(selecto) ++ List.wrap(Keyword.get(opts, :scope))
+      Map.get(selecto.set, :filtered, []) ++ List.wrap(Keyword.get(opts, :scope))
   end
 
   defp lenient_get(map, key) when is_map(map),

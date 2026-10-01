@@ -3,6 +3,28 @@
 
 ## Unreleased
 
+- Rebuild `Selecto.retarget/3` to the portable `query_retarget` 1.0.0
+  semantics (query_retarget 1.1.0, certification specification 2.22.0). A
+  retarget now returns a
+  query configured on a domain rooted at the target relation, named by a join
+  id (`:orders`) or a dotted join path (`"attendees.orders"`). The earlier
+  query becomes the context: the result is the distinct target rows its
+  joined read reaches under every filter kind and its required filters, so a
+  filter on a join of the path constrains that join. Selections, filters,
+  grouping, ordering, pagination, and subselects added afterwards resolve
+  against the target and its own joins, and ORDER BY, GROUP BY, and LIMIT are
+  no longer dropped. `:strategy` is `:in` (default) or `:exists`; the `:join`
+  and `:cte` strategies and `:preserve_filters` are removed, so required and
+  tenant filters can no longer be switched off. A target that declares
+  `tenant_field` carries the root tenant condition or fails closed with
+  `:missing_tenant_scope`. The domain `retarget` section's `targets` form an
+  allow-list and `default_target` must be one of them. Errors raise
+  `Selecto.Retarget.Error` with a `:code`. `post_retarget_filter/2` filters
+  the target and requires a retargeted query, `pre_retarget_filter/2` adds to
+  the context, `reset_retarget/1` returns the origin query, and
+  `query_filters/2` refuses a retargeted query so it cannot scope writes.
+  `Selecto.Builder.Retarget` is removed.
+
 - Add the tenant boundary of certification specification 2.19.0.
   `Selecto.Tenant.tenant_boundary/2` and `require_read_boundary/2` check a
   domain that declares `source.tenant_field` for a trusted tenant (attached with

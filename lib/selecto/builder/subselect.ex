@@ -22,15 +22,7 @@ defmodule Selecto.Builder.Subselect do
   """
   @spec build_subselect_clauses(Types.t()) :: {[Types.iodata_with_markers()], Types.sql_params()}
   def build_subselect_clauses(selecto) do
-    # Determine the correct source alias based on retarget context
-    source_alias =
-      if Selecto.Retarget.has_retarget?(selecto) do
-        # In retarget context, use "s" for source table
-        "s"
-      else
-        # In standard context, use "selecto_root"
-        "selecto_root"
-      end
+    source_alias = "selecto_root"
 
     build_subselect_clauses(selecto, source_alias)
   end
@@ -64,15 +56,7 @@ defmodule Selecto.Builder.Subselect do
   @spec build_single_subselect(Types.t(), Types.subselect_selector()) ::
           {Types.iodata_with_markers(), Types.sql_params()}
   def build_single_subselect(selecto, subselect_config) do
-    # Determine the correct source alias based on retarget context
-    source_alias =
-      if Selecto.Retarget.has_retarget?(selecto) do
-        # In retarget context, use "s" for source table
-        "s"
-      else
-        # In standard context, use "selecto_root"
-        "selecto_root"
-      end
+    source_alias = "selecto_root"
 
     build_single_subselect(selecto, subselect_config, source_alias)
   end
@@ -749,15 +733,7 @@ defmodule Selecto.Builder.Subselect do
   @spec build_correlated_subquery(Types.t(), Types.subselect_selector()) ::
           {Types.iodata_with_markers(), Types.sql_params()}
   def build_correlated_subquery(selecto, subselect_config) do
-    # Determine the correct source alias based on retarget context
-    source_alias =
-      if Selecto.Retarget.has_retarget?(selecto) do
-        # In retarget context, use "s" for source table
-        "s"
-      else
-        # In standard context, use "selecto_root"
-        "selecto_root"
-      end
+    source_alias = "selecto_root"
 
     build_correlated_subquery(selecto, subselect_config, source_alias)
   end
@@ -886,15 +862,7 @@ defmodule Selecto.Builder.Subselect do
   @spec resolve_join_condition_with_path(Types.t(), atom()) ::
           {:ok, Types.iodata_with_markers()} | {:error, String.t()}
   def resolve_join_condition_with_path(selecto, target_schema) do
-    # Determine the correct source alias based on retarget context
-    source_alias =
-      if Selecto.Retarget.has_retarget?(selecto) do
-        # In retarget context, use "s" for source table
-        "s"
-      else
-        # In standard context, use "selecto_root"
-        "selecto_root"
-      end
+    source_alias = "selecto_root"
 
     resolve_join_condition_with_path(selecto, target_schema, source_alias, nil)
   end
@@ -951,22 +919,8 @@ defmodule Selecto.Builder.Subselect do
   defp build_direct_correlation(selecto, target_schema, source_alias) do
     target_alias = generate_subquery_alias(target_schema)
 
-    # Determine the current context - if retargeted, use retarget target schema
-    {current_schema_config, association} =
-      if Selecto.Retarget.has_retarget?(selecto) do
-        # In retarget context - the source is the retarget target table
-        retarget_config = Selecto.Retarget.get_retarget_config(selecto)
-        retarget_target = retarget_config.target_schema
-        retarget_schema_config = Map.get(selecto.domain.schemas, retarget_target)
-
-        # Find the association from retarget target to the subselect target
-        assoc = Map.get(retarget_schema_config.associations, target_schema)
-        {retarget_schema_config, assoc}
-      else
-        # Normal context - use source
-        assoc = Map.get(selecto.domain.source.associations, target_schema)
-        {selecto.domain.source, assoc}
-      end
+    current_schema_config = selecto.domain.source
+    association = Map.get(current_schema_config.associations, target_schema)
 
     if association do
       condition =
@@ -989,22 +943,8 @@ defmodule Selecto.Builder.Subselect do
   defp build_direct_correlation_with_assoc(selecto, target_schema, assoc_name, source_alias) do
     target_alias = generate_subquery_alias(target_schema)
 
-    # Determine the current context - if retargeted, use retarget target schema
-    {current_schema_config, association} =
-      if Selecto.Retarget.has_retarget?(selecto) do
-        # In retarget context - the source is the retarget target table
-        retarget_config = Selecto.Retarget.get_retarget_config(selecto)
-        retarget_target = retarget_config.target_schema
-        retarget_schema_config = Map.get(selecto.domain.schemas, retarget_target)
-
-        # Get the association by name
-        assoc = Map.get(retarget_schema_config.associations, assoc_name)
-        {retarget_schema_config, assoc}
-      else
-        # Normal context - use source
-        assoc = Map.get(selecto.domain.source.associations, assoc_name)
-        {selecto.domain.source, assoc}
-      end
+    current_schema_config = selecto.domain.source
+    association = Map.get(current_schema_config.associations, assoc_name)
 
     if association do
       condition =
@@ -1109,25 +1049,7 @@ defmodule Selecto.Builder.Subselect do
     # Get junction table name
     junction_table = get_target_table(selecto, junction_schema)
 
-    # Determine the current context - if retargeted, use retarget target as source
-    {_source_schema_config, source_to_junction_assoc} =
-      if Selecto.Retarget.has_retarget?(selecto) do
-        # In retarget context - the source is the retarget target table
-        retarget_config = Selecto.Retarget.get_retarget_config(selecto)
-        retarget_target = retarget_config.target_schema
-        retarget_schema_config = Map.get(selecto.domain.schemas, retarget_target)
-
-        # Find the association from retarget target to junction
-        # For film → film_actors, we need to reverse lookup
-        assoc =
-          find_association_to_junction(retarget_schema_config, selecto.domain, junction_schema)
-
-        {retarget_schema_config, assoc}
-      else
-        # Normal context - use source
-        source_assoc = Map.get(selecto.domain.source.associations, junction_schema)
-        {selecto.domain.source, source_assoc}
-      end
+    source_to_junction_assoc = Map.get(selecto.domain.source.associations, junction_schema)
 
     # Get junction association (film_actors → film)
     junction_schema_config = Map.get(selecto.domain.schemas, junction_schema)
@@ -1164,78 +1086,12 @@ defmodule Selecto.Builder.Subselect do
     end
   end
 
-  # Find the association from a schema back to a junction table
-  # This is needed for retarget scenarios where we need to reverse-correlate
-  defp find_association_to_junction(schema_config, domain, junction_schema) do
-    # Look for an association where the queryable matches junction_schema
-    # For film → film_actors, this would be the film_actors association
-    case Map.get(schema_config.associations, junction_schema) do
-      nil ->
-        # Try looking through all associations to find one pointing to the junction
-        case Enum.find_value(schema_config.associations, fn {_name, assoc} ->
-               if assoc.queryable == junction_schema, do: assoc
-             end) do
-          nil ->
-            # No direct association found - infer it from junction table's associations
-            # The junction table should have an association back to this schema
-            infer_reverse_association(schema_config, domain, junction_schema)
-
-          assoc ->
-            assoc
-        end
-
-      assoc ->
-        assoc
-    end
-  end
-
-  # Infer the reverse association by looking at the junction table's associations
-  defp infer_reverse_association(schema_config, domain, junction_schema) do
-    junction_config = Map.get(domain.schemas, junction_schema)
-
-    if junction_config do
-      # Find an association in the junction that points back to our schema
-      # We need to match on the source_table since we don't have the schema name
-      schema_table = schema_config.source_table
-
-      # Look for an association where the related table matches our table
-      # and create a reverse association
-      Enum.find_value(junction_config.associations, fn {_name, assoc} ->
-        # Check if this association points to a schema with our table
-        target_schema = Map.get(domain.schemas, assoc.queryable)
-
-        if target_schema && target_schema.source_table == schema_table do
-          # Create reverse association - swap owner_key and related_key
-          %{
-            queryable: junction_schema,
-            owner_key: assoc.related_key,
-            related_key: assoc.owner_key
-          }
-        end
-      end)
-    end
-  end
-
   defp build_multi_step_exists(selecto, target_schema, multi_path, source_alias) do
     # For paths like [:orders, :order_items, :products]
     # Build: EXISTS (SELECT 1 FROM orders j1 INNER JOIN order_items j2 ON ... INNER JOIN products j3 ON ...)
     target_alias = generate_subquery_alias(target_schema)
 
-    # Get the starting point (either source or retarget target)
-    {source_schema_config, _source_key_field} =
-      if Selecto.Retarget.has_retarget?(selecto) do
-        retarget_config = Selecto.Retarget.get_retarget_config(selecto)
-        retarget_target = retarget_config.target_schema
-        retarget_schema_config = Map.get(selecto.domain.schemas, retarget_target)
-
-        # Get the primary key of the retarget target to use as correlation point
-        pk = retarget_schema_config.primary_key || :id
-        {retarget_schema_config, to_string(pk)}
-      else
-        # Use source
-        pk = selecto.domain.source.primary_key || :id
-        {selecto.domain.source, to_string(pk)}
-      end
+    source_schema_config = selecto.domain.source
 
     # Build the chain of JOINs
     case build_join_chain(selecto, source_schema_config, multi_path, source_alias, target_alias) do
@@ -1525,15 +1381,7 @@ defmodule Selecto.Builder.Subselect do
   end
 
   defp root_parent_primary_key(selecto) do
-    if Selecto.Retarget.has_retarget?(selecto) do
-      selecto
-      |> Selecto.Retarget.get_retarget_config()
-      |> Map.fetch!(:target_schema)
-      |> then(&get_target_schema_config(selecto, &1))
-      |> Map.fetch!(:primary_key)
-    else
-      Map.fetch!(selecto.domain.source, :primary_key)
-    end
+    Map.fetch!(selecto.domain.source, :primary_key)
   end
 
   defp build_collection_cursor_condition(selecto, config, child_alias, parent_alias, parent_key) do

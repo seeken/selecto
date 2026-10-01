@@ -143,6 +143,7 @@ defmodule Selecto.QueryEagerValidationTest do
   test "post retarget filter also validates fields eagerly" do
     assert_raise ArgumentError, ~r/bad_post_filter/, fn ->
       selecto()
+      |> Selecto.retarget(:order_items)
       |> Selecto.post_retarget_filter({"bad_post_filter", 1})
     end
   end
@@ -153,7 +154,7 @@ defmodule Selecto.QueryEagerValidationTest do
       |> Selecto.retarget(:order_items)
       |> Selecto.post_retarget_filter({"quantity", 1})
 
-    assert query.set.post_retarget_filters == [{"quantity", 1}]
+    assert query.set.filtered == [{"quantity", 1}]
 
     assert_raise ArgumentError, ~r/status/, fn ->
       selecto()

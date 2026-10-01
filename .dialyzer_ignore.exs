@@ -31,7 +31,6 @@
   {"lib/selecto/builder/cte.ex", :call, {125, 35}},
   {"lib/selecto/builder/cte.ex", :call, {155, 50}},
   {"lib/selecto/builder/cte.ex", :unused_fun, {319, 8}},
-  {"lib/selecto/builder/retarget.ex", :invalid_contract, 14},
   {"lib/selecto/configuration.ex", :invalid_contract, 168},
   {"lib/selecto/configuration.ex", :no_return, {169, 7}},
   {"lib/selecto/diagnostics.ex", :pattern_match_cov, {123, 8}},
