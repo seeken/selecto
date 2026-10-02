@@ -28,6 +28,13 @@
     `camp_registrations.cabin_id` is a declared foreign key to the shared
     `camp_cabins` relation (`references.tenant_field: false`).
 
+- `utc_datetime` columns accept `storage: :naive_utc` for zone-less
+  timestamps that hold UTC, matching the Perl and Ruby cores.
+  `Selecto.Domain.validate/1` and `Selecto.DomainValidator` reject `storage`
+  on any other column type, on a computed column, or with any other value
+  (`:invalid_column_storage`). The Elixir runtime does not compile query time
+  zones, so the key has no SQL effect yet. Documented under "Instant Storage"
+  in `docs/domain_schema_v1.md`.
 - Security: harden the read path against the adversarial scenarios in the
   vault plan `selecto-adversarial-api-and-backend-test-scenarios`.
   - Data query members (CTE, recursive CTE and lateral) over a schema that

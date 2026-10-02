@@ -59,6 +59,42 @@ defmodule Selecto.DomainRelationShapeTest do
     end
   end
 
+  test "utc_datetime columns accept naive_utc storage" do
+    for type <- [:utc_datetime, "utc_datetime", :utc_datetime_usec],
+        storage <- [:naive_utc, "naive_utc"],
+        placement <- [:source, :schema] do
+      authored = domain(with_column(%{type: type, storage: storage}), placement)
+      assert {:ok, _, _} = Domain.validate(authored)
+      assert :ok = DomainValidator.validate_domain(authored)
+    end
+  end
+
+  test "storage is rejected off utc_datetime, on computed columns and for other values" do
+    for {column, message} <- [
+          {%{type: :naive_datetime, storage: :naive_utc}, "is not a utc_datetime column"},
+          {%{type: :string, storage: "naive_utc"}, "is not a utc_datetime column"},
+          {%{storage: :naive_utc}, "is not a utc_datetime column"},
+          {%{type: :utc_datetime, storage: :naive_utc, computed: %{kind: :expression}},
+           "is computed"},
+          {%{type: :utc_datetime, storage: :zoned}, "must be naive_utc"},
+          {%{type: :utc_datetime, storage: "NAIVE_UTC"}, "must be naive_utc"},
+          {%{type: :utc_datetime, storage: nil}, "must be naive_utc"},
+          {%{type: :utc_datetime, storage: ["naive_utc"]}, "must be naive_utc"}
+        ],
+        placement <- [:source, :schema] do
+      authored = domain(with_column(column), placement)
+      assert {:error, diagnostics} = Domain.validate(authored)
+
+      assert Enum.any?(
+               diagnostics.errors,
+               &(&1.code == :invalid_column_storage and &1.message =~ message)
+             )
+
+      assert {:error, errors} = DomainValidator.validate_domain(authored)
+      assert Enum.any?(errors, &match?(%{code: :invalid_column_storage}, &1))
+    end
+  end
+
   test "non-map domains and relations produce structured runtime errors" do
     for invalid <- [nil, [], "items"] do
       assert {:error, _} = DomainValidator.validate_domain(invalid)
@@ -66,6 +102,11 @@ defmodule Selecto.DomainRelationShapeTest do
       assert {:error, _} = DomainValidator.validate_domain(%{source: @relation, schemas: invalid})
       assert {:error, _} = DomainValidator.validate_domain(domain(invalid, :schema))
     end
+  end
+
+  defp with_column(column) do
+    %{@relation | fields: [:id, :created_at]}
+    |> put_in([:columns, :created_at], column)
   end
 
   defp domain(relation, :source),

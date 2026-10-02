@@ -7,6 +7,7 @@ defmodule Selecto.Domain.Contract.Relations do
   alias Selecto.Analytics.Unit
 
   @relation_required_keys [:primary_key, :fields, :columns]
+  @instant_storage_types [:utc_datetime, :utc_datetime_usec]
 
   def validate(errors, source, schemas) do
     errors
@@ -200,6 +201,8 @@ defmodule Selecto.Domain.Contract.Relations do
       columns when is_map(columns) ->
         Enum.reduce(columns, errors, fn {field, definition}, acc ->
           if is_map(definition) do
+            acc = validate_column_storage(acc, relation_id, field, definition, path)
+
             case Unit.normalize_column(definition) do
               {:ok, _normalized} ->
                 acc
@@ -239,6 +242,47 @@ defmodule Selecto.Domain.Contract.Relations do
           )
           | errors
         ]
+    end
+  end
+
+  # A utc_datetime column may declare how the instant is stored. The default is
+  # a zone-aware column (PostgreSQL timestamptz); naive_utc is a zone-less
+  # column holding UTC wall time, such as an Ecto or Rails timestamp column.
+  defp validate_column_storage(errors, relation_id, field, column, path) do
+    case Core.fetch_map_value(column, :storage) do
+      :__missing__ ->
+        errors
+
+      storage ->
+        message =
+          cond do
+            not Core.enum_value?(Core.map_value(column, :type), @instant_storage_types) ->
+              "declares storage but is not a utc_datetime column"
+
+            Core.has_key?(column, :computed) ->
+              "declares storage but is computed"
+
+            not Core.enum_value?(storage, [:naive_utc]) ->
+              "storage must be naive_utc"
+
+            true ->
+              nil
+          end
+
+        if message do
+          [
+            Core.error(
+              :invalid_column_storage,
+              path ++ [:columns, field, :storage],
+              "domain relation #{inspect(relation_id)} column #{inspect(field)} #{message}",
+              relation: relation_id,
+              field: field
+            )
+            | errors
+          ]
+        else
+          errors
+        end
     end
   end
 

@@ -328,6 +328,40 @@ it to governed graph series after aggregate execution. Browser state, chart
 type, axis placement, color, transform parameters, and transformed values MUST
 NOT be authored as column `unit` or `behavior` declarations.
 
+### Instant Storage
+
+A `utc_datetime` source or schema column MAY declare `storage: :naive_utc`
+(`"storage": "naive_utc"` in JSON) when the database column is a
+time-zone-less timestamp that holds UTC wall time, such as a PostgreSQL
+`timestamp without time zone`, a DuckDB `TIMESTAMP`, an Ecto
+`:utc_datetime` field in a default migration, or a Rails `datetime` column:
+
+```elixir
+created_at: %{type: :utc_datetime, storage: :naive_utc}
+```
+
+Without `storage`, a `utc_datetime` column is zone-aware (PostgreSQL
+`timestamptz`, DuckDB `TIMESTAMPTZ`). `naive_utc` is the only value.
+Validators MUST reject, as an invalid domain, `storage` on a column whose type
+is not `utc_datetime`, `storage` on a computed column, and any other `storage`
+value. Elixir also accepts `:utc_datetime_usec`, which its type system treats
+as `utc_datetime`. Validation covers `source` and every `schemas` entry.
+
+The hint changes SQL only where a value is used as an instant. On PostgreSQL
+and DuckDB, a consumer that applies a query time zone compiles the field as
+`((column AT TIME ZONE 'UTC') AT TIME ZONE zone)` instead of
+`(column AT TIME ZONE zone)`, and instant output formats (ISO 8601, RFC 3339,
+epoch seconds or milliseconds, time-zone offset) read
+`(column AT TIME ZONE 'UTC')` with or without a query time zone. Calendar
+formats, buckets, date shortcuts and filters follow the localized field. A
+plain read without a query time zone returns the stored value unchanged.
+Other dialects accept the hint and compile as before.
+
+Perl and Ruby implement these SQL semantics. Elixir's
+`Selecto.Domain.validate/1` and `Selecto.DomainValidator` validate the key
+(diagnostic code `:invalid_column_storage`), but the Elixir runtime does not
+yet compile query time zones into SQL, so the hint has no SQL effect there.
+
 `joins` must be a map when present. Each join key must be declared as a
 queryable association on its parent relation, and each queryable association
 must point at a schema available in `schemas` unless it explicitly targets
