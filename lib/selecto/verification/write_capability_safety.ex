@@ -148,7 +148,7 @@ defmodule Selecto.Verification.WriteCapabilitySafety do
         operation: operation,
         relation: :items,
         assignments: [%{field: :name, value: {:literal, "safe"}}],
-        predicate: if(operation in [:update, :delete], do: {:eq, {:field, :id}, {:literal, 1}}),
+        predicate: if(operation == :update, do: {:eq, {:field, :id}, {:literal, 1}}),
         returning: :none
       })
 

@@ -338,7 +338,12 @@ defmodule Selecto.Advanced.ArrayOperations do
   @doc """
   Generate SQL for an array operation.
   """
-  def to_sql(%Spec{} = spec, params_list, selecto \\ nil) do
+  @spec to_sql(Spec.t(), list()) :: no_return()
+  def to_sql(%Spec{}, _params_list) do
+    raise ArgumentError, "collection SQL requires a configured Selecto runtime"
+  end
+
+  def to_sql(%Spec{} = spec, params_list, selecto) do
     Selecto.Builder.ArrayOperations.build_array_sql(spec, params_list, selecto)
   end
 

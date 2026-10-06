@@ -117,7 +117,7 @@ defmodule Selecto.Telemetry do
         outcome: :error,
         error_category: :internal,
         kind: normalize_kind(kind),
-        reason_type: normalize_reason_type(reason_type)
+        reason_type: reason_type
       })
     )
   end
@@ -191,8 +191,6 @@ defmodule Selecto.Telemetry do
   defp normalize_atom(_value), do: :unknown
   defp normalize_kind(kind) when kind in [:error, :exit, :throw], do: kind
   defp normalize_kind(_kind), do: :error
-  defp normalize_reason_type(value) when is_atom(value), do: value
-  defp normalize_reason_type(_value), do: :unknown
   defp reason_type(%{__struct__: module}) when is_atom(module), do: module
   defp reason_type(reason) when is_atom(reason), do: reason
   defp reason_type(_reason), do: :unknown

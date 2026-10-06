@@ -82,7 +82,18 @@ defmodule Selecto.DB.Adapter do
   @type query :: String.t() | iodata()
   @type params :: [term()]
   @type execute_options :: keyword()
-  @type result :: %{required(:rows) => list(), required(:columns) => [String.t()]}
+  @typedoc """
+  Normalized rows and columns, with optional adapter-reported count and metadata.
+
+  A nil count represents an unknown count from the driver. Companion adapters
+  may retain existing native result information in the metadata map.
+  """
+  @type result :: %{
+          required(:rows) => list(),
+          required(:columns) => [String.t()],
+          optional(:num_rows) => non_neg_integer() | nil,
+          optional(:metadata) => map()
+        }
   @type introspection_options :: keyword()
   @type schema_metadata :: map()
   @type stream_result ::

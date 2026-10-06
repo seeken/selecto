@@ -54,7 +54,7 @@ defmodule Selecto.Output.Transformers.Json do
   Returns a JSON string representation of the query results with configurable
   serialization options.
   """
-  @spec transform(list(list()), list(String.t()), map(), json_options()) ::
+  @spec transform(list(list()), list(String.t()), Selecto.Types.result_aliases(), json_options()) ::
           {:ok, String.t()} | {:error, Error.t()}
   def transform(rows, columns, aliases, options \\ []) do
     try do
@@ -103,7 +103,12 @@ defmodule Selecto.Output.Transformers.Json do
   Returns a stream that yields JSON strings, useful for processing
   large result sets without loading everything into memory.
   """
-  @spec stream_transform(list(list()) | Enumerable.t(), list(String.t()), map(), json_options()) ::
+  @spec stream_transform(
+          list(list()) | Enumerable.t(),
+          list(String.t()),
+          Selecto.Types.result_aliases(),
+          json_options()
+        ) ::
           Enumerable.t()
   def stream_transform(rows, columns, aliases, options \\ []) do
     opts = parse_options(options)
@@ -293,6 +298,7 @@ defmodule Selecto.Output.Transformers.Json do
       :unix ->
         date
         |> Date.to_erl()
+        |> then(&{&1, {0, 0, 0}})
         |> :calendar.datetime_to_gregorian_seconds()
         |> Kernel.-(62_167_219_200)
 

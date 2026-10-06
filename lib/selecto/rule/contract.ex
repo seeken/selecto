@@ -180,7 +180,8 @@ defmodule Selecto.Rule.Contract do
     |> Map.put("evaluation", evaluation_markers(bindings))
   end
 
-  defp normalize_projected_stages(:all), do: MapSet.new(@supported_scopes)
+  @spec normalize_projected_stages(:all | [term()]) :: MapSet.t(String.t())
+  defp normalize_projected_stages(:all), do: normalize_projected_stages(@supported_scopes)
 
   defp normalize_projected_stages(stages) when is_list(stages),
     do: MapSet.new(stages, &to_string/1)
@@ -1134,10 +1135,11 @@ defmodule Selecto.Rule.Contract do
     |> MapSet.member?(field)
   end
 
+  @spec entry_ids(term()) :: MapSet.t(String.t())
   defp entry_ids(entries) when is_map(entries),
     do: MapSet.new(entries, fn {id, _} -> to_string(id) end)
 
-  defp entry_ids(_entries), do: MapSet.new()
+  defp entry_ids(_entries), do: MapSet.new([], &to_string/1)
 
   defp find_entry(entries, id) when is_map(entries) do
     case Enum.find(entries, fn {candidate, _value} -> to_string(candidate) == id end) do

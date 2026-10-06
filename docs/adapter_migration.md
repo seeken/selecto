@@ -64,3 +64,37 @@ Run the package boundary gate after migration:
 ```sh
 scripts/check_postgresql_boundary.sh
 ```
+
+## Computed-value rendering
+
+The governed computed-value AST remains unchanged. Core composes field references,
+addition/subtraction/multiplication, coalesce, lower/upper and case expressions
+using the configured adapter's quoting and parameters. A condition or child
+expression may itself need an adapter-owned fragment.
+
+Typed literals, explicit casts, the casts used by concatenation and division,
+and `json_text` require the optional dialect callback `render_computed_value/2`.
+It receives a `Selecto.Dialect.ComputedValue` with exactly two operations:
+
+- `:cast`: a compiled expression and a canonical type (`string`, `integer`,
+  `decimal`, `boolean`, `date` or `utc_datetime`).
+- `:json_text`: a compiled JSON expression and ordered, bound path markers.
+
+The renderer owns native cast targets and JSON syntax and must preserve parameter
+markers and their order. It rejects unknown types, operations and malformed
+fragments. Core has no database-specific fallback. A dialect without the callback
+returns a structured `:computed_value` unsupported-fragment error when one of
+these operations is requested; other queries continue to compile normally.
+
+Use the PostgreSQL companion adapter containing `render_computed_value/2` before
+upgrading Core. That adapter can also compile against older Core pins, which do
+not call the optional callback. Previously published adapters without it do not
+support the newly delegated computed fragments. This change does not enroll any
+additional runtime, adapter or portable certification profile.
+
+The boundary audit's only input compatibility exceptions are three exact lines
+recognizing historical JSON and zone-aware timestamp aliases. Those exceptions
+do not allow native rendering or exempt an entire source file. Runtime identifier
+interning has a separately documented one-line atom-audit exception: its validated
+creation site is serialized with process-specific global-lock requesters and
+charged against a fixed VM-lifetime budget.

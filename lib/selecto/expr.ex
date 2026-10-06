@@ -155,7 +155,7 @@ defmodule Selecto.Expr do
   def lit(value), do: {:literal, value}
 
   @doc "Builds a generic function selector."
-  @spec func(String.t(), term()) :: tuple()
+  @spec func(String.t() | atom(), term()) :: tuple()
   def func(function_name, args \\ []) do
     {:func, function_name, Enum.map(List.wrap(args), &normalize_selector_input/1)}
   end

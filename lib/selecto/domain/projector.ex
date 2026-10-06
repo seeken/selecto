@@ -54,7 +54,7 @@ defmodule Selecto.Domain.Projector do
     :redact_fields
   ]
 
-  @spec project(map(), :query | :write | :ui | :api | :query_contract) :: map()
+  @spec project(map(), :query | :write | :ui | :api | :import | :query_contract) :: map()
   def project(%{schema_version: _schema_version, domain: _domain} = normalized, :query) do
     normalized
     |> base_projection()

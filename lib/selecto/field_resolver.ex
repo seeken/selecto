@@ -483,7 +483,8 @@ defmodule Selecto.FieldResolver do
     |> Enum.into(%{})
   end
 
-  defp join_path(joins, join_name, seen \\ MapSet.new()) do
+  @spec join_path(map(), atom() | String.t(), MapSet.t(String.t())) :: [String.t()]
+  defp join_path(joins, join_name, seen \\ MapSet.new([], &to_string/1)) do
     name = to_string(join_name)
 
     if MapSet.member?(seen, name) do

@@ -234,7 +234,7 @@ defmodule Selecto.Fields do
         {:error, reason} -> # handle error
       end
   """
-  @spec resolve_field(Selecto.Types.t(), Selecto.Types.field_name()) ::
+  @spec resolve_field(Selecto.Types.t(), Selecto.FieldResolver.field_reference()) ::
           {:ok, map()} | {:error, term()}
   def resolve_field(selecto, field_name) do
     Selecto.FieldResolver.resolve_field(selecto, field_name)
@@ -246,9 +246,9 @@ defmodule Selecto.Fields do
   ## Examples
 
       fields = Selecto.Fields.available_fields(selecto)
-      # => ["id", "name", "email", "posts.title", ...]
+      # => %{"id" => %{...}, "name" => %{...}, "posts.title" => %{...}, ...}
   """
-  @spec available_fields(Selecto.Types.t()) :: [String.t()]
+  @spec available_fields(Selecto.Types.t()) :: %{String.t() => map()}
   def available_fields(selecto) do
     Selecto.FieldResolver.get_available_fields(selecto)
   end

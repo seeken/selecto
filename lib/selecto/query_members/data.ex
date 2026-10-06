@@ -129,7 +129,7 @@ defmodule Selecto.QueryMembers.Data do
         recursive_query: fn _cte_ref ->
           selecto
           |> member_selecto(source)
-          |> Selecto.join(String.to_atom(cte_name),
+          |> Selecto.join(Selecto.Identifier.to_atom!(cte_name),
             source: cte_name,
             type: :inner,
             owner_key: atom(get(step_join, :owner_key)),
@@ -417,5 +417,5 @@ defmodule Selecto.QueryMembers.Data do
   defp get(_map, _key), do: nil
 
   defp atom(value) when is_atom(value), do: value
-  defp atom(value) when is_binary(value), do: String.to_atom(value)
+  defp atom(value) when is_binary(value), do: Selecto.Identifier.to_atom!(value)
 end

@@ -60,7 +60,7 @@ defmodule Selecto.Identifier do
   end
 
   defp intern_new_atom!(value) do
-    :global.trans({__MODULE__, :atom_interning}, fn ->
+    :global.trans({{__MODULE__, :atom_interning}, self()}, fn ->
       try do
         String.to_existing_atom(value)
       rescue
@@ -74,6 +74,9 @@ defmodule Selecto.Identifier do
     count = :atomics.add_get(counter, 1, 1)
 
     if count <= @max_dynamic_identifiers do
+      # This is the sole interning site: identifiers are validated, serialized,
+      # and charged against the fixed VM-lifetime budget before creating an atom.
+      # credo:disable-for-next-line Credo.Check.Warning.UnsafeToAtom
       String.to_atom(value)
     else
       :atomics.sub_get(counter, 1, 1)

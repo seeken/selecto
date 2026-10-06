@@ -90,6 +90,30 @@ defmodule Selecto.QueryMemberDataTest do
     assert {:ok, _normalized, _diagnostics} = Selecto.Domain.validate(domain())
   end
 
+  test "runtime member identifiers obey the bounded interner's byte limit" do
+    identifier = "member_#{System.unique_integer([:positive])}" <> String.duplicate("ø", 128)
+    base = Selecto.configure(domain(), :compile_only)
+    ordinary = put_in(domain().query_members.ctes.order_totals, [:join, :owner_key], identifier)
+
+    assert_raise ArgumentError, ~r/255-byte runtime limit/, fn ->
+      Selecto.QueryMembers.Data.to_runtime(base, :ctes, "orders", ordinary)
+    end
+
+    recursive =
+      Selecto.QueryMembers.Data.to_runtime(
+        base,
+        :ctes,
+        identifier,
+        domain().query_members.ctes.team_tree
+      )
+
+    assert_raise ArgumentError, ~r/255-byte runtime limit/, fn ->
+      recursive.recursive_query.(nil)
+    end
+
+    assert_raise ArgumentError, fn -> String.to_existing_atom(identifier) end
+  end
+
   test "a CTE member compiles from data" do
     {sql, params} =
       domain()

@@ -41,12 +41,15 @@ defmodule Selecto.MixProject do
           "docs/contexts.md",
           "docs/query_library.md",
           "docs/document_shapes.md",
+          "docs/governed-lookups.md",
+          "docs/nested_composition_contract.md",
           "docs/source_query_plans.md",
           "docs/strict_mode.md",
           "docs/write_adapter_protocol.md",
           "guides/complex_join_patterns.md",
           "guides/olap_and_hierarchical_patterns.md",
-          "guides/advanced_usage.md"
+          "guides/advanced_usage.md",
+          "guides/canned_pages.md"
         ],
         groups_for_modules: [
           Core: [Selecto, Selecto.Types],

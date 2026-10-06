@@ -252,7 +252,9 @@ defmodule Selecto.Domain.Contract.ComputedPredicates do
       ]
 
   defp validate_cycles(errors, graph) do
-    case Enum.find(Map.keys(graph), &cycle_from?(&1, graph, MapSet.new(), MapSet.new())) do
+    empty = MapSet.new([], &to_string/1)
+
+    case Enum.find(Map.keys(graph), &cycle_from?(&1, graph, empty, empty)) do
       nil ->
         errors
 
@@ -264,6 +266,12 @@ defmodule Selecto.Domain.Contract.ComputedPredicates do
     end
   end
 
+  @spec cycle_from?(
+          String.t(),
+          %{String.t() => [String.t()]},
+          MapSet.t(String.t()),
+          MapSet.t(String.t())
+        ) :: boolean()
   defp cycle_from?(field, graph, visiting, visited) do
     cond do
       MapSet.member?(visiting, field) ->

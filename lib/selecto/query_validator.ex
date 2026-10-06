@@ -659,9 +659,6 @@ defmodule Selecto.QueryValidator do
 
       {:error, %{message: message}} ->
         raise ArgumentError, message
-
-      {:error, error} ->
-        raise ArgumentError, inspect(error)
     end
   end
 end

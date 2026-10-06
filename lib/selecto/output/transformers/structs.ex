@@ -63,7 +63,7 @@ defmodule Selecto.Output.Transformers.Structs do
   @spec transform(
           rows :: list(list()),
           columns :: list(),
-          aliases :: map(),
+          aliases :: Selecto.Types.result_aliases(),
           struct_module :: module() | nil,
           options :: struct_options()
         ) ::
@@ -104,7 +104,7 @@ defmodule Selecto.Output.Transformers.Structs do
   @spec stream_transform(
           rows :: Enumerable.t(),
           columns :: list(),
-          aliases :: map(),
+          aliases :: Selecto.Types.result_aliases(),
           struct_module :: module() | nil,
           options :: struct_options()
         ) ::
