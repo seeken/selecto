@@ -1048,14 +1048,27 @@ defmodule Selecto do
   @spec gen_sql(t(), keyword()) :: {String.t(), list(), list()}
   def gen_sql(selecto, opts) do
     sql = Selecto.Builder.Sql.build(selecto, opts)
+    ensure_gen_sql_tenant_scope!(selecto, opts)
+    sql
+  end
 
-    # A required, mismatched or ambiguous tenant scope fails closed here as in
-    # to_sql/2 and execute/2; `validate_tenant: false` opts out explicitly.
+  @doc false
+  # gen_sql/2, also returning the joins the query resolved in join order (nil
+  # for set operations). The executor's complexity check reads them instead
+  # of resolving the joins again.
+  @spec gen_sql_with_joins(t(), keyword()) :: {String.t(), list(), list(), list() | nil}
+  def gen_sql_with_joins(selecto, opts) do
+    compiled = Selecto.Builder.Sql.build_with_joins(selecto, opts)
+    ensure_gen_sql_tenant_scope!(selecto, opts)
+    compiled
+  end
+
+  # A required, mismatched or ambiguous tenant scope fails closed here as in
+  # to_sql/2 and execute/2; `validate_tenant: false` opts out explicitly.
+  defp ensure_gen_sql_tenant_scope!(selecto, opts) do
     if Keyword.get(opts, :validate_tenant, true) do
       Selecto.Tenant.ensure_scope!(selecto, opts)
     end
-
-    sql
   end
 
   @doc """

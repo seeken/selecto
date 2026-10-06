@@ -44,6 +44,22 @@ defmodule Selecto.Builder.Sql do
     end
   end
 
+  @doc false
+  # build/2, also returning the joins the query resolved, in join order, so a
+  # caller can inspect them without building the query a second time. The
+  # joins are `nil` for set operations, which do not resolve joins this way.
+  @spec build_with_joins(Selecto.Types.t(), Selecto.Types.sql_generation_options()) ::
+          {String.t(), list(), [any()], list() | nil}
+  def build_with_joins(selecto, opts) do
+    if Selecto.Builder.SetOperations.has_set_operations?(selecto) do
+      {sql, aliases, params} = build_set_operation_query(selecto, opts)
+      {sql, aliases, params, nil}
+    else
+      :ok = Selecto.Policy.validate_query!(selecto)
+      build_standard_query_with_joins(selecto, opts)
+    end
+  end
+
   @doc """
   Output column name given to the selected column at 1-based `position` when
   building with `unique_projection_aliases: true`.
@@ -199,6 +215,11 @@ defmodule Selecto.Builder.Sql do
   end
 
   defp build_standard_query(selecto, opts) do
+    {sql, aliases, params, _joins_in_order} = build_standard_query_with_joins(selecto, opts)
+    {sql, aliases, params}
+  end
+
+  defp build_standard_query_with_joins(selecto, opts) do
     # Phase 4: All SQL builders now use iodata parameterization.
     {aliases, sel_joins, select_iodata, select_params} =
       build_select_with_subselects(selecto, %{}, opts)
@@ -425,7 +446,7 @@ defmodule Selecto.Builder.Sql do
 
     # CTE params are already integrated into the iodata, so final_params contains everything
     # Don't double-count parameters
-    {sql, aliases, final_params}
+    {sql, aliases, final_params, joins_in_order}
   end
 
   defp finalize_section(iodata, _adapter, _type) when iodata in [[], [""], ["()"], "", "()"],

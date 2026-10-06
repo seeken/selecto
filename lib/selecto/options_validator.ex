@@ -95,33 +95,48 @@ defmodule Selecto.OptionsValidator do
     to_sql_opts: [type: :keyword_list]
   ]
 
+  # Compiled once here: NimbleOptions.validate!/2 with a keyword schema
+  # revalidates the schema itself on every call.
+  @compiled_configure_schema NimbleOptions.new!(@configure_schema)
+  @compiled_execute_schema NimbleOptions.new!(@execute_schema)
+  @compiled_to_sql_schema NimbleOptions.new!(@to_sql_schema)
+  @compiled_diagnostic_schema NimbleOptions.new!(@diagnostic_schema)
+
   @spec validate_configure_opts!(keyword()) :: :ok
   def validate_configure_opts!(opts) when is_list(opts) do
-    validate_known_options!(opts, @configure_option_keys, @configure_schema)
+    validate_builtin_options!(opts, @configure_option_keys, @compiled_configure_schema)
   end
 
   @spec validate_execute_opts!(keyword()) :: :ok
   def validate_execute_opts!(opts) when is_list(opts) do
-    validate_known_options!(opts, @execute_option_keys, @execute_schema)
+    validate_builtin_options!(opts, @execute_option_keys, @compiled_execute_schema)
   end
 
   @spec validate_to_sql_opts!(keyword()) :: :ok
   def validate_to_sql_opts!(opts) when is_list(opts) do
-    validate_known_options!(opts, @to_sql_option_keys, @to_sql_schema)
+    validate_builtin_options!(opts, @to_sql_option_keys, @compiled_to_sql_schema)
   end
 
   @spec validate_diagnostic_opts!(keyword()) :: :ok
   def validate_diagnostic_opts!(opts) when is_list(opts) do
-    validate_known_options!(opts, @diagnostic_option_keys, @diagnostic_schema)
+    validate_builtin_options!(opts, @diagnostic_option_keys, @compiled_diagnostic_schema)
   end
 
-  @spec validate_known_options!(keyword(), [atom()], keyword()) :: :ok
+  @spec validate_known_options!(keyword(), [atom()], keyword() | NimbleOptions.t()) :: :ok
   def validate_known_options!(opts, keys, schema)
-      when is_list(opts) and is_list(keys) and is_list(schema) do
+      when is_list(opts) and is_list(keys) and
+             (is_list(schema) or is_struct(schema, NimbleOptions)) do
     opts
     |> Keyword.take(keys)
     |> NimbleOptions.validate!(schema)
 
     :ok
   end
+
+  # None of the built-in schemas has a required option, so no options at all
+  # is always valid.
+  defp validate_builtin_options!([], _keys, _schema), do: :ok
+
+  defp validate_builtin_options!(opts, keys, schema),
+    do: validate_known_options!(opts, keys, schema)
 end

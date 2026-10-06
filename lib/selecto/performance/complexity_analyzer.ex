@@ -74,7 +74,17 @@ defmodule Selecto.Performance.ComplexityAnalyzer do
   - `{:error, :too_complex, analysis}` - Query exceeds complexity limits
   """
   @spec analyze(Selecto.t(), keyword()) :: analysis_result()
-  def analyze(selecto, opts \\ []) do
+  def analyze(selecto, opts \\ []), do: do_analyze(selecto, opts, :resolve)
+
+  @doc false
+  # analyze/2 for a query whose joins were already resolved while compiling
+  # it (`joins_in_order` from `Selecto.Builder.Sql.build_with_joins/2`), so
+  # they are not resolved a second time. The result is the same as analyze/2.
+  @spec analyze_resolved(Selecto.t(), list(), keyword()) :: analysis_result()
+  def analyze_resolved(selecto, joins_in_order, opts) when is_list(joins_in_order),
+    do: do_analyze(selecto, opts, {:resolved, joins_in_order})
+
+  defp do_analyze(selecto, opts, joins) do
     max_score = Keyword.get(opts, :max_complexity, @max_complexity_score)
     max_joins = Keyword.get(opts, :max_joins, @max_joins)
     max_in_size = Keyword.get(opts, :max_in_clause_size, @max_in_clause_size)
@@ -92,7 +102,7 @@ defmodule Selecto.Performance.ComplexityAnalyzer do
     }
 
     analysis
-    |> check_join_count(selecto, max_joins)
+    |> check_join_count(selecto, joins, max_joins)
     |> check_subselects(selecto)
     |> check_cartesian_products(selecto)
     |> check_in_clause_size(selecto, max_in_size)
@@ -104,8 +114,8 @@ defmodule Selecto.Performance.ComplexityAnalyzer do
   end
 
   # Check number of joins
-  defp check_join_count(analysis, selecto, max_joins) do
-    join_count = active_join_count(selecto)
+  defp check_join_count(analysis, selecto, joins, max_joins) do
+    join_count = active_join_count(selecto, joins)
 
     details = Map.put(analysis.details, :join_count, join_count)
 
@@ -350,23 +360,30 @@ defmodule Selecto.Performance.ComplexityAnalyzer do
     end
   end
 
-  defp active_join_count(selecto) do
+  defp active_join_count(selecto, {:resolved, resolved_joins}),
+    do: count_active_joins(selecto, resolved_joins)
+
+  defp active_join_count(selecto, :resolve) do
     try do
       resolved_joins =
         selecto
         |> Selecto.Builder.Sql.benchmark_components()
         |> Map.fetch!(:joins_in_order)
 
-      explicit_joins = Map.get(selecto.set, :active_joins, [])
-
-      (resolved_joins ++ explicit_joins)
-      |> Enum.uniq()
-      |> length()
+      count_active_joins(selecto, resolved_joins)
     rescue
       # Lightweight analyzer fixtures and partially constructed queries may not
       # be SQL-compilable yet. Retain the conservative legacy count for them.
       RuntimeError -> count_configured_joins(selecto.config.joins)
     end
+  end
+
+  defp count_active_joins(selecto, resolved_joins) do
+    explicit_joins = Map.get(selecto.set, :active_joins, [])
+
+    (resolved_joins ++ explicit_joins)
+    |> Enum.uniq()
+    |> length()
   end
 
   defp count_configured_joins(joins) when is_map(joins) do

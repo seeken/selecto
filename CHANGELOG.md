@@ -3,6 +3,30 @@
 
 ## Unreleased
 
+- Performance: `Selecto.execute/2` (and `execute_one/2`) do less per call;
+  results, errors, tenant and complexity checks and telemetry events are
+  unchanged.
+  - The complexity check no longer builds the query a second time: the query
+    is compiled once before the check, which reads the joins the compile
+    resolved, and execution reuses that SQL. The `[:selecto, :telemetry,
+    :compile]` span is therefore emitted before the legacy
+    `[:selecto, :query, :complexity_analyzed]` event, not after it.
+  - A complexity warning is logged once per query shape (compiled SQL text)
+    instead of on every execution, at the same level and with the same text.
+    `config :selecto, :complexity_warning_log, :every_call` restores the old
+    behavior. `execute_with_metadata`, count, projection sum and streams still
+    log on every call.
+  - Adapters may declare `supports?(:execute_timeout)` when `execute/4`
+    enforces a `timeout: ms` option. Queries then run in the calling process
+    with the remaining time passed as `:timeout`, instead of in a task whose
+    result is copied back (about 7 ms on a 5,000 × 20 result); a query past
+    the timeout returns the same timeout error. Registered performance hooks
+    or `cache: true` keep the task. See `Selecto.DB.Adapter`.
+  - Execute option schemas are compiled once, not on every call.
+  - The performance hooks table is created at application start, so it no
+    longer belongs to (and disappears with) the first process that used
+    hooks, and a task no longer leaves hook entries behind.
+
 - Security: close the ungoverned-write boundary. Writes execute only through
   the governed entry point, `SelectoUpdato`.
   - `Selecto.Write.execute/3`, `Selecto.Write.execute_prepared/3` and every

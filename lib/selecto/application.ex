@@ -14,6 +14,11 @@ defmodule Selecto.Application do
 
   @impl true
   def start(_type, _args) do
+    # Shared ETS tables are created here so that they belong to the
+    # application rather than to a short-lived caller process.
+    :ok = Selecto.Performance.Hooks.init_table()
+    :ok = Selecto.Performance.ComplexityWarnings.init_table()
+
     children = [
       # Executor timeouts depend on this supervisor, so it stays supervised.
       {Task.Supervisor, name: Selecto.TaskSupervisor}

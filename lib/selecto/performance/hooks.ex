@@ -85,6 +85,20 @@ defmodule Selecto.Performance.Hooks do
     :ok
   end
 
+  @doc false
+  # True when a snapshot holds no hooks at any hook point.
+  def empty_snapshot?(snapshot) when is_map(snapshot),
+    do: Enum.all?(snapshot, fn {_hook_point, hooks} -> hooks == [] end)
+
+  @doc false
+  # Creates the shared hooks table. The application calls this at start so
+  # the table belongs to a long-lived process rather than to whichever
+  # process registers or snapshots hooks first.
+  def init_table do
+    _ = ensure_hooks_table()
+    :ok
+  end
+
   @doc """
   Unregister all hooks for a specific hook point.
   """
@@ -122,29 +136,42 @@ defmodule Selecto.Performance.Hooks do
   This is the main entry point for integrating hooks into query execution.
   """
   def with_hooks(selecto, execution_fn, options \\ []) do
-    operation = Selecto.Telemetry.Context.current_operation() || %{}
+    compiled = Keyword.get(options, :compiled)
 
     context = %{
       selecto: selecto,
       options: options,
-      query_id: Map.get(operation, :operation_id, generate_query_id()),
-      started_at: System.monotonic_time(:millisecond)
+      query_id: current_query_id(),
+      started_at: compiled_started_at(compiled)
     }
 
     # Run pre-execution hooks
     context = run_hooks(:before_query_build, context)
 
-    # Generate SQL
-    {sql, params, query_metadata} =
-      Selecto.Telemetry.span([:compile], %{}, fn ->
-        build_query_context(selecto, options)
-      end)
+    # Generate SQL, unless the caller already compiled it (and emitted the
+    # compile span) with the same options
+    {sql, params, query_metadata, query_built_at} =
+      case compiled do
+        %{sql: sql, params: params, aliases: aliases, built_at: built_at} ->
+          query_metadata =
+            if Keyword.get(options, :include_aliases, false), do: %{aliases: aliases}, else: %{}
+
+          {sql, params, query_metadata, built_at}
+
+        nil ->
+          {sql, params, query_metadata} =
+            Selecto.Telemetry.span([:compile], %{}, fn ->
+              build_query_context(selecto, options)
+            end)
+
+          {sql, params, query_metadata, System.monotonic_time(:millisecond)}
+      end
 
     context =
       Map.merge(context, %{
         sql: sql,
         params: params,
-        query_built_at: System.monotonic_time(:millisecond)
+        query_built_at: query_built_at
       })
       |> Map.merge(query_metadata)
 
@@ -455,6 +482,18 @@ defmodule Selecto.Performance.Hooks do
       {sql, params, %{}}
     end
   end
+
+  defp current_query_id do
+    case Selecto.Telemetry.Context.current_operation() do
+      %{operation_id: operation_id} -> operation_id
+      _ -> generate_query_id()
+    end
+  end
+
+  defp compiled_started_at(%{started_at: started_at}) when is_integer(started_at),
+    do: started_at
+
+  defp compiled_started_at(_compiled), do: System.monotonic_time(:millisecond)
 
   defp generate_query_id do
     :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)

@@ -70,16 +70,36 @@ defmodule Selecto.Executor do
     query_id = query_id()
 
     with :ok <- check_query_complexity(selecto, opts, query_id) do
-      with_timeout_protection(opts, query_id, start_time, work)
+      with_timeout_protection(
+        opts,
+        query_id,
+        start_time,
+        Selecto.Performance.Hooks.snapshot_hooks(),
+        work
+      )
     end
   end
 
   defp execute_safe(selecto, opts, query_id, start_time) do
-    with :ok <- check_query_complexity(selecto, opts, query_id) do
+    hook_options = hook_options(opts)
+    hook_snapshot = Selecto.Performance.Hooks.snapshot_hooks()
+
+    with {:ok, compiled} <- compile_and_check(selecto, opts, query_id, hook_options) do
+      hook_options =
+        if compiled, do: Keyword.put(hook_options, :compiled, compiled), else: hook_options
+
+      work = fn deadline ->
+        execute_with_hooks(selecto, hook_options, query_id, start_time, deadline)
+      end
+
       result =
-        with_timeout_protection(opts, query_id, start_time, fn ->
-          execute_with_hooks(selecto, opts, query_id, start_time)
-        end)
+        if run_in_caller?(selecto, opts, hook_snapshot) do
+          with_adapter_timeout(opts, query_id, start_time, work)
+        else
+          with_timeout_protection(opts, query_id, start_time, hook_snapshot, fn ->
+            work.(nil)
+          end)
+        end
 
       # Apply output format transformation if specified
       case result do
@@ -112,18 +132,90 @@ defmodule Selecto.Executor do
     end
   end
 
+  # The complexity check needs the joins the query resolves, which compiling
+  # the query resolves anyway. So the query is compiled once, here, and the
+  # check reads the compile's joins; execution reuses the compiled SQL rather
+  # than compiling again. Without the check (`analyze_complexity: false`)
+  # nothing is compiled here and execution compiles as before.
+  defp compile_and_check(selecto, opts, query_id, hook_options) do
+    if opts[:analyze_complexity] == false do
+      {:ok, nil}
+    else
+      case compile(selecto, Keyword.fetch!(hook_options, :gen_sql_opts)) do
+        {:ok, compiled, nil} ->
+          # Set operations do not resolve joins while compiling.
+          with :ok <- analyze_query_complexity(selecto, opts, query_id, compiled.sql) do
+            {:ok, compiled}
+          end
+
+        {:ok, compiled, joins_in_order} ->
+          analysis =
+            Selecto.Performance.ComplexityAnalyzer.analyze_resolved(
+              selecto,
+              joins_in_order,
+              opts
+            )
+
+          with :ok <- complexity_outcome(analysis, query_id, compiled.sql) do
+            {:ok, compiled}
+          end
+
+        {:raised, exception, stacktrace} ->
+          # A query the check rejects is rejected even when it cannot compile,
+          # as when the check ran before compiling; otherwise the compile
+          # error is raised as before.
+          with :ok <- analyze_query_complexity(selecto, opts, query_id, nil) do
+            reraise exception, stacktrace
+          end
+      end
+    end
+  end
+
+  defp compile(selecto, gen_sql_opts) do
+    started_at = System.monotonic_time(:millisecond)
+
+    {sql, aliases, params, joins_in_order} =
+      Selecto.Telemetry.span([:compile], %{}, fn ->
+        Selecto.gen_sql_with_joins(selecto, gen_sql_opts)
+      end)
+
+    compiled = %{
+      sql: sql,
+      aliases: aliases,
+      params: params,
+      started_at: started_at,
+      built_at: System.monotonic_time(:millisecond)
+    }
+
+    {:ok, compiled, joins_in_order}
+  rescue
+    exception -> {:raised, exception, __STACKTRACE__}
+  end
+
   defp check_query_complexity(selecto, opts, query_id) do
     if opts[:analyze_complexity] == false do
       :ok
     else
-      analyze_query_complexity(selecto, opts, query_id)
+      analyze_query_complexity(selecto, opts, query_id, nil)
     end
   end
 
-  defp analyze_query_complexity(selecto, opts, query_id) do
-    case Selecto.Performance.ComplexityAnalyzer.analyze(selecto, opts) do
+  defp analyze_query_complexity(selecto, opts, query_id, sql) do
+    selecto
+    |> Selecto.Performance.ComplexityAnalyzer.analyze(opts)
+    |> complexity_outcome(query_id, sql)
+  end
+
+  # `sql` names the query shape when it is known, so that a warning is
+  # logged once per shape (see Selecto.Performance.ComplexityWarnings).
+  defp complexity_outcome(analysis_result, query_id, sql) do
+    case analysis_result do
       {:ok, analysis} ->
-        Enum.each(analysis.warnings, &Logger.warning("[Selecto] Query complexity: #{&1}"))
+        Enum.each(analysis.warnings, fn warning ->
+          if Selecto.Performance.ComplexityWarnings.log?(sql, warning) do
+            Logger.warning("[Selecto] Query complexity: #{warning}")
+          end
+        end)
 
         :telemetry.execute(
           [:selecto, :query, :complexity_analyzed],
@@ -159,21 +251,32 @@ defmodule Selecto.Executor do
     end
   end
 
-  # Run the execution work with timeout protection
-  defp with_timeout_protection(opts, query_id, start_time, work) do
-    # Get timeout from options or default
-    # Default 30 seconds
-    timeout = opts[:timeout] || 30_000
-    # 5 minutes absolute maximum
-    max_timeout = 300_000
-    timeout = min(timeout, max_timeout)
-    hook_snapshot = Selecto.Performance.Hooks.snapshot_hooks()
+  # Default 30 seconds, at most 5 minutes.
+  @default_timeout 30_000
+  @max_timeout 300_000
+
+  defp effective_timeout(opts), do: min(opts[:timeout] || @default_timeout, @max_timeout)
+
+  # Run the execution work with timeout protection: in a supervised task that
+  # is abandoned (shut down) when the timeout elapses.
+  defp with_timeout_protection(opts, query_id, start_time, hook_snapshot, work) do
+    timeout = effective_timeout(opts)
+    restore_hooks? = not Selecto.Performance.Hooks.empty_snapshot?(hook_snapshot)
 
     # Wrap execution in Task.async for timeout enforcement
     task =
       Selecto.TaskSupervisor.async(fn ->
-        Selecto.Performance.Hooks.restore_hooks(hook_snapshot)
-        work.()
+        if restore_hooks? do
+          Selecto.Performance.Hooks.restore_hooks(hook_snapshot)
+
+          try do
+            work.()
+          after
+            Selecto.Performance.Hooks.restore_hooks(%{})
+          end
+        else
+          work.()
+        end
       end)
 
     # Wait for task with timeout
@@ -181,43 +284,99 @@ defmodule Selecto.Executor do
       {:ok, result} ->
         result
 
-      {:exit, {%_{} = error, stacktrace}} when is_list(stacktrace) ->
-        reraise error, stacktrace
-
       {:exit, reason} ->
-        duration = System.monotonic_time(:millisecond) - start_time
-
-        :telemetry.execute(
-          [:selecto, :query, :error],
-          %{count: 1},
-          %{query_id: query_id, error_type: infer_error_type(reason), duration: duration}
-        )
-
-        {:error,
-         Selecto.Error.connection_error(
-           "Database execution process exited",
-           Selecto.Error.exit_details(reason)
-         )}
+        exited_result(reason, query_id, start_time)
 
       nil ->
         # Task was killed due to timeout
-        duration = System.monotonic_time(:millisecond) - start_time
-
-        Logger.error("[Selecto] Query timeout after #{timeout}ms")
-
-        # Emit timeout telemetry
-        :telemetry.execute(
-          [:selecto, :query, :timeout],
-          %{duration: duration, timeout: timeout},
-          %{query_id: query_id}
-        )
-
-        {:error,
-         Selecto.Error.timeout_error(
-           "Query exceeded timeout of #{timeout}ms",
-           %{timeout: timeout, duration: duration}
-         )}
+        timeout_result(timeout, query_id, start_time)
     end
+  end
+
+  # Run the execution work in the calling process when the adapter enforces
+  # the timeout itself (`supports?(:execute_timeout)`), so the result is not
+  # copied out of a task. The outcome matches with_timeout_protection/5: work
+  # that does not finish within the timeout yields the same timeout error
+  # however it ends, an exit or throw the same connection error, and an
+  # exception is raised again.
+  defp with_adapter_timeout(opts, query_id, start_time, work) do
+    timeout = effective_timeout(opts)
+    started_at = System.monotonic_time(:millisecond)
+
+    outcome =
+      if timeout == 0 do
+        :not_started
+      else
+        try do
+          {:done, work.(started_at + timeout)}
+        catch
+          :exit, reason -> {:exited, reason}
+          :throw, value -> {:exited, {{:nocatch, value}, __STACKTRACE__}}
+          :error, reason -> {:raised, reason, __STACKTRACE__}
+        end
+      end
+
+    if outcome == :not_started or System.monotonic_time(:millisecond) - started_at > timeout do
+      timeout_result(timeout, query_id, start_time)
+    else
+      case outcome do
+        {:done, result} -> result
+        {:exited, reason} -> exited_result(reason, query_id, start_time)
+        {:raised, reason, stacktrace} -> :erlang.raise(:error, reason, stacktrace)
+      end
+    end
+  end
+
+  defp run_in_caller?(selecto, opts, hook_snapshot) do
+    !opts[:cache] and Selecto.Performance.Hooks.empty_snapshot?(hook_snapshot) and
+      adapter_enforces_timeout?(runtime_adapter(selecto))
+  end
+
+  defp adapter_enforces_timeout?(adapter) do
+    Selecto.AdapterSupport.callback_available?(adapter, :supports?, 1) and
+      adapter.supports?(:execute_timeout) == true
+  rescue
+    _ -> false
+  end
+
+  defp exited_result({%_{} = error, stacktrace}, _query_id, _start_time)
+       when is_list(stacktrace) do
+    reraise error, stacktrace
+  end
+
+  defp exited_result(reason, query_id, start_time) do
+    duration = System.monotonic_time(:millisecond) - start_time
+
+    :telemetry.execute(
+      [:selecto, :query, :error],
+      %{count: 1},
+      %{query_id: query_id, error_type: infer_error_type(reason), duration: duration}
+    )
+
+    {:error,
+     Selecto.Error.connection_error(
+       "Database execution process exited",
+       Selecto.Error.exit_details(reason)
+     )}
+  end
+
+  defp timeout_result(timeout, query_id, start_time) do
+    duration = System.monotonic_time(:millisecond) - start_time
+
+    Logger.error("[Selecto] Query timeout after #{timeout}ms")
+
+    # Emit timeout telemetry
+    :telemetry.execute(
+      [:selecto, :query, :timeout],
+      %{duration: duration, timeout: timeout},
+      %{query_id: query_id}
+    )
+
+    {:error,
+     Selecto.Error.timeout_error(
+       "Query exceeded timeout of #{timeout}ms",
+       %{timeout: timeout, duration: duration}
+     )}
   end
 
   @doc """
@@ -733,7 +892,9 @@ defmodule Selecto.Executor do
   defp runtime_connection(selecto), do: Selecto.Runtime.Context.connection(selecto)
   defp runtime_adapter(selecto), do: Selecto.Runtime.Context.adapter(selecto)
 
-  defp execute_with_hooks(selecto, opts, query_id, start_time) do
+  # `deadline` (monotonic milliseconds) is set when the adapter enforces the
+  # timeout itself; it then receives the time remaining as `:timeout`.
+  defp execute_with_hooks(selecto, hook_options, query_id, start_time, deadline) do
     Selecto.Performance.Hooks.with_hooks(
       selecto,
       fn _selecto, sql, params, context ->
@@ -741,7 +902,9 @@ defmodule Selecto.Executor do
 
         result =
           :telemetry.span(@query_execution_event, %{query_id: query_id}, fn ->
-            result = execute_for_context(selecto, sql, params, aliases)
+            result =
+              execute_for_context(selecto, sql, params, aliases, deadline_options(deadline))
+
             duration = System.monotonic_time(:millisecond) - start_time
 
             stop_metadata =
@@ -753,9 +916,14 @@ defmodule Selecto.Executor do
 
         result
       end,
-      hook_options(opts)
+      hook_options
     )
   end
+
+  defp deadline_options(nil), do: []
+
+  defp deadline_options(deadline),
+    do: [timeout: max(deadline - System.monotonic_time(:millisecond), 1)]
 
   defp hook_options(opts) do
     [
@@ -776,7 +944,7 @@ defmodule Selecto.Executor do
     ]
   end
 
-  defp execute_for_context(selecto, query, params, aliases) do
+  defp execute_for_context(selecto, query, params, aliases, adapter_opts \\ []) do
     adapter = runtime_adapter(selecto)
 
     Selecto.Telemetry.span([:adapter], %{adapter: adapter}, fn ->
@@ -785,7 +953,8 @@ defmodule Selecto.Executor do
         runtime_connection(selecto),
         query,
         params,
-        aliases
+        aliases,
+        adapter_opts
       )
     end)
   end

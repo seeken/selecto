@@ -28,6 +28,19 @@ defmodule Selecto.DB.Adapter do
     implemented and can produce rows for the given connection context.
   - `stream/4` is optional; adapters that do not support streaming should omit
     it and return `false` for `supports?(:stream)`.
+
+  Execution timeout contract:
+
+  - By default `Selecto.execute/2` runs each query in a supervised task and
+    abandons it when the `:timeout` option (default 30 seconds) elapses, which
+    copies the whole result between processes.
+  - `supports?(:execute_timeout)` should return `true` only when `execute/4`
+    honours a `timeout: milliseconds` option for every connection it accepts:
+    once the time elapses it abandons the statement and returns
+    `{:error, reason}` instead of waiting. Selecto then runs the query in the
+    calling process (when no performance hooks are registered there and
+    `:cache` is off), passes the remaining time as `:timeout`, and returns
+    the same timeout error as the task would.
   """
 
   @contract_version 1
