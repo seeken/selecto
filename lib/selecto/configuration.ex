@@ -169,7 +169,15 @@ defmodule Selecto.Configuration do
             inspect(context_adapter)
   end
 
-  defp initialize_connection!(adapter, {:pool, %{adapter: adapter} = pool_ref}), do: pool_ref
+  # A generic pool wraps a single adapter connection, and adapters resolve its
+  # `%{adapter: _, connection: _}` reference themselves. An adapter-managed pool
+  # (the adapter implements start_pool/3) means something only to that adapter,
+  # whose execute/4, stream/4 and rollup_sort_fix/1 take the `{:pool, pool_ref}`
+  # tuple, so it stays wrapped.
+  defp initialize_connection!(adapter, {:pool, %{adapter: adapter, connection: _} = pool_ref}),
+    do: pool_ref
+
+  defp initialize_connection!(adapter, {:pool, %{adapter: adapter}} = pool), do: pool
 
   defp initialize_connection!(adapter, connection_input) do
     unless Selecto.AdapterSupport.callback_available?(adapter, :connect, 1) do

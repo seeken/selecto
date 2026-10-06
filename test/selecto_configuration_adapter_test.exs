@@ -29,6 +29,38 @@ defmodule Selecto.ConfigurationAdapterTest do
     def supports?(_feature), do: true
   end
 
+  defmodule ManagedPoolAdapter do
+    @behaviour Selecto.DB.Adapter
+
+    @impl true
+    def name, do: :managed_pool
+
+    @impl true
+    def connect({:pool, _pool_ref} = pool), do: {:ok, pool}
+
+    @impl true
+    def execute({:pool, %{adapter: __MODULE__}}, _query, _params, _opts),
+      do: {:ok, %{rows: [[1]], columns: ["id"]}}
+
+    def execute(connection, _query, _params, _opts),
+      do: {:error, {:invalid_connection, connection}}
+
+    @impl true
+    def rollup_sort_fix(connection) do
+      send(self(), {:rollup_sort_fix_connection, connection})
+      false
+    end
+
+    @impl true
+    def placeholder(_index), do: "?"
+
+    @impl true
+    def quote_identifier(identifier), do: "`#{identifier}`"
+
+    @impl true
+    def supports?(_feature), do: true
+  end
+
   defmodule FakeProvider do
     @behaviour Selecto.Configuration.Provider
 
@@ -188,5 +220,21 @@ defmodule Selecto.ConfigurationAdapterTest do
     assert length(aliases) == 1
     assert is_binary(hd(aliases))
     assert :ok = Selecto.ConnectionPool.stop_pool(selecto.connection)
+  end
+
+  test "configure keeps an adapter-managed pool reference wrapped" do
+    pool = {:pool, %{adapter: ManagedPoolAdapter, pool: self(), manager: self(), name: :managed}}
+
+    selecto =
+      domain()
+      |> Selecto.configure(pool, adapter: ManagedPoolAdapter, validate: false)
+      |> Selecto.select(["id"])
+
+    assert selecto.connection == pool
+    assert selecto.runtime.connection == pool
+    assert_received {:rollup_sort_fix_connection, ^pool}
+
+    assert {:ok, {[[1]], ["id"], _aliases}} =
+             Selecto.execute(selecto, analyze_complexity: false)
   end
 end

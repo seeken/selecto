@@ -171,7 +171,9 @@ defmodule Selecto.ConnectionPool do
 
   Gracefully shuts down the pool and all its connections.
   """
-  @spec stop_pool(pool_ref()) :: :ok
+  @spec stop_pool(pool_ref() | {:pool, pool_ref()}) :: :ok
+  def stop_pool({:pool, pool_ref}), do: stop_pool(pool_ref)
+
   def stop_pool(%{pool: pool_pid, manager: manager_pid}) do
     clear_prepared_flags(pool_pid)
     stop_manager(manager_pid)
