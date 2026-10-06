@@ -3,6 +3,8 @@
 
 ## Unreleased
 
+- Update the test-only Postgrex lock to patched 0.22.4.
+
 - Repair the complete quality and Dialyzer gates with contracts matching the
   existing query, importer and formatted-result APIs, opaque set construction,
   tracked documentation extras, and removal of stale baseline filters. Direct
