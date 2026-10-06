@@ -316,7 +316,9 @@ defmodule Selecto.Executor do
         end
       end
 
-    if outcome == :not_started or System.monotonic_time(:millisecond) - started_at > timeout do
+    # The deadline is a millisecond tick, and an adapter's timer can end the
+    # work within that tick: reaching it counts as timing out.
+    if outcome == :not_started or System.monotonic_time(:millisecond) - started_at >= timeout do
       timeout_result(timeout, query_id, start_time)
     else
       case outcome do

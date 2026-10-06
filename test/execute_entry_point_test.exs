@@ -47,6 +47,13 @@ defmodule Selecto.ExecuteEntryPointTest do
     send(connection.test, {:adapter_execute, self(), opts})
 
     case connection do
+      # A driver whose own timer fires on the deadline's millisecond tick and
+      # returns its error within that millisecond.
+      %{fire_on_deadline_tick: true} ->
+        deadline = System.monotonic_time(:millisecond) + Keyword.fetch!(opts, :timeout)
+        wait_for_tick(deadline)
+        {:error, :driver_timeout}
+
       %{sleep: sleep, honour_timeout: true} ->
         timeout = Keyword.fetch!(opts, :timeout)
 
@@ -65,6 +72,10 @@ defmodule Selecto.ExecuteEntryPointTest do
       _connection ->
         {:ok, %{rows: connection.rows, columns: ["id", "name"]}}
     end
+  end
+
+  defp wait_for_tick(deadline) do
+    if System.monotonic_time(:millisecond) < deadline, do: wait_for_tick(deadline)
   end
 
   def handle_event(event, measurements, metadata, test),
@@ -269,6 +280,19 @@ defmodule Selecto.ExecuteEntryPointTest do
 
         assert map_size(measurements) == 2
         assert is_binary(query_id)
+      end
+    end
+
+    test "a driver timeout that fires on the deadline's millisecond is the timeout error" do
+      for _attempt <- 1..25 do
+        capture_log(fn ->
+          assert {:error, %Selecto.Error{type: :timeout_error} = error} =
+                   Selecto.execute(query(CallerAdapter, %{fire_on_deadline_tick: true}),
+                     timeout: 5
+                   )
+
+          assert error.message == "Query exceeded timeout of 5ms"
+        end)
       end
     end
 

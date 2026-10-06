@@ -40,7 +40,9 @@
     with the remaining time passed as `:timeout`, instead of in a task whose
     result is copied back (about 7 ms on a 5,000 × 20 result); a query past
     the timeout returns the same timeout error. Registered performance hooks
-    or `cache: true` keep the task. See `Selecto.DB.Adapter`.
+    or `cache: true` keep the task. See `Selecto.DB.Adapter`. Work that ends
+    on the deadline's millisecond counts as timed out, so a driver timer that
+    fires on the deadline still yields the timeout error.
   - Execute option schemas are compiled once, not on every call.
   - The performance hooks table is created at application start, so it no
     longer belongs to (and disappears with) the first process that used
