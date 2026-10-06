@@ -142,6 +142,10 @@ defmodule Selecto.Builder.Sql.Select do
   end
 
   # Handle array_length function (2-tuple)
+  def prep_selector(selecto, {:grouping, fields} = selector) when is_list(fields) do
+    prep_selector(selecto, selector, %{})
+  end
+
   def prep_selector(selecto, {:array_length, _} = selector) do
     prep_selector(selecto, selector, %{})
   end
@@ -420,6 +424,13 @@ defmodule Selecto.Builder.Sql.Select do
     check_string(format)
     extract_iodata = ["extract( ", format, " from  ", sel_iodata, ")"]
     {extract_iodata, join, param}
+  end
+
+  # GROUPING(a, b, ...) over several grouped fields: the ROLLUP/CUBE level
+  # marker that tells a subtotal row from a row whose real key is NULL.
+  def prep_selector(selecto, {:grouping, fields} = selector, _retarget_aliases)
+      when is_list(fields) and fields != [] do
+    Selecto.SQL.Functions.prep_advanced_selector(selecto, selector)
   end
 
   def prep_selector(selecto, {:array_length, _} = selector, _retarget_aliases) do

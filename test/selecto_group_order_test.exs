@@ -170,4 +170,78 @@ defmodule Selecto.GroupOrderTest do
 
     assert sql =~ "order by 1 asc nulls last, 2 desc nulls first"
   end
+
+  defp orders_selecto do
+    domain = %{
+      source: %{
+        source_table: "orders",
+        primary_key: :id,
+        fields: [:id, :person_id, :state, :total],
+        redact_fields: [:total],
+        columns: %{
+          id: %{type: :integer},
+          person_id: %{type: :integer},
+          state: %{type: :string},
+          total: %{type: :decimal}
+        },
+        associations: %{}
+      },
+      schemas: %{},
+      joins: %{},
+      name: "Orders"
+    }
+
+    Selecto.configure(domain, :mock_connection,
+      adapter: SelectoDBPostgreSQL.Adapter,
+      rollup_sort_fix: false,
+      validate: false
+    )
+  end
+
+  test "a one-dimensional ROLLUP selects a GROUPING marker over its dimension" do
+    {sql, _aliases, params} =
+      orders_selecto()
+      |> Selecto.select([
+        "state",
+        {:field, {:count, "*"}, "order_count"},
+        {:field, {:grouping, ["state"]}, "grouping_marker"}
+      ])
+      |> Selecto.group_by(rollup: ["state"])
+      |> Selecto.gen_sql([])
+
+    sql = String.downcase(sql)
+
+    assert sql =~ "select selecto_root.state, count(*), grouping(selecto_root.state)\n"
+    assert sql =~ "group by rollup( selecto_root.state )"
+    assert params == []
+  end
+
+  test "a two-dimensional ROLLUP marker covers both dimensions in order" do
+    {sql, _aliases, _params} =
+      orders_selecto()
+      |> Selecto.select([
+        "state",
+        "person_id",
+        {:field, {:count, "*"}, "order_count"},
+        {:field, {:grouping, ["state", "person_id"]}, "grouping_marker"}
+      ])
+      |> Selecto.group_by(rollup: ["state", "person_id"])
+      |> Selecto.gen_sql([])
+
+    sql = String.downcase(sql)
+
+    assert sql =~ "grouping(selecto_root.state, selecto_root.person_id)\n"
+    assert sql =~ "group by rollup( selecto_root.state, selecto_root.person_id )"
+  end
+
+  test "a GROUPING marker refuses unknown and redacted fields" do
+    for field <- ["missing", "total"] do
+      assert_raise RuntimeError, ~r/Field .#{field}. not found/, fn ->
+        orders_selecto()
+        |> Selecto.select(["state", {:field, {:grouping, ["state", field]}, "marker"}])
+        |> Selecto.group_by(rollup: ["state"])
+        |> Selecto.gen_sql([])
+      end
+    end
+  end
 end
