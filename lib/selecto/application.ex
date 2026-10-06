@@ -18,6 +18,7 @@ defmodule Selecto.Application do
     # application rather than to a short-lived caller process.
     :ok = Selecto.Performance.Hooks.init_table()
     :ok = Selecto.Performance.ComplexityWarnings.init_table()
+    :ok = Selecto.Domain.WriteContract.Cache.init_table()
 
     children = [
       # Executor timeouts depend on this supervisor, so it stays supervised.

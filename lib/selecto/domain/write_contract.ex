@@ -16,6 +16,7 @@ defmodule Selecto.Domain.WriteContract do
 
   alias Selecto.Domain
   alias Selecto.Domain.Contract.Shared.Core
+  alias Selecto.Domain.WriteContract.Cache
   alias Selecto.Write.Error
 
   @operation_ids %{
@@ -50,8 +51,21 @@ defmodule Selecto.Domain.WriteContract do
             fingerprint: nil,
             fields_declared?: false
 
+  @doc """
+  Compiles the write contract of a domain or configured Selecto value.
+
+  The result for a given domain term is computed once and reused for any
+  domain that is exactly equal to it; a changed domain compiles afresh.
+  """
   @spec compile(term()) :: {:ok, t()} | {:error, Error.t()}
-  def compile(input) do
+  def compile(%Selecto{domain: domain}), do: compile(domain)
+  def compile(domain) when is_map(domain), do: Cache.fetch(domain, &compile_uncached/1)
+  def compile(input), do: compile_uncached(input)
+
+  @doc false
+  # The uncached compilation, a pure function of its input.
+  @spec compile_uncached(term()) :: {:ok, t()} | {:error, Error.t()}
+  def compile_uncached(input) do
     with {:ok, normalized} <- normalized_domain(input),
          {:ok, writes} <- explicit_writes(normalized),
          {:ok, operations} <- compile_operations(writes),
