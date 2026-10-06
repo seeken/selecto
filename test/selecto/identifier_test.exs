@@ -46,12 +46,15 @@ defmodule Selecto.IdentifierTest do
     IO.puts("budget enforced")
     """
 
-    # Only the executable search path is needed by this standalone child VM.
-    child_environment =
+    # Keep the fresh VM independent of ambient settings and force UTF-8 filename
+    # encoding when cleared locale variables would select Latin-1 on Linux.
+    cleared_environment =
       System.get_env()
       |> Map.keys()
-      |> Enum.reject(&(&1 == "PATH"))
+      |> Enum.reject(&(&1 in ["PATH", "ELIXIR_ERL_OPTIONS"]))
       |> Enum.map(&{&1, nil})
+
+    child_environment = [{"ELIXIR_ERL_OPTIONS", "+fnu"} | cleared_environment]
 
     assert {"budget enforced\n", 0} =
              System.cmd(System.find_executable("elixir"), ["-r", @identifier_source, "-e", code],
