@@ -19,6 +19,7 @@ defmodule Selecto.DB.Dialect do
   alias Selecto.Dialect.Window.FrameBoundary
   alias Selecto.Dialect.View.{Definition, Index, Refresh}
   alias Selecto.Dialect.Interval
+  alias Selecto.Dialect.ComputedValue
 
   alias Selecto.Dialect.Json.{
     ArrayContains,
@@ -34,6 +35,7 @@ defmodule Selecto.DB.Dialect do
   @callback render_text_search_predicate(Predicate.t(), Selecto.t()) :: render_result()
   @callback render_text_search_rank(Rank.t(), Selecto.t()) :: render_result()
   @callback render_interval(Interval.t(), Selecto.t()) :: render_result()
+  @callback render_computed_value(ComputedValue.t(), Selecto.t() | map()) :: render_result()
   @callback render_json_extraction(Extraction.t(), Selecto.t() | map()) :: render_result()
   @callback render_json_contains(Contains.t(), Selecto.t() | map()) :: render_result()
   @callback render_json_key_exists(KeyExists.t(), Selecto.t() | map()) :: render_result()
@@ -64,6 +66,7 @@ defmodule Selecto.DB.Dialect do
   @optional_callbacks render_text_search_predicate: 2,
                       render_text_search_rank: 2,
                       render_interval: 2,
+                      render_computed_value: 2,
                       render_json_extraction: 2,
                       render_json_contains: 2,
                       render_json_key_exists: 2,

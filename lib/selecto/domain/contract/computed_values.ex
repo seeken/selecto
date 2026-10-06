@@ -331,12 +331,4 @@ defmodule Selecto.Domain.Contract.ComputedValues do
       true -> "string"
     end
   end
-
-  @doc "Adapter-owned PostgreSQL cast targets for value-expression types."
-  def postgres_type("string"), do: "TEXT"
-  def postgres_type("integer"), do: "BIGINT"
-  def postgres_type("decimal"), do: "NUMERIC"
-  def postgres_type("boolean"), do: "BOOLEAN"
-  def postgres_type("date"), do: "DATE"
-  def postgres_type("utc_datetime"), do: "TIMESTAMPTZ"
 end

@@ -9,56 +9,56 @@ defmodule Selecto.Domain.Sections do
 
   @categories [:canonical, :projection, :proposed, :unknown]
 
-  @canonical_sections MapSet.new([
-                        "schema_version",
-                        "domain_version",
-                        "domain_fingerprint",
-                        "name",
-                        "source",
-                        "schemas",
-                        "joins",
-                        "default_selected",
-                        "required_selected",
-                        "required_filters",
-                        "required_order_by",
-                        "required_group_by",
-                        "filters",
-                        "functions",
-                        "query_members",
-                        "query_library",
-                        "rules",
-                        "co_domains",
-                        "domain_dependencies",
-                        "operations",
-                        "experiences",
-                        "published_views",
-                        "detail_actions",
-                        "editors",
-                        "components",
-                        "imports",
-                        "domain_data",
-                        "extensions"
-                      ])
+  @canonical_sections [
+    "schema_version",
+    "domain_version",
+    "domain_fingerprint",
+    "name",
+    "source",
+    "schemas",
+    "joins",
+    "default_selected",
+    "required_selected",
+    "required_filters",
+    "required_order_by",
+    "required_group_by",
+    "filters",
+    "functions",
+    "query_members",
+    "query_library",
+    "rules",
+    "co_domains",
+    "domain_dependencies",
+    "operations",
+    "experiences",
+    "published_views",
+    "detail_actions",
+    "editors",
+    "components",
+    "imports",
+    "domain_data",
+    "extensions"
+  ]
 
-  @projection_sections MapSet.new([
-                         "columns",
-                         "custom_columns",
-                         "json_schemas",
-                         "subfilters",
-                         "window_functions",
-                         "pagination",
-                         "retarget",
-                         "redact_fields"
-                       ])
+  @projection_sections [
+    "columns",
+    "custom_columns",
+    "json_schemas",
+    "subfilters",
+    "window_functions",
+    "pagination",
+    "retarget",
+    "redact_fields"
+  ]
 
-  @proposed_sections MapSet.new([
-                       "writes",
-                       "actions",
-                       "events",
-                       "capabilities",
-                       "source_relationships",
-                       "choice_sources"
-                     ])
+  @proposed_sections [
+    "writes",
+    "actions",
+    "events",
+    "capabilities",
+    "source_relationships",
+    "choice_sources"
+  ]
 
   @doc """
   Returns the diagnostic section categories in stable order.
@@ -95,9 +95,9 @@ defmodule Selecto.Domain.Sections do
     section_name = section_name(section)
 
     cond do
-      MapSet.member?(@canonical_sections, section_name) -> :canonical
-      MapSet.member?(@projection_sections, section_name) -> :projection
-      MapSet.member?(@proposed_sections, section_name) -> :proposed
+      section_name in @canonical_sections -> :canonical
+      section_name in @projection_sections -> :projection
+      section_name in @proposed_sections -> :proposed
       true -> :unknown
     end
   end
@@ -147,5 +147,5 @@ defmodule Selecto.Domain.Sections do
 
   defp sort_value(section), do: section_name(section)
 
-  defp sorted_sections(sections), do: sections |> MapSet.to_list() |> Enum.sort()
+  defp sorted_sections(sections), do: Enum.sort(sections)
 end

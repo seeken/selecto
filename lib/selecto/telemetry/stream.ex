@@ -103,7 +103,7 @@ defimpl Enumerable, for: Selecto.Telemetry.Stream do
         outcome: :error,
         error_category: :internal,
         stream_result: normalize_kind(kind),
-        status: normalize_reason(reason_type)
+        status: reason_type
       })
     )
   end
@@ -113,8 +113,6 @@ defimpl Enumerable, for: Selecto.Telemetry.Stream do
   defp delete_state(ref), do: Process.delete({__MODULE__, ref})
   defp normalize_kind(kind) when kind in [:error, :exit, :throw], do: kind
   defp normalize_kind(_kind), do: :error
-  defp normalize_reason(reason) when is_atom(reason), do: reason
-  defp normalize_reason(_reason), do: :unknown
   defp reason_type(%{__struct__: module}) when is_atom(module), do: module
   defp reason_type(reason) when is_atom(reason), do: reason
   defp reason_type(_reason), do: :unknown

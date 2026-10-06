@@ -87,7 +87,8 @@ defmodule Selecto.Write.Graph.Materializer do
     end
   end
 
-  @spec root_returning(Graph.t()) :: :none | :all | [atom() | String.t()]
+  # Graph metadata is an open map; root_rows/2 safely handles unknown values.
+  @spec root_returning(Graph.t()) :: term()
   def root_returning(%Graph{metadata: metadata}), do: Map.get(metadata, :root_returning, :all)
 
   @doc """

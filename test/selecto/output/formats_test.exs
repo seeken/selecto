@@ -81,6 +81,15 @@ defmodule Selecto.Output.FormatsTest do
       assert_raise ArgumentError, fn -> String.to_existing_atom(unknown_name) end
     end
 
+    test "JSON Unix dates use UTC midnight, including dates before the epoch" do
+      result = {[[~D[1970-01-01]], [~D[1970-01-02]], [~D[1969-12-31]]], ["date"], ["day"]}
+
+      assert {:ok, json} =
+               Formats.transform(result, {:json, coerce_types: true, date_format: :unix})
+
+      assert Jason.decode!(json) == [%{"day" => 0}, %{"day" => 86_400}, %{"day" => -86_400}]
+    end
+
     test "returns error for unknown format", %{rows: rows, columns: columns, aliases: aliases} do
       {:error, {:unknown_format, :invalid_format}} =
         Formats.transform({rows, columns, aliases}, :invalid_format)

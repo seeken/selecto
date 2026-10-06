@@ -121,13 +121,6 @@ defmodule Selecto.Write.AdapterConformance do
     end
   end
 
-  defp validate_capabilities(other) do
-    {:error,
-     Error.new(:adapter_conformance_failed, "write capabilities must be a map",
-       details: %{actual: other}
-     )}
-  end
-
   defp preview_commands(selecto, commands, context) do
     Enum.reduce_while(@operations, {:ok, %{}}, fn operation, {:ok, previews} ->
       case Write.preview(selecto, Map.fetch!(commands, operation), context: context) do

@@ -8,6 +8,37 @@ defmodule Selecto.TestDialect.PostgreSQL do
   alias Selecto.Dialect.Window.FrameBoundary
   alias Selecto.Dialect.View.{Definition, Index, Refresh}
 
+  def render_computed_value(%Selecto.Dialect.ComputedValue{operation: :cast} = fragment, _selecto) do
+    target =
+      Map.fetch!(
+        %{
+          "string" => "TEXT",
+          "integer" => "BIGINT",
+          "decimal" => "NUMERIC",
+          "boolean" => "BOOLEAN",
+          "date" => "DATE",
+          "utc_datetime" => "TIMESTAMPTZ"
+        },
+        fragment.type
+      )
+
+    {:ok, ["CAST(", fragment.expression, " AS ", target, ")"]}
+  end
+
+  def render_computed_value(
+        %Selecto.Dialect.ComputedValue{operation: :json_text} = fragment,
+        _selecto
+      ) do
+    {:ok,
+     [
+       "JSONB_EXTRACT_PATH_TEXT(CAST(",
+       fragment.expression,
+       " AS JSONB), ",
+       Enum.intersperse(fragment.path, ", "),
+       ")"
+     ]}
+  end
+
   def render_json_extraction(fragment, _selecto),
     do: Selecto.TestDialect.Json.extraction(:postgresql, fragment)
 

@@ -329,6 +329,25 @@ defmodule Selecto.QueryMembersTest do
     assert sql =~ ~r/series_override/i
   end
 
+  test "with_lateral/3 normalizes a configured query through the governed source path" do
+    source =
+      Selecto.configure(order_domain_with_query_members(), :mock_connection, validate: false)
+      |> Selecto.select(["order_number"])
+      |> Selecto.filter({"order_number", "ORD-42"})
+
+    query =
+      Selecto.configure(order_domain_with_query_members(), :mock_connection, validate: false)
+      |> Selecto.with_lateral(source, as: "direct_orders", join_type: :left)
+      |> Selecto.select(["order_number"])
+
+    {sql, params} = Selecto.to_sql(query)
+
+    assert params == ["ORD-42"]
+    assert sql =~ ~r/left\s+join\s+lateral/i
+    assert sql =~ "direct_orders"
+    assert sql =~ "$1"
+  end
+
   test "with_lateral/2 registers columns for named sqlite json_each laterals" do
     query =
       Selecto.configure(order_domain_with_query_members(), :mock_connection, validate: false)

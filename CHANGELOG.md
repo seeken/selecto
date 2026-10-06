@@ -3,6 +3,23 @@
 
 ## Unreleased
 
+- Repair the complete quality and Dialyzer gates with contracts matching the
+  existing query, importer and formatted-result APIs, opaque set construction,
+  tracked documentation extras, and removal of stale baseline filters. Direct
+  configured LATERAL sources use the governed source normalizer; JSON Unix
+  dates now represent UTC midnight rather than failing date conversion.
+
+- Computed-value casts and JSON text extraction are rendered by the adapter's
+  optional `render_computed_value/2` dialect callback, including casts used by
+  literals, concatenation and division. PostgreSQL requires the companion
+  adapter implementation; missing renderers fail closed. Closed expressions
+  without those fragments use the adapter's existing quoting and parameters.
+- Query-member runtime identifiers use the bounded identifier interner. Its
+  global lock now has a process-specific requester, so concurrent initialization
+  and atom creation obey the fixed VM-lifetime budget.
+- The production-boundary audit permits only three exact historical input-type
+  alias lines; native SQL and altered alias lines remain forbidden.
+
 - Performance: `Selecto.execute/2` (and `execute_one/2`) do less per call;
   results, errors, tenant and complexity checks and telemetry events are
   unchanged.

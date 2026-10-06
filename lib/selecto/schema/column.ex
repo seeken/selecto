@@ -191,8 +191,8 @@ defmodule Selecto.Schema.Column do
   end
 
   defp merge_presentation(config, source_col) do
-    source_presentation = Map.get(source_col || %{}, :presentation, %{})
-    config_presentation = Map.get(config || %{}, :presentation, %{})
+    source_presentation = Map.get(source_col, :presentation, %{})
+    config_presentation = Map.get(config, :presentation, %{})
 
     case {source_presentation, config_presentation} do
       {%{} = source_presentation, %{} = config_presentation} ->

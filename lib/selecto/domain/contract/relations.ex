@@ -246,7 +246,7 @@ defmodule Selecto.Domain.Contract.Relations do
   end
 
   # A utc_datetime column may declare how the instant is stored. The default is
-  # a zone-aware column (PostgreSQL timestamptz); naive_utc is a zone-less
+  # a zone-aware column; naive_utc is a zone-less
   # column holding UTC wall time, such as an Ecto or Rails timestamp column.
   defp validate_column_storage(errors, relation_id, field, column, path) do
     case Core.fetch_map_value(column, :storage) do

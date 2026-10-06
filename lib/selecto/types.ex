@@ -74,19 +74,34 @@ defmodule Selecto.Types do
   @type hierarchy_type :: :adjacency_list | :materialized_path | :closure_table
 
   # Selector types for SELECT clauses
-  @type basic_selector :: field_name()
+  @type basic_selector :: field_name() | number() | boolean() | nil
 
-  @type function_selector :: {
-          :func,
-          function_name :: String.t(),
-          args :: [field_name() | term()]
-        }
+  @type function_selector ::
+          {
+            :func,
+            function_name :: atom_or_string(),
+            args :: [field_name() | term()]
+          }
+          | {:func, atom_or_string()}
+          | {:func, atom_or_string(), [term()], keyword()}
+          | {atom()}
+          | {atom(), selector() | [selector()]}
+          | {atom(), selector(), filter()}
 
-  @type case_selector :: {
-          :case,
-          conditions :: [{condition :: term(), value :: term()}],
-          else_value :: term()
-        }
+  @type case_selector ::
+          {
+            :case,
+            conditions :: [{condition :: term(), value :: term()}],
+            else_value :: term()
+          }
+          | {:case, [{term(), term()}]}
+          | {:case | :case_when, Selecto.Advanced.CaseExpression.Spec.t()}
+
+  @type aliased_selector ::
+          {:field, selector(), atom_or_string()}
+          | {:as, selector(), atom_or_string()}
+
+  @type literal_selector :: {:literal, term()} | {:literal_position, integer()}
 
   @type extract_selector :: {
           :extract,
@@ -114,6 +129,16 @@ defmodule Selecto.Types do
           | extract_selector()
           | window_selector()
           | custom_selector()
+          | aliased_selector()
+          | literal_selector()
+          | {:raw_sql, String.t()}
+          | {:custom_sql, String.t(), map()}
+          | {:subquery, term(), [term()]}
+          | {:computed_value | :computed_predicate, [term()]}
+          | {:datetime_format, selector(), String.t(), map()}
+          | {:datetime_extract, selector(), atom_or_string(), map()}
+          | {:text_normalize, selector(), map()}
+          | {:bucket, selector(), map()}
 
   # Retarget feature types
   @type retarget_config :: %{
@@ -176,13 +201,26 @@ defmodule Selecto.Types do
 
   @type basic_filter :: {field_name(), term()}
   @type comparison_filter :: {field_name(), {comparison_operator(), term()}}
-  @type logical_filter :: {:and | :or, [filter()]}
+  @type logical_filter :: {:and | :or, [filter()]} | {:not, filter()}
 
-  @type filter :: basic_filter() | comparison_filter() | logical_filter()
+  @type filter ::
+          basic_filter()
+          | comparison_filter()
+          | logical_filter()
+          | {[field_name()], {:text_search, term(), keyword()}}
+          | {field_name(), comparison_operator(), term()}
+          | {:array_contains | :array_contained | :array_overlap | :array_eq, field_name(),
+             [term()]}
+          | {:exists, term()}
+          | {:exists, term(), [term()]}
+          | {:raw_sql_filter, iodata_with_markers()}
+          | {:udf, atom_or_string(), [term()]}
 
   # Order by types
-  @type order_direction :: :asc | :desc
-  @type order_spec :: field_name() | {order_direction(), field_name()}
+  @type order_direction ::
+          :asc | :desc | :asc_nulls_first | :asc_nulls_last | :desc_nulls_first | :desc_nulls_last
+  @type order_spec ::
+          selector() | {order_direction(), selector()} | {selector(), order_direction()}
 
   # Association types
   @type association :: %{
@@ -427,16 +465,24 @@ defmodule Selecto.Types do
         }
 
   # Query execution results
+  @type result_aliases :: %{String.t() => String.t()} | [String.t() | nil]
+
   @type query_result :: {
           rows :: [[term()]],
           columns :: [String.t()],
-          aliases :: %{String.t() => String.t()}
+          aliases :: result_aliases()
         }
 
-  @type execute_result :: query_result()
+  @type formatted_query_result ::
+          query_result()
+          | [map()]
+          | String.t()
+          | %Stream{}
+          | (Enumerable.acc(), Enumerable.reducer() -> Enumerable.result())
+  @type execute_result :: formatted_query_result()
 
   # Safe execute/2 results (tagged tuples with structured errors)
-  @type execute_result_ok :: {:ok, query_result()}
+  @type execute_result_ok :: {:ok, formatted_query_result()}
   @type execute_result_error :: {:error, Selecto.Error.t()}
   @type safe_execute_result :: execute_result_ok() | execute_result_error()
 
@@ -451,7 +497,7 @@ defmodule Selecto.Types do
   @type safe_execute_stream_result :: execute_stream_result_ok() | execute_stream_result_error()
 
   # Single row execution results
-  @type single_row_result :: {row :: [term()], aliases :: %{String.t() => String.t()}}
+  @type single_row_result :: {row :: [term()], aliases :: result_aliases()}
   @type execute_one_result_ok :: {:ok, single_row_result()}
   @type execute_one_result_error :: {:error, Selecto.Error.t()}
   @type safe_execute_one_result :: execute_one_result_ok() | execute_one_result_error()
@@ -499,7 +545,9 @@ defmodule Selecto.Types do
 
   @type sql_generation_options :: [
           include_comments: boolean(),
-          pretty_print: boolean()
+          pretty_print: boolean(),
+          emit_user_ctes: boolean(),
+          unique_projection_aliases: boolean()
         ]
 
   # Option provider types for select filters

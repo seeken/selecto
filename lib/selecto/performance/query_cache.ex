@@ -586,8 +586,6 @@ defmodule Selecto.Performance.QueryCache do
     end
   end
 
-  defp create_cache_table(_backend), do: create_cache_table(:ets)
-
   defp lookup_cache(table, key) when is_reference(table) or is_atom(table) do
     case :ets.lookup(table, key) do
       [{^key, entry}] -> {:ok, entry}

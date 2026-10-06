@@ -347,7 +347,7 @@ identities and nullable references; `object_id_cases/0` is the shared strict-val
 corpus. This fixture evidence is not certification of every BSON family or
 backend.
 
-`Path.fetch/2` returns `%Selecto.Document.Missing{}` for an absent path, `nil` for
+`Selecto.Document.Path.fetch/2` returns `%Selecto.Document.Missing{}` for an absent path, `nil` for
 present null, and the actual value otherwise. JSON encoding of that sentinel is
 `{"$selecto":"missing"}`. Consumers must treat the tag as result metadata;
 missing must not be collapsed into null before predicate or mutation planning.

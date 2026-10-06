@@ -68,7 +68,13 @@ defmodule Selecto.Output.Transformers.Stream do
       # Streaming to JSON Lines
       {:ok, stream} = transform(rows, columns, aliases, {:json, format: :lines})
   """
-  @spec transform(list() | Enumerable.t(), list(), map(), atom() | tuple(), keyword()) ::
+  @spec transform(
+          list() | Enumerable.t(),
+          list(),
+          Selecto.Types.result_aliases(),
+          atom() | tuple(),
+          keyword()
+        ) ::
           {:ok, Enumerable.t()} | {:error, term()}
   def transform(rows, columns, aliases, inner_format, options \\ []) do
     try do
@@ -97,7 +103,13 @@ defmodule Selecto.Output.Transformers.Stream do
   This is more memory efficient for simple transformations but may be slower
   for complex transformations that benefit from batching.
   """
-  @spec transform_single(Enumerable.t(), list(), map(), atom() | tuple(), keyword()) ::
+  @spec transform_single(
+          Enumerable.t(),
+          list(),
+          Selecto.Types.result_aliases(),
+          atom() | tuple(),
+          keyword()
+        ) ::
           {:ok, Enumerable.t()} | {:error, term()}
   def transform_single(rows, columns, aliases, inner_format, options \\ []) do
     try do
@@ -129,7 +141,13 @@ defmodule Selecto.Output.Transformers.Stream do
         process_batch(chunk)
       end)
   """
-  @spec transform_chunked(Enumerable.t(), list(), map(), atom() | tuple(), keyword()) ::
+  @spec transform_chunked(
+          Enumerable.t(),
+          list(),
+          Selecto.Types.result_aliases(),
+          atom() | tuple(),
+          keyword()
+        ) ::
           {:ok, Enumerable.t()} | {:error, term()}
   def transform_chunked(rows, columns, aliases, inner_format, options \\ []) do
     try do
@@ -168,7 +186,14 @@ defmodule Selecto.Output.Transformers.Stream do
         transform_to_io(rows, columns, aliases, :csv, file)
       end)
   """
-  @spec transform_to_io(Enumerable.t(), list(), map(), atom() | tuple(), IO.device(), keyword()) ::
+  @spec transform_to_io(
+          Enumerable.t(),
+          list(),
+          Selecto.Types.result_aliases(),
+          atom() | tuple(),
+          IO.device(),
+          keyword()
+        ) ::
           :ok | {:error, term()}
   def transform_to_io(rows, columns, aliases, inner_format, io_device, options \\ []) do
     case transform(rows, columns, aliases, inner_format, options) do

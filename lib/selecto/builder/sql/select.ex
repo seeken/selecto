@@ -983,16 +983,6 @@ defmodule Selecto.Builder.Sql.Select do
   # Governed computed values (computed.kind: :expression). The AST is closed and
   # typed; literals and JSON path segments are bound, never interpolated.
   def prep_selector(selecto, {:computed_value, expression}, retarget_aliases) do
-    adapter = AdapterSupport.adapter_name(selecto.adapter)
-
-    unless adapter in [nil, :postgresql, :postgres] do
-      raise Error.to_exception(
-              Error.configuration_error("adapter does not support computed value expressions", %{
-                adapter: adapter
-              })
-            )
-    end
-
     {:ok, normalized} = Selecto.Domain.Contract.ComputedValues.normalize(expression)
     {iodata, joins, params} = compile_value(selecto, normalized, retarget_aliases)
     {["(", iodata, ")"], joins, params}
@@ -1895,8 +1885,7 @@ defmodule Selecto.Builder.Sql.Select do
   defp compile_value(selecto, ["literal", value, type], retarget_aliases) do
     {param, _join, params} = prep_selector(selecto, {:param, value}, retarget_aliases)
 
-    {["CAST(", param, " AS ", Selecto.Domain.Contract.ComputedValues.postgres_type(type), ")"],
-     [], params}
+    {computed_cast!(selecto, param, type), [], params}
   end
 
   defp compile_value(selecto, ["coalesce" | values], retarget_aliases) do
@@ -1907,13 +1896,23 @@ defmodule Selecto.Builder.Sql.Select do
   defp compile_value(selecto, ["concat" | values], retarget_aliases) do
     {parts, joins, params} = compile_values(selecto, values, retarget_aliases)
 
-    {["CONCAT(", Enum.intersperse(Enum.map(parts, &["CAST(", &1, " AS TEXT)"]), ", "), ")"],
-     joins, params}
+    {[
+       "CONCAT(",
+       Enum.intersperse(Enum.map(parts, &computed_cast!(selecto, &1, "string")), ", "),
+       ")"
+     ], joins, params}
   end
 
   defp compile_value(selecto, ["divide", left, right], retarget_aliases) do
     {[l, r], joins, params} = compile_values(selecto, [left, right], retarget_aliases)
-    {["(CAST(", l, " AS NUMERIC) / CAST(", r, " AS NUMERIC))"], joins, params}
+
+    {[
+       "(",
+       computed_cast!(selecto, l, "decimal"),
+       " / ",
+       computed_cast!(selecto, r, "decimal"),
+       ")"
+     ], joins, params}
   end
 
   defp compile_value(selecto, [op, left, right], retarget_aliases)
@@ -1931,8 +1930,7 @@ defmodule Selecto.Builder.Sql.Select do
   defp compile_value(selecto, ["cast", value, type], retarget_aliases) do
     {sql, joins, params} = compile_value(selecto, value, retarget_aliases)
 
-    {["CAST(", sql, " AS ", Selecto.Domain.Contract.ComputedValues.postgres_type(type), ")"],
-     joins, params}
+    {computed_cast!(selecto, sql, type), joins, params}
   end
 
   defp compile_value(selecto, ["json_text", path, segments], retarget_aliases) do
@@ -1944,13 +1942,13 @@ defmodule Selecto.Builder.Sql.Select do
         {markers ++ [marker], acc ++ param}
       end)
 
-    {[
-       "JSONB_EXTRACT_PATH_TEXT(CAST(",
-       field,
-       " AS JSONB), ",
-       Enum.intersperse(markers, ", "),
-       ")"
-     ], joins, params ++ segment_params}
+    fragment = %Selecto.Dialect.ComputedValue{
+      operation: :json_text,
+      expression: field,
+      path: markers
+    }
+
+    {render_computed_value!(selecto, fragment), joins, params ++ segment_params}
   end
 
   defp compile_value(selecto, ["case" | branches], retarget_aliases) do
@@ -1979,14 +1977,30 @@ defmodule Selecto.Builder.Sql.Select do
     end)
   end
 
+  defp computed_cast!(selecto, expression, type) do
+    render_computed_value!(selecto, %Selecto.Dialect.ComputedValue{
+      operation: :cast,
+      expression: expression,
+      type: type
+    })
+  end
+
+  defp render_computed_value!(selecto, fragment) do
+    case Selecto.DialectSupport.render_computed_value(selecto.adapter, fragment, selecto) do
+      {:ok, expression} -> expression
+      {:error, %Error{} = error} -> raise Error.to_exception(error)
+      {:error, reason} -> raise ArgumentError, "unsupported computed value: #{inspect(reason)}"
+    end
+  end
+
   defp wrap_joins({sql, joins, params}), do: {sql, List.wrap(joins), params}
 
   @doc """
   The 1-based SELECT position for a grouping or ordering term, when that term is
   also selected and compiles with bound parameters.
 
-  Parameters are numbered per clause, so `CASE ... $1` in SELECT and
-  `CASE ... $12` in GROUP BY are different expressions to the database.
+  Parameters are numbered per clause, so separately bound CASE expressions in
+  SELECT and GROUP BY are different expressions to the database.
   Referring to the selected output by position keeps them identical. SQL Server
   does not accept positional GROUP BY, so it keeps the expression.
   """

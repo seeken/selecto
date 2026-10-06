@@ -500,9 +500,15 @@ defmodule Selecto.Advanced.CTE do
   defp topological_sort(ctes) do
     names = Enum.map(ctes, & &1.name)
     dependencies = Map.new(ctes, &{&1.name, &1.dependencies})
-    topological_sort(names, dependencies, MapSet.new(), [])
+    topological_sort(names, dependencies, MapSet.new([], &to_string/1), [])
   end
 
+  @spec topological_sort(
+          [String.t()],
+          %{String.t() => [String.t()]},
+          MapSet.t(String.t()),
+          [String.t()]
+        ) :: {:ok, [String.t()]} | {:error, ValidationError.t()}
   defp topological_sort(names, dependencies, emitted, ordered) do
     case Enum.find(names, fn name ->
            not MapSet.member?(emitted, name) and

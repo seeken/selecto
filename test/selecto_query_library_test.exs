@@ -277,6 +277,19 @@ defmodule Selecto.QueryLibraryTest do
     end
   end
 
+  test "keyword parameters preserve the final duplicate and reject malformed entries" do
+    query =
+      Selecto.apply_segment(configured(), :priority_at_least, minimum: "1", minimum: "3")
+
+    assert {:priority, {:gte, 3}} in Selecto.query_filters(query, validate_tenant: false)
+
+    for parameters <- [[{"minimum", "3"}], [:minimum], [{:minimum, "3", :extra}]] do
+      assert_raise ArgumentError, "segment parameters must be a map or keyword list", fn ->
+        Selecto.apply_segment(configured(), :priority_at_least, parameters)
+      end
+    end
+  end
+
   test "domain normalization and query-contract projection retain the portable library" do
     assert {:ok, normalized, diagnostics} = Selecto.Domain.validate(domain())
     assert diagnostics.unknown_sections == []

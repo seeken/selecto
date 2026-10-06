@@ -453,13 +453,14 @@ defmodule Selecto do
 
   Provides detailed field information and helpful error messages.
   """
-  @spec resolve_field(t(), Selecto.Types.field_name()) :: {:ok, map()} | {:error, term()}
+  @spec resolve_field(t(), Selecto.FieldResolver.field_reference()) ::
+          {:ok, map()} | {:error, term()}
   defdelegate resolve_field(selecto, field), to: Selecto.Fields
 
   @doc """
   Get all available fields across all joins and the source table.
   """
-  @spec available_fields(t()) :: [String.t()]
+  @spec available_fields(t()) :: %{String.t() => map()}
   defdelegate available_fields(selecto), to: Selecto.Fields
 
   @doc """
@@ -1802,7 +1803,8 @@ defmodule Selecto do
         join_type: :left
       )
   """
-  @spec with_lateral(t(), atom() | String.t(), keyword() | map()) :: t()
+  @spec with_lateral(t(), atom() | String.t() | t() | tuple() | function(), keyword() | map()) ::
+          t()
   def with_lateral(selecto, member_id, opts \\ [])
 
   def with_lateral(selecto, %Selecto{} = lateral_source, opts)
@@ -1927,6 +1929,9 @@ defmodule Selecto do
         to_string(alias_name),
         [:as, :alias, :alias_name, :join_type, :type]
       )
+
+    lateral_source =
+      QueryMembers.normalize_lateral_source!(lateral_source, selecto, to_string(alias_name))
 
     selecto
     |> Selecto.lateral_join(join_type, lateral_source, to_string(alias_name), lateral_opts)

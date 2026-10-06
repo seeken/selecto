@@ -421,8 +421,6 @@ defmodule Selecto.Subselect do
     end
   end
 
-  defp normalize_schema_reference(schema) when is_atom(schema), do: schema
-
   defp normalize_schema_reference(schema) when is_binary(schema) do
     try do
       String.to_existing_atom(schema)

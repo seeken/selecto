@@ -512,6 +512,8 @@ defmodule Selecto.Retarget do
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
+  @spec fail!(atom(), String.t()) :: no_return()
+  @spec fail!(atom(), String.t(), keyword()) :: no_return()
   defp fail!(code, message, details \\ []) do
     raise Error, code: code, message: message, details: Map.new(details)
   end

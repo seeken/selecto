@@ -15,6 +15,10 @@ defmodule Selecto.DialectSupport do
     render(adapter, :render_interval, fragment, selecto, :interval)
   end
 
+  def render_computed_value(adapter, fragment, selecto) do
+    render(adapter, :render_computed_value, fragment, selecto, :computed_value)
+  end
+
   def render_json(adapter, callback, fragment, selecto)
       when callback in [
              :render_json_extraction,

@@ -38,7 +38,8 @@ defmodule Selecto.Output.Transformers.Maps do
       {:ok, maps} = transform(rows, columns, aliases, keys: :atoms, transform: :camelCase)
       # => [%{firstName: "John", userAge: 25}, ...]
   """
-  @spec transform(list(), list(), map(), keyword()) :: {:ok, list(map())} | {:error, term()}
+  @spec transform(list(), list(), Selecto.Types.result_aliases(), keyword()) ::
+          {:ok, list(map())} | {:error, term()}
   def transform(rows, columns, aliases, options \\ []) do
     try do
       # Validate and set defaults for options
@@ -74,7 +75,7 @@ defmodule Selecto.Output.Transformers.Maps do
   This is a more advanced version that can coerce database types to proper Elixir types
   based on canonical column type information.
   """
-  @spec transform_with_types(list(), list(), map(), keyword()) ::
+  @spec transform_with_types(list(), list(), Selecto.Types.result_aliases(), keyword()) ::
           {:ok, list(map())} | {:error, term()}
   def transform_with_types(rows, columns, aliases, options \\ []) do
     try do

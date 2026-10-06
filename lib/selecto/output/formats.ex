@@ -60,7 +60,7 @@ defmodule Selecto.Output.Formats do
       # CSV with headers
       {:ok, csv_string} = transform(result, {:csv, headers: true})
   """
-  @spec transform({list(), list(), map()}, format_spec(), keyword()) ::
+  @spec transform(Selecto.Types.query_result(), format_spec(), keyword()) ::
           {:ok, term()} | {:error, term()}
 
   def transform({rows, columns, aliases} = result, format, options \\ []) do

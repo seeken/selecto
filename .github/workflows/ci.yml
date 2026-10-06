@@ -7,27 +7,51 @@ on:
     branches: [main, non-ecto]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   ELIXIR_VERSION: "1.20.0"
-  OTP_VERSION: "29.0"
+  OTP_VERSION: "29.0.2"
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   test:
     name: Test & Quality
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, beep-vm]
+    timeout-minutes: 45
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Initialize diagnostics
+        run: |
+          mkdir -p ci-reports
+          git rev-parse HEAD | tee ci-reports/source.txt
+          command -v selecto-ci-checkout
 
       - name: Set up Elixir
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           elixir-version: ${{ env.ELIXIR_VERSION }}
           otp-version: ${{ env.OTP_VERSION }}
+          version-type: strict
+
+      - name: Record runtime
+        run: elixir --version | tee ci-reports/runtime.log
 
       - name: Cache dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             deps
@@ -37,45 +61,74 @@ jobs:
             ${{ runner.os }}-mix-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
 
       - name: Install dependencies
-        run: mix deps.get --locked
+        run: mix deps.get --locked 2>&1 | tee ci-reports/dependencies.log
 
       - name: Run precommit checks
-        run: mix precommit
+        run: mix precommit 2>&1 | tee ci-reports/precommit.log
 
       - name: Run performance tests
-        run: mix test test/performance_test.exs --include performance:true
+        run: mix test test/performance_test.exs --include performance:true 2>&1 | tee ci-reports/performance.log
 
       - name: Generate docs
-        run: mix docs --warnings-as-errors
+        run: mix docs --warnings-as-errors 2>&1 | tee ci-reports/docs.log
 
       - name: Verify Hex package contents
-        run: mix hex.build
+        run: mix hex.build 2>&1 | tee ci-reports/package.log
+
+      - name: Upload quality evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: selecto-core-quality-${{ github.run_attempt }}
+          path: ci-reports
+          if-no-files-found: error
 
   dialyzer:
     name: Dialyzer Analysis
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, beep-vm]
+    timeout-minutes: 60
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Initialize diagnostics
+        run: |
+          mkdir -p ci-reports
+          git rev-parse HEAD | tee ci-reports/source.txt
+          command -v selecto-ci-checkout
 
       - name: Set up Elixir
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           elixir-version: ${{ env.ELIXIR_VERSION }}
           otp-version: ${{ env.OTP_VERSION }}
+          version-type: strict
+
+      - name: Record runtime
+        run: elixir --version | tee ci-reports/runtime.log
 
       - name: Cache PLT files
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: priv/plts
           key: v3-${{ runner.os }}-plt-elixir-${{ env.ELIXIR_VERSION }}-otp-${{ env.OTP_VERSION }}-${{ hashFiles('**/mix.lock') }}
 
       - name: Install dependencies
-        run: mix deps.get --locked
+        run: mix deps.get --locked 2>&1 | tee ci-reports/dependencies.log
 
       - name: Build PLT
-        run: mix dialyzer --plt
+        run: mix dialyzer --plt 2>&1 | tee ci-reports/plt.log
 
       - name: Run Dialyzer
-        run: mix dialyzer --list-unused-filters
+        run: mix dialyzer --list-unused-filters 2>&1 | tee ci-reports/dialyzer.log
+
+      - name: Upload Dialyzer evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: selecto-core-dialyzer-${{ github.run_attempt }}
+          path: ci-reports
+          if-no-files-found: error

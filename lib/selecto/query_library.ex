@@ -1194,8 +1194,8 @@ defmodule Selecto.QueryLibrary do
 
   defp map_value(_map, _key), do: nil
 
-  defp map_has_key?(map, key) when is_map(map) do
-    Map.has_key?(map, key) or (is_atom(key) and Map.has_key?(map, Atom.to_string(key)))
+  defp map_has_key?(map, key) when is_map(map) and is_atom(key) do
+    Map.has_key?(map, key) or Map.has_key?(map, Atom.to_string(key))
   end
 
   defp valid_id?(value) when is_atom(value), do: not is_nil(value)

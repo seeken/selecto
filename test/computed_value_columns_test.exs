@@ -3,6 +3,21 @@ defmodule Selecto.ComputedValueColumnsTest do
 
   alias Selecto.Domain.Contract.ComputedValues
 
+  defmodule AlternateDialect do
+    def render_computed_value(
+          %Selecto.Dialect.ComputedValue{operation: :cast, type: "integer"} = fragment,
+          _selecto
+        ),
+        do: {:ok, ["CAST(", fragment.expression, " AS INTEGER)"]}
+  end
+
+  defmodule AlternateAdapter do
+    def name, do: :sqlite
+    def dialect, do: AlternateDialect
+    defdelegate placeholder(index), to: SelectoDBSQLite.Adapter
+    defdelegate quote_identifier(identifier), to: SelectoDBSQLite.Adapter
+  end
+
   defp columns(extra) do
     Map.merge(
       %{
@@ -194,5 +209,76 @@ defmodule Selecto.ComputedValueColumnsTest do
     assert {:ok, ["literal", 2.5, "decimal"]} = ComputedValues.normalize(["literal", 2.5])
     assert {:ok, ["literal", "x", "string"]} = ComputedValues.normalize(["literal", "x"])
     assert {:ok, ["literal", true, "boolean"]} = ComputedValues.normalize(["literal", true])
+  end
+
+  test "a different dialect chooses its cast target and retains the literal binding" do
+    query =
+      domain(%{
+        one: %{type: :integer, computed: %{kind: :expression, expression: ["literal", 1]}}
+      })
+      |> Selecto.configure(:compile_only)
+      |> Selecto.select(["one"])
+
+    {sql, params} = sql(%{query | adapter: AlternateAdapter})
+    assert sql =~ "CAST(? AS INTEGER)"
+    refute sql =~ "BIGINT"
+    assert params == [1]
+  end
+
+  test "dialects without the optional callback reject casts and JSON text extraction" do
+    fragment = %Selecto.Dialect.ComputedValue{
+      operation: :cast,
+      expression: {:param, 1},
+      type: "integer"
+    }
+
+    assert {:error, %Selecto.Error{details: %{unsupported_feature: :computed_value}}} =
+             Selecto.DialectSupport.render_computed_value(SelectoDBSQLite.Adapter, fragment, %{})
+
+    for selected <- ["buyer", "first_sku", "half_total"] do
+      query = domain() |> Selecto.configure(:compile_only) |> Selecto.select([selected])
+
+      assert_raise RuntimeError, ~r/does not support the requested SQL fragment/, fn ->
+        sql(%{query | adapter: SelectoDBSQLite.Adapter})
+      end
+    end
+  end
+
+  test "computed expressions without adapter-owned fragments still compile on every dialect" do
+    extra = %{
+      normalized: %{
+        type: :string,
+        computed: %{kind: :expression, expression: ["lower", ["field", "state"]]}
+      },
+      fallback: %{
+        type: :string,
+        computed: %{
+          kind: :expression,
+          expression: ["coalesce", ["field", "state"], ["field", "state"]]
+        }
+      },
+      combined: %{
+        type: :integer,
+        computed: %{
+          kind: :expression,
+          expression: ["add", ["field", "id"], ["field", "person_id"]]
+        }
+      }
+    }
+
+    query = domain(extra) |> Selecto.configure(:compile_only) |> Selecto.select(Map.keys(extra))
+
+    for adapter <- [
+          SelectoDBPostgreSQL.Adapter,
+          SelectoDBSQLite.Adapter,
+          SelectoDBMySQL.Adapter,
+          SelectoDBMSSQL.Adapter
+        ] do
+      {sql, []} = sql(%{query | adapter: adapter})
+      assert sql =~ "LOWER("
+      assert sql =~ "COALESCE("
+      refute sql =~ "CAST("
+      refute sql =~ "JSONB"
+    end
   end
 end
