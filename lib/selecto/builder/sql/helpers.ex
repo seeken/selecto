@@ -35,36 +35,58 @@ defmodule Selecto.Builder.Sql.Helpers do
   Only quote if it's a reserved word, contains special characters, or has mixed case.
   """
   def needs_quoting?(str) when is_binary(str) do
-    # Common SQL reserved words that appear as column names.
-    reserved_words = ~w(
-      user order group select from where having limit offset join left right
-      inner outer cross union all distinct as on using natural full exists
-      case when then else end null is not and or in between like
-      primary key foreign references table column index create alter drop
-      insert update delete values set into default unique check constraint
-      view trigger function procedure return declare begin commit rollback
-      transaction isolation level read write only deferrable serializable
-      repeatable committed uncommitted work savepoint release cursor fetch
-      close cast row array text integer boolean date time timestamp interval
-      numeric decimal real double precision varchar char bit varying zone
-    )
-
-    # Check if it needs quoting
-    cond do
-      # Reserved words need quoting
-      String.downcase(str) in reserved_words -> true
-      # Mixed case identifiers need quoting to preserve case
-      str != String.downcase(str) -> true
-      # Identifiers starting with numbers need quoting
-      String.match?(str, ~r/^[0-9]/) -> true
-      # Identifiers with special characters (except underscore) need quoting
-      String.match?(str, ~r/[^a-z0-9_]/) -> true
-      # Simple lowercase identifiers with underscores don't need quoting
-      true -> false
+    # A plain identifier (only lowercase ASCII letters, digits and
+    # underscores) needs quoting when it is a reserved word or starts with a
+    # digit. Anything else (uppercase, so mixed case; special characters,
+    # including any non-ASCII byte) needs quoting. Byte matching, no regex or
+    # Unicode case mapping: this runs for every identifier of every query.
+    if plain_identifier?(str) do
+      reserved_word?(str) or leading_digit?(str)
+    else
+      true
     end
   end
 
   def needs_quoting?(_), do: false
+
+  # Common SQL reserved words that appear as column names.
+  @reserved_words ~w(
+    user order group select from where having limit offset join left right
+    inner outer cross union all distinct as on using natural full exists
+    case when then else end null is not and or in between like
+    primary key foreign references table column index create alter drop
+    insert update delete values set into default unique check constraint
+    view trigger function procedure return declare begin commit rollback
+    transaction isolation level read write only deferrable serializable
+    repeatable committed uncommitted work savepoint release cursor fetch
+    close cast row array text integer boolean date time timestamp interval
+    numeric decimal real double precision varchar char bit varying zone
+  )
+
+  for word <- @reserved_words do
+    defp reserved_word?(unquote(word)), do: true
+  end
+
+  defp reserved_word?(_str), do: false
+
+  defp leading_digit?(<<digit, _rest::binary>>) when digit in ?0..?9, do: true
+  defp leading_digit?(_str), do: false
+
+  defp plain_identifier?(<<char, rest::binary>>)
+       when char in ?a..?z or char in ?0..?9 or char == ?_,
+       do: plain_identifier?(rest)
+
+  defp plain_identifier?(<<>>), do: true
+  defp plain_identifier?(_str), do: false
+
+  # The characters a table, column or alias name may contain.
+  defp identifier_chars?(<<char, rest::binary>>)
+       when char in ?a..?z or char in ?A..?Z or char in ?0..?9 or
+              char in [?_, ?\s, ?:, ?&, ?-],
+       do: identifier_chars?(rest)
+
+  defp identifier_chars?(<<>>), do: true
+  defp identifier_chars?(_str), do: false
 
   @doc """
   Maybe quote an identifier - only adds quotes if necessary.
@@ -152,7 +174,7 @@ defmodule Selecto.Builder.Sql.Helpers do
   end
 
   def double_wrap(str) when is_binary(str) do
-    if String.match?(str, ~r/[^a-zA-Z0-9_ :&-]/) do
+    unless identifier_chars?(str) do
       raise RuntimeError, message: "Invalid Table/Column/Alias Name #{str}"
     end
 
@@ -193,7 +215,7 @@ defmodule Selecto.Builder.Sql.Helpers do
   end
 
   def quote_identifier(selecto, str) when is_binary(str) do
-    if String.match?(str, ~r/[^a-zA-Z0-9_ :&-]/) do
+    unless identifier_chars?(str) do
       raise RuntimeError, message: "Invalid Table/Column/Alias Name #{str}"
     end
 
