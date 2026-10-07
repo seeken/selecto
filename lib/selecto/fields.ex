@@ -205,13 +205,17 @@ defmodule Selecto.Fields do
       colid when is_binary(colid) ->
         case String.split(colid, ".") do
           [_join, nested_field] when nested_field != "" -> nested_field
-          _ -> Atom.to_string(field_name)
+          _ -> to_string(field_name)
         end
 
       _ ->
-        Atom.to_string(field_name)
+        to_string(field_name)
     end
   end
+
+  # nil is an atom: without this clause a missing :field became "nil".
+  defp normalize_database_field(nil, fallback_result, field_name),
+    do: fallback_database_field(fallback_result, field_name)
 
   defp normalize_database_field(field, _fallback_result, _field_name) when is_atom(field),
     do: Atom.to_string(field)

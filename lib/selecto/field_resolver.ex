@@ -621,6 +621,8 @@ defmodule Selecto.FieldResolver do
   defp normalize_join_source(source) when is_binary(source), do: source
   defp normalize_join_source(_source), do: nil
 
+  # nil is an atom: without this clause a missing :field became "nil".
+  defp normalize_database_field(nil, fallback), do: fallback
   defp normalize_database_field(field, _fallback) when is_atom(field), do: Atom.to_string(field)
   defp normalize_database_field(field, _fallback) when is_binary(field), do: field
   defp normalize_database_field(_field, fallback), do: fallback
