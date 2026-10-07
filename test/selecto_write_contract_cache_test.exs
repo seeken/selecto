@@ -1,5 +1,8 @@
 defmodule Selecto.WriteContractCacheTest do
-  use ExUnit.Case, async: true
+  # Not async: the cache is one application-wide table that empties itself
+  # when full, and other test modules fill it concurrently, so a contract
+  # cached here could be evicted between two assertions.
+  use ExUnit.Case, async: false
 
   alias Selecto.Domain.WriteContract
   alias Selecto.Domain.WriteContract.Cache
