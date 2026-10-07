@@ -53,6 +53,106 @@ defmodule Selecto.FieldResolverTest do
     {:ok, selecto: selecto}
   end
 
+  describe "resolve_field/2 with plain names" do
+    test "matches the entry the full field map holds for every plain name", %{selecto: selecto} do
+      # Atom and string spellings of one field, a redacted spelling, and a
+      # field without a column type: the last unredacted spelling wins, as
+      # in get_available_fields/1.
+      selecto =
+        selecto
+        |> put_in([Access.key(:config), :source, :fields], [
+          :id,
+          "name",
+          :name,
+          :email,
+          "status",
+          :status,
+          "untyped"
+        ])
+        |> put_in([Access.key(:config), :source, :redact_fields], [:email, :status])
+
+      available = FieldResolver.get_available_fields(selecto)
+
+      plain_names = available |> Map.keys() |> Enum.reject(&String.contains?(&1, "."))
+      assert Enum.sort(plain_names) == ["id", "name", "status", "untyped"]
+
+      for name <- plain_names do
+        assert FieldResolver.resolve_field(selecto, name) == {:ok, Map.fetch!(available, name)}
+
+        assert FieldResolver.resolve_field(selecto, String.to_atom(name)) ==
+                 {:ok, Map.fetch!(available, name)}
+      end
+
+      assert {:error, %Error{}} = FieldResolver.resolve_field(selecto, "email")
+      assert {:error, %Error{}} = FieldResolver.resolve_field(selecto, "missing")
+    end
+
+    test "falls back to the full field map when the source is not a map", %{selecto: selecto} do
+      selecto = put_in(selecto, [Access.key(:config), :source], "users")
+
+      assert {:error, %Error{}} = FieldResolver.resolve_field(selecto, "name")
+    end
+  end
+
+  describe "resolve_field/2 with join-qualified names" do
+    test "matches the entry the full field map holds for every join field", %{selecto: selecto} do
+      # A child join (path names "posts.tags.label") and a join without
+      # declared fields, whose fields come from its schema.
+      joins =
+        selecto.config.joins
+        |> Map.put(:tags, %{
+          requires_join: :posts,
+          fields: %{"tags.label" => %{type: :string}, :weight => %{type: :integer}}
+        })
+        |> Map.put(:author, %{source: "authors"})
+
+      selecto =
+        selecto
+        |> put_in([Access.key(:config), :joins], joins)
+        |> Map.put(:domain, %{schemas: %{"authors" => %{columns: %{"name" => %{type: :string}}}}})
+
+      available = FieldResolver.get_available_fields(selecto)
+
+      for {name, info} <- available, String.contains?(name, ".") do
+        assert FieldResolver.resolve_field(selecto, name) == {:ok, info}, name
+      end
+
+      assert {:ok, %{source_join: :author, name: "name"}} =
+               FieldResolver.resolve_field(selecto, "author.name")
+
+      assert {:ok, %{qualified_name: "posts.tags.label"}} =
+               FieldResolver.resolve_field(selecto, "posts.tags.label")
+
+      assert {:error, %Error{}} = FieldResolver.resolve_field(selecto, "posts.missing")
+      assert {:error, %Error{}} = FieldResolver.resolve_field(selecto, "nope.title")
+    end
+
+    test "takes the general path when join names are ambiguous or dotted", %{selecto: selecto} do
+      posts = selecto.config.joins.posts
+
+      both_spellings =
+        put_in(selecto, [Access.key(:config), :joins], %{:posts => posts, "posts" => posts})
+
+      dotted =
+        put_in(selecto, [Access.key(:config), :joins], %{:posts => posts, "a.b" => posts})
+
+      for selecto <- [both_spellings, dotted] do
+        available = FieldResolver.get_available_fields(selecto)
+
+        assert FieldResolver.resolve_field(selecto, "posts.title") ==
+                 {:ok, Map.fetch!(available, "posts.title")}
+      end
+    end
+
+    test "CTE columns still resolve when no join has the name", %{selecto: selecto} do
+      assert {:ok, %{source_join: "order_totals"}} =
+               FieldResolver.resolve_field(selecto, "order_totals.total")
+
+      assert {:ok, %{source_join: "high_value_orders"}} =
+               FieldResolver.resolve_field(selecto, "high_value_orders.anything")
+    end
+  end
+
   describe "resolve_field/2" do
     test "resolves simple field from source table", %{selecto: selecto} do
       {:ok, field_info} = FieldResolver.resolve_field(selecto, "name")

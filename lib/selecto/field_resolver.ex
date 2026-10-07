@@ -202,49 +202,9 @@ defmodule Selecto.FieldResolver do
 
   # All do_resolve_field/2 clauses grouped together
   defp do_resolve_field(selecto, %{type: :qualified, join: join_name, field: field_name}) do
-    available_fields = get_available_fields(selecto)
-    qualified_name = "#{join_name}.#{field_name}"
-
-    case Map.get(available_fields, qualified_name) do
-      nil ->
-        case resolve_cte_field(selecto, join_name, field_name, qualified_name) do
-          {:ok, cte_field_info} ->
-            {:ok, cte_field_info}
-
-          :not_cte ->
-            # Check if the join exists
-            case lookup_join_config(selecto.config.joins, join_name) do
-              {:ok, join_key, join_info} ->
-                available_join_fields =
-                  join_info
-                  |> Map.get(:fields, %{})
-                  |> Map.keys()
-
-                {:error,
-                 Error.field_resolution_error(
-                   "Field '#{field_name}' not found in join '#{join_name}'",
-                   qualified_name,
-                   %{available_fields_in_join: available_join_fields, join_key: join_key}
-                 )}
-
-              :error ->
-                available_joins = Map.keys(selecto.config.joins)
-                available_ctes = get_cte_names(selecto)
-
-                {:error,
-                 Error.field_resolution_error(
-                   "Join '#{join_name}' not found",
-                   qualified_name,
-                   %{available_joins: available_joins, available_ctes: available_ctes}
-                 )}
-            end
-
-          {:error, error} ->
-            {:error, error}
-        end
-
-      field_info ->
-        {:ok, field_info}
+    case join_field(selecto, join_name, field_name) do
+      {:ok, field_info} -> {:ok, field_info}
+      :error -> resolve_qualified_field(selecto, join_name, field_name)
     end
   end
 
@@ -264,15 +224,21 @@ defmodule Selecto.FieldResolver do
   end
 
   defp do_resolve_field(selecto, %{type: :simple, field: field_name}) do
-    available_fields = get_available_fields(selecto)
-
-    # Try direct field name first
-    case Map.get(available_fields, field_name) do
-      nil ->
-        handle_field_not_found(selecto, field_name, available_fields)
-
-      field_info ->
+    case source_field(selecto, field_name) do
+      {:ok, field_info} ->
         {:ok, field_info}
+
+      :error ->
+        available_fields = get_available_fields(selecto)
+
+        # Try direct field name first
+        case Map.get(available_fields, field_name) do
+          nil ->
+            handle_field_not_found(selecto, field_name, available_fields)
+
+          field_info ->
+            {:ok, field_info}
+        end
     end
   end
 
@@ -341,6 +307,54 @@ defmodule Selecto.FieldResolver do
     end
   end
 
+  # A qualified reference resolved against the full field map.
+  defp resolve_qualified_field(selecto, join_name, field_name) do
+    available_fields = get_available_fields(selecto)
+    qualified_name = "#{join_name}.#{field_name}"
+
+    case Map.get(available_fields, qualified_name) do
+      nil ->
+        case resolve_cte_field(selecto, join_name, field_name, qualified_name) do
+          {:ok, cte_field_info} ->
+            {:ok, cte_field_info}
+
+          :not_cte ->
+            # Check if the join exists
+            case lookup_join_config(selecto.config.joins, join_name) do
+              {:ok, join_key, join_info} ->
+                available_join_fields =
+                  join_info
+                  |> Map.get(:fields, %{})
+                  |> Map.keys()
+
+                {:error,
+                 Error.field_resolution_error(
+                   "Field '#{field_name}' not found in join '#{join_name}'",
+                   qualified_name,
+                   %{available_fields_in_join: available_join_fields, join_key: join_key}
+                 )}
+
+              :error ->
+                available_joins = Map.keys(selecto.config.joins)
+                available_ctes = get_cte_names(selecto)
+
+                {:error,
+                 Error.field_resolution_error(
+                   "Join '#{join_name}' not found",
+                   qualified_name,
+                   %{available_joins: available_joins, available_ctes: available_ctes}
+                 )}
+            end
+
+          {:error, error} ->
+            {:error, error}
+        end
+
+      field_info ->
+        {:ok, field_info}
+    end
+  end
+
   # Helper function to handle field not found cases
   defp handle_field_not_found(selecto, field_name, available_fields) do
     # Check if it's an ambiguous field
@@ -364,6 +378,97 @@ defmodule Selecto.FieldResolver do
          %{suggestions: suggestions, available_fields: Map.keys(available_fields)}
        )}
     end
+  end
+
+  # The field "join.field" names in one join, without building the field map
+  # of every join. When no join name contains a dot, the only entry of the
+  # full map under a one-dot key "join.field" is that join's own field
+  # (another join's names would need a dot to match, and its path names,
+  # "parent.join.field", have two or more), and join entries take precedence
+  # over source and CTE entries. So with exactly one join of that name, this
+  # entry is the one get_available_fields/1 would return. Anything else takes
+  # the general path.
+  defp join_field(selecto, join_name, field_name)
+       when is_binary(join_name) and is_binary(field_name) do
+    joins = selecto.config.joins
+
+    with true <- is_map(joins),
+         false <- String.contains?(join_name, ".") or String.contains?(field_name, "."),
+         [{key, config}] <- joins_named(joins, join_name),
+         field_config when not is_nil(field_config) <-
+           last_join_field(join_fields(selecto, key, config), field_name) do
+      {:ok, join_field_info(key, field_name, "#{key}.#{field_name}", field_config)}
+    else
+      _ -> :error
+    end
+  end
+
+  defp join_field(_selecto, _join_name, _field_name), do: :error
+
+  # The joins named `join_name`, or none when any join name contains a dot.
+  defp joins_named(joins, join_name) do
+    Enum.reduce_while(joins, [], fn {key, _config} = join, named ->
+      name = to_string(key)
+
+      cond do
+        String.contains?(name, ".") -> {:halt, []}
+        name == join_name -> {:cont, [join | named]}
+        true -> {:cont, named}
+      end
+    end)
+  end
+
+  # The source field a plain name resolves to, without building the field map
+  # of every join. Join and CTE field names are always qualified
+  # ("join.field", "cte.column"), so a name without a dot can only be a
+  # source field, and get_available_fields/1 would return exactly this entry:
+  # the last unredacted field that names it. Anything else (a dotted name, or
+  # a name the source does not have) takes the general path.
+  defp source_field(selecto, field_name) when is_binary(field_name) do
+    source = selecto.config.source
+
+    with false <- String.contains?(field_name, "."),
+         true <- is_map(source),
+         redact_fields = Map.get(source, :redact_fields, []),
+         field when not is_nil(field) <-
+           last_source_field(Map.get(source, :fields, []), field_name, redact_fields, nil) do
+      {:ok, source_field_info(field, field_name, Map.get(source, :columns, %{}))}
+    else
+      _ -> :error
+    end
+  end
+
+  defp source_field(_selecto, _field_name), do: :error
+
+  defp last_source_field([], _field_name, _redact_fields, found), do: found
+
+  defp last_source_field([field | rest], field_name, redact_fields, found) do
+    found =
+      if source_field_name(field) == field_name and field not in redact_fields,
+        do: field,
+        else: found
+
+    last_source_field(rest, field_name, redact_fields, found)
+  end
+
+  # Not a list of fields: the general path handles (or rejects) it as before.
+  defp last_source_field(_fields, _field_name, _redact_fields, _found), do: nil
+
+  defp source_field_name(field) when is_atom(field), do: Atom.to_string(field)
+  defp source_field_name(field), do: field
+
+  defp source_field_info(field, field_str, source_columns) do
+    %{
+      name: field_str,
+      qualified_name: field_str,
+      source_join: :selecto_root,
+      type: get_field_type(source_columns, field),
+      alias: nil,
+      table_alias: "selecto_root",
+      field: field_str,
+      parameters: nil,
+      parameter_signature: nil
+    }
   end
 
   defp get_source_fields(selecto) do
@@ -402,85 +507,96 @@ defmodule Selecto.FieldResolver do
     |> Enum.filter(fn field -> field not in redact_fields end)
     |> Enum.into(%{}, fn field ->
       # Domain inputs may use atom or string field identifiers.
-      field_str = if is_atom(field), do: Atom.to_string(field), else: field
-
-      field_info = %{
-        name: field_str,
-        qualified_name: field_str,
-        source_join: :selecto_root,
-        type: get_field_type(source_columns, field),
-        alias: nil,
-        table_alias: "selecto_root",
-        field: field_str,
-        parameters: nil,
-        parameter_signature: nil
-      }
-
-      {field_str, field_info}
+      field_str = source_field_name(field)
+      {field_str, source_field_info(field, field_str, source_columns)}
     end)
   end
 
   defp get_join_fields(selecto) do
     selecto.config.joins
-    |> Enum.flat_map(fn {join_name, join_config} ->
-      # Normalized domain fields come from schemas, not directly from join config.
-      join_fields =
-        if is_map(join_config) and Map.get(join_config, :fields) do
-          Map.get(join_config, :fields)
-        else
-          # Look up schema by join source
-          schema_name = normalize_join_source(Map.get(join_config, :source))
-
-          if schema_name do
-            schema = get_in(selecto.domain, [:schemas, schema_name])
-
-            if is_map(schema) and Map.get(schema, :columns) do
-              # Convert schema columns to field format
-              Enum.into(Map.get(schema, :columns), %{}, fn {col_name, col_config} ->
-                {col_name, col_config}
-              end)
-            else
-              infer_cte_join_fields(join_name, join_config)
-            end
-          else
-            infer_cte_join_fields(join_name, join_config)
-          end
-        end
-
-      Enum.flat_map(join_fields, fn {field_key, field_config} ->
-        field_name = extract_field_name(field_key)
-        qualified_name = "#{join_name}.#{field_name}"
-        full_name = Enum.join(join_path(selecto.config.joins, join_name), ".") <> ".#{field_name}"
-
-        # Get the database field name from the configuration
-        database_field_name =
-          field_config
-          |> Map.get(:field, field_config[:field])
-          |> normalize_database_field(field_name)
-
-        field_info = %{
-          name: field_name,
-          qualified_name: qualified_name,
-          source_join: join_name,
-          type: Map.get(field_config, :type, field_config[:type]) || :string,
-          alias: Map.get(field_config, :alias, field_config[:alias]),
-          table_alias: to_string(join_name),
-          field: database_field_name,
-          parameters: nil,
-          parameter_signature: nil
-        }
-
-        if full_name == qualified_name do
-          [{qualified_name, field_info}]
-        else
-          [
-            {qualified_name, field_info},
-            {full_name, %{field_info | qualified_name: full_name}}
-          ]
-        end
-      end)
-    end)
+    |> Enum.flat_map(&join_field_entries(selecto, &1))
     |> Enum.into(%{})
+  end
+
+  # The {name, field_info} entries one join contributes to the field map.
+  defp join_field_entries(selecto, {join_name, join_config}) do
+    join_fields = join_fields(selecto, join_name, join_config)
+
+    # The join's path ("parent.join") is the same for each of its fields.
+    path =
+      if Enum.empty?(join_fields),
+        do: nil,
+        else: Enum.join(join_path(selecto.config.joins, join_name), ".")
+
+    Enum.flat_map(join_fields, fn {field_key, field_config} ->
+      field_name = extract_field_name(field_key)
+      qualified_name = "#{join_name}.#{field_name}"
+      full_name = path <> ".#{field_name}"
+      field_info = join_field_info(join_name, field_name, qualified_name, field_config)
+
+      if full_name == qualified_name do
+        [{qualified_name, field_info}]
+      else
+        [
+          {qualified_name, field_info},
+          {full_name, %{field_info | qualified_name: full_name}}
+        ]
+      end
+    end)
+  end
+
+  # The fields a join declares, or those of its schema, or its CTE columns.
+  # Normalized domain fields come from schemas, not directly from join config.
+  defp join_fields(selecto, join_name, join_config) do
+    if is_map(join_config) and Map.get(join_config, :fields) do
+      Map.get(join_config, :fields)
+    else
+      # Look up schema by join source
+      schema_name = normalize_join_source(Map.get(join_config, :source))
+
+      if schema_name do
+        schema = get_in(selecto.domain, [:schemas, schema_name])
+
+        if is_map(schema) and Map.get(schema, :columns) do
+          # Convert schema columns to field format
+          Enum.into(Map.get(schema, :columns), %{}, fn {col_name, col_config} ->
+            {col_name, col_config}
+          end)
+        else
+          infer_cte_join_fields(join_name, join_config)
+        end
+      else
+        infer_cte_join_fields(join_name, join_config)
+      end
+    end
+  end
+
+  defp join_field_info(join_name, field_name, qualified_name, field_config) do
+    # Get the database field name from the configuration
+    database_field_name =
+      field_config
+      |> Map.get(:field, field_config[:field])
+      |> normalize_database_field(field_name)
+
+    %{
+      name: field_name,
+      qualified_name: qualified_name,
+      source_join: join_name,
+      type: Map.get(field_config, :type, field_config[:type]) || :string,
+      alias: Map.get(field_config, :alias, field_config[:alias]),
+      table_alias: to_string(join_name),
+      field: database_field_name,
+      parameters: nil,
+      parameter_signature: nil
+    }
+  end
+
+  # The config of the last field of a join named `field_name`: the one whose
+  # entry the field map keeps.
+  defp last_join_field(join_fields, field_name) do
+    Enum.reduce(join_fields, nil, fn {field_key, field_config}, found ->
+      if extract_field_name(field_key) == field_name, do: field_config, else: found
+    end)
   end
 
   @spec join_path(map(), atom() | String.t(), MapSet.t(String.t())) :: [String.t()]
