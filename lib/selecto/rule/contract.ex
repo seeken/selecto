@@ -8,6 +8,7 @@ defmodule Selecto.Rule.Contract do
 
   alias Selecto.Domain
   alias Selecto.Domain.Contract.Shared.Core
+  alias Selecto.Rule.Pattern
 
   @schema "selecto.data_rules.v1"
   @rules_keys ~w(schema definitions normalizers bindings)
@@ -107,6 +108,7 @@ defmodule Selecto.Rule.Contract do
         when code in [
                :invalid_rule_version,
                :invalid_text_pattern,
+               :evaluation_limit,
                :unknown_rule_option,
                :unsupported_rule_operator
              ] ->
@@ -667,11 +669,10 @@ defmodule Selecto.Rule.Contract do
          "ascii_v1" <- value(test, :profile),
          pattern when is_binary(pattern) <- value(test, :pattern),
          true <- byte_size(pattern) in 1..256,
-         true <- String.printable?(pattern) and ascii?(pattern),
+         true <- ascii?(pattern),
          mode when mode in ["full", "search"] <- value(test, :match),
          flags when flags in [nil, []] <- value(test, :flags, []),
-         :ok <- portable_pattern(pattern),
-         {:ok, _regex} <- Regex.compile(pattern) do
+         {:ok, _automaton} <- Pattern.compile(pattern) do
       {:ok,
        %{
          "op" => "text.pattern",
@@ -681,6 +682,9 @@ defmodule Selecto.Rule.Contract do
          "flags" => []
        }}
     else
+      {:error, :evaluation_limit} ->
+        {:error, error(:evaluation_limit, path, "text pattern exceeds the compilation budget")}
+
       {:error, reason} ->
         {:error,
          error(:invalid_text_pattern, path, "text pattern is invalid", reason: inspect(reason))}
@@ -1563,40 +1567,6 @@ defmodule Selecto.Rule.Contract do
   end
 
   defp decimal(_value), do: :error
-
-  defp portable_pattern(pattern) do
-    cond do
-      String.contains?(pattern, ["(?", "\\1", "\\2", "\\3", "^", "$"]) ->
-        {:error, :unsupported_regex_feature}
-
-      String.contains?(pattern, ["[[:", ":]]", "&&"]) ->
-        {:error, :unsupported_character_class}
-
-      Regex.match?(~r/(?:\*|\+|\?|\})[?+]/, pattern) ->
-        {:error, :unsupported_quantifier_mode}
-
-      not portable_escapes?(pattern) ->
-        {:error, :unsupported_escape}
-
-      true ->
-        :ok
-    end
-  end
-
-  defp portable_escapes?(pattern) do
-    pattern
-    |> :binary.bin_to_list()
-    |> portable_escape_bytes?()
-  end
-
-  defp portable_escape_bytes?([]), do: true
-  defp portable_escape_bytes?([?\\]), do: false
-
-  defp portable_escape_bytes?([?\\, escaped | rest]) do
-    escaped in ~c"\\.^$|?*+()[]{}-dDsSwWtrn" and portable_escape_bytes?(rest)
-  end
-
-  defp portable_escape_bytes?([_byte | rest]), do: portable_escape_bytes?(rest)
 
   defp ascii?(value), do: value |> :binary.bin_to_list() |> Enum.all?(&(&1 < 128))
 

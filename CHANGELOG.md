@@ -3,6 +3,17 @@
 
 ## Unreleased
 
+- Count portable text length in Unicode scalars, and replace native backtracking
+  rule patterns with a bounded ASCII Thompson matcher. Report `evaluation_limit`
+  for excessive state expansion or depleted work, without changing patterns.
+- Share a finite work budget across a record's bindings, normalizers, conditions,
+  logical branches, paths, collection operations and exact numeric arithmetic.
+  Check input before normalization; a false condition or passing `any` branch
+  cannot conceal a resource refusal. Preserve exact collection sums beyond the
+  caller's Decimal precision and refuse oversized operands before conversion.
+- Mark the pre-existing unavailable-PostgreSQL pool test `requires_db` so
+  service-excluded suites do not attempt a connection to `invalid.local`.
+
 - Add optional whole-query `render_rollup/2` adapter lowering and a structured
   joined-query composition port. Validate query policy before rendering and keep
   global bind finalization, aliases and join metadata; native ROLLUP is unchanged.

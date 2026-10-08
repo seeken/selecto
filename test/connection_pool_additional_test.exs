@@ -35,6 +35,7 @@ defmodule Selecto.ConnectionPoolAdditionalTest do
     def init(:ok), do: {:ok, %{}}
   end
 
+  @tag :requires_db
   test "start_pool returns errors for unavailable backends" do
     postgres_result = ConnectionPool.start_pool(hostname: "invalid.local", database: "missing_db")
 
