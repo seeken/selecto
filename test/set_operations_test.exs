@@ -221,4 +221,41 @@ defmodule SetOperationsTest do
     order_by_count = Regex.scan(~r/order\s+by/i, sql) |> length()
     assert order_by_count == 2
   end
+
+  test "PostgreSQL retains native compound parentheses and ALL operators", %{q1: q1, q2: q2} do
+    for {operation, name} <- [{&Selecto.intersect/3, "INTERSECT"}, {&Selecto.except/3, "EXCEPT"}] do
+      {sql, params} = operation.(q1, q2, all: true) |> Selecto.offset(1) |> Selecto.to_sql()
+
+      assert String.trim_leading(sql) |> String.starts_with?("(")
+      assert sql =~ name <> " ALL"
+      assert sql =~ ~r/OFFSET\s+1/i
+      refute sql =~ ~r/LIMIT\s+-1/i
+      refute sql =~ "selecto_set_operand"
+      assert params == ["PG", "G"]
+    end
+  end
+
+  test "nested PostgreSQL operands retain all bind parameters and quoted placeholders", %{
+    domain: domain
+  } do
+    query =
+      Selecto.configure(domain, [], validate: false)
+      |> Selecto.select(["title", {:literal, "$1"}])
+
+    left = Selecto.filter(query, {"rating", "PG"})
+    right = Selecto.filter(query, {"rating", "G"})
+
+    third =
+      Selecto.configure(domain, [], validate: false)
+      |> Selecto.select(["title", {:literal, "$1"}])
+      |> Selecto.filter({"rating", "R"})
+
+    {sql, params} = Selecto.union(left, Selecto.except(right, third)) |> Selecto.to_sql()
+
+    assert sql =~ "'$1'"
+    assert sql =~ "selecto_root.rating = $1"
+    assert sql =~ "selecto_root.rating = $2"
+    assert sql =~ "selecto_root.rating = $3"
+    assert params == ["PG", "G", "R"]
+  end
 end

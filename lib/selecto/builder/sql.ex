@@ -33,14 +33,25 @@ defmodule Selecto.Builder.Sql do
   @spec build(Selecto.Types.t(), Selecto.Types.sql_generation_options()) ::
           {String.t(), list(), [any()]}
   def build(selecto, opts) do
+    {iodata, aliases} = build_iodata(selecto, opts)
+    {sql, params} = Params.finalize(iodata, adapter: selecto.adapter)
+    {sql, aliases, params}
+  end
+
+  @doc false
+  # Internal composition keeps parameter markers until the complete statement
+  # is finalized. Parsing placeholder text out of finalized SQL cannot safely
+  # distinguish binds from quoted literals or comments.
+  def build_iodata(selecto, opts) do
     # Check for Set Operations first as they completely override query structure
     cond do
       Selecto.Builder.SetOperations.has_set_operations?(selecto) ->
-        build_set_operation_query(selecto, opts)
+        build_set_operation_iodata(selecto, opts)
 
       true ->
         :ok = Selecto.Policy.validate_query!(selecto)
-        build_standard_query(selecto, opts)
+        {iodata, aliases, _joins} = build_standard_query_iodata_with_joins(selecto, opts)
+        {iodata, aliases}
     end
   end
 
@@ -51,13 +62,17 @@ defmodule Selecto.Builder.Sql do
   @spec build_with_joins(Selecto.Types.t(), Selecto.Types.sql_generation_options()) ::
           {String.t(), list(), [any()], list() | nil}
   def build_with_joins(selecto, opts) do
-    if Selecto.Builder.SetOperations.has_set_operations?(selecto) do
-      {sql, aliases, params} = build_set_operation_query(selecto, opts)
-      {sql, aliases, params, nil}
-    else
-      :ok = Selecto.Policy.validate_query!(selecto)
-      build_standard_query_with_joins(selecto, opts)
-    end
+    {iodata, aliases, joins} =
+      if Selecto.Builder.SetOperations.has_set_operations?(selecto) do
+        {iodata, aliases} = build_set_operation_iodata(selecto, opts)
+        {iodata, aliases, nil}
+      else
+        :ok = Selecto.Policy.validate_query!(selecto)
+        build_standard_query_iodata_with_joins(selecto, opts)
+      end
+
+    {sql, params} = Params.finalize(iodata, adapter: selecto.adapter)
+    {sql, aliases, params, joins}
   end
 
   @doc """
@@ -214,12 +229,7 @@ defmodule Selecto.Builder.Sql do
     build_from_with_ctes(selecto, joins_in_order)
   end
 
-  defp build_standard_query(selecto, opts) do
-    {sql, aliases, params, _joins_in_order} = build_standard_query_with_joins(selecto, opts)
-    {sql, aliases, params}
-  end
-
-  defp build_standard_query_with_joins(selecto, opts) do
+  defp build_standard_query_iodata_with_joins(selecto, opts) do
     # Phase 4: All SQL builders now use iodata parameterization.
     {aliases, sel_joins, select_iodata, select_params} =
       build_select_with_subselects(selecto, %{}, opts)
@@ -438,15 +448,7 @@ defmodule Selecto.Builder.Sql do
         adapter
       )
 
-    # Phase 4: All parameters are now properly handled through iodata - no sentinel patterns remain
-    {sql, final_params} =
-      Params.finalize(final_query_iodata,
-        adapter: adapter
-      )
-
-    # CTE params are already integrated into the iodata, so final_params contains everything
-    # Don't double-count parameters
-    {sql, aliases, final_params, joins_in_order}
+    {final_query_iodata, aliases, joins_in_order}
   end
 
   defp finalize_section(iodata, _adapter, _type) when iodata in [[], [""], ["()"], "", "()"],
@@ -548,7 +550,7 @@ defmodule Selecto.Builder.Sql do
     |> Enum.uniq()
   end
 
-  defp build_set_operation_query(selecto, opts) do
+  defp build_set_operation_iodata(selecto, opts) do
     case Selecto.Builder.SetOperations.validate_set_operations_for_sql(selecto) do
       :ok ->
         :ok
@@ -589,17 +591,11 @@ defmodule Selecto.Builder.Sql do
     # Combine set operations with any outer ORDER BY/LIMIT/OFFSET
     final_iodata = [set_op_iodata] ++ order_by_iodata ++ limit_iodata ++ offset_iodata
 
-    # Finalize the SQL
-    {sql, final_params} =
-      Selecto.SQL.Params.finalize(final_iodata,
-        adapter: adapter
-      )
-
     # For set operations, we don't return field aliases since the result schema
     # depends on the left query's structure
     aliases = []
 
-    {sql, aliases, final_params}
+    {final_iodata, aliases}
   end
 
   defp pagination_sections(selecto, adapter, prefix \\ "\n        ") do
@@ -630,8 +626,14 @@ defmodule Selecto.Builder.Sql do
     else
       limit_iodata =
         case limit_value do
-          nil -> []
-          value -> [prefix, "limit ", Integer.to_string(value)]
+          nil ->
+            if not is_nil(offset_value) and
+                 Selecto.AdapterSupport.adapter_name(adapter) == :sqlite,
+               do: [prefix, "limit -1"],
+               else: []
+
+          value ->
+            [prefix, "limit ", Integer.to_string(value)]
         end
 
       offset_iodata =

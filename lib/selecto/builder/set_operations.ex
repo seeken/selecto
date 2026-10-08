@@ -21,11 +21,10 @@ defmodule Selecto.Builder.SetOperations do
       [] ->
         {[], []}
 
-      [operation] ->
-        build_single_set_operation(operation, opts)
-
-      multiple_operations ->
-        build_chained_set_operations(multiple_operations, opts)
+      operations ->
+        # The latest left operand contains the complete preceding chain and
+        # any ordering/paging applied before this operation was appended.
+        build_single_set_operation(List.last(operations), opts)
     end
   end
 
@@ -34,18 +33,14 @@ defmodule Selecto.Builder.SetOperations do
     {left_sql, left_params} = query_to_iodata_with_params(spec.left_query, opts)
     {right_sql, right_params} = query_to_iodata_with_params(spec.right_query, opts)
 
-    operation_sql = build_operation_sql(spec.operation, spec.options.all)
+    operation_sql = build_operation_sql(spec.operation, spec.options.all, spec.left_query.adapter)
 
     combined_sql = [
-      "(",
-      left_sql,
-      ")",
+      operand_sql(left_sql, spec.left_query.adapter),
       "\n",
       operation_sql,
       "\n",
-      "(",
-      right_sql,
-      ")"
+      operand_sql(right_sql, spec.left_query.adapter)
     ]
 
     combined_params = left_params ++ right_params
@@ -53,52 +48,41 @@ defmodule Selecto.Builder.SetOperations do
     {combined_sql, combined_params}
   end
 
-  # Build SQL for chained set operations  
-  defp build_chained_set_operations([first_op | rest_ops], opts) do
-    # Start with the first operation
-    {base_sql, base_params} = build_single_set_operation(first_op, opts)
-
-    # Chain additional operations
-    {final_sql, final_params} =
-      Enum.reduce(rest_ops, {base_sql, base_params}, fn op, {acc_sql, acc_params} ->
-        {right_sql, right_params} = query_to_iodata_with_params(op.right_query, opts)
-        operation_sql = build_operation_sql(op.operation, op.options.all)
-
-        chained_sql = [
-          "(",
-          acc_sql,
-          ")",
-          "\n",
-          operation_sql,
-          "\n",
-          "(",
-          right_sql,
-          ")"
-        ]
-
-        chained_params = acc_params ++ right_params
-        {chained_sql, chained_params}
-      end)
-
-    {final_sql, final_params}
-  end
-
   # Convert a Selecto query to SQL with parameters
   defp query_to_iodata_with_params(selecto, opts) do
-    # Create a copy of the query without set operations to avoid recursion
-    clean_selecto = %{selecto | set: Map.delete(selecto.set, :set_operations)}
+    # Compile the complete operand, including its nested sets, CTEs and paging.
+    # Keep bind markers intact so literal placeholder text cannot be mistaken
+    # for a parameter when the complete expression is finalized.
+    {iodata, _aliases} =
+      Sql.build_iodata(selecto, Keyword.take(opts, [:unique_projection_aliases]))
 
-    # Generate SQL for the individual query, then restore its parameter markers.
-    # Each operand is finalized independently and therefore starts numbering at
-    # one. Restoring markers lets the outer builder finalize the complete set
-    # expression once with globally coordinated placeholder numbers.
-    {sql, _aliases, params} =
-      Sql.build(clean_selecto, Keyword.take(opts, [:unique_projection_aliases]))
+    {_sql, params} = Selecto.SQL.Params.finalize(iodata, adapter: selecto.adapter)
+    {iodata, params}
+  end
 
-    {Selecto.SQL.Params.rebind_finalized(sql, params, clean_selecto.adapter), params}
+  # SQLite compound terms must be SELECT statements. Derived tables preserve
+  # the operand's CTE scope, ORDER BY/LIMIT and authored nesting while turning
+  # any complete query into a valid compound term.
+  defp operand_sql(sql, adapter) do
+    case Selecto.AdapterSupport.adapter_name(adapter) do
+      :sqlite -> ["SELECT * FROM (", sql, ") AS selecto_set_operand"]
+      _ -> ["(", sql, ")"]
+    end
   end
 
   # Build the operation SQL keyword
+  defp build_operation_sql(operation, true, adapter) when operation in [:intersect, :except] do
+    if Selecto.AdapterSupport.adapter_name(adapter) == :sqlite do
+      raise ArgumentError,
+            "SQLite does not support #{String.upcase(to_string(operation))} ALL; " <>
+              "use the distinct set operation or UNION ALL"
+    end
+
+    build_operation_sql(operation, true)
+  end
+
+  defp build_operation_sql(operation, all?, _adapter), do: build_operation_sql(operation, all?)
+
   defp build_operation_sql(:union, true), do: "UNION ALL"
   defp build_operation_sql(:union, false), do: "UNION"
   defp build_operation_sql(:intersect, true), do: "INTERSECT ALL"
@@ -134,13 +118,8 @@ defmodule Selecto.Builder.SetOperations do
   in the final parameter list.
   """
   def extract_set_operation_params(selecto) do
-    set_operations = Map.get(selecto.set, :set_operations, [])
-
-    Enum.flat_map(set_operations, fn spec ->
-      {_left_sql, left_params} = query_to_iodata_with_params(spec.left_query, [])
-      {_right_sql, right_params} = query_to_iodata_with_params(spec.right_query, [])
-      left_params ++ right_params
-    end)
+    {_iodata, params} = build_set_operations(selecto)
+    params
   end
 
   @doc """
