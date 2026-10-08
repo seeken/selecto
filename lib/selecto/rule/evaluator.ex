@@ -249,15 +249,15 @@ defmodule Selecto.Rule.Evaluator do
     if value == @missing, do: :passed, else: failed(:forbidden, "value must be absent")
   end
 
-  defp evaluate_node(%{"op" => "type.is", "type" => type}, value, opts) do
+  defp evaluate_node(%{"op" => "type.is", "type" => type}, value, _opts) do
     valid =
       case type do
         type when type in ["text", "string"] -> is_binary(value)
         "integer" -> is_integer(value)
-        "decimal" -> match?({:ok, _decimal}, decimal(value, opts))
+        "decimal" -> is_number(value) or match?(%Decimal{}, value)
         "boolean" -> is_boolean(value)
         "collection" -> is_list(value)
-        "object" -> is_map(value)
+        "object" -> is_map(value) and not is_struct(value)
       end
 
     if valid, do: :passed, else: failed(:invalid_type, "value has the wrong portable type")
