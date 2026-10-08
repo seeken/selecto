@@ -3,6 +3,10 @@
 
 ## Unreleased
 
+- Refuse portable evaluator resource exhaustion even for advisory rules.
+  Oversized subjects, expensive conditions/logical branches and shared
+  normalizer budgets cannot authorize a write. Ordinary advisory validation
+  failures and successful normalization retain their behavior.
 - Count portable text length in Unicode scalars, and replace native backtracking
   rule patterns with a bounded ASCII Thompson matcher. Report `evaluation_limit`
   for excessive state expansion or depleted work, without changing patterns.

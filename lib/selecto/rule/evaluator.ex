@@ -229,6 +229,7 @@ defmodule Selecto.Rule.Evaluator do
     required_obligations = Enum.filter(obligations, &(&1.enforcement == "required"))
 
     cond do
+      Enum.any?(outcomes, &(&1.disposition == :error and &1.code == :evaluation_limit)) -> :error
       Enum.any?(required, &(&1.disposition == :error)) -> :error
       Enum.any?(required, &(&1.disposition == :failed)) -> :failed
       required_obligations != [] -> :pending

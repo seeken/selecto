@@ -153,6 +153,70 @@ defmodule Selecto.Rule.ResourceTest do
              Evaluator.normalize([%{"op" => "text.trim"}], "\u00a0AB12\u00a0")
   end
 
+  test "advisory resource exhaustion cannot become success behind a condition or logical branch" do
+    expensive = %{op: "all", rules: List.duplicate(pattern("a*"), 100)}
+
+    for {test, subject, condition} <- [
+          {%{op: "presence.required"}, String.duplicate(" ", 17000),
+           %{op: "value.eq", value: "never"}},
+          {%{op: "any", rules: [%{op: "presence.required"}, expensive]},
+           String.duplicate("a", 4096), nil},
+          {%{op: "presence.required"}, String.duplicate("a", 4096), expensive}
+        ] do
+      authored = put_in(rules(test), [:bindings, :check, :enforcement], :advisory)
+
+      authored =
+        if condition,
+          do: put_in(authored, [:bindings, :check, :condition], condition),
+          else: authored
+
+      assert {:ok, contract} = Contract.compile_rules(authored)
+
+      assert %{
+               disposition: :error,
+               outcomes: [%{code: :evaluation_limit, enforcement: "advisory"}]
+             } = Evaluator.evaluate(contract, :candidate, %{subject: subject})
+    end
+  end
+
+  test "advisory normalizers share the invocation budget and retain ordinary advisory behavior" do
+    authored = rules(%{op: "value.eq", value: "never"})
+
+    binding =
+      authored.bindings.check
+      |> Map.put(:enforcement, :advisory)
+      |> Map.put(:normalizer, %{id: :trim, version: 1})
+      |> Map.put(:condition, %{op: "value.eq", value: "never"})
+
+    authored = %{
+      authored
+      | bindings: %{a: binding, b: binding},
+        normalizers: %{
+          trim: %{
+            version: 1,
+            steps: List.duplicate(%{op: "text.trim", profile: "ascii_v1"}, 300)
+          }
+        }
+    }
+
+    assert {:ok, contract} = Contract.compile_rules(authored)
+
+    assert %{disposition: :error, outcomes: [_, %{code: :evaluation_limit}]} =
+             Evaluator.evaluate(contract, :candidate, %{subject: String.duplicate("a", 4000)})
+
+    ordinary =
+      put_in(authored, [:normalizers, :trim, :steps], [%{op: "text.trim", profile: "ascii_v1"}])
+
+    ordinary = put_in(ordinary, [:bindings, :a, :condition], %{op: "presence.required"})
+    assert {:ok, contract} = Contract.compile_rules(ordinary)
+
+    assert %{disposition: :passed, values: %{subject: "allowed"}, outcomes: outcomes} =
+             Evaluator.evaluate(contract, :candidate, %{subject: " allowed "})
+
+    assert [%{disposition: :failed, enforcement: "advisory"}, %{disposition: :not_applicable}] =
+             outcomes
+  end
+
   test "original pattern bytes cannot be hidden by a prior normalizer or false condition" do
     authored = rules(pattern("a"))
 

@@ -146,6 +146,63 @@ defmodule Selecto.Rule.NativeSQLiteResourceTest do
     assert sql(db, "SELECT name FROM temp.sqlite_master") == []
   end
 
+  test "public advisory INPUT resource failure refuses before any business DML", %{db: db} do
+    authored =
+      domain(%{op: "presence.required"})
+      |> put_in([:rules, :bindings, :check, :enforcement], :advisory)
+      |> put_in([:rules, :bindings, :check, :condition], %{op: "value.eq", value: "never"})
+
+    before = changes(db)
+
+    assert {:error,
+            %Error{
+              details: %{
+                code: :data_rule_error,
+                outcomes: [%{code: :evaluation_limit, enforcement: "advisory"}]
+              }
+            }} = insert(authored, db, String.duplicate("a", 17000))
+
+    assert changes(db) == before
+    assert rows(db) == [[1, "original"]]
+  end
+
+  test "public advisory normalizers cannot conceal exhausted work behind a false condition", %{
+    db: db
+  } do
+    authored =
+      domain(%{op: "presence.required"})
+      |> put_in([:rules, :bindings, :check, :enforcement], :advisory)
+      |> put_in([:rules, :bindings, :check, :condition], %{op: "value.eq", value: "never"})
+      |> put_in([:rules, :bindings, :check, :normalizer], %{id: :trim, version: 1})
+      |> put_in([:rules, :normalizers], %{
+        trim: %{
+          version: 1,
+          steps: List.duplicate(%{op: "text.trim", profile: "ascii_v1"}, 700)
+        }
+      })
+
+    before = changes(db)
+
+    assert {:error, %Error{details: %{code: :data_rule_error}}} =
+             insert(authored, db, String.duplicate("a", 4000))
+
+    assert changes(db) == before
+    assert rows(db) == [[1, "original"]]
+  end
+
+  test "ordinary public advisory failure preserves successful normalization", %{db: db} do
+    authored =
+      domain(%{op: "value.eq", value: "never"})
+      |> put_in([:rules, :bindings, :check, :enforcement], :advisory)
+      |> put_in([:rules, :bindings, :check, :normalizer], %{id: :trim, version: 1})
+      |> put_in([:rules, :normalizers], %{
+        trim: %{version: 1, steps: [%{op: "text.trim", profile: "ascii_v1"}]}
+      })
+
+    assert {:ok, _} = insert(authored, db, " allowed ")
+    assert rows(db) == [[1, "original"], [2, "allowed"]]
+  end
+
   defp domain(test, stage \\ :input) do
     %{
       name: "Native bounded rules",
