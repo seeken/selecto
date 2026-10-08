@@ -111,6 +111,14 @@ defmodule Selecto.DB.Adapter do
   @callback execute(connection(), query(), params(), execute_options()) ::
               {:ok, result()} | {:error, term()}
 
+  @doc """
+  Optional execution port for governed read queries. Adapters may enforce
+  connection-local read-only state here; `execute/4` remains available for
+  trusted administration and writes. Core prefers this port when present.
+  """
+  @callback execute_query(connection(), query(), params(), execute_options()) ::
+              {:ok, result()} | {:error, term()}
+
   @callback normalize_execution_result(term()) :: {:ok, result()} | {:error, term()}
   @callback normalize_error(term()) :: Selecto.Error.t()
   @callback normalize_type(term()) :: term()
@@ -173,6 +181,7 @@ defmodule Selecto.DB.Adapter do
   @callback supports?(atom()) :: boolean()
 
   @optional_callbacks adapter_contract_version: 0,
+                      execute_query: 4,
                       parameter_placeholder: 2,
                       stream: 4,
                       disconnect: 1,

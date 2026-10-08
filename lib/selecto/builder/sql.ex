@@ -535,20 +535,38 @@ defmodule Selecto.Builder.Sql do
     adapter = Map.get(selecto, :adapter, Selecto.AdapterSupport.default_adapter())
 
     if Selecto.AdapterSupport.adapter_name(adapter) in [:mssql, :mysql, :mariadb, :sqlite] do
-      [adapter: adapter, table_alias: "selecto_root"]
+      [adapter: adapter, table_alias: "selecto_root", selecto: selecto]
     else
-      [adapter: adapter]
+      [adapter: adapter, selecto: selecto]
     end
   end
 
   defp collect_requested_joins(selecto, inferred_join_groups) do
     explicit_joins = selecto.set |> Map.get(:active_joins, []) |> List.wrap()
 
+    json_joins =
+      [:json_selects, :json_filters, :json_order_by]
+      |> Enum.flat_map(&Map.get(selecto.set, &1, []))
+      |> Enum.flat_map(fn
+        {%{column: column}, _direction} -> json_column_join(selecto, column)
+        %{column: column} -> json_column_join(selecto, column)
+      end)
+
     inferred_join_groups
     |> List.flatten()
     |> Kernel.++(explicit_joins)
+    |> Kernel.++(json_joins)
     |> Enum.uniq()
   end
+
+  defp json_column_join(selecto, column) when is_binary(column) do
+    case Selecto.field(selecto, column) do
+      %{requires_join: join} when not is_nil(join) -> [join]
+      _ -> []
+    end
+  end
+
+  defp json_column_join(_selecto, _column), do: []
 
   defp build_set_operation_iodata(selecto, opts) do
     case Selecto.Builder.SetOperations.validate_set_operations_for_sql(selecto) do

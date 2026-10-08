@@ -84,8 +84,8 @@ defmodule Selecto.Builder.Subselect do
     target_alias = generate_subquery_alias(subselect_config.target_schema)
     adapter_name = AdapterSupport.adapter_name(Map.get(selecto, :adapter))
 
-    if Map.get(subselect_config, :limit) && adapter_name != :postgresql do
-      raise ArgumentError, "per-parent collection limits require PostgreSQL"
+    if Map.get(subselect_config, :limit) && adapter_name not in [:postgresql, :sqlite] do
+      raise ArgumentError, "per-parent collection limits require PostgreSQL or SQLite"
     end
 
     cond do
@@ -369,6 +369,13 @@ defmodule Selecto.Builder.Subselect do
   defp render_json_aggregate!(selecto, expression, subselect_config, target_alias) do
     {order_by_sql, []} = build_subquery_order_by(selecto, subselect_config, target_alias)
 
+    # SQLite consumes the ordered derived relation below, which also works
+    # before aggregate ORDER BY was added in SQLite 3.44.
+    order_by_sql =
+      if AdapterSupport.adapter_name(Map.get(selecto, :adapter)) == :sqlite,
+        do: nil,
+        else: order_by_sql
+
     render_json_operation!(selecto, %JsonOperation{
       operation: :json_agg,
       clause: :select,
@@ -377,13 +384,42 @@ defmodule Selecto.Builder.Subselect do
   end
 
   defp collection_from_clause(selecto, config, table, target_alias, where_clause) do
+    adapter_name = AdapterSupport.adapter_name(Map.get(selecto, :adapter))
+    limit = Map.get(config, :limit)
+
+    if adapter_name == :sqlite and
+         (Map.get(config, :order_by, []) != [] or not is_nil(limit)) and
+         (is_nil(limit) or (is_integer(limit) and limit > 0)) do
+      {order_by_sql, []} = build_subquery_order_by(selecto, config, target_alias)
+
+      [
+        "(SELECT ",
+        target_alias,
+        ".* FROM ",
+        table,
+        " ",
+        target_alias,
+        " WHERE ",
+        where_clause,
+        " ORDER BY ",
+        order_by_sql,
+        if(limit, do: [" LIMIT ", Integer.to_string(limit)], else: []),
+        ") ",
+        target_alias
+      ]
+    else
+      collection_from_clause_with_limit(selecto, config, table, target_alias, where_clause)
+    end
+  end
+
+  defp collection_from_clause_with_limit(selecto, config, table, target_alias, where_clause) do
     case Map.get(config, :limit) do
       nil ->
         [table, " ", target_alias, " WHERE ", where_clause]
 
       limit when is_integer(limit) and limit > 0 ->
         if AdapterSupport.adapter_name(Map.get(selecto, :adapter)) != :postgresql do
-          raise ArgumentError, "per-parent collection limits require PostgreSQL"
+          raise ArgumentError, "per-parent collection limits require PostgreSQL or SQLite"
         end
 
         {order_by_sql, []} = build_subquery_order_by(selecto, config, target_alias)

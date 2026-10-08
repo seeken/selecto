@@ -116,11 +116,11 @@ defmodule Selecto.Builder.LateralJoinTest do
     {sql_iodata, params} = LateralJoin.build_lateral_join(spec, adapter: SelectoDBSQLite.Adapter)
     {sql, finalized_params} = Params.finalize(sql_iodata, adapter: SelectoDBSQLite.Adapter)
 
-    assert params == []
-    assert finalized_params == []
+    assert params == ["$[*]"]
+    assert finalized_params == ["$[*]"]
 
     assert sql =~
-             ~r/INNER JOIN JSON_EACH\(selecto_root\.line_items, '\$\[\*\]'\) AS item_rows ON true/i
+             ~r/INNER JOIN JSON_EACH\(selecto_root\.line_items, \?\) AS item_rows ON true/i
 
     refute sql =~ "JOIN LATERAL"
   end

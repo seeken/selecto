@@ -232,13 +232,13 @@ defmodule Selecto.Builder.LateralJoin do
        when function_name in [:json_each, :json_tree] do
     function_sql = String.upcase(to_string(function_name))
 
-    args =
+    {args, params} =
       case path do
-        nil -> [source_ref]
-        value -> [source_ref, ", ", "'", escape_sql_literal(value), "'"]
+        nil -> {[source_ref], []}
+        value -> {[source_ref, ", ", {:param, value}], [value]}
       end
 
-    {[function_sql, "(", args, ")"], []}
+    {[function_sql, "(", args, ")"], params}
   end
 
   defp build_table_function_sql(unknown) do

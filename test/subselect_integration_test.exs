@@ -476,9 +476,11 @@ defmodule Selecto.SubselectIntegrationTest do
           }
         ])
 
-      assert_raise ArgumentError, "per-parent collection limits require PostgreSQL", fn ->
-        Subselect.build_subselect_clauses(selecto)
-      end
+      assert_raise ArgumentError,
+                   "per-parent collection limits require PostgreSQL or SQLite",
+                   fn ->
+                     Subselect.build_subselect_clauses(selecto)
+                   end
     end
 
     test "builds nested correlations when domain associations use string keys" do

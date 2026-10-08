@@ -358,8 +358,8 @@ defmodule Selecto.QueryMembersTest do
 
     {sql, params} = Selecto.to_sql(query)
 
-    assert params == ["sku-123"]
-    assert sql =~ "JSON_EACH(selecto_root.metadata, '$[*]')"
+    assert params == ["$[*]", "sku-123"]
+    assert sql =~ "JSON_EACH(selecto_root.metadata, ?)"
     assert sql =~ "item_rows.\"key\""
     assert sql =~ "item_rows.value"
     assert sql =~ ~r/where.*item_rows\.value\s*=\s*\?/i
