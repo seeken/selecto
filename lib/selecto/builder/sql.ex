@@ -43,15 +43,22 @@ defmodule Selecto.Builder.Sql do
   # is finalized. Parsing placeholder text out of finalized SQL cannot safely
   # distinguish binds from quoted literals or comments.
   def build_iodata(selecto, opts) do
+    {iodata, aliases, _joins} = build_iodata_with_joins(selecto, opts)
+    {iodata, aliases}
+  end
+
+  @doc false
+  # Adapter compositions preserve parameter markers and the resolved joins.
+  def build_iodata_with_joins(selecto, opts) do
     # Check for Set Operations first as they completely override query structure
     cond do
       Selecto.Builder.SetOperations.has_set_operations?(selecto) ->
-        build_set_operation_iodata(selecto, opts)
+        {iodata, aliases} = build_set_operation_iodata(selecto, opts)
+        {iodata, aliases, nil}
 
       true ->
         :ok = Selecto.Policy.validate_query!(selecto)
-        {iodata, aliases, _joins} = build_standard_query_iodata_with_joins(selecto, opts)
-        {iodata, aliases}
+        build_query_iodata_with_joins(selecto, opts)
     end
   end
 
@@ -62,14 +69,7 @@ defmodule Selecto.Builder.Sql do
   @spec build_with_joins(Selecto.Types.t(), Selecto.Types.sql_generation_options()) ::
           {String.t(), list(), [any()], list() | nil}
   def build_with_joins(selecto, opts) do
-    {iodata, aliases, joins} =
-      if Selecto.Builder.SetOperations.has_set_operations?(selecto) do
-        {iodata, aliases} = build_set_operation_iodata(selecto, opts)
-        {iodata, aliases, nil}
-      else
-        :ok = Selecto.Policy.validate_query!(selecto)
-        build_standard_query_iodata_with_joins(selecto, opts)
-      end
+    {iodata, aliases, joins} = build_iodata_with_joins(selecto, opts)
 
     {sql, params} = Params.finalize(iodata, adapter: selecto.adapter)
     {sql, aliases, params, joins}
@@ -449,6 +449,17 @@ defmodule Selecto.Builder.Sql do
       )
 
     {final_query_iodata, aliases, joins_in_order}
+  end
+
+  defp build_query_iodata_with_joins(selecto, opts) do
+    rollup? = Enum.any?(selecto.set.group_by, &match?({:rollup, _}, &1))
+
+    if rollup? and
+         Selecto.AdapterSupport.callback_available?(selecto.adapter, :render_rollup, 2) do
+      selecto.adapter.render_rollup(selecto, opts)
+    else
+      build_standard_query_iodata_with_joins(selecto, opts)
+    end
   end
 
   defp finalize_section(iodata, _adapter, _type) when iodata in [[], [""], ["()"], "", "()"],

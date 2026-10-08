@@ -3,6 +3,10 @@
 
 ## Unreleased
 
+- Add optional whole-query `render_rollup/2` adapter lowering and a structured
+  joined-query composition port. Validate query policy before rendering and keep
+  global bind finalization, aliases and join metadata; native ROLLUP is unchanged.
+
 - Update the test-only Postgrex lock to patched 0.22.4.
 
 - Repair the complete quality and Dialyzer gates with contracts matching the

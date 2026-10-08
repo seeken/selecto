@@ -9,6 +9,71 @@ defmodule Selecto.GroupOrderTest do
     def quote_identifier(identifier), do: to_string(identifier)
   end
 
+  defmodule WholeQueryRollupAdapter do
+    defdelegate connect(connection), to: NoRollupAdapter
+    defdelegate quote_identifier(identifier), to: NoRollupAdapter
+    def supports?(:rollup), do: true
+    def supports?(_feature), do: false
+    def placeholder(index), do: "$#{index}"
+
+    def render_rollup(selecto, opts) do
+      send(self(), {:rollup_rendered, selecto.set.group_by, opts})
+
+      {["SELECT '? $1', ", {:param, "first"}, ", ", {:param, "second"}], ["rolled"],
+       [:dimension_join]}
+    end
+  end
+
+  test "whole-query rollup rendering keeps structural binds, aliases and joins" do
+    query = rollup_dispatch_query()
+
+    assert {"SELECT '? $1', $1, $2", ["rolled"], ["first", "second"], [:dimension_join]} =
+             Selecto.Builder.Sql.build_with_joins(query, unique_projection_aliases: true)
+
+    assert_received {:rollup_rendered, [rollup: ["region"]], [unique_projection_aliases: true]}
+
+    assert {"SELECT '? $1', $1, $2", ["rolled"], ["first", "second"]} =
+             Selecto.Builder.Sql.build(query, [])
+  end
+
+  test "whole-query rollup callback is skipped for ordinary grouping" do
+    query = put_in(rollup_dispatch_query().set.group_by, ["region"])
+    assert {sql, _, []} = Selecto.Builder.Sql.build(query, [])
+    assert sql =~ "group by selecto_root.region"
+    refute_received {:rollup_rendered, _, _}
+  end
+
+  test "strict query policy is validated before whole-query adapter dispatch" do
+    query = rollup_dispatch_query(mode: :strict)
+    query = put_in(query.set.filtered, [{:raw_sql_filter, "1 = 1"}])
+    assert_raise Selecto.PolicyViolation, fn -> Selecto.Builder.Sql.build(query, []) end
+    refute_received {:rollup_rendered, _, _}
+  end
+
+  defp rollup_dispatch_query(opts \\ []) do
+    domain = %{
+      name: "Sales",
+      source: %{
+        source_table: "sales",
+        primary_key: :id,
+        fields: [:id, :region],
+        redact_fields: [],
+        columns: %{id: %{type: :integer}, region: %{type: :string}},
+        associations: %{}
+      },
+      schemas: %{},
+      joins: %{}
+    }
+
+    Selecto.configure(
+      domain,
+      :mock_connection,
+      Keyword.put(opts, :adapter, WholeQueryRollupAdapter)
+    )
+    |> Selecto.select(["region"])
+    |> Selecto.group_by(rollup: ["region"])
+  end
+
   test "GROUP BY and ORDER BY with new iodata parameterization (phase 2)" do
     # Domain configuration
     domain = %{
