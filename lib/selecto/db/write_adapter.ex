@@ -49,6 +49,8 @@ defmodule Selecto.DB.WriteAdapter do
              {:ok, Selecto.Write.CandidateState.t()} | {:error, Selecto.Write.Error.t()})
           | (Selecto.Write.RecordRequest.t() ->
                {:ok, Selecto.Write.RecordState.t()} | {:error, Selecto.Write.Error.t()})
+          | (Selecto.Write.RuleCandidateRequest.t() ->
+               {:ok, Selecto.Write.RecordState.t()} | {:error, Selecto.Write.Error.t()})
   @typedoc "A governed preparation: returns the write with its authorization."
   @type prepare_fun ::
           (prepared_state_loader() ->
@@ -88,7 +90,14 @@ defmodule Selecto.DB.WriteAdapter do
   @callback execute_prepared_write_unsafe(connection(), unsafe_prepare_fun(), keyword()) ::
               {:ok, execution_result()} | {:error, Selecto.Write.Error.t()} | {:error, term()}
 
-  @optional_callbacks execute_write_unsafe: 3,
+  @doc "Prepares a preview against protected native state, always rolling back private projections."
+  @callback preview_prepared_write(connection(), unsafe_prepare_fun(), keyword()) ::
+              {:ok, Selecto.Write.Preview.t()}
+              | {:error, Selecto.Write.Error.t()}
+              | {:error, term()}
+
+  @optional_callbacks preview_prepared_write: 3,
+                      execute_write_unsafe: 3,
                       execute_prepared_write: 3,
                       execute_prepared_write_unsafe: 3
 end

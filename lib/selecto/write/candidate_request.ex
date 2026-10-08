@@ -35,6 +35,8 @@ defmodule Selecto.Write.CandidateRequest do
             context: %{},
             identity_fields: [],
             fields: [],
+            field_types: %{},
+            scope_predicate: nil,
             max_rows: 1_000
 
   @type t :: %__MODULE__{
@@ -51,6 +53,8 @@ defmodule Selecto.Write.CandidateRequest do
           context: map(),
           identity_fields: [String.t()],
           fields: [String.t()],
+          field_types: map(),
+          scope_predicate: term(),
           max_rows: pos_integer()
         }
 end
