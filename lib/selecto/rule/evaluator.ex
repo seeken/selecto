@@ -78,22 +78,28 @@ defmodule Selecto.Rule.Evaluator do
         definition = Map.fetch!(contract.definitions, binding.rule.id)
         normalizer = binding.normalizer && Map.fetch!(contract.normalizers, binding.normalizer.id)
 
-        with :passed <- evaluate_condition(binding.condition, values, opts),
-             {:ok, normalized} <- apply_normalizer(normalizer, value),
-             result <-
-               safe_evaluate(definition.test, normalized, Keyword.put(opts, :values, values)) do
+        with {:ok, normalized} <- apply_normalizer(normalizer, value) do
           updated =
             if normalizer && value != @missing,
               do: put_path(values, binding.subject.path, normalized),
               else: values
 
+          evaluation_opts = Keyword.put(opts, :values, updated)
+
+          result =
+            case evaluate_condition(
+                   binding.condition,
+                   normalized,
+                   Keyword.put(evaluation_opts, :condition_values, updated)
+                 ) do
+              :passed -> safe_evaluate(definition.test, normalized, evaluation_opts)
+              :not_applicable -> :not_applicable
+              {:error, error} -> {:error, error}
+            end
+
           outcome = outcome(binding, definition, result)
           {updated, outcomes ++ [outcome], obligations}
         else
-          :not_applicable ->
-            outcome = outcome(binding, definition, :not_applicable)
-            {values, outcomes ++ [outcome], obligations}
-
           {:error, error} ->
             outcome = outcome(binding, definition, {:error, error})
             {values, outcomes ++ [outcome], obligations}
@@ -385,7 +391,7 @@ defmodule Selecto.Rule.Evaluator do
     do: failed(:invalid_type, "value must be an object")
 
   defp do_evaluate(%{"op" => "path.test", "path" => path, "test" => nested_test}, value, opts) do
-    do_evaluate(nested_test, fetch_path(value, path), opts)
+    do_evaluate(nested_test, fetch_path(Keyword.get(opts, :condition_values, value), path), opts)
   end
 
   defp do_evaluate(%{"op" => "value.eq", "value" => expected}, value, _opts),

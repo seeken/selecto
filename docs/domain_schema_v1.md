@@ -1017,6 +1017,29 @@ compares its subject with an authored semantic path using `gt`, `gte`, `lt`,
 not exact literals. Use integers, decimal strings, or `Decimal` values at the
 Elixir evaluator boundary.
 
+`Selecto.Rule.Contract.compile_rules/1,2` and the matching `Compiler` functions
+compile a standalone authored rules artifact. They resolve registry references
+without assuming a Domain field or action namespace. `Contract.compile/1`
+additionally resolves subjects and their types against the Domain for governed
+execution. Both APIs preserve nonempty string IDs and supported rule-AST
+conditions. The standalone API accepts `diagnostics: :portable` for stable
+contract error classes and retains changed detailed codes as `legacy_code`.
+Binding normalizers run before the condition and rule test. Portable conditions
+evaluate the normalized binding subject; `value.compare_path` can inspect the
+complete normalized values. The `path.test` extension in a condition retains
+its complete-value path lookup, including when nested in a logical condition.
+Skipped conditions retain successful normalization, while normalization or
+condition errors produce a non-passing outcome.
+
+Positive version digit strings are parsed exactly into integers, including
+versions beyond binary floating-point precision; strings are limited to 4096
+bytes and cannot contain signs, whitespace or redundant leading zeroes. Exact
+numeric declaration strings use plain decimal syntax and a 4096-byte bound.
+Finite native `Decimal` operands also retain exact values, with their formatted
+expansion bounded before fingerprinting. Scientific strings and nonfinite
+values reject compilation. Operations and semantic uniqueness paths must be
+unique after atom/string normalization.
+
 The Elixir profile also validates strict ISO-8601 `temporal.date`,
 `temporal.time`, and offset-bearing `temporal.instant` values. A
 `temporal.compare_path` declaration names one temporal kind plus a related

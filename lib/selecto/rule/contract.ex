@@ -23,6 +23,7 @@ defmodule Selecto.Rule.Contract do
   @supported_enforcement ~w(required advisory)
   @supported_normalizers ~w(text.trim text.uppercase text.lowercase text.nfc text.line_endings text.empty_to_null)
   @projection_keys ~w(schema definitions normalizers bindings required_features fingerprint evaluation)
+  @max_numeric_literal_bytes 4096
   @supported_ops ~w(
     presence.required presence.non_null presence.absent type.is text.nonblank
     text.length text.pattern text.prefix text.suffix text.contains
@@ -60,6 +61,70 @@ defmodule Selecto.Rule.Contract do
     do: {:error, [error(:invalid_rules_input, [], "rules input must be a Domain map")]}
 
   @doc """
+  Compiles a standalone authored rules artifact without a Domain namespace.
+
+  Registry references are resolved within the artifact. Subject paths and action
+  names retain their syntax here; `compile/1` additionally resolves them against
+  a Domain before governed execution. `diagnostics: :portable` reports portable
+  contract error classes and retains a changed diagnostic's `legacy_code`.
+  """
+  @spec compile_rules(term(), keyword()) :: {:ok, t()} | {:error, [map()]}
+  def compile_rules(rules, opts \\ []) do
+    result =
+      if is_map(rules) and
+           Enum.all?([:schema, :definitions, :normalizers, :bindings], &(value(rules, &1) != nil)) do
+        compile_authored_rules(rules)
+      else
+        {:error,
+         [
+           error(
+             :invalid_rules_section,
+             [:rules],
+             "standalone rules require schema and all registries"
+           )
+         ]}
+      end
+
+    case {Keyword.get(opts, :diagnostics, :legacy), result} do
+      {:portable, {:error, error}} when is_map(error) ->
+        {:error, [portable_diagnostic(error)]}
+
+      {:portable, {:error, errors}} ->
+        {:error, Enum.map(errors, &portable_diagnostic/1)}
+
+      {_diagnostics, {:error, error}} when is_map(error) ->
+        {:error, [error]}
+
+      {_diagnostics, result} ->
+        result
+    end
+  end
+
+  defp portable_diagnostic(%{code: code} = diagnostic) do
+    portable_code =
+      case code do
+        code
+        when code in [
+               :invalid_rule_version,
+               :invalid_text_pattern,
+               :unknown_rule_option,
+               :unsupported_rule_operator
+             ] ->
+          code
+
+        code when code in [:unresolved_rule_reference, :unresolved_normalizer_reference] ->
+          :unresolved_rule_reference
+
+        _code ->
+          :invalid_data_rules_contract
+      end
+
+    if code == portable_code,
+      do: diagnostic,
+      else: diagnostic |> Map.put(:code, portable_code) |> Map.put(:legacy_code, code)
+  end
+
+  @doc """
   Verifies and compiles a server-produced portable rule projection for local,
   non-authoritative evaluation.
 
@@ -70,7 +135,7 @@ defmodule Selecto.Rule.Contract do
   @spec compile_projection(map()) :: {:ok, t()} | {:error, [map()]}
   def compile_projection(projection) when is_map(projection) do
     with :ok <- known_keys(projection, @projection_keys, [:rules]),
-         {:ok, contract} <- compile_rules(authored_projection_rules(projection)) do
+         {:ok, contract} <- compile_authored_rules(authored_projection_rules(projection)) do
       compiled = project(contract)
 
       if Map.take(projection, @projection_keys) == compiled do
@@ -111,7 +176,7 @@ defmodule Selecto.Rule.Contract do
   def compile_normalized(normalized) do
     rules = Map.get(normalized, :rules, %{})
 
-    case compile_rules(rules) do
+    case compile_authored_rules(rules) do
       {:ok, contract} ->
         case resolve_subjects(contract, normalized) do
           {:ok, contract} -> {:ok, contract}
@@ -186,11 +251,11 @@ defmodule Selecto.Rule.Contract do
   defp normalize_projected_stages(stages) when is_list(stages),
     do: MapSet.new(stages, &to_string/1)
 
-  defp compile_rules(rules) when rules in [nil, %{}] do
+  defp compile_authored_rules(rules) when rules in [nil, %{}] do
     {:ok, finish(%__MODULE__{definitions: %{}, normalizers: %{}, bindings: %{}})}
   end
 
-  defp compile_rules(rules) when is_map(rules) do
+  defp compile_authored_rules(rules) when is_map(rules) do
     with :ok <- known_keys(rules, @rules_keys, [:rules]),
          :ok <- require_schema(rules),
          {:ok, definitions} <- compile_registry(value(rules, :definitions, %{}), :definition),
@@ -206,7 +271,7 @@ defmodule Selecto.Rule.Contract do
     end
   end
 
-  defp compile_rules(other) do
+  defp compile_authored_rules(other) do
     {:error,
      [error(:invalid_rules_section, [:rules], "rules must be a map", actual: kind(other))]}
   end
@@ -228,13 +293,14 @@ defmodule Selecto.Rule.Contract do
 
   defp compile_registry(registry, entry_kind) when is_map(registry) do
     registry
-    |> Enum.sort_by(fn {id, _spec} -> to_string(id) end)
+    |> Enum.sort_by(fn {id, _spec} -> maybe_id(id) || "" end)
     |> Enum.reduce_while({:ok, %{}}, fn {id, spec}, {:ok, acc} ->
-      id = to_string(id)
+      valid_id? = non_empty_id?(id)
+      id = maybe_id(id)
 
       result =
         cond do
-          id == "" ->
+          not valid_id? ->
             {:error,
              error(:invalid_rule_id, [:rules, plural(entry_kind)], "rule ids must be non-empty")}
 
@@ -448,15 +514,25 @@ defmodule Selecto.Rule.Contract do
          {:ok, segments} <- semantic_path(value(subject, :path), path ++ [:path]) do
       action = value(subject, :action)
 
-      if scope == "action_input" and not non_empty_id?(action) do
-        {:error,
-         error(
-           :missing_rule_action,
-           path ++ [:action],
-           "action_input subjects must name an action"
-         )}
-      else
-        {:ok, compact(%{scope: scope, path: segments, action: maybe_id(action)})}
+      cond do
+        scope == "action_input" and not non_empty_id?(action) ->
+          {:error,
+           error(
+             :missing_rule_action,
+             path ++ [:action],
+             "action_input subjects must name an action"
+           )}
+
+        scope != "action_input" and Core.fetch_map_value(subject, :action) != :__missing__ ->
+          {:error,
+           error(
+             :invalid_rule_subject,
+             path ++ [:action],
+             "only action_input subjects may name an action"
+           )}
+
+        true ->
+          {:ok, compact(%{scope: scope, path: segments, action: maybe_id(action)})}
       end
     end
   end
@@ -466,11 +542,11 @@ defmodule Selecto.Rule.Contract do
 
   defp compile_ref(ref, path) when is_map(ref) do
     with :ok <- known_keys(ref, @ref_keys, path),
-         id when is_binary(id) and id != "" <- maybe_id(value(ref, :id)),
+         true <- non_empty_id?(value(ref, :id)),
          {:ok, version} <- positive_version(value(ref, :version), path ++ [:version]) do
-      {:ok, %{id: id, version: version}}
+      {:ok, %{id: maybe_id(value(ref, :id)), version: version}}
     else
-      nil ->
+      false ->
         {:error,
          error(:invalid_rule_reference, path ++ [:id], "rule references need a non-empty id")}
 
@@ -731,11 +807,13 @@ defmodule Selecto.Rule.Contract do
   defp compile_unique_by(test, path) do
     with :ok <- known_keys(test, ~w(op paths), path),
          paths when is_list(paths) and paths != [] <- value(test, :paths),
-         true <- Enum.all?(paths, &valid_semantic_path?/1) do
+         true <- Enum.all?(paths, &valid_semantic_path?/1),
+         paths = Enum.map(paths, &Enum.map(&1, fn segment -> to_string(segment) end)),
+         true <- MapSet.size(MapSet.new(paths)) == length(paths) do
       {:ok,
        %{
          "op" => "collection.unique_by",
-         "paths" => Enum.map(paths, &Enum.map(&1, fn segment -> to_string(segment) end))
+         "paths" => paths
        }}
     else
       _ ->
@@ -743,7 +821,7 @@ defmodule Selecto.Rule.Contract do
          error(
            :invalid_unique_rule,
            path ++ [:paths],
-           "collection.unique_by requires non-empty semantic paths"
+           "collection.unique_by requires non-empty unique semantic paths"
          )}
     end
   end
@@ -1277,7 +1355,7 @@ defmodule Selecto.Rule.Contract do
 
   defp known_keys(map, allowed, path) do
     unknown =
-      map |> Map.keys() |> Enum.map(&to_string/1) |> Enum.reject(&(&1 in allowed)) |> Enum.sort()
+      map |> Map.keys() |> Enum.map(&maybe_id/1) |> Enum.reject(&(&1 in allowed)) |> Enum.sort()
 
     if unknown == [],
       do: :ok,
@@ -1289,8 +1367,22 @@ defmodule Selecto.Rule.Contract do
   defp positive_version(version, _path) when is_integer(version) and version > 0,
     do: {:ok, version}
 
-  defp positive_version(_version, path),
-    do: {:error, error(:invalid_rule_version, path, "rule versions must be positive integers")}
+  defp positive_version(version, path) when is_binary(version) and byte_size(version) <= 4096 do
+    if Regex.match?(~r/\A[1-9][0-9]*\z/, version),
+      do: {:ok, String.to_integer(version)},
+      else: invalid_version(path)
+  end
+
+  defp positive_version(_version, path), do: invalid_version(path)
+
+  defp invalid_version(path),
+    do:
+      {:error,
+       error(
+         :invalid_rule_version,
+         path,
+         "rule versions must be positive integers or canonical digit strings of at most 4096 bytes"
+       )}
 
   defp semantic_path(path, error_path) when is_list(path) and path != [] do
     if Enum.all?(path, &non_empty_id?/1) do
@@ -1318,17 +1410,18 @@ defmodule Selecto.Rule.Contract do
     do: is_list(path) and path != [] and Enum.all?(path, &non_empty_id?/1)
 
   defp operations(operations, path) when is_list(operations) do
-    values = Enum.map(operations, &to_string/1)
+    values = Enum.map(operations, &maybe_id/1)
 
-    if Enum.all?(values, &(&1 in ~w(insert update delete upsert))),
-      do: {:ok, values},
-      else:
-        {:error,
-         error(
-           :invalid_rule_operations,
-           path,
-           "rule operations must be insert, update, delete, or upsert"
-         )}
+    if Enum.all?(values, &(&1 in ~w(insert update delete upsert))) and
+         MapSet.size(MapSet.new(values)) == length(values),
+       do: {:ok, values},
+       else:
+         {:error,
+          error(
+            :invalid_rule_operations,
+            path,
+            "rule operations must be unique insert, update, delete, or upsert values"
+          )}
   end
 
   defp operations(_operations, path),
@@ -1366,6 +1459,17 @@ defmodule Selecto.Rule.Contract do
 
       true ->
         :ok
+    end
+  end
+
+  defp number_literal(%Decimal{} = literal, path) do
+    case decimal(literal) do
+      {:ok, decimal} ->
+        {:ok, %{type: "decimal", value: Decimal.to_string(decimal, :normal), decimal: decimal}}
+
+      :error ->
+        {:error,
+         error(:invalid_number_literal, path, "numeric literals must be finite exact values")}
     end
   end
 
@@ -1426,16 +1530,38 @@ defmodule Selecto.Rule.Contract do
     end
   end
 
-  defp decimal(value) when is_integer(value), do: {:ok, Decimal.new(value)}
+  defp decimal(value) when is_integer(value) do
+    if byte_size(Integer.to_string(value)) <= @max_numeric_literal_bytes,
+      do: {:ok, Decimal.new(value)},
+      else: :error
+  end
 
-  defp decimal(value) when is_binary(value) do
-    case Decimal.parse(value) do
-      {decimal, ""} -> {:ok, decimal}
-      _ -> :error
+  defp decimal(value) when is_binary(value) and byte_size(value) <= @max_numeric_literal_bytes do
+    if Regex.match?(~r/\A-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?\z/, value) do
+      case Decimal.parse(value) do
+        {decimal, ""} -> {:ok, decimal}
+        _ -> :error
+      end
+    else
+      :error
     end
   end
 
-  defp decimal(%Decimal{} = value), do: {:ok, value}
+  defp decimal(%Decimal{coef: coefficient, exp: exponent, sign: sign} = value)
+       when is_integer(coefficient) and coefficient >= 0 and sign in [-1, 1] and
+              is_integer(exponent) and
+              abs(exponent) <= @max_numeric_literal_bytes do
+    coefficient_bytes = byte_size(Integer.to_string(coefficient))
+    # Bound expansion before serializing the exact value for the fingerprint.
+    expanded_bytes =
+      if exponent < 0,
+        do: max(coefficient_bytes, 1 - exponent) + 2,
+        else: coefficient_bytes + exponent
+
+    expanded_bytes = expanded_bytes + if(sign < 0, do: 1, else: 0)
+    if expanded_bytes <= @max_numeric_literal_bytes, do: {:ok, value}, else: :error
+  end
+
   defp decimal(_value), do: :error
 
   defp portable_pattern(pattern) do
@@ -1491,7 +1617,7 @@ defmodule Selecto.Rule.Contract do
   defp non_empty_id?(value),
     do:
       (is_atom(value) and value not in [nil, true, false]) or
-        (is_binary(value) and String.trim(value) != "")
+        (is_binary(value) and value != "")
 
   defp native_constraint_id(value, path) do
     if is_binary(value) and String.match?(value, ~r/\A[A-Za-z][A-Za-z0-9_.-]*\z/) do
