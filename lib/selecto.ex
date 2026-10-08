@@ -1353,6 +1353,7 @@ defmodule Selecto do
             name: "#{alias_name}_ordinality",
             field: to_string(ordinality),
             requires_join: alias_name,
+            select: sqlite_unnest_ordinality(selecto, alias_name),
             type: :integer
           }
         }
@@ -1361,6 +1362,14 @@ defmodule Selecto do
       end
 
     put_in(updated_selecto.config[:columns], Map.merge(current_columns, columns_to_add))
+  end
+
+  defp sqlite_unnest_ordinality(selecto, alias_name) do
+    if Selecto.AdapterSupport.adapter_name(selecto.adapter) == :sqlite do
+      alias_sql = selecto.adapter.quote_identifier(to_string(alias_name))
+      key_sql = selecto.adapter.quote_identifier("key")
+      "(#{alias_sql}.#{key_sql} + 1)"
+    end
   end
 
   @doc """

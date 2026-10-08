@@ -1005,55 +1005,7 @@ defmodule Selecto.Builder.Subselect do
          target_alias,
          source_alias
        ) do
-    key_condition =
-      correlation_equality(
-        selecto,
-        target_alias,
-        association.related_key,
-        source_alias,
-        association.owner_key
-      )
-
-    case {Map.get(association, :source_scope_key), Map.get(association, :target_scope_key)} do
-      {nil, nil} ->
-        key_condition
-
-      {source_scope_key, target_scope_key}
-      when not is_nil(source_scope_key) and not is_nil(target_scope_key) ->
-        [
-          key_condition,
-          " AND ",
-          correlation_equality(
-            selecto,
-            target_alias,
-            target_scope_key,
-            source_alias,
-            source_scope_key
-          )
-        ]
-
-      _incomplete_scope ->
-        raise ArgumentError,
-              "association scope requires both :source_scope_key and :target_scope_key"
-    end
-  end
-
-  defp correlation_equality(
-         selecto,
-         left_alias,
-         left_field,
-         right_alias,
-         right_field
-       ) do
-    [
-      left_alias,
-      ".",
-      adapter_quote_identifier(selecto, to_string(left_field)),
-      " = ",
-      right_alias,
-      ".",
-      adapter_quote_identifier(selecto, to_string(right_field))
-    ]
+    Selecto.Builder.Association.predicate(selecto, association, target_alias, source_alias)
   end
 
   defp build_exists_correlation(selecto, target_schema, join_path, source_alias) do

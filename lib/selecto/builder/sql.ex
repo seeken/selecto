@@ -1173,6 +1173,29 @@ defmodule Selecto.Builder.Sql do
 
   defp build_join_on_clause(selecto, join, config) do
     base_on =
+      case Map.get(config, :portable_association) do
+        association when is_map(association) ->
+          Selecto.Builder.Association.predicate(
+            selecto,
+            association,
+            to_string(join),
+            to_string(config.requires_join)
+          )
+
+        nil ->
+          build_standard_join_on_clause(selecto, join, config)
+      end
+
+    append_param_filters_to_on_clause(
+      selecto,
+      join,
+      base_on,
+      Map.get(config, :param_filters, %{})
+    )
+  end
+
+  defp build_standard_join_on_clause(selecto, join, config) do
+    base_on =
       case Map.get(config, :on, []) do
         on_conditions when is_list(on_conditions) and on_conditions != [] ->
           requires_join = Map.get(config, :requires_join, :selecto_root)
@@ -1193,14 +1216,7 @@ defmodule Selecto.Builder.Sql do
           ]
       end
 
-    base_on = append_association_scope_to_on_clause(selecto, join, base_on, config)
-
-    append_param_filters_to_on_clause(
-      selecto,
-      join,
-      base_on,
-      Map.get(config, :param_filters, %{})
-    )
+    append_association_scope_to_on_clause(selecto, join, base_on, config)
   end
 
   defp append_association_scope_to_on_clause(selecto, join, base_on, config) do
