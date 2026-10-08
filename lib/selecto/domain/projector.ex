@@ -540,7 +540,7 @@ defmodule Selecto.Domain.Projector do
     filterable? = query_contract_filterable?(column, id, source_kind, filterable_fields)
     aggregatable? = query_contract_aggregatable?(column, type_id, detail_selectable?)
 
-    %{
+    surface = %{
       detail_selectable: detail_selectable?,
       filterable: filterable?,
       sortable: query_contract_sortable?(column, type_id, detail_selectable?),
@@ -553,6 +553,24 @@ defmodule Selecto.Domain.Projector do
       default_grouping: query_contract_default(column, :default_grouping),
       default_aggregate: query_contract_default(column, :default_aggregate)
     }
+
+    # A hidden field is unavailable to public query consumers even when its
+    # authored role flags or operator lists explicitly enable it.
+    if query_contract_default(column, :hidden) == true do
+      Map.merge(surface, %{
+        detail_selectable: false,
+        filterable: false,
+        sortable: false,
+        groupable: false,
+        aggregatable: false,
+        comparators: [],
+        aggregate_functions: [],
+        default_grouping: nil,
+        default_aggregate: nil
+      })
+    else
+      surface
+    end
   end
 
   defp query_contract_default(column, key) when is_map(column) do

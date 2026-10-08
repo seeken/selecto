@@ -1165,6 +1165,45 @@ defmodule Selecto.DomainTest do
       refute Map.has_key?(projection, :future_runtime_metadata)
     end
 
+    test "hidden columns cannot advertise public query roles or explicit operators" do
+      enabled = %{
+        hidden: true,
+        detail_selectable: true,
+        filterable: true,
+        sortable: true,
+        groupable: true,
+        aggregatable: true,
+        comparators: [:eq],
+        aggregate_functions: [:sum]
+      }
+
+      for flags <- [enabled, Map.new(enabled, fn {key, value} -> {to_string(key), value} end)] do
+        domain =
+          query_contract_domain()
+          |> update_in([:source, :columns, :total], &Map.merge(&1, flags))
+          |> update_in([:schemas, :customers, :columns, :name], &Map.merge(&1, flags))
+          |> update_in([:custom_columns, "status_label"], &Map.merge(&1, flags))
+
+        assert {:ok, contract, _diagnostics} = Domain.query_contract(domain)
+
+        for id <- ["total", "customers.name", "customer.name", "status_label"] do
+          field = Enum.find(contract.fields, &(&1.id == id))
+          assert field
+
+          for role <- [:detail_selectable, :filterable, :sortable, :groupable, :aggregatable] do
+            refute Map.fetch!(field, role), "hidden #{id} advertised #{role}"
+          end
+
+          assert field.comparators == []
+          assert field.aggregate_functions == []
+        end
+
+        visible = Enum.find(contract.fields, &(&1.id == "customer_id"))
+        assert visible.detail_selectable and visible.filterable and visible.sortable
+        assert visible.groupable and visible.aggregatable
+      end
+    end
+
     test "projects a constrained query contract for tools and AI" do
       {:ok, normalized, _diagnostics} = Domain.normalize(query_contract_domain())
 

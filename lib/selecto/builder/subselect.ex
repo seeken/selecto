@@ -463,33 +463,78 @@ defmodule Selecto.Builder.Subselect do
          child_alias
        ) do
     parent_schema_config = get_target_schema_config(selecto, parent_config.target_schema)
-    child_assoc_name = child_assoc_name(parent_config, child_config)
-    association = fetch_equivalent_key(parent_schema_config.associations || %{}, child_assoc_name)
+    child_path = nested_join_path!(selecto, parent_config, child_config)
 
-    if association do
+    with {:ok, edges} <- resolve_join_edges(selecto, parent_schema_config, child_path, []),
+         :ok <-
+           validate_correlation_target(
+             selecto,
+             List.last(edges).association.queryable,
+             child_config.target_schema
+           ) do
       condition =
-        build_association_correlation_condition(
-          selecto,
-          association,
-          child_alias,
-          parent_alias
-        )
+        case edges do
+          [edge] ->
+            edge_correlation(selecto, edge, child_alias, parent_alias)
+
+          _ ->
+            {intermediate_edges, [final_edge]} = Enum.split(edges, -1)
+
+            {join_clauses, start_correlation, end_correlation} =
+              render_join_chain(
+                selecto,
+                intermediate_edges,
+                final_edge,
+                parent_alias,
+                child_alias
+              )
+
+            [
+              "EXISTS (SELECT 1 FROM ",
+              join_clauses,
+              " WHERE ",
+              start_correlation,
+              " AND ",
+              end_correlation,
+              ")"
+            ]
+        end
 
       {condition, []}
     else
-      raise ArgumentError,
-            "Cannot build nested subselect correlation from #{inspect(parent_config.target_schema)} through #{inspect(child_assoc_name)}"
+      {:error, reason} -> raise ArgumentError, reason
     end
   end
 
-  defp child_assoc_name(parent_config, child_config) do
-    parent_path = normalize_join_path(Map.get(parent_config, :join_path, []))
-    child_path = normalize_join_path(Map.get(child_config, :join_path, []))
+  defp nested_join_path!(selecto, parent_config, child_config) do
+    parent_path = config_join_path!(selecto, parent_config)
+    child_path = config_join_path!(selecto, child_config)
 
-    child_path
-    |> Enum.drop(length(parent_path))
-    |> List.first()
-    |> Kernel.||(List.last(child_path))
+    cond do
+      length(child_path) > length(parent_path) and
+          Enum.take(child_path, length(parent_path)) == parent_path ->
+        Enum.drop(child_path, length(parent_path))
+
+      length(child_path) == 1 ->
+        child_path
+
+      true ->
+        raise ArgumentError,
+              "Nested subselect path #{inspect(child_path)} must extend its parent path #{inspect(parent_path)}"
+    end
+  end
+
+  defp config_join_path!(selecto, config) do
+    case Map.get(config, :join_path) do
+      path when is_list(path) and path != [] ->
+        normalize_join_path(path)
+
+      _ ->
+        case Selecto.Subselect.resolve_join_path(selecto, config.target_schema) do
+          {:ok, path} -> normalize_join_path(path)
+          {:error, reason} -> raise ArgumentError, reason
+        end
+    end
   end
 
   defp nested_subselects(config), do: Map.get(config, :nested, Map.get(config, "nested", []))
@@ -923,10 +968,15 @@ defmodule Selecto.Builder.Subselect do
     association = Map.get(current_schema_config.associations, target_schema)
 
     if association do
+      ensure_correlation_target!(selecto, association.queryable, target_schema)
+
       condition =
         build_association_correlation_condition(
           selecto,
+          target_schema,
           association,
+          current_schema_config,
+          get_target_schema_config(selecto, association.queryable),
           target_alias,
           source_alias
         )
@@ -947,10 +997,15 @@ defmodule Selecto.Builder.Subselect do
     association = Map.get(current_schema_config.associations, assoc_name)
 
     if association do
+      ensure_correlation_target!(selecto, association.queryable, target_schema)
+
       condition =
         build_association_correlation_condition(
           selecto,
+          assoc_name,
           association,
+          current_schema_config,
+          get_target_schema_config(selecto, association.queryable),
           target_alias,
           source_alias
         )
@@ -965,7 +1020,10 @@ defmodule Selecto.Builder.Subselect do
 
   defp build_association_correlation_condition(
          selecto,
+         association_id,
          association,
+         source_relation,
+         target_relation,
          target_alias,
          source_alias
        ) do
@@ -978,12 +1036,16 @@ defmodule Selecto.Builder.Subselect do
         association.owner_key
       )
 
-    case {Map.get(association, :source_scope_key), Map.get(association, :target_scope_key)} do
+    case Selecto.Schema.Join.association_scope_keys!(
+           association_id,
+           association,
+           source_relation,
+           target_relation
+         ) do
       {nil, nil} ->
         key_condition
 
-      {source_scope_key, target_scope_key}
-      when not is_nil(source_scope_key) and not is_nil(target_scope_key) ->
+      {source_scope_key, target_scope_key} ->
         [
           key_condition,
           " AND ",
@@ -995,10 +1057,6 @@ defmodule Selecto.Builder.Subselect do
             source_scope_key
           )
         ]
-
-      _incomplete_scope ->
-        raise ArgumentError,
-              "association scope requires both :source_scope_key and :target_scope_key"
     end
   end
 
@@ -1020,227 +1078,153 @@ defmodule Selecto.Builder.Subselect do
     ]
   end
 
+  defp build_exists_correlation(selecto, target_schema, [assoc_name], source_alias) do
+    build_direct_correlation_with_assoc(selecto, target_schema, assoc_name, source_alias)
+  end
+
   defp build_exists_correlation(selecto, target_schema, join_path, source_alias) do
-    # For actor → film_actors → film, we need:
-    # EXISTS (SELECT 1 FROM film_actor fa WHERE fa.actor_id = selecto_root.actor_id AND fa.film_id = sub_film.film_id)
-    case join_path do
-      [junction_schema, ^target_schema] ->
-        # Simple many-to-many junction (actor → film_actors → film)
-        # Path includes both junction and target
-        build_single_junction_exists(selecto, target_schema, junction_schema, source_alias)
-
-      [assoc_name] ->
-        # Single-element path - could be:
-        # 1. Direct self-join (categories.parent_category → categories)
-        # 2. Direct one-to-many (user → orders)
-        # Use direct correlation, passing the association name
-        build_direct_correlation_with_assoc(selecto, target_schema, assoc_name, source_alias)
-
-      multi_path ->
-        # Multi-step path (3+ elements) - build chained joins
-        build_multi_step_exists(selecto, target_schema, multi_path, source_alias)
-    end
-  end
-
-  defp build_single_junction_exists(selecto, target_schema, junction_schema, source_alias) do
-    target_alias = generate_subquery_alias(target_schema)
-    junction_alias = generate_subquery_alias(junction_schema)
-
-    # Get junction table name
-    junction_table = get_target_table(selecto, junction_schema)
-
-    source_to_junction_assoc = Map.get(selecto.domain.source.associations, junction_schema)
-
-    # Get junction association (film_actors → film)
-    junction_schema_config = Map.get(selecto.domain.schemas, junction_schema)
-    target_assoc = Map.get(junction_schema_config.associations, target_schema)
-
-    if source_to_junction_assoc && target_assoc do
-      exists_condition = [
-        "EXISTS (SELECT 1 FROM ",
-        junction_table,
-        " ",
-        junction_alias,
-        " WHERE ",
-        junction_alias,
-        ".",
-        escape_identifier(to_string(source_to_junction_assoc.related_key)),
-        " = ",
-        source_alias,
-        ".",
-        escape_identifier(to_string(source_to_junction_assoc.owner_key)),
-        " AND ",
-        junction_alias,
-        ".",
-        escape_identifier(to_string(target_assoc.owner_key)),
-        " = ",
-        target_alias,
-        ".",
-        escape_identifier(to_string(target_assoc.related_key)),
-        ")"
-      ]
-
-      {:ok, exists_condition}
-    else
-      {:error, "Cannot build EXISTS correlation - missing association configuration"}
-    end
-  end
-
-  defp build_multi_step_exists(selecto, target_schema, multi_path, source_alias) do
-    # For paths like [:orders, :order_items, :products]
-    # Build: EXISTS (SELECT 1 FROM orders j1 INNER JOIN order_items j2 ON ... INNER JOIN products j3 ON ...)
     target_alias = generate_subquery_alias(target_schema)
 
-    source_schema_config = selecto.domain.source
-
-    # Build the chain of JOINs
-    case build_join_chain(selecto, source_schema_config, multi_path, source_alias, target_alias) do
+    case build_join_chain(selecto, join_path, source_alias, target_schema, target_alias) do
       {:ok, {join_clauses, start_correlation, end_correlation}} ->
-        exists_sql = [
-          "EXISTS (SELECT 1 FROM ",
-          join_clauses,
-          " WHERE ",
-          start_correlation,
-          " AND ",
-          end_correlation,
-          ")"
-        ]
-
-        {:ok, exists_sql}
+        {:ok,
+         [
+           "EXISTS (SELECT 1 FROM ",
+           join_clauses,
+           " WHERE ",
+           start_correlation,
+           " AND ",
+           end_correlation,
+           ")"
+         ]}
 
       {:error, reason} ->
         {:error, reason}
     end
   end
 
-  # Build a chain of INNER JOINs for multi-step paths
-  # Returns: {:ok, {join_clauses_iodata, start_correlation, end_correlation}}
-  defp build_join_chain(selecto, source_config, join_path, source_alias, target_alias) do
-    # Validate we have a path
+  defp build_join_chain(selecto, join_path, source_alias, target_schema, target_alias) do
     if length(join_path) < 2 do
-      {:error, "Multi-step path must have at least 2 schemas"}
+      {:error, "Multi-step path must have at least 2 associations"}
     else
-      case build_join_chain_recursive(
-             selecto,
-             source_config,
-             join_path,
-             source_alias,
-             target_alias,
-             [],
-             nil
-           ) do
-        {:ok, result} -> {:ok, result}
-        {:error, reason} -> {:error, reason}
+      with {:ok, edges} <- resolve_join_edges(selecto, selecto.domain.source, join_path, []),
+           :ok <-
+             validate_correlation_target(
+               selecto,
+               List.last(edges).association.queryable,
+               target_schema
+             ) do
+        {intermediate_edges, [final_edge]} = Enum.split(edges, -1)
+
+        {:ok,
+         render_join_chain(selecto, intermediate_edges, final_edge, source_alias, target_alias)}
       end
     end
   end
 
-  # Recursively build the JOIN chain
-  # prev_join_info format: {prev_alias, prev_association, start_correlation}
-  defp build_join_chain_recursive(
-         selecto,
-         current_schema_config,
-         [assoc_name | remaining_path],
-         source_alias,
-         target_alias,
-         acc_joins,
-         prev_join_info
-       ) do
-    # Get association from current schema using the association name
-    association = Map.get(current_schema_config.associations, assoc_name)
+  defp resolve_join_edges(_selecto, _current_relation, [], edges), do: {:ok, edges}
 
-    unless association do
-      {:error, "No association found from #{current_schema_config.source_table} to #{assoc_name}"}
-    else
-      # Get the target schema using the queryable field from the association
-      target_schema_name = association.queryable
-      next_schema_config = Map.get(selecto.domain.schemas, target_schema_name)
-
-      unless next_schema_config do
+  defp resolve_join_edges(selecto, current_relation, [association_id | remaining_path], edges) do
+    case fetch_equivalent_key(current_relation.associations || %{}, association_id) do
+      nil ->
         {:error,
-         "Schema #{target_schema_name} not found in domain (from association #{assoc_name})"}
-      else
-        # Generate alias for this join (use association name for clarity)
-        join_alias = "j_#{assoc_name}"
-        table_name = next_schema_config.source_table
+         "No association found from #{current_relation.source_table} to #{association_id}"}
 
-        # Build the JOIN clause and track start_correlation
-        {join_clause, accumulated_start_corr} =
-          if prev_join_info == nil do
-            # First table in chain - no INNER JOIN yet, just table reference
-            # Build start correlation (links to source)
-            start_corr = [
-              join_alias,
-              ".",
-              adapter_quote_identifier(selecto, to_string(association.related_key)),
-              " = ",
-              source_alias,
-              ".",
-              adapter_quote_identifier(selecto, to_string(association.owner_key))
-            ]
+      association ->
+        case fetch_equivalent_key(selecto.domain.schemas, association.queryable) do
+          nil ->
+            {:error,
+             "Schema #{association.queryable} not found in domain (from association #{association_id})"}
 
-            {[table_name, " ", join_alias], start_corr}
-          else
-            # Subsequent joins
-            {prev_alias, prev_association, inherited_start_corr} = prev_join_info
+          target_relation ->
+            edge = %{
+              association_id: association_id,
+              association: association,
+              source_relation: current_relation,
+              target_relation: target_relation
+            }
 
-            join_sql = [
-              " INNER JOIN ",
-              table_name,
-              " ",
-              join_alias,
-              " ON ",
-              prev_alias,
-              ".",
-              adapter_quote_identifier(selecto, to_string(prev_association.owner_key)),
-              " = ",
-              join_alias,
-              ".",
-              adapter_quote_identifier(selecto, to_string(prev_association.related_key))
-            ]
-
-            # Pass through the start correlation from first join
-            {join_sql, inherited_start_corr}
-          end
-
-        # Add to accumulator
-        new_acc_joins = acc_joins ++ [join_clause]
-
-        # Check if we've reached the target
-        if remaining_path == [] do
-          # This is the last step - build end correlation to target
-          end_correlation = [
-            join_alias,
-            ".",
-            adapter_quote_identifier(selecto, to_string(next_schema_config.primary_key || :id)),
-            " = ",
-            target_alias,
-            ".",
-            adapter_quote_identifier(selecto, to_string(next_schema_config.primary_key || :id))
-          ]
-
-          # Return complete chain
-          join_clauses = Enum.intersperse(new_acc_joins, [])
-
-          {:ok, {join_clauses, accumulated_start_corr, end_correlation}}
-        else
-          # More joins to process
-          # Get the association from next_schema to the following schema for the next iteration
-          [peek_schema | _] = remaining_path
-          next_association = Map.get(next_schema_config.associations, peek_schema)
-
-          # Recurse with updated context, passing through start_correlation
-          build_join_chain_recursive(
-            selecto,
-            next_schema_config,
-            remaining_path,
-            source_alias,
-            target_alias,
-            new_acc_joins,
-            {join_alias, next_association, accumulated_start_corr}
-          )
+            resolve_join_edges(selecto, target_relation, remaining_path, edges ++ [edge])
         end
-      end
+    end
+  end
+
+  defp render_join_chain(
+         selecto,
+         [first_edge | remaining_edges],
+         final_edge,
+         source_alias,
+         target_alias
+       ) do
+    reserved_aliases = [source_alias, target_alias]
+    first_alias = available_join_alias(first_edge.association_id, reserved_aliases)
+    first_table = [first_edge.target_relation.source_table, " ", first_alias]
+    start_correlation = edge_correlation(selecto, first_edge, first_alias, source_alias)
+
+    {join_clauses, parent_alias, _aliases} =
+      remaining_edges
+      |> Enum.reduce({[first_table], first_alias, [first_alias | reserved_aliases]}, fn edge,
+                                                                                        {clauses,
+                                                                                         parent_alias,
+                                                                                         aliases} ->
+        join_alias = available_join_alias(edge.association_id, aliases)
+
+        join_clause = [
+          " INNER JOIN ",
+          edge.target_relation.source_table,
+          " ",
+          join_alias,
+          " ON ",
+          edge_correlation(selecto, edge, join_alias, parent_alias)
+        ]
+
+        {clauses ++ [join_clause], join_alias, [join_alias | aliases]}
+      end)
+
+    # Bind the selected row through the final association itself. An internal
+    # target row with the same primary key does not establish path membership.
+    end_correlation = edge_correlation(selecto, final_edge, target_alias, parent_alias)
+    {join_clauses, start_correlation, end_correlation}
+  end
+
+  defp available_join_alias(association_id, aliases) do
+    base_alias = "j_#{association_id}"
+    occupied_aliases = MapSet.new(aliases, &String.downcase/1)
+
+    Enum.find_value(0..length(aliases), fn index ->
+      candidate = if index == 0, do: base_alias, else: "#{base_alias}_#{index}"
+      if MapSet.member?(occupied_aliases, String.downcase(candidate)), do: nil, else: candidate
+    end)
+  end
+
+  defp edge_correlation(selecto, edge, target_alias, source_alias) do
+    build_association_correlation_condition(
+      selecto,
+      edge.association_id,
+      edge.association,
+      edge.source_relation,
+      edge.target_relation,
+      target_alias,
+      source_alias
+    )
+  end
+
+  defp validate_correlation_target(selecto, actual_schema, target_schema) do
+    actual_relation = get_target_schema_config(selecto, actual_schema)
+    target_relation = get_target_schema_config(selecto, target_schema)
+
+    if actual_relation.source_table == target_relation.source_table do
+      :ok
+    else
+      {:error,
+       "Join path terminates at #{actual_schema}, which does not match target schema #{target_schema}"}
+    end
+  end
+
+  defp ensure_correlation_target!(selecto, actual_schema, target_schema) do
+    case validate_correlation_target(selecto, actual_schema, target_schema) do
+      :ok -> :ok
+      {:error, reason} -> raise ArgumentError, reason
     end
   end
 
@@ -1557,11 +1541,6 @@ defmodule Selecto.Builder.Subselect do
   defp escape_string(string) do
     # Escape SQL string literals
     "'#{String.replace(string, "'", "''")}'"
-  end
-
-  defp escape_identifier(identifier) do
-    # Escape SQL identifiers - simplified implementation
-    "\"#{identifier}\""
   end
 
   defp adapter_quote_identifier(selecto, identifier) do

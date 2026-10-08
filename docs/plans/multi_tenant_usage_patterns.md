@@ -56,6 +56,47 @@ Capture recommended multi-tenant patterns for `selecto`, `selecto_updato`, and r
 - `SelectoUpdato.execute/3` forwards repo options, enabling prefix-based writes in schema models.
 - Saved views already support a context key that can be tenant-scoped.
 
+### Tenant-aware direct associations
+
+For an ordinary direct association, declare `tenant_field` on both the owning
+relation and its target. When the association has no authored scope keys,
+Selecto adds their equality to the join's `ON` clause. The fields can have
+different names, such as root `tenant_id` and target `organization_id`. A dirty
+foreign reference then behaves like a missing target in a left join, preserving
+the root row without exposing a foreign name or changing joined counts.
+
+A complete `source_scope_key` / `target_scope_key` pair remains authoritative.
+A partial pair is invalid, including when domain validation is disabled.
+A genuinely tenantless target keeps its ordinary join. This guard supplements
+the host's root tenant scope; it does not establish that root authority.
+
+The PostgreSQL regression covers direct joined selection, filtering, ordering
+and counts with foreign-only references, same-ID tenant collisions, null and
+missing targets, explicit scope pairs and tenantless lookups. Direct correlated
+JSON collections, counts and child filters use the same validated scope rule.
+Nested direct JSON correlations use the immediate parent's declared tenant
+field, including association aliases and differently named tenant columns.
+
+Flattened collections apply the same rule between every immediate pair in a
+declared association path. The final association binds the selected target row
+through its foreign key and scope, preserving path membership even when target
+IDs repeat across tenants. The path must end at the same physical relation as
+`target_schema`; incompatible targets fail before database execution. Complete
+authored scope pairs retain precedence, and tenantless intermediate relations
+retain their authored visibility.
+
+Nested JSON collections follow every association after the immediate parent's
+path. A full child path must extend that parent path; the builder does not
+discard remaining steps or infer membership from a shared physical table.
+Each child edge uses the same validated scope rule, including complete authored
+pairs. Omitted paths use the ordinary relationship resolver. Join aliases avoid
+collisions under case folding as well as repeated association names.
+
+Native PostgreSQL coverage includes two- and three-step paths, named junction
+associations, association aliases, terminal tenant/ID collisions and a four-step
+path with repeated association names. Enhanced/custom joins, through metadata
+and arbitrary recursive paths have separate coverage requirements.
+
 ## Recommended Baseline Architecture
 
 1. Create a `TenantContext` at request entry:

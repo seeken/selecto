@@ -980,12 +980,24 @@ defmodule Selecto.Schema.Join do
   end
 
   defp attach_association_scope!(join, association_id, association, source, target) do
-    source_scope_key = map_value(association, :source_scope_key)
-    target_scope_key = map_value(association, :target_scope_key)
+    case association_scope_keys!(association_id, association, source, target) do
+      {nil, nil} ->
+        join
+
+      {source_scope_key, target_scope_key} ->
+        join
+        |> Map.put(:source_scope_key, source_scope_key)
+        |> Map.put(:target_scope_key, target_scope_key)
+    end
+  end
+
+  @doc false
+  def association_scope_keys!(association_id, association, source, target) do
+    {source_scope_key, target_scope_key} = association_scope_keys(association, source, target)
 
     case {source_scope_key, target_scope_key} do
       {nil, nil} ->
-        join
+        {nil, nil}
 
       {nil, _target_scope_key} ->
         raise ArgumentError,
@@ -999,9 +1011,24 @@ defmodule Selecto.Schema.Join do
         validate_scope_field!(association_id, :source, source, source_scope_key)
         validate_scope_field!(association_id, :target, target, target_scope_key)
 
-        join
-        |> Map.put(:source_scope_key, source_scope_key)
-        |> Map.put(:target_scope_key, target_scope_key)
+        {source_scope_key, target_scope_key}
+    end
+  end
+
+  defp association_scope_keys(association, source, target) do
+    case {map_value(association, :source_scope_key), map_value(association, :target_scope_key)} do
+      {nil, nil} ->
+        case {map_value(source, :tenant_field), map_value(target, :tenant_field)} do
+          {source_tenant, target_tenant}
+          when not is_nil(source_tenant) and not is_nil(target_tenant) ->
+            {source_tenant, target_tenant}
+
+          _ ->
+            {nil, nil}
+        end
+
+      authored_keys ->
+        authored_keys
     end
   end
 

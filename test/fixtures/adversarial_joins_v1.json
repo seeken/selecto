@@ -1,0 +1,1295 @@
+{
+  "domain": {
+    "schema_version": 1,
+    "name": "CertificationAdversarialDirtyJoins",
+    "domain_version": "1.0.0",
+    "domain_fingerprint": "adversarial-dirty-joins-v1-declared",
+    "source": {
+      "source_table": "selecto_cert_join_people",
+      "primary_key": "id",
+      "fields": [
+        "id",
+        "tenant_id",
+        "name",
+        "account_id",
+        "lookup_id",
+        "secret_score",
+        "ssn"
+      ],
+      "redact_fields": [
+        "ssn"
+      ],
+      "columns": {
+        "id": {
+          "type": "integer"
+        },
+        "tenant_id": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "account_id": {
+          "type": "integer"
+        },
+        "lookup_id": {
+          "type": "integer"
+        },
+        "secret_score": {
+          "type": "integer",
+          "internal": true
+        },
+        "ssn": {
+          "type": "string"
+        }
+      },
+      "associations": {
+        "account": {
+          "queryable": "account",
+          "owner_key": "account_id",
+          "related_key": "id",
+          "cardinality": "one"
+        },
+        "lookup": {
+          "queryable": "lookup",
+          "owner_key": "lookup_id",
+          "related_key": "id",
+          "cardinality": "one"
+        }
+      },
+      "tenant_field": "tenant_id"
+    },
+    "schemas": {
+      "account": {
+        "source_table": "selecto_cert_join_accounts",
+        "primary_key": "id",
+        "fields": [
+          "id",
+          "organization_id",
+          "name",
+          "secret_score",
+          "ssn"
+        ],
+        "redact_fields": [
+          "ssn"
+        ],
+        "columns": {
+          "id": {
+            "type": "integer"
+          },
+          "organization_id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "secret_score": {
+            "type": "integer",
+            "internal": true
+          },
+          "ssn": {
+            "type": "string"
+          }
+        },
+        "associations": {},
+        "tenant_field": "organization_id"
+      },
+      "lookup": {
+        "source_table": "selecto_cert_join_lookups",
+        "primary_key": "id",
+        "fields": [
+          "id",
+          "name"
+        ],
+        "redact_fields": [],
+        "columns": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "associations": {}
+      }
+    },
+    "joins": {
+      "account": {
+        "type": "left"
+      },
+      "lookup": {
+        "type": "left"
+      }
+    }
+  },
+  "case_domains": {
+    "AJN002": {
+      "schema_version": 1,
+      "name": "CertificationAdversarialDirtyJoins",
+      "domain_version": "1.0.0",
+      "domain_fingerprint": "adversarial-dirty-joins-v1-explicit",
+      "source": {
+        "source_table": "selecto_cert_join_people",
+        "primary_key": "id",
+        "fields": [
+          "id",
+          "tenant_id",
+          "name",
+          "account_id",
+          "lookup_id",
+          "secret_score",
+          "ssn"
+        ],
+        "redact_fields": [
+          "ssn"
+        ],
+        "columns": {
+          "id": {
+            "type": "integer"
+          },
+          "tenant_id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "account_id": {
+            "type": "integer"
+          },
+          "lookup_id": {
+            "type": "integer"
+          },
+          "secret_score": {
+            "type": "integer",
+            "internal": true
+          },
+          "ssn": {
+            "type": "string"
+          }
+        },
+        "associations": {
+          "account": {
+            "queryable": "account",
+            "owner_key": "account_id",
+            "related_key": "id",
+            "cardinality": "one",
+            "source_scope_key": "tenant_id",
+            "target_scope_key": "organization_id"
+          },
+          "lookup": {
+            "queryable": "lookup",
+            "owner_key": "lookup_id",
+            "related_key": "id",
+            "cardinality": "one"
+          }
+        },
+        "tenant_field": "tenant_id"
+      },
+      "schemas": {
+        "account": {
+          "source_table": "selecto_cert_join_accounts",
+          "primary_key": "id",
+          "fields": [
+            "id",
+            "organization_id",
+            "name",
+            "secret_score",
+            "ssn"
+          ],
+          "redact_fields": [
+            "ssn"
+          ],
+          "columns": {
+            "id": {
+              "type": "integer"
+            },
+            "organization_id": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            },
+            "secret_score": {
+              "type": "integer",
+              "internal": true
+            },
+            "ssn": {
+              "type": "string"
+            }
+          },
+          "associations": {},
+          "tenant_field": "organization_id"
+        },
+        "lookup": {
+          "source_table": "selecto_cert_join_lookups",
+          "primary_key": "id",
+          "fields": [
+            "id",
+            "name"
+          ],
+          "redact_fields": [],
+          "columns": {
+            "id": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "associations": {}
+        }
+      },
+      "joins": {
+        "account": {
+          "type": "left"
+        },
+        "lookup": {
+          "type": "left"
+        }
+      }
+    },
+    "AJN003": {
+      "schema_version": 1,
+      "name": "CertificationAdversarialDirtyJoins",
+      "domain_version": "1.0.0",
+      "domain_fingerprint": "adversarial-dirty-joins-v1-tenantless",
+      "source": {
+        "source_table": "selecto_cert_join_people",
+        "primary_key": "id",
+        "fields": [
+          "id",
+          "tenant_id",
+          "name",
+          "account_id",
+          "lookup_id",
+          "secret_score",
+          "ssn"
+        ],
+        "redact_fields": [
+          "ssn"
+        ],
+        "columns": {
+          "id": {
+            "type": "integer"
+          },
+          "tenant_id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "account_id": {
+            "type": "integer"
+          },
+          "lookup_id": {
+            "type": "integer"
+          },
+          "secret_score": {
+            "type": "integer",
+            "internal": true
+          },
+          "ssn": {
+            "type": "string"
+          }
+        },
+        "associations": {
+          "account": {
+            "queryable": "account",
+            "owner_key": "account_id",
+            "related_key": "id",
+            "cardinality": "one"
+          },
+          "lookup": {
+            "queryable": "lookup",
+            "owner_key": "lookup_id",
+            "related_key": "id",
+            "cardinality": "one"
+          }
+        },
+        "tenant_field": "tenant_id"
+      },
+      "schemas": {
+        "account": {
+          "source_table": "selecto_cert_join_accounts",
+          "primary_key": "id",
+          "fields": [
+            "id",
+            "organization_id",
+            "name",
+            "secret_score",
+            "ssn"
+          ],
+          "redact_fields": [
+            "ssn"
+          ],
+          "columns": {
+            "id": {
+              "type": "integer"
+            },
+            "organization_id": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            },
+            "secret_score": {
+              "type": "integer",
+              "internal": true
+            },
+            "ssn": {
+              "type": "string"
+            }
+          },
+          "associations": {},
+          "tenant_field": "organization_id"
+        },
+        "lookup": {
+          "source_table": "selecto_cert_join_lookups",
+          "primary_key": "id",
+          "fields": [
+            "id",
+            "name"
+          ],
+          "redact_fields": [],
+          "columns": {
+            "id": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "associations": {}
+        }
+      },
+      "joins": {
+        "account": {
+          "type": "left"
+        },
+        "lookup": {
+          "type": "left"
+        }
+      }
+    }
+  },
+  "dataset": {
+    "people": {
+      "columns": [
+        "id",
+        "tenant_id",
+        "name",
+        "account_id",
+        "lookup_id",
+        "secret_score",
+        "ssn"
+      ],
+      "rows": [
+        [
+          1,
+          7,
+          "root own beta",
+          101,
+          10,
+          11,
+          "own:ssn:1"
+        ],
+        [
+          2,
+          7,
+          "root dirty foreign",
+          201,
+          20,
+          22,
+          "own:ssn:2"
+        ],
+        [
+          3,
+          7,
+          "root own alpha",
+          102,
+          10,
+          33,
+          "own:ssn:3"
+        ],
+        [
+          4,
+          7,
+          "root null",
+          null,
+          null,
+          44,
+          "own:ssn:4"
+        ],
+        [
+          5,
+          7,
+          "root missing",
+          999,
+          99,
+          55,
+          "own:ssn:5"
+        ],
+        [
+          8,
+          8,
+          "foreign root",
+          201,
+          20,
+          88,
+          "foreign:ssn:8"
+        ]
+      ]
+    },
+    "accounts": {
+      "columns": [
+        "id",
+        "organization_id",
+        "name",
+        "secret_score",
+        "ssn"
+      ],
+      "rows": [
+        [
+          101,
+          7,
+          "Account Beta",
+          1011,
+          "account:ssn:own:101"
+        ],
+        [
+          102,
+          7,
+          "Account Alpha",
+          1022,
+          "account:ssn:own:102"
+        ],
+        [
+          101,
+          8,
+          "Foreign Collision",
+          8011,
+          "account:ssn:foreign:101"
+        ],
+        [
+          201,
+          8,
+          "Foreign Only",
+          8201,
+          "account:ssn:foreign:201"
+        ]
+      ]
+    },
+    "lookups": {
+      "columns": [
+        "id",
+        "name"
+      ],
+      "rows": [
+        [
+          10,
+          "Shared One"
+        ],
+        [
+          20,
+          "Shared Two"
+        ]
+      ]
+    }
+  },
+  "trusted_tenant": 7,
+  "trusted_scope": null,
+  "variants": [
+    {
+      "variant": "out_of_scope_changed",
+      "dataset": {
+        "people": {
+          "columns": [
+            "id",
+            "tenant_id",
+            "name",
+            "account_id",
+            "lookup_id",
+            "secret_score",
+            "ssn"
+          ],
+          "rows": [
+            [
+              1,
+              7,
+              "root own beta",
+              101,
+              10,
+              11,
+              "own:ssn:1"
+            ],
+            [
+              2,
+              7,
+              "root dirty foreign",
+              201,
+              20,
+              22,
+              "own:ssn:2"
+            ],
+            [
+              3,
+              7,
+              "root own alpha",
+              102,
+              10,
+              33,
+              "own:ssn:3"
+            ],
+            [
+              4,
+              7,
+              "root null",
+              null,
+              null,
+              44,
+              "own:ssn:4"
+            ],
+            [
+              5,
+              7,
+              "root missing",
+              999,
+              99,
+              55,
+              "own:ssn:5"
+            ],
+            [
+              8,
+              8,
+              "foreign root changed",
+              201,
+              20,
+              88,
+              "foreign:ssn:8"
+            ],
+            [
+              9,
+              8,
+              "extra foreign root",
+              202,
+              20,
+              99,
+              "foreign:ssn:9"
+            ]
+          ]
+        },
+        "accounts": {
+          "columns": [
+            "id",
+            "organization_id",
+            "name",
+            "secret_score",
+            "ssn"
+          ],
+          "rows": [
+            [
+              101,
+              7,
+              "Account Beta",
+              1011,
+              "account:ssn:own:101"
+            ],
+            [
+              102,
+              7,
+              "Account Alpha",
+              1022,
+              "account:ssn:own:102"
+            ],
+            [
+              101,
+              8,
+              "Aardvark Foreign Collision",
+              8011,
+              "account:ssn:foreign:101"
+            ],
+            [
+              201,
+              8,
+              "Aardvark Foreign Only",
+              8201,
+              "account:ssn:foreign:201"
+            ],
+            [
+              202,
+              8,
+              "Extra Foreign",
+              8202,
+              "account:ssn:foreign:202"
+            ]
+          ]
+        },
+        "lookups": {
+          "columns": [
+            "id",
+            "name"
+          ],
+          "rows": [
+            [
+              10,
+              "Shared One"
+            ],
+            [
+              20,
+              "Shared Two"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "variant": "secrets_changed",
+      "dataset": {
+        "people": {
+          "columns": [
+            "id",
+            "tenant_id",
+            "name",
+            "account_id",
+            "lookup_id",
+            "secret_score",
+            "ssn"
+          ],
+          "rows": [
+            [
+              1,
+              7,
+              "root own beta",
+              101,
+              10,
+              90011,
+              "own:ssn:1:changed"
+            ],
+            [
+              2,
+              7,
+              "root dirty foreign",
+              201,
+              20,
+              90022,
+              "own:ssn:2:changed"
+            ],
+            [
+              3,
+              7,
+              "root own alpha",
+              102,
+              10,
+              90033,
+              "own:ssn:3:changed"
+            ],
+            [
+              4,
+              7,
+              "root null",
+              null,
+              null,
+              90044,
+              "own:ssn:4:changed"
+            ],
+            [
+              5,
+              7,
+              "root missing",
+              999,
+              99,
+              90055,
+              "own:ssn:5:changed"
+            ],
+            [
+              8,
+              8,
+              "foreign root",
+              201,
+              20,
+              90088,
+              "foreign:ssn:8:changed"
+            ]
+          ]
+        },
+        "accounts": {
+          "columns": [
+            "id",
+            "organization_id",
+            "name",
+            "secret_score",
+            "ssn"
+          ],
+          "rows": [
+            [
+              101,
+              7,
+              "Account Beta",
+              91011,
+              "account:ssn:own:101:changed"
+            ],
+            [
+              102,
+              7,
+              "Account Alpha",
+              91022,
+              "account:ssn:own:102:changed"
+            ],
+            [
+              101,
+              8,
+              "Foreign Collision",
+              98011,
+              "account:ssn:foreign:101:changed"
+            ],
+            [
+              201,
+              8,
+              "Foreign Only",
+              98201,
+              "account:ssn:foreign:201:changed"
+            ]
+          ]
+        },
+        "lookups": {
+          "columns": [
+            "id",
+            "name"
+          ],
+          "rows": [
+            [
+              10,
+              "Shared One"
+            ],
+            [
+              20,
+              "Shared Two"
+            ]
+          ]
+        }
+      }
+    }
+  ],
+  "cases": {
+    "AJN001": [
+      {
+        "id": "joined-select",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            "id",
+            "name",
+            "account.name"
+          ],
+          "filters": [],
+          "order_by": [
+            {
+              "field": "id",
+              "direction": "asc"
+            }
+          ],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "own-alpha-filter",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            "id"
+          ],
+          "filters": [
+            {
+              "field": "account.name",
+              "op": "eq",
+              "value": "Account Alpha"
+            }
+          ],
+          "order_by": [
+            {
+              "field": "id",
+              "direction": "asc"
+            }
+          ],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "foreign-only-filter",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            "id"
+          ],
+          "filters": [
+            {
+              "field": "account.name",
+              "op": "eq",
+              "value": "Foreign Only"
+            }
+          ],
+          "order_by": [
+            {
+              "field": "id",
+              "direction": "asc"
+            }
+          ],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "foreign-collision-filter",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            "id"
+          ],
+          "filters": [
+            {
+              "field": "account.name",
+              "op": "eq",
+              "value": "Foreign Collision"
+            }
+          ],
+          "order_by": [
+            {
+              "field": "id",
+              "direction": "asc"
+            }
+          ],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "sort-joined-asc",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            "id"
+          ],
+          "filters": [],
+          "order_by": [
+            {
+              "field": "account.name",
+              "direction": "asc"
+            },
+            {
+              "field": "id",
+              "direction": "asc"
+            }
+          ],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "sort-joined-desc",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            "id"
+          ],
+          "filters": [],
+          "order_by": [
+            {
+              "field": "account.name",
+              "direction": "desc"
+            },
+            {
+              "field": "id",
+              "direction": "asc"
+            }
+          ],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "joined-name-count",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            {
+              "aggregate": "count",
+              "field": "account.name",
+              "alias": "matched"
+            }
+          ],
+          "filters": [],
+          "order_by": [],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "own-filter-count",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            {
+              "aggregate": "count",
+              "alias": "matched"
+            }
+          ],
+          "filters": [
+            {
+              "field": "account.name",
+              "op": "eq",
+              "value": "Account Alpha"
+            }
+          ],
+          "order_by": [],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "foreign-filter-count",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            {
+              "aggregate": "count",
+              "alias": "matched"
+            }
+          ],
+          "filters": [
+            {
+              "field": "account.name",
+              "op": "eq",
+              "value": "Foreign Only"
+            }
+          ],
+          "order_by": [],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "root-positive-control",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            "id",
+            "name"
+          ],
+          "filters": [],
+          "order_by": [
+            {
+              "field": "id",
+              "direction": "asc"
+            }
+          ],
+          "limit": 100,
+          "offset": 0
+        }
+      }
+    ],
+    "AJN002": [
+      {
+        "id": "joined-select",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            "id",
+            "name",
+            "account.name"
+          ],
+          "filters": [],
+          "order_by": [
+            {
+              "field": "id",
+              "direction": "asc"
+            }
+          ],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "own-alpha-filter",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            "id"
+          ],
+          "filters": [
+            {
+              "field": "account.name",
+              "op": "eq",
+              "value": "Account Alpha"
+            }
+          ],
+          "order_by": [
+            {
+              "field": "id",
+              "direction": "asc"
+            }
+          ],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "foreign-only-filter",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            "id"
+          ],
+          "filters": [
+            {
+              "field": "account.name",
+              "op": "eq",
+              "value": "Foreign Only"
+            }
+          ],
+          "order_by": [
+            {
+              "field": "id",
+              "direction": "asc"
+            }
+          ],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "foreign-collision-filter",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            "id"
+          ],
+          "filters": [
+            {
+              "field": "account.name",
+              "op": "eq",
+              "value": "Foreign Collision"
+            }
+          ],
+          "order_by": [
+            {
+              "field": "id",
+              "direction": "asc"
+            }
+          ],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "sort-joined-asc",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            "id"
+          ],
+          "filters": [],
+          "order_by": [
+            {
+              "field": "account.name",
+              "direction": "asc"
+            },
+            {
+              "field": "id",
+              "direction": "asc"
+            }
+          ],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "sort-joined-desc",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            "id"
+          ],
+          "filters": [],
+          "order_by": [
+            {
+              "field": "account.name",
+              "direction": "desc"
+            },
+            {
+              "field": "id",
+              "direction": "asc"
+            }
+          ],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "joined-name-count",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            {
+              "aggregate": "count",
+              "field": "account.name",
+              "alias": "matched"
+            }
+          ],
+          "filters": [],
+          "order_by": [],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "own-filter-count",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            {
+              "aggregate": "count",
+              "alias": "matched"
+            }
+          ],
+          "filters": [
+            {
+              "field": "account.name",
+              "op": "eq",
+              "value": "Account Alpha"
+            }
+          ],
+          "order_by": [],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "foreign-filter-count",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            {
+              "aggregate": "count",
+              "alias": "matched"
+            }
+          ],
+          "filters": [
+            {
+              "field": "account.name",
+              "op": "eq",
+              "value": "Foreign Only"
+            }
+          ],
+          "order_by": [],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "root-positive-control",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            "id",
+            "name"
+          ],
+          "filters": [],
+          "order_by": [
+            {
+              "field": "id",
+              "direction": "asc"
+            }
+          ],
+          "limit": 100,
+          "offset": 0
+        }
+      }
+    ],
+    "AJN003": [
+      {
+        "id": "tenantless-shared-select",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            "id",
+            "lookup.name"
+          ],
+          "filters": [],
+          "order_by": [
+            {
+              "field": "id",
+              "direction": "asc"
+            }
+          ],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "tenantless-shared-filter",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            "id"
+          ],
+          "filters": [
+            {
+              "field": "lookup.name",
+              "op": "eq",
+              "value": "Shared Two"
+            }
+          ],
+          "order_by": [
+            {
+              "field": "id",
+              "direction": "asc"
+            }
+          ],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "tenantless-shared-sort",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            "id"
+          ],
+          "filters": [],
+          "order_by": [
+            {
+              "field": "lookup.name",
+              "direction": "asc"
+            },
+            {
+              "field": "id",
+              "direction": "asc"
+            }
+          ],
+          "limit": 100,
+          "offset": 0
+        }
+      },
+      {
+        "id": "tenantless-shared-count",
+        "surface": "engine_query",
+        "intent": {
+          "select": [
+            {
+              "aggregate": "count",
+              "field": "lookup.name",
+              "alias": "matched"
+            }
+          ],
+          "filters": [],
+          "order_by": [],
+          "limit": 100,
+          "offset": 0
+        }
+      }
+    ]
+  }
+}

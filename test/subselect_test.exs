@@ -320,10 +320,9 @@ defmodule Selecto.SubselectTest do
       sql = IO.iodata_to_binary(condition)
 
       assert sql =~ ~r/j_members\./i
-      assert sql =~ ~r/j_manager\./i
       assert sql =~ ~r/j_members\."workspace_id" = selecto_root\."id"/i
-      assert sql =~ ~r/j_members\."manager_id" = j_manager\."id"/i
-      assert sql =~ ~r/j_manager\."id" = sub_employee\."id"/i
+      assert sql =~ ~r/sub_employee\."id" = j_members\."manager_id"/i
+      refute sql =~ ~r/j_manager\./i
     end
   end
 

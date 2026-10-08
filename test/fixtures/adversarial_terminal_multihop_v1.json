@@ -1,0 +1,3092 @@
+{
+  "format": "selecto.elixir_terminal_multihop_input.v1",
+  "trusted_tenant": 7,
+  "dataset": {
+    "roots": {
+      "columns": [
+        "id",
+        "tenant_id",
+        "middle_id",
+        "name",
+        "bucket",
+        "secret"
+      ],
+      "rows": [
+        [
+          1,
+          7,
+          101,
+          "positive",
+          42,
+          "root-secret1"
+        ],
+        [
+          2,
+          7,
+          201,
+          "first-edge-only",
+          42,
+          "root-secret2"
+        ],
+        [
+          3,
+          7,
+          102,
+          "second-edge-only",
+          42,
+          "root-secret3"
+        ],
+        [
+          4,
+          7,
+          103,
+          "terminal-link-only",
+          42,
+          "root-secret4"
+        ],
+        [
+          5,
+          7,
+          999,
+          "missing",
+          42,
+          "root-secret5"
+        ],
+        [
+          6,
+          7,
+          null,
+          "null",
+          42,
+          "root-secret6"
+        ],
+        [
+          7,
+          7,
+          104,
+          "second-positive",
+          42,
+          "root-secret7"
+        ],
+        [
+          20,
+          8,
+          201,
+          "foreign-root",
+          42,
+          "foreign-root-secret"
+        ]
+      ]
+    },
+    "middles": {
+      "columns": [
+        "id",
+        "organization_id",
+        "route_id",
+        "root_id",
+        "target_id",
+        "name",
+        "root_bucket",
+        "segment",
+        "secret"
+      ],
+      "rows": [
+        [
+          101,
+          7,
+          501,
+          1,
+          301,
+          "own101",
+          42,
+          9,
+          "middle-secret1"
+        ],
+        [
+          201,
+          8,
+          601,
+          2,
+          305,
+          "foreign201",
+          42,
+          9,
+          "foreign-middle-secret"
+        ],
+        [
+          102,
+          7,
+          502,
+          3,
+          302,
+          "own102",
+          42,
+          9,
+          "middle-secret2"
+        ],
+        [
+          103,
+          7,
+          503,
+          4,
+          303,
+          "own103",
+          42,
+          9,
+          "middle-secret3"
+        ],
+        [
+          104,
+          7,
+          504,
+          7,
+          304,
+          "own104",
+          99,
+          9,
+          "middle-secret4"
+        ]
+      ]
+    },
+    "hubs": {
+      "columns": [
+        "id",
+        "company_id",
+        "route_id",
+        "mid_ref",
+        "name",
+        "segment",
+        "secret"
+      ],
+      "rows": [
+        [
+          501,
+          7,
+          701,
+          501,
+          "ownhub501",
+          9,
+          "hub-secret1"
+        ],
+        [
+          601,
+          8,
+          801,
+          601,
+          "foreignhub601",
+          9,
+          "foreign-hub-secret1"
+        ],
+        [
+          502,
+          8,
+          702,
+          502,
+          "foreignhub502",
+          9,
+          "foreign-hub-secret2"
+        ],
+        [
+          503,
+          7,
+          703,
+          503,
+          "ownhub503",
+          9,
+          "hub-secret2"
+        ],
+        [
+          504,
+          7,
+          704,
+          504,
+          "ownhub504",
+          9,
+          "hub-secret3"
+        ]
+      ]
+    },
+    "terminals": {
+      "columns": [
+        "id",
+        "workspace_id",
+        "mid_ref",
+        "name",
+        "segment",
+        "secret"
+      ],
+      "rows": [
+        [
+          301,
+          7,
+          501,
+          "owned301",
+          9,
+          "terminal-secret1"
+        ],
+        [
+          305,
+          8,
+          601,
+          "first-edge-foreign",
+          9,
+          "foreign-terminal-secret1"
+        ],
+        [
+          302,
+          8,
+          502,
+          "second-edge-foreign",
+          10,
+          "foreign-terminal-secret2"
+        ],
+        [
+          303,
+          7,
+          503,
+          "owned303",
+          9,
+          "terminal-secret2"
+        ],
+        [
+          303,
+          8,
+          999,
+          "terminal-collision-foreign",
+          9,
+          "foreign-terminal-secret3"
+        ],
+        [
+          304,
+          7,
+          504,
+          "owned304",
+          9,
+          "terminal-secret3"
+        ],
+        [
+          401,
+          7,
+          701,
+          "owned401",
+          9,
+          "terminal-secret4"
+        ],
+        [
+          405,
+          8,
+          801,
+          "first-edge-foreign3",
+          9,
+          "foreign-terminal-secret4"
+        ],
+        [
+          402,
+          8,
+          702,
+          "second-edge-foreign3",
+          9,
+          "foreign-terminal-secret5"
+        ],
+        [
+          403,
+          7,
+          703,
+          "owned403",
+          9,
+          "terminal-secret5"
+        ],
+        [
+          403,
+          8,
+          999,
+          "terminal-collision-foreign3",
+          9,
+          "foreign-terminal-secret6"
+        ],
+        [
+          404,
+          7,
+          704,
+          "owned404",
+          9,
+          "terminal-secret6"
+        ]
+      ]
+    },
+    "decoys": {
+      "columns": [
+        "id",
+        "workspace_id",
+        "mid_ref",
+        "name",
+        "segment",
+        "secret"
+      ],
+      "rows": [
+        [
+          303,
+          7,
+          503,
+          "unrelated-decoy303",
+          9,
+          "decoy-secret1"
+        ],
+        [
+          301,
+          7,
+          501,
+          "unrelated-decoy301",
+          9,
+          "decoy-secret2"
+        ]
+      ]
+    }
+  },
+  "variants": [
+    {
+      "variant": "out_of_scope_changed",
+      "dataset": {
+        "roots": {
+          "columns": [
+            "id",
+            "tenant_id",
+            "middle_id",
+            "name",
+            "bucket",
+            "secret"
+          ],
+          "rows": [
+            [
+              1,
+              7,
+              101,
+              "positive",
+              42,
+              "root-secret1"
+            ],
+            [
+              2,
+              7,
+              201,
+              "first-edge-only",
+              42,
+              "root-secret2"
+            ],
+            [
+              3,
+              7,
+              102,
+              "second-edge-only",
+              42,
+              "root-secret3"
+            ],
+            [
+              4,
+              7,
+              103,
+              "terminal-link-only",
+              42,
+              "root-secret4"
+            ],
+            [
+              5,
+              7,
+              999,
+              "missing",
+              42,
+              "root-secret5"
+            ],
+            [
+              6,
+              7,
+              null,
+              "null",
+              42,
+              "root-secret6"
+            ],
+            [
+              7,
+              7,
+              104,
+              "second-positive",
+              42,
+              "root-secret7"
+            ],
+            [
+              20,
+              8,
+              201,
+              "foreign-root changed outside",
+              42,
+              "foreign-root-secret foreign hidden changed"
+            ]
+          ]
+        },
+        "middles": {
+          "columns": [
+            "id",
+            "organization_id",
+            "route_id",
+            "root_id",
+            "target_id",
+            "name",
+            "root_bucket",
+            "segment",
+            "secret"
+          ],
+          "rows": [
+            [
+              101,
+              7,
+              501,
+              1,
+              301,
+              "own101",
+              42,
+              9,
+              "middle-secret1"
+            ],
+            [
+              201,
+              8,
+              601,
+              2,
+              305,
+              "foreign201 changed outside",
+              42,
+              9,
+              "foreign-middle-secret foreign hidden changed"
+            ],
+            [
+              102,
+              7,
+              502,
+              3,
+              302,
+              "own102",
+              42,
+              9,
+              "middle-secret2"
+            ],
+            [
+              103,
+              7,
+              503,
+              4,
+              303,
+              "own103",
+              42,
+              9,
+              "middle-secret3"
+            ],
+            [
+              104,
+              7,
+              504,
+              7,
+              304,
+              "own104",
+              99,
+              9,
+              "middle-secret4"
+            ]
+          ]
+        },
+        "hubs": {
+          "columns": [
+            "id",
+            "company_id",
+            "route_id",
+            "mid_ref",
+            "name",
+            "segment",
+            "secret"
+          ],
+          "rows": [
+            [
+              501,
+              7,
+              701,
+              501,
+              "ownhub501",
+              9,
+              "hub-secret1"
+            ],
+            [
+              601,
+              8,
+              801,
+              601,
+              "foreignhub601 changed outside",
+              9,
+              "foreign-hub-secret1 foreign hidden changed"
+            ],
+            [
+              502,
+              8,
+              702,
+              502,
+              "foreignhub502 changed outside",
+              9,
+              "foreign-hub-secret2 foreign hidden changed"
+            ],
+            [
+              503,
+              7,
+              703,
+              503,
+              "ownhub503",
+              9,
+              "hub-secret2"
+            ],
+            [
+              504,
+              7,
+              704,
+              504,
+              "ownhub504",
+              9,
+              "hub-secret3"
+            ]
+          ]
+        },
+        "terminals": {
+          "columns": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name",
+            "segment",
+            "secret"
+          ],
+          "rows": [
+            [
+              301,
+              7,
+              501,
+              "owned301",
+              9,
+              "terminal-secret1"
+            ],
+            [
+              305,
+              8,
+              601,
+              "first-edge-foreign changed outside",
+              9,
+              "foreign-terminal-secret1 foreign hidden changed"
+            ],
+            [
+              302,
+              8,
+              502,
+              "second-edge-foreign changed outside",
+              10,
+              "foreign-terminal-secret2 foreign hidden changed"
+            ],
+            [
+              303,
+              7,
+              503,
+              "owned303",
+              9,
+              "terminal-secret2"
+            ],
+            [
+              303,
+              8,
+              999,
+              "terminal-collision-foreign changed outside",
+              9,
+              "foreign-terminal-secret3 foreign hidden changed"
+            ],
+            [
+              304,
+              7,
+              504,
+              "owned304",
+              9,
+              "terminal-secret3"
+            ],
+            [
+              401,
+              7,
+              701,
+              "owned401",
+              9,
+              "terminal-secret4"
+            ],
+            [
+              405,
+              8,
+              801,
+              "first-edge-foreign3 changed outside",
+              9,
+              "foreign-terminal-secret4 foreign hidden changed"
+            ],
+            [
+              402,
+              8,
+              702,
+              "second-edge-foreign3 changed outside",
+              9,
+              "foreign-terminal-secret5 foreign hidden changed"
+            ],
+            [
+              403,
+              7,
+              703,
+              "owned403",
+              9,
+              "terminal-secret5"
+            ],
+            [
+              403,
+              8,
+              999,
+              "terminal-collision-foreign3 changed outside",
+              9,
+              "foreign-terminal-secret6 foreign hidden changed"
+            ],
+            [
+              404,
+              7,
+              704,
+              "owned404",
+              9,
+              "terminal-secret6"
+            ],
+            [
+              406,
+              8,
+              501,
+              "new reachable global foreign",
+              9,
+              "foreign-added-secret"
+            ]
+          ]
+        },
+        "decoys": {
+          "columns": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name",
+            "segment",
+            "secret"
+          ],
+          "rows": [
+            [
+              303,
+              7,
+              503,
+              "unrelated-decoy303",
+              9,
+              "decoy-secret1"
+            ],
+            [
+              301,
+              7,
+              501,
+              "unrelated-decoy301",
+              9,
+              "decoy-secret2"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "variant": "secrets_changed",
+      "dataset": {
+        "roots": {
+          "columns": [
+            "id",
+            "tenant_id",
+            "middle_id",
+            "name",
+            "bucket",
+            "secret"
+          ],
+          "rows": [
+            [
+              1,
+              7,
+              101,
+              "positive",
+              42,
+              "secret perturbation roots 1 7"
+            ],
+            [
+              2,
+              7,
+              201,
+              "first-edge-only",
+              42,
+              "secret perturbation roots 2 7"
+            ],
+            [
+              3,
+              7,
+              102,
+              "second-edge-only",
+              42,
+              "secret perturbation roots 3 7"
+            ],
+            [
+              4,
+              7,
+              103,
+              "terminal-link-only",
+              42,
+              "secret perturbation roots 4 7"
+            ],
+            [
+              5,
+              7,
+              999,
+              "missing",
+              42,
+              "secret perturbation roots 5 7"
+            ],
+            [
+              6,
+              7,
+              null,
+              "null",
+              42,
+              "secret perturbation roots 6 7"
+            ],
+            [
+              7,
+              7,
+              104,
+              "second-positive",
+              42,
+              "secret perturbation roots 7 7"
+            ],
+            [
+              20,
+              8,
+              201,
+              "foreign-root",
+              42,
+              "secret perturbation roots 20 8"
+            ]
+          ]
+        },
+        "middles": {
+          "columns": [
+            "id",
+            "organization_id",
+            "route_id",
+            "root_id",
+            "target_id",
+            "name",
+            "root_bucket",
+            "segment",
+            "secret"
+          ],
+          "rows": [
+            [
+              101,
+              7,
+              501,
+              1,
+              301,
+              "own101",
+              42,
+              9,
+              "secret perturbation middles 101 7"
+            ],
+            [
+              201,
+              8,
+              601,
+              2,
+              305,
+              "foreign201",
+              42,
+              9,
+              "secret perturbation middles 201 8"
+            ],
+            [
+              102,
+              7,
+              502,
+              3,
+              302,
+              "own102",
+              42,
+              9,
+              "secret perturbation middles 102 7"
+            ],
+            [
+              103,
+              7,
+              503,
+              4,
+              303,
+              "own103",
+              42,
+              9,
+              "secret perturbation middles 103 7"
+            ],
+            [
+              104,
+              7,
+              504,
+              7,
+              304,
+              "own104",
+              99,
+              9,
+              "secret perturbation middles 104 7"
+            ]
+          ]
+        },
+        "hubs": {
+          "columns": [
+            "id",
+            "company_id",
+            "route_id",
+            "mid_ref",
+            "name",
+            "segment",
+            "secret"
+          ],
+          "rows": [
+            [
+              501,
+              7,
+              701,
+              501,
+              "ownhub501",
+              9,
+              "secret perturbation hubs 501 7"
+            ],
+            [
+              601,
+              8,
+              801,
+              601,
+              "foreignhub601",
+              9,
+              "secret perturbation hubs 601 8"
+            ],
+            [
+              502,
+              8,
+              702,
+              502,
+              "foreignhub502",
+              9,
+              "secret perturbation hubs 502 8"
+            ],
+            [
+              503,
+              7,
+              703,
+              503,
+              "ownhub503",
+              9,
+              "secret perturbation hubs 503 7"
+            ],
+            [
+              504,
+              7,
+              704,
+              504,
+              "ownhub504",
+              9,
+              "secret perturbation hubs 504 7"
+            ]
+          ]
+        },
+        "terminals": {
+          "columns": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name",
+            "segment",
+            "secret"
+          ],
+          "rows": [
+            [
+              301,
+              7,
+              501,
+              "owned301",
+              9,
+              "secret perturbation terminals 301 7"
+            ],
+            [
+              305,
+              8,
+              601,
+              "first-edge-foreign",
+              9,
+              "secret perturbation terminals 305 8"
+            ],
+            [
+              302,
+              8,
+              502,
+              "second-edge-foreign",
+              10,
+              "secret perturbation terminals 302 8"
+            ],
+            [
+              303,
+              7,
+              503,
+              "owned303",
+              9,
+              "secret perturbation terminals 303 7"
+            ],
+            [
+              303,
+              8,
+              999,
+              "terminal-collision-foreign",
+              9,
+              "secret perturbation terminals 303 8"
+            ],
+            [
+              304,
+              7,
+              504,
+              "owned304",
+              9,
+              "secret perturbation terminals 304 7"
+            ],
+            [
+              401,
+              7,
+              701,
+              "owned401",
+              9,
+              "secret perturbation terminals 401 7"
+            ],
+            [
+              405,
+              8,
+              801,
+              "first-edge-foreign3",
+              9,
+              "secret perturbation terminals 405 8"
+            ],
+            [
+              402,
+              8,
+              702,
+              "second-edge-foreign3",
+              9,
+              "secret perturbation terminals 402 8"
+            ],
+            [
+              403,
+              7,
+              703,
+              "owned403",
+              9,
+              "secret perturbation terminals 403 7"
+            ],
+            [
+              403,
+              8,
+              999,
+              "terminal-collision-foreign3",
+              9,
+              "secret perturbation terminals 403 8"
+            ],
+            [
+              404,
+              7,
+              704,
+              "owned404",
+              9,
+              "secret perturbation terminals 404 7"
+            ]
+          ]
+        },
+        "decoys": {
+          "columns": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name",
+            "segment",
+            "secret"
+          ],
+          "rows": [
+            [
+              303,
+              7,
+              503,
+              "unrelated-decoy303",
+              9,
+              "secret perturbation decoys 303 7"
+            ],
+            [
+              301,
+              7,
+              501,
+              "unrelated-decoy301",
+              9,
+              "secret perturbation decoys 301 7"
+            ]
+          ]
+        }
+      }
+    }
+  ],
+  "cases": {
+    "TFM001": {
+      "domain": {
+        "name": "AdversarialTerminalMultihop",
+        "source": {
+          "source_table": "selecto_adv_terminal_roots",
+          "primary_key": "id",
+          "fields": [
+            "id",
+            "tenant_id",
+            "middle_id",
+            "name",
+            "bucket",
+            "secret"
+          ],
+          "redact_fields": [
+            "secret"
+          ],
+          "columns": {
+            "id": {
+              "type": "integer"
+            },
+            "tenant_id": {
+              "type": "integer"
+            },
+            "middle_id": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            },
+            "bucket": {
+              "type": "integer"
+            },
+            "secret": {
+              "type": "string",
+              "internal": true
+            }
+          },
+          "associations": {
+            "customer": {
+              "queryable": "middles",
+              "owner_key": "middle_id",
+              "related_key": "id",
+              "cardinality": "one"
+            }
+          },
+          "tenant_field": "tenant_id"
+        },
+        "schemas": {
+          "middles": {
+            "source_table": "selecto_adv_terminal_middles",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "organization_id",
+              "route_id",
+              "root_id",
+              "target_id",
+              "name",
+              "root_bucket",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "organization_id": {
+                "type": "integer"
+              },
+              "route_id": {
+                "type": "integer"
+              },
+              "root_id": {
+                "type": "integer"
+              },
+              "target_id": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "root_bucket": {
+                "type": "integer"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {
+              "members": {
+                "queryable": "terminals",
+                "owner_key": "route_id",
+                "related_key": "mid_ref",
+                "cardinality": "many"
+              }
+            },
+            "tenant_field": "organization_id"
+          },
+          "terminals": {
+            "source_table": "selecto_adv_terminal_terminals",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "workspace_id",
+              "mid_ref",
+              "name",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "workspace_id": {
+                "type": "integer"
+              },
+              "mid_ref": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {},
+            "tenant_field": "workspace_id"
+          },
+          "decoys": {
+            "source_table": "selecto_adv_terminal_decoys",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "workspace_id",
+              "mid_ref",
+              "name",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "workspace_id": {
+                "type": "integer"
+              },
+              "mid_ref": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {},
+            "tenant_field": "workspace_id"
+          }
+        },
+        "joins": {
+          "customer": {
+            "type": "left"
+          }
+        },
+        "domain_version": "1.0.0",
+        "domain_fingerprint": "adversarial-terminal-multihop-v1"
+      },
+      "target_schema": "terminals",
+      "join_path": [
+        "customer",
+        "members"
+      ],
+      "probes": [
+        {
+          "id": "flat-json",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": []
+        },
+        {
+          "id": "flat-count",
+          "format": "count",
+          "fields": [
+            "id"
+          ],
+          "filters": []
+        },
+        {
+          "id": "filter-first-edge",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "first-edge-foreign"
+            ]
+          ]
+        },
+        {
+          "id": "filter-middle-edge",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "second-edge-foreign"
+            ]
+          ]
+        },
+        {
+          "id": "filter-terminal-collision",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "terminal-collision-foreign"
+            ]
+          ]
+        },
+        {
+          "id": "filter-owned",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "owned303"
+            ]
+          ]
+        }
+      ]
+    },
+    "TFM002": {
+      "domain": {
+        "name": "AdversarialTerminalMultihop",
+        "source": {
+          "source_table": "selecto_adv_terminal_roots",
+          "primary_key": "id",
+          "fields": [
+            "id",
+            "tenant_id",
+            "middle_id",
+            "name",
+            "bucket",
+            "secret"
+          ],
+          "redact_fields": [
+            "secret"
+          ],
+          "columns": {
+            "id": {
+              "type": "integer"
+            },
+            "tenant_id": {
+              "type": "integer"
+            },
+            "middle_id": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            },
+            "bucket": {
+              "type": "integer"
+            },
+            "secret": {
+              "type": "string",
+              "internal": true
+            }
+          },
+          "associations": {
+            "customer": {
+              "queryable": "middles",
+              "owner_key": "middle_id",
+              "related_key": "id",
+              "cardinality": "one"
+            }
+          },
+          "tenant_field": "tenant_id"
+        },
+        "schemas": {
+          "middles": {
+            "source_table": "selecto_adv_terminal_middles",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "organization_id",
+              "route_id",
+              "root_id",
+              "target_id",
+              "name",
+              "root_bucket",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "organization_id": {
+                "type": "integer"
+              },
+              "route_id": {
+                "type": "integer"
+              },
+              "root_id": {
+                "type": "integer"
+              },
+              "target_id": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "root_bucket": {
+                "type": "integer"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {
+              "via": {
+                "queryable": "hubs",
+                "owner_key": "route_id",
+                "related_key": "mid_ref",
+                "cardinality": "many"
+              }
+            },
+            "tenant_field": "organization_id"
+          },
+          "hubs": {
+            "source_table": "selecto_adv_terminal_hubs",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "company_id",
+              "route_id",
+              "mid_ref",
+              "name",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "company_id": {
+                "type": "integer"
+              },
+              "route_id": {
+                "type": "integer"
+              },
+              "mid_ref": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {
+              "items": {
+                "queryable": "terminals",
+                "owner_key": "route_id",
+                "related_key": "mid_ref",
+                "cardinality": "many"
+              }
+            },
+            "tenant_field": "company_id"
+          },
+          "terminals": {
+            "source_table": "selecto_adv_terminal_terminals",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "workspace_id",
+              "mid_ref",
+              "name",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "workspace_id": {
+                "type": "integer"
+              },
+              "mid_ref": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {},
+            "tenant_field": "workspace_id"
+          },
+          "decoys": {
+            "source_table": "selecto_adv_terminal_decoys",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "workspace_id",
+              "mid_ref",
+              "name",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "workspace_id": {
+                "type": "integer"
+              },
+              "mid_ref": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {},
+            "tenant_field": "workspace_id"
+          }
+        },
+        "joins": {
+          "customer": {
+            "type": "left"
+          }
+        },
+        "domain_version": "1.0.0",
+        "domain_fingerprint": "adversarial-terminal-multihop-v1"
+      },
+      "target_schema": "terminals",
+      "join_path": [
+        "customer",
+        "via",
+        "items"
+      ],
+      "probes": [
+        {
+          "id": "flat-json",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": []
+        },
+        {
+          "id": "flat-count",
+          "format": "count",
+          "fields": [
+            "id"
+          ],
+          "filters": []
+        },
+        {
+          "id": "filter-first-edge",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "first-edge-foreign3"
+            ]
+          ]
+        },
+        {
+          "id": "filter-middle-edge",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "second-edge-foreign3"
+            ]
+          ]
+        },
+        {
+          "id": "filter-terminal-collision",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "terminal-collision-foreign3"
+            ]
+          ]
+        },
+        {
+          "id": "filter-owned",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "owned403"
+            ]
+          ]
+        }
+      ]
+    },
+    "TFM003": {
+      "domain": {
+        "name": "AdversarialTerminalMultihop",
+        "source": {
+          "source_table": "selecto_adv_terminal_roots",
+          "primary_key": "id",
+          "fields": [
+            "id",
+            "tenant_id",
+            "middle_id",
+            "name",
+            "bucket",
+            "secret"
+          ],
+          "redact_fields": [
+            "secret"
+          ],
+          "columns": {
+            "id": {
+              "type": "integer"
+            },
+            "tenant_id": {
+              "type": "integer"
+            },
+            "middle_id": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            },
+            "bucket": {
+              "type": "integer"
+            },
+            "secret": {
+              "type": "string",
+              "internal": true
+            }
+          },
+          "associations": {
+            "links": {
+              "queryable": "links",
+              "owner_key": "id",
+              "related_key": "root_id",
+              "cardinality": "many"
+            }
+          },
+          "tenant_field": "tenant_id"
+        },
+        "schemas": {
+          "links": {
+            "source_table": "selecto_adv_terminal_middles",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "organization_id",
+              "route_id",
+              "root_id",
+              "target_id",
+              "name",
+              "root_bucket",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "organization_id": {
+                "type": "integer"
+              },
+              "route_id": {
+                "type": "integer"
+              },
+              "root_id": {
+                "type": "integer"
+              },
+              "target_id": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "root_bucket": {
+                "type": "integer"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {
+              "terminals": {
+                "queryable": "terminals",
+                "owner_key": "target_id",
+                "related_key": "id",
+                "cardinality": "one"
+              }
+            },
+            "tenant_field": "organization_id"
+          },
+          "terminals": {
+            "source_table": "selecto_adv_terminal_terminals",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "workspace_id",
+              "mid_ref",
+              "name",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "workspace_id": {
+                "type": "integer"
+              },
+              "mid_ref": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {},
+            "tenant_field": "workspace_id"
+          },
+          "decoys": {
+            "source_table": "selecto_adv_terminal_decoys",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "workspace_id",
+              "mid_ref",
+              "name",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "workspace_id": {
+                "type": "integer"
+              },
+              "mid_ref": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {},
+            "tenant_field": "workspace_id"
+          }
+        },
+        "joins": {
+          "links": {
+            "type": "left"
+          }
+        },
+        "domain_version": "1.0.0",
+        "domain_fingerprint": "adversarial-terminal-multihop-v1"
+      },
+      "target_schema": "terminals",
+      "join_path": [
+        "links",
+        "terminals"
+      ],
+      "probes": [
+        {
+          "id": "flat-json",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": []
+        },
+        {
+          "id": "flat-count",
+          "format": "count",
+          "fields": [
+            "id"
+          ],
+          "filters": []
+        },
+        {
+          "id": "filter-first-edge",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "first-edge-foreign"
+            ]
+          ]
+        },
+        {
+          "id": "filter-middle-edge",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "second-edge-foreign"
+            ]
+          ]
+        },
+        {
+          "id": "filter-terminal-collision",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "terminal-collision-foreign"
+            ]
+          ]
+        },
+        {
+          "id": "filter-owned",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "owned303"
+            ]
+          ]
+        }
+      ]
+    },
+    "TFM004": {
+      "domain": {
+        "name": "AdversarialTerminalMultihop",
+        "source": {
+          "source_table": "selecto_adv_terminal_roots",
+          "primary_key": "id",
+          "fields": [
+            "id",
+            "tenant_id",
+            "middle_id",
+            "name",
+            "bucket",
+            "secret"
+          ],
+          "redact_fields": [
+            "secret"
+          ],
+          "columns": {
+            "id": {
+              "type": "integer"
+            },
+            "tenant_id": {
+              "type": "integer"
+            },
+            "middle_id": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            },
+            "bucket": {
+              "type": "integer"
+            },
+            "secret": {
+              "type": "string",
+              "internal": true
+            }
+          },
+          "associations": {
+            "bridge_alias": {
+              "queryable": "bridges",
+              "owner_key": "id",
+              "related_key": "root_id",
+              "cardinality": "many"
+            }
+          },
+          "tenant_field": "tenant_id"
+        },
+        "schemas": {
+          "bridges": {
+            "source_table": "selecto_adv_terminal_middles",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "organization_id",
+              "route_id",
+              "root_id",
+              "target_id",
+              "name",
+              "root_bucket",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "organization_id": {
+                "type": "integer"
+              },
+              "route_id": {
+                "type": "integer"
+              },
+              "root_id": {
+                "type": "integer"
+              },
+              "target_id": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "root_bucket": {
+                "type": "integer"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {
+              "terminals": {
+                "queryable": "terminals",
+                "owner_key": "target_id",
+                "related_key": "id",
+                "cardinality": "one"
+              }
+            },
+            "tenant_field": "organization_id"
+          },
+          "terminals": {
+            "source_table": "selecto_adv_terminal_terminals",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "workspace_id",
+              "mid_ref",
+              "name",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "workspace_id": {
+                "type": "integer"
+              },
+              "mid_ref": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {},
+            "tenant_field": "workspace_id"
+          },
+          "decoys": {
+            "source_table": "selecto_adv_terminal_decoys",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "workspace_id",
+              "mid_ref",
+              "name",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "workspace_id": {
+                "type": "integer"
+              },
+              "mid_ref": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {},
+            "tenant_field": "workspace_id"
+          }
+        },
+        "joins": {
+          "bridge_alias": {
+            "type": "left"
+          }
+        },
+        "domain_version": "1.0.0",
+        "domain_fingerprint": "adversarial-terminal-multihop-v1"
+      },
+      "target_schema": "terminals",
+      "join_path": [
+        "bridge_alias",
+        "terminals"
+      ],
+      "probes": [
+        {
+          "id": "flat-json",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": []
+        },
+        {
+          "id": "flat-count",
+          "format": "count",
+          "fields": [
+            "id"
+          ],
+          "filters": []
+        },
+        {
+          "id": "filter-first-edge",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "first-edge-foreign"
+            ]
+          ]
+        },
+        {
+          "id": "filter-middle-edge",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "second-edge-foreign"
+            ]
+          ]
+        },
+        {
+          "id": "filter-terminal-collision",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "terminal-collision-foreign"
+            ]
+          ]
+        },
+        {
+          "id": "filter-owned",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "owned303"
+            ]
+          ]
+        }
+      ]
+    },
+    "TFM005": {
+      "domain": {
+        "name": "AdversarialTerminalMultihop",
+        "source": {
+          "source_table": "selecto_adv_terminal_roots",
+          "primary_key": "id",
+          "fields": [
+            "id",
+            "tenant_id",
+            "middle_id",
+            "name",
+            "bucket",
+            "secret"
+          ],
+          "redact_fields": [
+            "secret"
+          ],
+          "columns": {
+            "id": {
+              "type": "integer"
+            },
+            "tenant_id": {
+              "type": "integer"
+            },
+            "middle_id": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            },
+            "bucket": {
+              "type": "integer"
+            },
+            "secret": {
+              "type": "string",
+              "internal": true
+            }
+          },
+          "associations": {
+            "customer": {
+              "queryable": "shared_middle",
+              "owner_key": "middle_id",
+              "related_key": "id",
+              "cardinality": "one"
+            }
+          },
+          "tenant_field": "tenant_id"
+        },
+        "schemas": {
+          "shared_middle": {
+            "source_table": "selecto_adv_terminal_middles",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "organization_id",
+              "route_id",
+              "root_id",
+              "target_id",
+              "name",
+              "root_bucket",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "organization_id": {
+                "type": "integer"
+              },
+              "route_id": {
+                "type": "integer"
+              },
+              "root_id": {
+                "type": "integer"
+              },
+              "target_id": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "root_bucket": {
+                "type": "integer"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {
+              "members": {
+                "queryable": "terminals",
+                "owner_key": "route_id",
+                "related_key": "mid_ref",
+                "cardinality": "many"
+              }
+            }
+          },
+          "terminals": {
+            "source_table": "selecto_adv_terminal_terminals",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "workspace_id",
+              "mid_ref",
+              "name",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "workspace_id": {
+                "type": "integer"
+              },
+              "mid_ref": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {},
+            "tenant_field": "workspace_id"
+          },
+          "decoys": {
+            "source_table": "selecto_adv_terminal_decoys",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "workspace_id",
+              "mid_ref",
+              "name",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "workspace_id": {
+                "type": "integer"
+              },
+              "mid_ref": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {},
+            "tenant_field": "workspace_id"
+          }
+        },
+        "joins": {
+          "customer": {
+            "type": "left"
+          }
+        },
+        "domain_version": "1.0.0",
+        "domain_fingerprint": "adversarial-terminal-multihop-v1"
+      },
+      "target_schema": "terminals",
+      "join_path": [
+        "customer",
+        "members"
+      ],
+      "probes": [
+        {
+          "id": "flat-json",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": []
+        },
+        {
+          "id": "flat-count",
+          "format": "count",
+          "fields": [
+            "id"
+          ],
+          "filters": []
+        },
+        {
+          "id": "filter-first-edge",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "first-edge-foreign"
+            ]
+          ]
+        },
+        {
+          "id": "filter-middle-edge",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "second-edge-foreign"
+            ]
+          ]
+        },
+        {
+          "id": "filter-terminal-collision",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "terminal-collision-foreign"
+            ]
+          ]
+        },
+        {
+          "id": "filter-owned",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "owned303"
+            ]
+          ]
+        }
+      ]
+    },
+    "TFM006": {
+      "domain": {
+        "name": "AdversarialTerminalMultihop",
+        "source": {
+          "source_table": "selecto_adv_terminal_roots",
+          "primary_key": "id",
+          "fields": [
+            "id",
+            "tenant_id",
+            "middle_id",
+            "name",
+            "bucket",
+            "secret"
+          ],
+          "redact_fields": [
+            "secret"
+          ],
+          "columns": {
+            "id": {
+              "type": "integer"
+            },
+            "tenant_id": {
+              "type": "integer"
+            },
+            "middle_id": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            },
+            "bucket": {
+              "type": "integer"
+            },
+            "secret": {
+              "type": "string",
+              "internal": true
+            }
+          },
+          "associations": {
+            "customer": {
+              "queryable": "middles",
+              "owner_key": "middle_id",
+              "related_key": "id",
+              "cardinality": "one",
+              "source_scope_key": "bucket",
+              "target_scope_key": "root_bucket"
+            }
+          },
+          "tenant_field": "tenant_id"
+        },
+        "schemas": {
+          "middles": {
+            "source_table": "selecto_adv_terminal_middles",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "organization_id",
+              "route_id",
+              "root_id",
+              "target_id",
+              "name",
+              "root_bucket",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "organization_id": {
+                "type": "integer"
+              },
+              "route_id": {
+                "type": "integer"
+              },
+              "root_id": {
+                "type": "integer"
+              },
+              "target_id": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "root_bucket": {
+                "type": "integer"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {
+              "members": {
+                "queryable": "terminals",
+                "owner_key": "route_id",
+                "related_key": "mid_ref",
+                "cardinality": "many",
+                "source_scope_key": "segment",
+                "target_scope_key": "segment"
+              }
+            },
+            "tenant_field": "organization_id"
+          },
+          "terminals": {
+            "source_table": "selecto_adv_terminal_terminals",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "workspace_id",
+              "mid_ref",
+              "name",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "workspace_id": {
+                "type": "integer"
+              },
+              "mid_ref": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {},
+            "tenant_field": "workspace_id"
+          },
+          "decoys": {
+            "source_table": "selecto_adv_terminal_decoys",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "workspace_id",
+              "mid_ref",
+              "name",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "workspace_id": {
+                "type": "integer"
+              },
+              "mid_ref": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {},
+            "tenant_field": "workspace_id"
+          }
+        },
+        "joins": {
+          "customer": {
+            "type": "left"
+          }
+        },
+        "domain_version": "1.0.0",
+        "domain_fingerprint": "adversarial-terminal-multihop-v1"
+      },
+      "target_schema": "terminals",
+      "join_path": [
+        "customer",
+        "members"
+      ],
+      "probes": [
+        {
+          "id": "flat-json",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": []
+        },
+        {
+          "id": "flat-count",
+          "format": "count",
+          "fields": [
+            "id"
+          ],
+          "filters": []
+        },
+        {
+          "id": "filter-first-edge",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "first-edge-foreign"
+            ]
+          ]
+        },
+        {
+          "id": "filter-middle-edge",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "second-edge-foreign"
+            ]
+          ]
+        },
+        {
+          "id": "filter-terminal-collision",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "terminal-collision-foreign"
+            ]
+          ]
+        },
+        {
+          "id": "filter-owned",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "owned303"
+            ]
+          ]
+        }
+      ]
+    },
+    "TFM007": {
+      "domain": {
+        "name": "AdversarialTerminalMultihop",
+        "source": {
+          "source_table": "selecto_adv_terminal_roots",
+          "primary_key": "id",
+          "fields": [
+            "id",
+            "tenant_id",
+            "middle_id",
+            "name",
+            "bucket",
+            "secret"
+          ],
+          "redact_fields": [
+            "secret"
+          ],
+          "columns": {
+            "id": {
+              "type": "integer"
+            },
+            "tenant_id": {
+              "type": "integer"
+            },
+            "middle_id": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            },
+            "bucket": {
+              "type": "integer"
+            },
+            "secret": {
+              "type": "string",
+              "internal": true
+            }
+          },
+          "associations": {
+            "customer": {
+              "queryable": "middles",
+              "owner_key": "middle_id",
+              "related_key": "id",
+              "cardinality": "one"
+            }
+          },
+          "tenant_field": "tenant_id"
+        },
+        "schemas": {
+          "middles": {
+            "source_table": "selecto_adv_terminal_middles",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "organization_id",
+              "route_id",
+              "root_id",
+              "target_id",
+              "name",
+              "root_bucket",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "organization_id": {
+                "type": "integer"
+              },
+              "route_id": {
+                "type": "integer"
+              },
+              "root_id": {
+                "type": "integer"
+              },
+              "target_id": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "root_bucket": {
+                "type": "integer"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {
+              "members": {
+                "queryable": "terminals",
+                "owner_key": "route_id",
+                "related_key": "mid_ref",
+                "cardinality": "many"
+              }
+            },
+            "tenant_field": "organization_id"
+          },
+          "terminals": {
+            "source_table": "selecto_adv_terminal_terminals",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "workspace_id",
+              "mid_ref",
+              "name",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "workspace_id": {
+                "type": "integer"
+              },
+              "mid_ref": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {},
+            "tenant_field": "workspace_id"
+          },
+          "decoys": {
+            "source_table": "selecto_adv_terminal_decoys",
+            "primary_key": "id",
+            "fields": [
+              "id",
+              "workspace_id",
+              "mid_ref",
+              "name",
+              "segment",
+              "secret"
+            ],
+            "redact_fields": [
+              "secret"
+            ],
+            "columns": {
+              "id": {
+                "type": "integer"
+              },
+              "workspace_id": {
+                "type": "integer"
+              },
+              "mid_ref": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "segment": {
+                "type": "integer"
+              },
+              "secret": {
+                "type": "string",
+                "internal": true
+              }
+            },
+            "associations": {},
+            "tenant_field": "workspace_id"
+          }
+        },
+        "joins": {
+          "customer": {
+            "type": "left"
+          }
+        },
+        "domain_version": "1.0.0",
+        "domain_fingerprint": "adversarial-terminal-multihop-v1"
+      },
+      "target_schema": "decoys",
+      "join_path": [
+        "customer",
+        "members"
+      ],
+      "probes": [
+        {
+          "id": "flat-json",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": []
+        },
+        {
+          "id": "flat-count",
+          "format": "count",
+          "fields": [
+            "id"
+          ],
+          "filters": []
+        },
+        {
+          "id": "filter-first-edge",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "first-edge-foreign"
+            ]
+          ]
+        },
+        {
+          "id": "filter-middle-edge",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "second-edge-foreign"
+            ]
+          ]
+        },
+        {
+          "id": "filter-terminal-collision",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "terminal-collision-foreign"
+            ]
+          ]
+        },
+        {
+          "id": "filter-owned",
+          "format": "json_agg",
+          "fields": [
+            "id",
+            "workspace_id",
+            "mid_ref",
+            "name"
+          ],
+          "filters": [
+            [
+              "name",
+              "owned303"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "table_names": {
+    "roots": "selecto_adv_terminal_roots",
+    "middles": "selecto_adv_terminal_middles",
+    "hubs": "selecto_adv_terminal_hubs",
+    "terminals": "selecto_adv_terminal_terminals",
+    "decoys": "selecto_adv_terminal_decoys"
+  },
+  "provenance": {
+    "derived_design": "/tmp/selecto-elixir-flattened-multihop-design-audit-233.md",
+    "old_fixture_unchanged": "6f7de5a8e95fe7a52238955ba703f40dcab3b89ae803335322da599886542573",
+    "no_physical_FKs": true,
+    "terminal_unique_key": [
+      "workspace_id",
+      "id"
+    ],
+    "new_input_only": true
+  }
+}
