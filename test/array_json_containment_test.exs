@@ -38,6 +38,20 @@ defmodule Selecto.ArrayJsonContainmentTest do
     assert sql =~ "::jsonb"
   end
 
+  test "JSON containment accepts bound scalar and array documents" do
+    for document <- ["bar", 1, 1.0, true, false, nil, ["bar"], []] do
+      {sql, _params} =
+        domain()
+        |> Selecto.configure(:compile_only)
+        |> Selecto.select(["id"])
+        |> Selecto.filter({"metadata", {:json_contains, document}})
+        |> sql()
+
+      assert sql =~ "@>"
+      assert sql =~ "::jsonb"
+    end
+  end
+
   test "unnest columns address the table function's value and ordinality columns" do
     {sql, _params} =
       domain()

@@ -545,7 +545,9 @@ defmodule Selecto.Builder.Sql.Where do
   # ---------------------------------------------------------------------------
 
   # JSON containment.
-  def build(selecto, {field, {:json_contains, value}}) when is_map(value) do
+  def build(selecto, {field, {:json_contains, value}})
+      when is_map(value) or is_list(value) or is_binary(value) or is_number(value) or
+             is_boolean(value) or is_nil(value) do
     domain = selecto.config
 
     if Json.json_column?(domain, field) do
