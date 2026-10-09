@@ -113,6 +113,7 @@ defmodule Selecto.Domain do
       |> maybe_put_domain_version(domain_version)
       |> maybe_put_domain_fingerprint(domain_fingerprint)
       |> Shorthand.normalize_authoring_shorthand()
+      |> Selecto.Domain.EditorNormalization.normalize()
       |> Unit.normalize_domain_columns()
       |> Values.decorate()
 

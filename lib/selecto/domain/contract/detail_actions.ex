@@ -87,8 +87,56 @@ defmodule Selecto.Domain.Contract.DetailActions do
       |> require_target(action_id, target, required)
       |> reject_record_editor_settings(action_id, payload)
       |> validate_editor_presentation(action_id, payload)
+      |> validate_editor_title(action_id, payload, required)
     else
       errors
+    end
+  end
+
+  defp validate_editor_title(errors, action_id, payload, required) do
+    title = Core.map_value(payload, :title)
+    path = [:detail_actions, action_id, :payload, :title]
+
+    if Core.non_empty_string?(title) do
+      placeholder = ~r/\{\{\s*([^}]+?)\s*\}\}/
+
+      fields =
+        required
+        |> List.wrap()
+        |> Enum.filter(&(is_atom(&1) or is_binary(&1)))
+        |> Enum.map(&to_string/1)
+
+      invalid_fields =
+        placeholder
+        |> Regex.scan(title, capture: :all_but_first)
+        |> List.flatten()
+        |> Enum.map(&String.trim/1)
+        |> Enum.reject(&(&1 in fields))
+
+      bare = Regex.replace(placeholder, title, "")
+
+      if invalid_fields == [] and not String.contains?(bare, ["{", "}"]) do
+        errors
+      else
+        [
+          Core.error(
+            :invalid_record_editor_title,
+            path,
+            "record-editor title must use required fields in valid placeholders",
+            fields: invalid_fields
+          )
+          | errors
+        ]
+      end
+    else
+      [
+        Core.error(
+          :invalid_record_editor_title,
+          path,
+          "record-editor title must be a non-empty string"
+        )
+        | errors
+      ]
     end
   end
 
@@ -169,7 +217,8 @@ defmodule Selecto.Domain.Contract.DetailActions do
         ]
       end
 
-    if is_nil(navigation) or is_boolean(navigation) do
+    if Core.fetch_map_value(payload, :navigation_enabled) == :__missing__ or
+         is_boolean(navigation) do
       errors
     else
       [

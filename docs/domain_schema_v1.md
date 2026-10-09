@@ -782,6 +782,11 @@ Type-specific payload checks:
   `editors`. Its `payload.target_field` defaults to the source primary key and
   must appear in `required_fields`. It rejects link/embed-only payload keys and
   accepts an optional presentation `size` and boolean `navigation_enabled`.
+  Normalization supplies the source primary key as `target_field`, the action
+  name as `title`, `"lg"` as `size`, and `true` as `navigation_enabled` when it
+  is omitted. An explicit `false` remains false; an explicit null navigation
+  flag is invalid. Title placeholders such as `{{id}}` must refer to a required
+  field and use balanced double braces.
 
 Invalid detail-action metadata produces diagnostics such as
 `:invalid_detail_action_id`, `:invalid_detail_action_spec`,

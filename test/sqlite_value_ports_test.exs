@@ -63,6 +63,7 @@ defmodule Selecto.SQLiteValuePortsTest do
   setup do
     assert {:ok, connection} = Exqlite.Sqlite3.open(":memory:")
     on_exit(fn -> Exqlite.Sqlite3.close(connection) end)
+    assert :ok = Exqlite.Sqlite3.execute(connection, "PRAGMA temp_store=MEMORY")
 
     assert :ok =
              Exqlite.Sqlite3.execute(
