@@ -110,6 +110,13 @@ domain_fingerprint: "sha256:9f5d..."
 Selecto core preserves a supplied fingerprint but does not compute one during
 normalization.
 
+The root may declare `fts5_index: %{table: "people_fts", key: :id}` for a
+host-maintained SQLite external-content FTS5 index. This closed map accepts only
+`table` and `key` identifiers; `key` must be the root's single public stored
+integer primary key. It carries configuration and does not create an index or
+authorize a lookup. The SQLite adapter verifies the physical index and content
+table against the connected main catalog before compiling a search.
+
 ## Key And Identifier Rules
 
 The normalized schema accepts known structural keys in atom or string form.

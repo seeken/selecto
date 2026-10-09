@@ -44,6 +44,17 @@ ordering. The target adapter must advertise governed lookup text search in the
 requested mode. The local PostgreSQL adapter implements it; other adapters
 must not silently substitute an ungoverned search.
 
+SQLite governed lookup uses an ordinary root table and an explicitly supplied,
+host-maintained external-content FTS5 index. Declare
+`source.fts5_index: %{table: "people_fts", key: :id}` on the configured target;
+the declaration is preserved as authored metadata and does not create an index
+or grant access. `key` must be the public stored integer primary key. The SQLite
+adapter checks the connected main catalog, index content identity, indexed text
+fields, default `unicode61` tokenizer and `full` detail. TEMP shadows, joined,
+computed or internal search fields refuse. Plain, phrase and normalized prefix
+searches bind their text; descending relevance precedes named ordering while
+required, tenant, named and request filters continue to intersect.
+
 The complete synthetic source/target domains and live example are in sibling
 `selecto_db_postgresql/test/selecto_db_postgresql/co_domain_test.exs`. Run from
 that repository with its documented PostgreSQL test connection configured:
