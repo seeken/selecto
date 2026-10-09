@@ -48,7 +48,9 @@ defmodule Selecto.Advanced.LateralJoin do
       # List of parent table references used in subquery
       :correlation_refs,
       # Boolean indicating if correlations have been validated
-      :validated
+      :validated,
+      # Stored public projection metadata inferred without rebuilding the child
+      :output_columns
     ]
 
     @type join_type :: :left | :inner | :right | :full
@@ -259,7 +261,13 @@ defmodule Selecto.Advanced.LateralJoin do
         |> Enum.reject(&field_available?(&1, available_fields))
 
       if Enum.empty?(invalid_refs) do
-        validated_spec = %{spec | correlation_refs: correlation_refs, validated: true}
+        validated_spec = %{
+          spec
+          | correlation_refs: correlation_refs,
+            validated: true,
+            output_columns: stored_output_columns(dummy_subquery)
+        }
+
         {:ok, validated_spec}
       else
         [invalid_ref] = Enum.take(invalid_refs, 1)
@@ -283,6 +291,45 @@ defmodule Selecto.Advanced.LateralJoin do
          }}
     end
   end
+
+  defp stored_output_columns(%Selecto{domain: domain, config: config} = child)
+       when is_map(domain) and is_map(config) do
+    Enum.flat_map(Map.get(child.set, :selected, []), fn
+      {:field, field, name} -> stored_output_column(child, field, name)
+      {:field, field} -> stored_output_column(child, field, field)
+      field when is_atom(field) or is_binary(field) -> stored_output_column(child, field, field)
+      _ -> []
+    end)
+  end
+
+  defp stored_output_columns(_child), do: []
+
+  defp stored_output_column(child, field, name) when is_atom(field) or is_binary(field) do
+    alias Selecto.Domain.Shared.Map, as: DomainMap
+    columns = DomainMap.map_value(DomainMap.map_value(child.domain, :source), :columns) || %{}
+
+    authored =
+      case DomainMap.fetch_key(columns, field) do
+        {:ok, definition} when is_map(definition) -> definition
+        _ -> %{}
+      end
+
+    conf = Selecto.field(child, field)
+
+    if is_map(conf) and conf[:requires_join] == :selecto_root and
+         conf[:internal] != true and not Map.has_key?(conf, :select) and
+         not Map.has_key?(conf, :computed) and
+         DomainMap.map_value(authored, :internal) != true and
+         not Map.has_key?(authored, :computed) and not Map.has_key?(authored, "computed") and
+         not Map.has_key?(authored, :select) and not Map.has_key?(authored, "select") and
+         map_size(authored) > 0 and (is_binary(name) or is_atom(name)) do
+      [%{name: to_string(name), type: conf[:type]}]
+    else
+      []
+    end
+  end
+
+  defp stored_output_column(_child, _field, _name), do: []
 
   # Extract correlation references from a built subquery
   defp extract_subquery_correlations(selecto) do

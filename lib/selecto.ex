@@ -1782,6 +1782,10 @@ defmodule Selecto do
             to_string(alias_name),
             public_opts
           )
+          |> maybe_register_data_lateral_columns(
+            validated_spec.output_columns,
+            to_string(alias_name)
+          )
 
         # Add to selecto set
         current_lateral_joins = Map.get(selecto.set, :lateral_joins, [])

@@ -16,6 +16,9 @@ defmodule Selecto.Builder.Sql do
   from both the root and a joined table. The aliases change only the output
   column names, never the rows, so DISTINCT, GROUP BY and ORDER BY keep their
   meaning.
+
+  Adapter lowerings may instead set `preserve_projection_aliases: true` to emit
+  each selected expression's authored output alias in a derived row query.
   """
 
   import Selecto.Builder.Sql.Helpers
@@ -901,7 +904,10 @@ defmodule Selecto.Builder.Sql do
 
     aliases = Enum.reverse(aliases)
     joins = Enum.reverse(joins)
-    selects_iodata = selects_iodata |> Enum.reverse() |> maybe_alias_projections(selecto, opts)
+
+    selects_iodata =
+      selects_iodata |> Enum.reverse() |> maybe_alias_projections(selecto, opts, aliases)
+
     params = Enum.reverse(params)
 
     # SELECT clauses are now native iodata, just intersperse with commas
@@ -910,15 +916,22 @@ defmodule Selecto.Builder.Sql do
     {aliases, joins, final_select_iodata, params}
   end
 
-  defp maybe_alias_projections(selects_iodata, selecto, opts) do
-    if Keyword.get(opts, :unique_projection_aliases, false) do
-      selects_iodata
-      |> Enum.with_index(1)
-      |> Enum.map(fn {select_iodata, position} ->
-        [select_iodata, " AS ", quote_identifier(selecto, projection_alias(position))]
-      end)
-    else
-      selects_iodata
+  defp maybe_alias_projections(selects_iodata, selecto, opts, aliases) do
+    cond do
+      Keyword.get(opts, :preserve_projection_aliases, false) ->
+        Enum.zip_with(selects_iodata, aliases, fn expression, name ->
+          [expression, " AS ", quote_identifier(selecto, name)]
+        end)
+
+      Keyword.get(opts, :unique_projection_aliases, false) ->
+        selects_iodata
+        |> Enum.with_index(1)
+        |> Enum.map(fn {select_iodata, position} ->
+          [select_iodata, " AS ", quote_identifier(selecto, projection_alias(position))]
+        end)
+
+      true ->
+        selects_iodata
     end
   end
 

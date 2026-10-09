@@ -69,6 +69,17 @@ defmodule Selecto.DialectSupport do
     render(adapter, :render_table_function_join, fragment, selecto, :table_function_join)
   end
 
+  # Equivalent lowerings receive the child AST before native LATERAL syntax or
+  # root alias rewriting. Dialects without this optional hook keep that syntax.
+  def render_lateral_subquery(adapter, fragment, selecto) do
+    with {:ok, dialect} <- dialect(adapter),
+         true <- AdapterSupport.callback_available?(dialect, :render_lateral_subquery, 2) do
+      dialect.render_lateral_subquery(fragment, selecto)
+    else
+      _ -> :not_implemented
+    end
+  end
+
   def render_window_frame_boundary(adapter, fragment, selecto) do
     render(adapter, :render_window_frame_boundary, fragment, selecto, :window_frame_boundary)
   end

@@ -5,6 +5,31 @@ defmodule Selecto.Builder.LateralJoinTest do
   alias Selecto.Builder.LateralJoin
   alias Selecto.TestSQLParams, as: Params
 
+  defmodule LoweringDialect do
+    @behaviour Selecto.DB.Dialect
+    @impl true
+    def render_lateral_subquery(%{options: %{query: child}}, parent) do
+      send(self(), {:structured_lateral, child, parent})
+      {:ok, ["LEFT JOIN lowered ON ", {:param, "selecto_root.literal?"}]}
+    end
+  end
+
+  defmodule LoweringAdapter do
+    def dialect, do: Selecto.Builder.LateralJoinTest.LoweringDialect
+  end
+
+  test "optional lowering receives the original child AST before SQL compilation" do
+    parent = %Selecto{set: %{}}
+    child = %Selecto{set: %{selected: ["would need a real compiler"]}}
+    spec = %Spec{join_type: :left, alias: "child", subquery_builder: fn ^parent -> child end}
+
+    assert {iodata, []} =
+             LateralJoin.build_lateral_join(spec, adapter: LoweringAdapter, selecto: parent)
+
+    assert iodata == ["LEFT JOIN lowered ON ", {:param, "selecto_root.literal?"}]
+    assert_received {:structured_lateral, ^child, ^parent}
+  end
+
   defp to_sql(iodata) do
     {sql, _params} = Params.finalize(iodata)
     sql
