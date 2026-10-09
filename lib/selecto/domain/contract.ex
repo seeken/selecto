@@ -94,7 +94,7 @@ defmodule Selecto.Domain.Contract do
     |> Editors.validate(editors, writes, actions, source, schemas)
     |> DetailActions.validate(detail_actions, field_index, editors, source)
     |> Imports.validate(imports, source, writes, actions)
-    |> SourceRelationships.validate(source_relationships, field_index)
+    |> SourceRelationships.validate(source_relationships, field_index, capabilities)
     |> ChoiceSources.validate(choice_sources, source_relationships, capabilities)
     |> CoDomains.validate(co_domains)
     |> DomainDependencies.validate(domain_dependencies)

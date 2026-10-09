@@ -1866,6 +1866,11 @@ Source relationship validation checks:
   `required` must be a boolean.
 - optional `filters` must be a list of static filter expressions using the same
   operator and path syntax as choice-source filters.
+- optional `capability` must be an atom or string referencing a declared
+  capability; validation does not execute a host capability resolver.
+- joined working-field aliases retain the complete declared association path,
+  such as `customer.region.name`. A schema with the same name as an undeclared
+  join does not establish that join's aliases.
 
 Choice source validation checks:
 
