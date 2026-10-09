@@ -206,7 +206,9 @@ defmodule Selecto.QueryMembers.Data do
     member =
       Selecto.configure(domain, Map.get(selecto, :runtime) || :compile_only,
         adapter: selecto.adapter,
-        validate: false
+        mode: if(Selecto.Policy.strict?(selecto), do: :strict, else: :permissive),
+        domain_sql: if(is_map(selecto.policy), do: selecto.policy.domain_sql, else: :declared),
+        validate: Selecto.Policy.strict?(selecto)
       )
 
     # A member over a tenant-scoped relation is marked so the root's tenant
