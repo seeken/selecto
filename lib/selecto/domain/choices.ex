@@ -9,6 +9,7 @@ defmodule Selecto.Domain.Choices do
   """
 
   alias Selecto.Domain.Choices.{OptionsRequest, OptionsResult, Request, Result}
+  alias Selecto.Domain.Shared.JoinAliases
 
   @type field :: atom() | String.t()
   @type choice_error :: %{
@@ -62,7 +63,10 @@ defmodule Selecto.Domain.Choices do
   Resolves the choice-source binding for a working-domain field.
 
   Rich references use `reference.choice_source`; compact bindings use
-  `choice_source` directly on the column metadata.
+  `choice_source` directly on the column metadata. Declared join paths and unique
+  local join aliases resolve to their actual association target columns. Join
+  namespaces take precedence over coincident schema and projection names;
+  missing target fields and ambiguous local aliases return structured errors.
   """
   @spec binding(map(), field()) :: {:ok, map()} | {:error, choice_error()}
   def binding(domain_or_normalized, field) when is_map(domain_or_normalized) do
@@ -324,6 +328,7 @@ defmodule Selecto.Domain.Choices do
     projection = Map.get(normalized, :projection, %{})
 
     with :error <- source_field_column(source, projection, field),
+         :error <- join_field_column(normalized, field),
          :error <- schema_field_column(schemas, projection, field),
          :error <- projection_field_column(projection, field) do
       {:error,
@@ -333,6 +338,22 @@ defmodule Selecto.Domain.Choices do
          "field #{inspect(field)} is not defined in source, schemas, or projection columns",
          field: field
        )}
+    end
+  end
+
+  defp join_field_column(normalized, field) do
+    case JoinAliases.lookup(normalized, field) do
+      {:ok, column} ->
+        {:ok, Map.take(column, [:field, :path, :column])}
+
+      :error ->
+        :error
+
+      {:error, reason} ->
+        {:error,
+         error(reason, [field], "field does not resolve in its declared join namespace",
+           field: field
+         )}
     end
   end
 

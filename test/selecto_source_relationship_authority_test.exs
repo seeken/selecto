@@ -55,11 +55,13 @@ defmodule SelectoSourceRelationshipAuthorityTest do
 
     index = field_index(domain)
     assert MapSet.member?(index, "customer.region.name")
-    refute MapSet.member?(index, "region.name")
+    assert MapSet.member?(index, "region.name")
   end
 
-  test "a child alias without its parent path does not acquire field authority" do
+  test "established local child aliases retain declared-association field authority" do
     domain = put_in(domain(), [:source_relationships, :owner, :source_field], "region.name")
+    assert {:ok, _, _} = Domain.validate(domain)
+    domain = update_in(domain, [:schemas, :customers, :associations], &Map.delete(&1, :region))
     assert {:error, diagnostics} = Domain.validate(domain)
     assert error(diagnostics, :source_relationship_source_field_not_found)
   end
@@ -124,7 +126,7 @@ defmodule SelectoSourceRelationshipAuthorityTest do
 
     assert {:ok, _, _} = Domain.validate(domain)
     assert MapSet.member?(field_index(domain), "customer.region_display")
-    refute MapSet.member?(field_index(domain), "region_display")
+    assert MapSet.member?(field_index(domain), "region_display")
 
     domain = update_in(domain, [:schemas, :customers, :associations], &Map.delete(&1, :region))
     refute MapSet.member?(field_index(domain), "customer.region_display")

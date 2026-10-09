@@ -1851,6 +1851,15 @@ providers.
 
 Source relationship validation checks:
 
+Declared association joins expose both their complete path (for example,
+`customer.region.name`) and an unambiguous established local alias (`region.name`).
+Choice bindings and query descriptors resolve these aliases to the actual target
+column, including its `choice_source` and `reference` metadata. Explicit root
+columns take precedence, followed by complete join paths, unique local aliases,
+direct schema fields, and projection columns. A declared join namespace cannot
+fall through to a coincident schema or projection if the target lacks the field;
+ambiguous local names require a complete path.
+
 - `source_relationships` must be a map when present.
 - source relationship ids must be atoms or strings.
 - each source relationship entry must be a map.
