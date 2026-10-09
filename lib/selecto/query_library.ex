@@ -442,7 +442,9 @@ defmodule Selecto.QueryLibrary do
       invalid_parameter!(id, type, value)
     end
 
-    float = Decimal.to_float(value)
+    # Decimal 2.3's direct conversion can wrap an out-of-range exponent into a
+    # different finite float. The VM parser rejects overflow reliably instead.
+    {float, ""} = value |> Decimal.to_string(:scientific) |> Float.parse()
     if float == 0.0 and coefficient != 0, do: invalid_parameter!(id, type, value)
     float
   rescue

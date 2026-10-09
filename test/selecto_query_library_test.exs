@@ -343,18 +343,18 @@ defmodule Selecto.QueryLibraryTest do
       end
     end
 
-    for input <- [
-          Decimal.new("0"),
-          Decimal.new("-0.375"),
-          Decimal.new("0.1"),
-          Decimal.new("1e308")
+    for {input, expected} <- [
+          {Decimal.new("0"), 0.0},
+          {Decimal.new("-0.375"), -0.375},
+          {Decimal.new("0.1"), 0.1},
+          {Decimal.new("1e308"), 1.0e308}
         ] do
       query =
         typed
         |> Selecto.configure(:mock_connection)
         |> Selecto.apply_segment(:priority_at_least, minimum: input)
 
-      assert {:priority, {:gte, Decimal.to_float(input)}} in Selecto.query_filters(query,
+      assert {:priority, {:gte, expected}} in Selecto.query_filters(query,
                validate_tenant: false
              )
     end
