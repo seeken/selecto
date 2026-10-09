@@ -277,6 +277,89 @@ defmodule Selecto.QueryLibraryTest do
     end
   end
 
+  test "exact Decimal input converts only for declared float parameters" do
+    input = Decimal.new("0.125")
+
+    for type <- [:float, "float", :decimal, "decimal"] do
+      typed =
+        put_in(
+          domain(),
+          [:query_library, :segments, :priority_at_least, :parameters, :minimum, :type],
+          type
+        )
+
+      query =
+        typed
+        |> Selecto.configure(:mock_connection)
+        |> Selecto.apply_segment(:priority_at_least, minimum: input)
+
+      expected = if type in [:float, "float"], do: 0.125, else: input
+      assert {:priority, {:gte, expected}} in Selecto.query_filters(query, validate_tenant: false)
+    end
+
+    typed =
+      put_in(
+        domain(),
+        [:query_library, :segments, :priority_at_least, :parameters, :minimum, :type],
+        :string
+      )
+
+    query =
+      typed
+      |> Selecto.configure(:mock_connection)
+      |> Selecto.apply_segment(:priority_at_least, minimum: "0.125")
+
+    assert {:priority, {:gte, "0.125"}} in Selecto.query_filters(query, validate_tenant: false)
+
+    assert_raise ArgumentError, ~r/must be :string/, fn ->
+      typed
+      |> Selecto.configure(:mock_connection)
+      |> Selecto.apply_segment(:priority_at_least, minimum: input)
+    end
+  end
+
+  test "Decimal to float refuses bounded nonfinite, overflow and nonzero underflow inputs" do
+    typed =
+      put_in(
+        domain(),
+        [:query_library, :segments, :priority_at_least, :parameters, :minimum, :type],
+        :float
+      )
+
+    for input <- [
+          Decimal.new("NaN"),
+          Decimal.new("Infinity"),
+          Decimal.new("-Infinity"),
+          Decimal.new("1e309"),
+          Decimal.new("-1e309"),
+          Decimal.new("1e-400"),
+          Decimal.new("1e100000000"),
+          Decimal.new(String.duplicate("9", 4097))
+        ] do
+      assert_raise ArgumentError, ~r/segment parameter :minimum must be :float/, fn ->
+        typed
+        |> Selecto.configure(:mock_connection)
+        |> Selecto.apply_segment(:priority_at_least, minimum: input)
+      end
+    end
+
+    for input <- [
+          Decimal.new("0"),
+          Decimal.new("-0.375"),
+          Decimal.new("0.1"),
+          Decimal.new("1e308")
+        ] do
+      query =
+        typed
+        |> Selecto.configure(:mock_connection)
+        |> Selecto.apply_segment(:priority_at_least, minimum: input)
+
+      assert {:priority, {:gte, Decimal.to_float(input)}} in Selecto.query_filters(query,
+               validate_tenant: false
+             )
+    end
+  end
+
   test "keyword parameters preserve the final duplicate and reject malformed entries" do
     query =
       Selecto.apply_segment(configured(), :priority_at_least, minimum: "1", minimum: "3")
