@@ -51,6 +51,8 @@ defmodule Selecto.DB.WriteAdapter do
                {:ok, Selecto.Write.RecordState.t()} | {:error, Selecto.Write.Error.t()})
           | (Selecto.Write.RuleCandidateRequest.t() ->
                {:ok, Selecto.Write.RecordState.t()} | {:error, Selecto.Write.Error.t()})
+          | (Selecto.Write.UpsertCandidateRequest.t() ->
+               {:ok, Selecto.Write.UpsertCandidateState.t()} | {:error, Selecto.Write.Error.t()})
   @typedoc "A governed preparation: returns the write with its authorization."
   @type prepare_fun ::
           (prepared_state_loader() ->
