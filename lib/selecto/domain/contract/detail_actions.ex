@@ -79,7 +79,13 @@ defmodule Selecto.Domain.Contract.DetailActions do
       payload = detail_action_payload(action_spec)
       editor = Core.map_value(payload, :editor)
       primary_key = Core.map_value(source, :primary_key) || :id
-      target = Core.map_value(payload, :target_field) || primary_key
+
+      target =
+        case Core.map_value(payload, :target_field) do
+          nil -> primary_key
+          provided -> provided
+        end
+
       required = Core.map_value(action_spec, :required_fields) || []
 
       errors
@@ -142,9 +148,10 @@ defmodule Selecto.Domain.Contract.DetailActions do
 
   defp require_editor(errors, action_id, editor, editors) do
     exists =
-      is_map(editors) and
+      Core.non_empty_atom_or_string?(editor) and is_map(editors) and
         Enum.any?(editors, fn {key, value} ->
-          to_string(key) == to_string(editor) and is_map(value)
+          Core.non_empty_atom_or_string?(key) and to_string(key) == to_string(editor) and
+            is_map(value)
         end)
 
     if exists do
@@ -163,7 +170,10 @@ defmodule Selecto.Domain.Contract.DetailActions do
   end
 
   defp require_target(errors, action_id, target, required) do
-    if Enum.any?(List.wrap(required), &(to_string(&1) == to_string(target))) do
+    if Core.non_empty_atom_or_string?(target) and is_list(required) and
+         Enum.any?(required, fn field ->
+           Core.non_empty_atom_or_string?(field) and to_string(field) == to_string(target)
+         end) do
       errors
     else
       [

@@ -93,5 +93,42 @@ defmodule Selecto.RecordEditorParityTest do
              Domain.validate(put_in(authored, ["editors", "order_profile", "actions"], [42]))
   end
 
+  test "malformed optional editor lists return diagnostics instead of disappearing" do
+    for {key, code} <- [
+          {"actions", :invalid_editor_actions},
+          {"collections", :invalid_editor_collections}
+        ],
+        value <- [false, %{}, "invalid", 42] do
+      assert {:error, diagnostics} =
+               Domain.validate(
+                 put_in(@fixture["domain"], ["editors", "order_profile", key], value)
+               )
+
+      assert Enum.any?(diagnostics.errors, &(&1.code == code))
+    end
+
+    authored =
+      update_in(@fixture["domain"], ["editors", "order_profile"], &Map.drop(&1, ["actions"]))
+
+    assert {:ok, _, _} = Domain.validate(authored)
+  end
+
+  test "malformed editor bindings return diagnostics without string protocol exceptions" do
+    for {path, value} <- [
+          {["detail_actions", "open_order", "required_fields"], %{}},
+          {["detail_actions", "open_order", "required_fields"], [%{}]},
+          {["detail_actions", "open_order", "payload", "target_field"], %{}},
+          {["detail_actions", "open_order", "payload", "target_field"], false},
+          {["detail_actions", "open_order", "payload", "editor"], %{}},
+          {["editors", "order_profile", "collections"],
+           [%{"id" => "items", "fields" => [%{"field" => %{}}]}]},
+          {["editors", "order_profile", "collections"],
+           [%{"id" => "items", "fields" => ["items.name"], "order_by" => false}]}
+        ] do
+      assert {:error, diagnostics} = Domain.validate(put_in(@fixture["domain"], path, value))
+      assert diagnostics.errors != []
+    end
+  end
+
   defp json(value), do: value |> Jason.encode!() |> Jason.decode!()
 end
