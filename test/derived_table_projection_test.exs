@@ -80,6 +80,17 @@ defmodule Selecto.DerivedTableProjectionTest do
     refute sql =~ "selecto_projection_"
   end
 
+  test "adapter derived row lowering can preserve authored output aliases and binds" do
+    query = duplicate_name_query(SelectoDBMySQL.Adapter)
+    {sql, aliases, params} = Selecto.gen_sql(query, preserve_projection_aliases: true)
+    assert aliases == ["name", "name", "total"]
+    assert sql =~ "selecto_root.name AS name"
+    assert sql =~ "category.name AS name"
+    assert sql =~ "selecto_root.price AS total"
+    assert params == [3]
+    refute sql =~ "selecto_projection_"
+  end
+
   for adapter <- [SelectoDBMySQL.Adapter, SelectoDBMariaDB.Adapter, SelectoDBMSSQL.Adapter] do
     test "#{inspect(adapter)} derived source names every projected column uniquely" do
       query = duplicate_name_query(unquote(adapter))

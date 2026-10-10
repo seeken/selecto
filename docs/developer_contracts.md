@@ -266,6 +266,39 @@ can only narrow the domain's write authority: it does not enable an operation,
 grant a field, or replace canonical tenant scope. Root identity and unsupported
 query expressions must fail closed at the write boundary.
 
+## Portable Data Rules
+
+`Selecto.Rule.Contract.compile/1` and `compile_rules/1` resolve authored portable
+rules. `Selecto.Rule.Evaluator.evaluate/4`, `evaluate_test/3`, and `normalize/2`
+perform pure local evaluation. Required boundaries authorize only a `:passed`
+result; `:error`, `:failed`, and pending obligations do not grant a write.
+
+Text length counts Unicode scalar values, including separate combining marks.
+The `ascii_v1` pattern port implements literals, character classes, alternatives,
+groups and portable quantifiers with a Thompson automaton. It never dispatches
+an authored pattern to the host regular-expression engine. Patterns are at most
+256 ASCII bytes, with at most 512 automaton states and 16 nested groups. Excessive
+expansion reports `evaluation_limit` during compilation.
+
+An invocation owns a fixed 2,000,000-unit work budget shared by all bindings,
+conditions, normalizers and nested operations. It checks original input before
+normalization or a condition can hide oversized data. Logical evaluation gives
+resource errors precedence over passing branches. Subject text is valid UTF-8
+of at most 16,384 bytes, preserving declared document text bounds; patterns admit
+at most 4,096 UTF-8 bytes from the original subject before normalization or
+conditions, including referenced paths. Collections and objects have at most 1,000 entries and
+32 levels of nesting. Compiled operands and normalizer pipelines use the same
+work meter with at most 64 artifact levels, and a contract has at most 1,000
+bindings at evaluation. Public options cannot expand these trusted ceilings.
+
+Exact numeric values are bounded to 4,096 expanded decimal bytes. Integer and
+Decimal coefficient/exponent bounds apply before string conversion or arithmetic;
+arithmetic charges operand sizes and scale differences, with a product charge
+before division/remainder. Collection sums use exact arithmetic within these
+limits rather than the ambient Decimal precision. Depleted work or an oversized
+value returns an explicit `:error` with `:evaluation_limit`. These are finite
+runtime admission limits, rather than validation failures or changed results.
+
 ## Domain Actions
 
 Actions are named workflows over the write contract. They are not direct writes;

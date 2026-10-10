@@ -173,6 +173,12 @@ Segment parameters accept maps or keyword lists. Built-in portable types are
 checked or cast before SQL generation. Adapter- or application-specific type
 names are retained and passed through.
 
+Exact JSON decoders may supply `Decimal` values. A declared `decimal` parameter
+keeps that value; a declared `float` parameter converts a bounded finite value
+to binary floating point. Overflow and nonzero underflow refuse with the usual
+typed parameter diagnostic. Numeric input is not converted into a declared
+`string` parameter.
+
 ## Governance boundaries
 
 Named definitions add application intent; they do not weaken domain policy.

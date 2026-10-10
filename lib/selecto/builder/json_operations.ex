@@ -42,16 +42,17 @@ defmodule Selecto.Builder.JsonOperations do
     adapter = Keyword.fetch!(opts, :adapter)
     validate_spec!(spec)
     validate_clause!(spec, clause)
+    {column, table_alias} = resolve_column(spec.column, opts)
 
     fragment = %Operation{
       operation: spec.operation,
       clause: clause,
-      column: spec.column,
+      column: column,
       path: spec.path,
       value: spec.value,
       key_field: spec.key_field,
       value_field: spec.value_field,
-      table_alias: Keyword.get(opts, :table_alias),
+      table_alias: table_alias,
       options: spec.options || %{}
     }
 
@@ -68,6 +69,27 @@ defmodule Selecto.Builder.JsonOperations do
 
       {:error, reason} ->
         raise Error.to_exception(render_error(adapter, spec.operation, reason))
+    end
+  end
+
+  defp resolve_column(column, opts) do
+    fallback_alias = Keyword.get(opts, :table_alias)
+
+    case Keyword.get(opts, :selecto) do
+      %Selecto{} = selecto when is_binary(column) ->
+        case Selecto.field(selecto, column) do
+          %{requires_join: join} = field when join not in [nil, :selecto_root, "selecto_root"] ->
+            {to_string(Map.get(field, :field, Map.get(field, :name, column))), to_string(join)}
+
+          %{field: field} ->
+            {to_string(field), fallback_alias}
+
+          _ ->
+            {column, fallback_alias}
+        end
+
+      _ ->
+        {column, fallback_alias}
     end
   end
 

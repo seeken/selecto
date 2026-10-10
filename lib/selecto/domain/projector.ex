@@ -66,9 +66,10 @@ defmodule Selecto.Domain.Projector do
         %{schema_version: _schema_version, domain: _domain, query: %{} = query} = normalized,
         :query_contract
       ) do
-    field_choice_bindings = FieldBindings.field_choice_bindings(normalized)
+    aliases = Selecto.Domain.Shared.JoinAliases.index(normalized)
+    field_choice_bindings = query_contract_field_choice_bindings(normalized, aliases)
     filters = MapHelpers.map_value(query, :filters)
-    fields = query_contract_fields(normalized, field_choice_bindings)
+    fields = query_contract_fields(normalized, field_choice_bindings, aliases)
     field_ids = MapSet.new(fields, & &1.id)
 
     %{
@@ -192,6 +193,14 @@ defmodule Selecto.Domain.Projector do
   end
 
   def query_contract_fields(normalized, field_choice_bindings) do
+    query_contract_fields(
+      normalized,
+      field_choice_bindings,
+      Selecto.Domain.Shared.JoinAliases.index(normalized)
+    )
+  end
+
+  defp query_contract_fields(normalized, field_choice_bindings, aliases) do
     choice_index = query_contract_choice_index(field_choice_bindings)
 
     filterable_fields =
@@ -211,7 +220,11 @@ defmodule Selecto.Domain.Projector do
       )
     )
     |> Kernel.++(
+      query_contract_join_fields(aliases, join_choice_index(aliases), filterable_fields)
+    )
+    |> Kernel.++(
       query_contract_schema_fields(Map.get(normalized, :schemas), choice_index, filterable_fields)
+      |> Enum.reject(&Selecto.Domain.Shared.JoinAliases.claimed_field?(aliases, &1.id))
     )
     |> Kernel.++(
       query_contract_custom_fields(
@@ -219,11 +232,44 @@ defmodule Selecto.Domain.Projector do
         choice_index,
         filterable_fields
       )
+      |> Enum.reject(&Selecto.Domain.Shared.JoinAliases.claimed_field?(aliases, &1.id))
     )
-    |> Kernel.++(query_contract_join_fields(normalized, choice_index, filterable_fields))
     |> Enum.uniq_by(& &1.id)
     |> Enum.sort_by(& &1.id)
   end
+
+  defp query_contract_field_choice_bindings(normalized, aliases) do
+    authored =
+      normalized
+      |> FieldBindings.field_choice_bindings()
+      |> Enum.reject(fn binding ->
+        not match?([:source | _], binding.path) and
+          Selecto.Domain.Shared.JoinAliases.claimed_field?(aliases, binding.field)
+      end)
+
+    (authored ++ join_choice_bindings(aliases))
+    |> Enum.sort_by(
+      &{MapHelpers.field_id(&1.field), MapHelpers.field_id(&1.choice_source), inspect(&1.path)}
+    )
+  end
+
+  defp join_choice_bindings(normalized) do
+    root_fields =
+      normalized
+      |> Selecto.Domain.Shared.JoinAliases.source()
+      |> MapHelpers.relation_field_ids()
+      |> MapSet.new()
+
+    normalized
+    |> Selecto.Domain.Shared.JoinAliases.field_columns()
+    |> Enum.reject(&MapSet.member?(root_fields, &1.field))
+    |> Enum.flat_map(fn entry ->
+      FieldBindings.column_field_choice_binding(entry.field, entry.column, entry.path)
+    end)
+  end
+
+  defp join_choice_index(normalized),
+    do: query_contract_choice_index(join_choice_bindings(normalized))
 
   def query_contract_schema_fields(schemas, choice_index, filterable_fields)
       when is_map(schemas) do
@@ -237,14 +283,20 @@ defmodule Selecto.Domain.Projector do
   def query_contract_schema_fields(_schemas, _choice_index, _filterable_fields), do: []
 
   def query_contract_join_fields(normalized, choice_index, filterable_fields) do
-    query_contract_join_field_tree(
-      Map.get(normalized, :joins, %{}),
-      Map.get(normalized, :source),
-      Map.get(normalized, :schemas, %{}),
-      choice_index,
-      filterable_fields,
-      []
-    )
+    normalized
+    |> Selecto.Domain.Shared.JoinAliases.field_columns()
+    |> Enum.flat_map(fn entry ->
+      relation = %{fields: [entry.source_field], columns: %{entry.source_field => entry.column}}
+
+      query_contract_relation_fields(
+        entry.alias_id,
+        relation,
+        :join,
+        choice_index,
+        filterable_fields
+      )
+      |> Enum.map(&Map.put(&1, :relation, entry.relation_id))
+    end)
   end
 
   def query_contract_join_field_tree(
@@ -393,8 +445,12 @@ defmodule Selecto.Domain.Projector do
     )
   end
 
-  def query_contract_join_tree(joins, parent_relation, schemas, path, parent_id)
-      when is_map(joins) do
+  def query_contract_join_tree(joins, parent_relation, schemas, path, parent_id) do
+    query_contract_join_tree(joins, parent_relation, schemas, path, parent_id, parent_relation)
+  end
+
+  defp query_contract_join_tree(joins, parent_relation, schemas, path, parent_id, source)
+       when is_map(joins) do
     joins
     |> MapHelpers.sorted_entries()
     |> Enum.flat_map(fn {join_id, join_config} ->
@@ -403,7 +459,7 @@ defmodule Selecto.Domain.Projector do
       target_schema = if is_map(association), do: MapHelpers.map_value(association, :queryable)
 
       target_relation =
-        query_contract_join_target_relation(target_schema, parent_relation, schemas)
+        query_contract_join_target_relation(target_schema, source, schemas)
 
       nested_joins = MapHelpers.map_value(join_config, :joins)
 
@@ -425,13 +481,15 @@ defmodule Selecto.Domain.Projector do
             target_relation,
             schemas,
             join_path,
-            target_schema
+            target_schema,
+            source
           )
       ]
     end)
   end
 
-  def query_contract_join_tree(_joins, _parent_relation, _schemas, _path, _parent_id), do: []
+  defp query_contract_join_tree(_joins, _parent_relation, _schemas, _path, _parent_id, _source),
+    do: []
 
   defp query_contract_join_cardinality(join_config, association, target_relation) do
     explicit =

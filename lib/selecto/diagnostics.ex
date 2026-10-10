@@ -60,29 +60,58 @@ defmodule Selecto.Diagnostics do
   defp run_explain(selecto, opts) do
     to_sql_opts = Keyword.get(opts, :to_sql_opts, [])
     {query_sql, params} = Selecto.to_sql(selecto, to_sql_opts)
-    explain_sql = build_explain_sql(query_sql, opts)
 
-    case execute_raw(selecto, explain_sql, params) do
-      {:ok, rows, columns} ->
-        plan_lines =
-          rows
-          |> Enum.map(fn
-            [line | _] when is_binary(line) -> line
-            other -> inspect(other)
-          end)
+    with {:ok, explain_sql} <- adapter_explain_sql(selecto, query_sql, opts),
+         {:ok, rows, columns} <- execute_raw(selecto, explain_sql, params) do
+      detail_position = Enum.find_index(columns, &(to_string(&1) == "detail")) || 0
 
-        {:ok,
-         %{
-           explain_sql: explain_sql,
-           query_sql: query_sql,
-           params: params,
-           columns: columns,
-           rows: rows,
-           plan_lines: plan_lines
-         }}
+      plan_lines =
+        Enum.map(rows, fn row ->
+          case Enum.at(row, detail_position) do
+            line when is_binary(line) -> line
+            _ -> inspect(row)
+          end
+        end)
 
-      {:error, error} ->
-        {:error, error}
+      {:ok,
+       %{
+         explain_sql: explain_sql,
+         query_sql: query_sql,
+         params: params,
+         columns: columns,
+         rows: rows,
+         plan_lines: plan_lines
+       }}
+    end
+  end
+
+  defp adapter_explain_sql(selecto, query_sql, opts) do
+    if Selecto.AdapterSupport.adapter_name(runtime_adapter(selecto)) == :sqlite do
+      unsupported_options =
+        Enum.filter([:verbose, :buffers, :settings, :wal, :timing, :costs, :summary], fn option ->
+          Keyword.has_key?(opts, option)
+        end)
+
+      cond do
+        Keyword.get(opts, :analyze, false) ->
+          {:error,
+           Error.validation_error(
+             "SQLite does not support EXPLAIN ANALYZE; use explain/2 for EXPLAIN QUERY PLAN",
+             %{adapter: :sqlite, feature: :explain_analyze}
+           )}
+
+        unsupported_options != [] or Keyword.get(opts, :format) not in [nil, :text] ->
+          {:error,
+           Error.validation_error(
+             "SQLite EXPLAIN QUERY PLAN does not support PostgreSQL explain flags or non-text formats",
+             %{adapter: :sqlite, unsupported_options: unsupported_options}
+           )}
+
+        true ->
+          {:ok, "EXPLAIN QUERY PLAN " <> query_sql}
+      end
+    else
+      {:ok, build_explain_sql(query_sql, opts)}
     end
   end
 

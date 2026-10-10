@@ -42,8 +42,8 @@ defmodule Selecto.Domain.Contract.Editors do
     |> optional_string(get(editor, :description), path ++ [:description])
     |> optional_string(get(editor, :submit_label), path ++ [:submit_label])
     |> validate_fields(fields, writes, source, schemas, path)
-    |> validate_actions(get(editor, :actions) || [], actions, path)
-    |> validate_collections(get(editor, :collections) || [], source, schemas, path)
+    |> validate_actions(optional_list(editor, :actions), actions, path)
+    |> validate_collections(optional_list(editor, :collections), source, schemas, path)
   end
 
   defp validate_editor(errors, id, editor, _writes, _actions, _source, _schemas) do
@@ -205,7 +205,9 @@ defmodule Selecto.Domain.Contract.Editors do
             case fields do
               [first | _] ->
                 field = if is_map(first), do: get(first, :field), else: first
-                field |> to_string() |> String.split(".") |> List.first()
+
+                if is_atom(field) or is_binary(field),
+                  do: field |> to_string() |> String.split(".") |> List.first()
 
               _ ->
                 nil
@@ -220,7 +222,7 @@ defmodule Selecto.Domain.Contract.Editors do
             |> collection_limit(get(collection, :limit), entry_path)
             |> collection_fields(fields, association, source, schemas, entry_path)
             |> collection_orders(
-              get(collection, :order_by) || [],
+              optional_list(collection, :order_by),
               association,
               source,
               schemas,
@@ -272,7 +274,9 @@ defmodule Selecto.Domain.Contract.Editors do
     errors =
       if is_map(target) and
            (cardinality in [:many, "many"] or
-              (is_nil(cardinality) and to_string(related_key) != to_string(target_primary))) do
+              (is_nil(cardinality) and field_id(related_key) != nil and
+                 field_id(target_primary) != nil and
+                 field_id(related_key) != field_id(target_primary))) do
         errors
       else
         [
@@ -551,7 +555,8 @@ defmodule Selecto.Domain.Contract.Editors do
   end
 
   defp reject_unknown(errors, value, allowed, path) do
-    unknown = Enum.reject(Map.keys(value), &(to_string(&1) in allowed))
+    unknown =
+      Enum.reject(Map.keys(value), &((is_atom(&1) or is_binary(&1)) and to_string(&1) in allowed))
 
     if unknown == [],
       do: errors,
@@ -570,6 +575,14 @@ defmodule Selecto.Domain.Contract.Editors do
   end
 
   defp fetch(_, _), do: nil
+
+  defp optional_list(value, key) do
+    case get(value, key) do
+      nil -> []
+      provided -> provided
+    end
+  end
+
   defp get(value, key) when is_map(value), do: Map.get(value, key, Map.get(value, to_string(key)))
   defp get(_, _), do: nil
   defp field_id(value) when is_atom(value) and not is_nil(value), do: Atom.to_string(value)

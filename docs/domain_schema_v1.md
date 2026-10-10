@@ -110,6 +110,13 @@ domain_fingerprint: "sha256:9f5d..."
 Selecto core preserves a supplied fingerprint but does not compute one during
 normalization.
 
+The root may declare `fts5_index: %{table: "people_fts", key: :id}` for a
+host-maintained SQLite external-content FTS5 index. This closed map accepts only
+`table` and `key` identifiers; `key` must be the root's single public stored
+integer primary key. It carries configuration and does not create an index or
+authorize a lookup. The SQLite adapter verifies the physical index and content
+table against the connected main catalog before compiling a search.
+
 ## Key And Identifier Rules
 
 The normalized schema accepts known structural keys in atom or string form.
@@ -782,6 +789,11 @@ Type-specific payload checks:
   `editors`. Its `payload.target_field` defaults to the source primary key and
   must appear in `required_fields`. It rejects link/embed-only payload keys and
   accepts an optional presentation `size` and boolean `navigation_enabled`.
+  Normalization supplies the source primary key as `target_field`, the action
+  name as `title`, `"lg"` as `size`, and `true` as `navigation_enabled` when it
+  is omitted. An explicit `false` remains false; an explicit null navigation
+  flag is invalid. Title placeholders such as `{{id}}` must refer to a required
+  field and use balanced double braces.
 
 Invalid detail-action metadata produces diagnostics such as
 `:invalid_detail_action_id`, `:invalid_detail_action_spec`,
@@ -1016,6 +1028,29 @@ compares its subject with an authored semantic path using `gt`, `gte`, `lt`,
 `lte`, `eq`, or `neq`; missing related values fail closed. Numeric floats are
 not exact literals. Use integers, decimal strings, or `Decimal` values at the
 Elixir evaluator boundary.
+
+`Selecto.Rule.Contract.compile_rules/1,2` and the matching `Compiler` functions
+compile a standalone authored rules artifact. They resolve registry references
+without assuming a Domain field or action namespace. `Contract.compile/1`
+additionally resolves subjects and their types against the Domain for governed
+execution. Both APIs preserve nonempty string IDs and supported rule-AST
+conditions. The standalone API accepts `diagnostics: :portable` for stable
+contract error classes and retains changed detailed codes as `legacy_code`.
+Binding normalizers run before the condition and rule test. Portable conditions
+evaluate the normalized binding subject; `value.compare_path` can inspect the
+complete normalized values. The `path.test` extension in a condition retains
+its complete-value path lookup, including when nested in a logical condition.
+Skipped conditions retain successful normalization, while normalization or
+condition errors produce a non-passing outcome.
+
+Positive version digit strings are parsed exactly into integers, including
+versions beyond binary floating-point precision; strings are limited to 4096
+bytes and cannot contain signs, whitespace or redundant leading zeroes. Exact
+numeric declaration strings use plain decimal syntax and a 4096-byte bound.
+Finite native `Decimal` operands also retain exact values, with their formatted
+expansion bounded before fingerprinting. Scientific strings and nonfinite
+values reject compilation. Operations and semantic uniqueness paths must be
+unique after atom/string normalization.
 
 The Elixir profile also validates strict ISO-8601 `temporal.date`,
 `temporal.time`, and offset-bearing `temporal.instant` values. A
@@ -1816,6 +1851,15 @@ providers.
 
 Source relationship validation checks:
 
+Declared association joins expose both their complete path (for example,
+`customer.region.name`) and an unambiguous established local alias (`region.name`).
+Choice bindings and query descriptors resolve these aliases to the actual target
+column, including its `choice_source` and `reference` metadata. Explicit root
+columns take precedence, followed by complete join paths, unique local aliases,
+direct schema fields, and projection columns. A declared join namespace cannot
+fall through to a coincident schema or projection if the target lacks the field;
+ambiguous local names require a complete path.
+
 - `source_relationships` must be a map when present.
 - source relationship ids must be atoms or strings.
 - each source relationship entry must be a map.
@@ -1831,6 +1875,11 @@ Source relationship validation checks:
   `required` must be a boolean.
 - optional `filters` must be a list of static filter expressions using the same
   operator and path syntax as choice-source filters.
+- optional `capability` must be an atom or string referencing a declared
+  capability; validation does not execute a host capability resolver.
+- joined working-field aliases retain the complete declared association path,
+  such as `customer.region.name`. A schema with the same name as an undeclared
+  join does not establish that join's aliases.
 
 Choice source validation checks:
 

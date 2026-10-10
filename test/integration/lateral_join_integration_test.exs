@@ -109,8 +109,8 @@ defmodule Selecto.Integration.LateralJoinTest do
 
     {sql, params} = Selecto.to_sql(query)
 
-    assert params == []
-    assert sql =~ "JSON_EACH(selecto_root.line_items, '$[*]')"
+    assert params == ["$[*]"]
+    assert sql =~ "JSON_EACH(selecto_root.line_items, ?)"
     assert sql =~ "item_rows.\"key\""
     assert sql =~ "item_rows.value"
     assert sql =~ "item_rows.path"
@@ -127,7 +127,7 @@ defmodule Selecto.Integration.LateralJoinTest do
 
     {sql, params} = Selecto.to_sql(query)
 
-    assert params == ["sku-123"]
+    assert params == ["$[*]", "sku-123"]
     assert sql =~ "item_rows.value"
     assert sql =~ ~r/where.*item_rows\.value\s*=\s*\?/i
   end

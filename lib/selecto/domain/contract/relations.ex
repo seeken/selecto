@@ -27,6 +27,7 @@ defmodule Selecto.Domain.Contract.Relations do
     |> validate_relation_field_columns(relation_id, relation, path)
     |> validate_relation_source_kind(relation_id, relation, path)
     |> validate_relation_readonly(relation_id, relation, path)
+    |> validate_fts5_index(relation_id, relation, path)
   end
 
   def validate_relation(errors, relation_id, relation, path) do
@@ -41,6 +42,48 @@ defmodule Selecto.Domain.Contract.Relations do
       | errors
     ]
   end
+
+  defp validate_fts5_index(errors, relation_id, relation, path) do
+    if Core.has_key?(relation, :fts5_index) do
+      index = Core.map_value(relation, :fts5_index)
+      key = if is_map(index), do: Core.map_value(index, :key)
+      table = if is_map(index), do: Core.map_value(index, :table)
+      columns = Core.map_value(relation, :columns) || %{}
+
+      column =
+        case Core.fetch_key(columns, key) do
+          {:ok, definition} when is_map(definition) -> definition
+          _ -> %{}
+        end
+
+      valid? =
+        relation_id == :source and is_map(index) and map_size(index) == 2 and
+          Enum.sort(Enum.map(Map.keys(index), &to_string/1)) == ["key", "table"] and
+          fts_identifier?(table) and fts_identifier?(key) and
+          Core.field_ref?(Core.map_value(relation, :primary_key)) and
+          to_string(key) == to_string(Core.map_value(relation, :primary_key)) and
+          Core.enum_value?(Core.map_value(column, :type), [:integer]) and
+          not Core.has_key?(column, :computed) and Core.map_value(column, :internal) != true
+
+      if valid?,
+        do: errors,
+        else: [
+          Core.error(
+            :invalid_fts5_index,
+            path ++ [:fts5_index],
+            "root fts5_index requires only table and key identifiers, with the stored integer primary key"
+          )
+          | errors
+        ]
+    else
+      errors
+    end
+  end
+
+  defp fts_identifier?(value) when is_atom(value) or is_binary(value),
+    do: Regex.match?(~r/\A[A-Za-z_][A-Za-z0-9_]*\z/, to_string(value))
+
+  defp fts_identifier?(_value), do: false
 
   def validate_required_relation_keys(errors, relation_id, relation, path) do
     required =

@@ -1,26 +1,40 @@
 defmodule Selecto.Domain.Contract.SourceRelationships do
   @moduledoc false
 
+  alias Selecto.Domain.Contract.Capabilities
   alias Selecto.Domain.Contract.Shared.Core
   alias Selecto.Domain.Contract.Shared.IdValue, as: IdValue
   alias Selecto.Domain.Contract.Shared.StaticFilters, as: StaticFilters
 
-  def validate(errors, source_relationships, field_index) do
-    validate_source_relationships(errors, source_relationships, field_index)
+  def validate(errors, source_relationships, field_index, capabilities \\ %{}) do
+    validate_source_relationships(errors, source_relationships, field_index, capabilities)
   end
 
-  def validate_source_relationships(errors, source_relationships, field_index)
+  def validate_source_relationships(
+        errors,
+        source_relationships,
+        field_index,
+        capabilities \\ %{}
+      )
+
+  def validate_source_relationships(errors, source_relationships, field_index, capabilities)
       when is_map(source_relationships) do
     Enum.reduce(source_relationships, errors, fn {relationship_id, relationship}, acc ->
       path = [:source_relationships, relationship_id]
 
       acc
       |> validate_source_relationship_id(relationship_id, path)
-      |> validate_source_relationship(relationship_id, relationship, path, field_index)
+      |> validate_source_relationship(
+        relationship_id,
+        relationship,
+        path,
+        field_index,
+        capabilities
+      )
     end)
   end
 
-  def validate_source_relationships(errors, source_relationships, _field_index) do
+  def validate_source_relationships(errors, source_relationships, _field_index, _capabilities) do
     [
       Core.error(
         :invalid_section_shape,
@@ -52,7 +66,23 @@ defmodule Selecto.Domain.Contract.SourceRelationships do
     ]
   end
 
-  def validate_source_relationship(errors, relationship_id, relationship, path, field_index)
+  def validate_source_relationship(
+        errors,
+        relationship_id,
+        relationship,
+        path,
+        field_index,
+        capabilities \\ %{}
+      )
+
+  def validate_source_relationship(
+        errors,
+        relationship_id,
+        relationship,
+        path,
+        field_index,
+        capabilities
+      )
       when is_map(relationship) do
     errors
     |> validate_source_relationship_required_keys(relationship_id, relationship, path)
@@ -76,9 +106,25 @@ defmodule Selecto.Domain.Contract.SourceRelationships do
     |> validate_source_relationship_source_path(relationship_id, relationship, path)
     |> validate_source_relationship_virtual_join(relationship_id, relationship, path, field_index)
     |> validate_source_relationship_filters(relationship_id, relationship, path)
+    |> Capabilities.validate_capability_reference(
+      Core.map_value(relationship, :capability),
+      path ++ [:capability],
+      capabilities,
+      :source_relationship_capability_not_found,
+      :invalid_source_relationship_capability,
+      "source relationship #{inspect(relationship_id)}",
+      source_relationship: relationship_id
+    )
   end
 
-  def validate_source_relationship(errors, relationship_id, relationship, path, _field_index) do
+  def validate_source_relationship(
+        errors,
+        relationship_id,
+        relationship,
+        path,
+        _field_index,
+        _capabilities
+      ) do
     [
       Core.error(
         :invalid_section_shape,

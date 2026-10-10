@@ -126,11 +126,9 @@ defmodule Selecto.Builder.CteSql do
     selecto_query = spec.query_builder.()
 
     # Generate SQL from the Selecto query
-    {sql, _aliases, params} = Sql.build(selecto_query, emit_user_ctes: false)
-
-    # Convert SQL string back to iodata with param markers
-    sql = rewrite_cte_root_alias(sql, spec.name)
-    sql_iodata = Selecto.SQL.Params.rebind_finalized(sql, params, selecto_query.adapter)
+    {sql_iodata, _aliases} = Sql.build_iodata(selecto_query, emit_user_ctes: false)
+    sql_iodata = rewrite_cte_root_alias(sql_iodata, spec.name)
+    {_sql, params} = Selecto.SQL.Params.finalize(sql_iodata, adapter: selecto_query.adapter)
 
     # Build CTE definition
     cte_name = escape_identifier(spec.name)
@@ -156,27 +154,20 @@ defmodule Selecto.Builder.CteSql do
       bound_recursion(spec, spec.base_query.(), spec.recursive_query.(cte_ref))
 
     # Execute base query
-    {base_sql, _base_aliases, base_params} = Sql.build(base_selecto, emit_user_ctes: false)
+    {base_sql_iodata, _base_aliases} = Sql.build_iodata(base_selecto, emit_user_ctes: false)
 
     # Execute recursive query with CTE reference
-    {recursive_sql, _recursive_aliases, recursive_params} =
-      Sql.build(recursive_selecto, emit_user_ctes: false)
+    {recursive_sql_iodata, _recursive_aliases} =
+      Sql.build_iodata(recursive_selecto, emit_user_ctes: false)
 
-    # Convert SQL strings back to iodata with param markers
-    base_sql = rewrite_cte_root_alias(base_sql, spec.name)
+    base_sql_iodata = rewrite_cte_root_alias(base_sql_iodata, spec.name)
+    recursive_sql_iodata = rewrite_cte_root_alias(recursive_sql_iodata, spec.name)
 
-    base_sql_iodata =
-      Selecto.SQL.Params.rebind_finalized(base_sql, base_params, base_selecto.adapter)
+    {_base_sql, base_params} =
+      Selecto.SQL.Params.finalize(base_sql_iodata, adapter: base_selecto.adapter)
 
-    # Adjust param indices for recursive part
-    recursive_sql = rewrite_cte_root_alias(recursive_sql, spec.name)
-
-    recursive_sql_iodata =
-      Selecto.SQL.Params.rebind_finalized(
-        recursive_sql,
-        recursive_params,
-        recursive_selecto.adapter
-      )
+    {_recursive_sql, recursive_params} =
+      Selecto.SQL.Params.finalize(recursive_sql_iodata, adapter: recursive_selecto.adapter)
 
     # Build recursive CTE definition
     cte_name = escape_identifier(spec.name)
@@ -347,6 +338,13 @@ defmodule Selecto.Builder.CteSql do
   defp rewrite_cte_root_alias(sql, cte_name) when is_binary(sql) and is_binary(cte_name) do
     Regex.replace(~r/\bselecto_root\b/u, sql, cte_root_alias(cte_name))
   end
+
+  defp rewrite_cte_root_alias(items, cte_name) when is_list(items),
+    do: Enum.map(items, &rewrite_cte_root_alias(&1, cte_name))
+
+  defp rewrite_cte_root_alias({:param, _value} = marker, _cte_name), do: marker
+
+  defp rewrite_cte_root_alias(other, _cte_name), do: other
 
   defp cte_root_alias(cte_name), do: "cte_#{cte_name}"
 end

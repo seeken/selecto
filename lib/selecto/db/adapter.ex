@@ -111,6 +111,14 @@ defmodule Selecto.DB.Adapter do
   @callback execute(connection(), query(), params(), execute_options()) ::
               {:ok, result()} | {:error, term()}
 
+  @doc """
+  Optional execution port for governed read queries. Adapters may enforce
+  connection-local read-only state here; `execute/4` remains available for
+  trusted administration and writes. Core prefers this port when present.
+  """
+  @callback execute_query(connection(), query(), params(), execute_options()) ::
+              {:ok, result()} | {:error, term()}
+
   @callback normalize_execution_result(term()) :: {:ok, result()} | {:error, term()}
   @callback normalize_error(term()) :: Selecto.Error.t()
   @callback normalize_type(term()) :: term()
@@ -168,11 +176,20 @@ defmodule Selecto.DB.Adapter do
   @callback quote_identifier(String.t()) :: String.t()
   @callback format_datetime(iodata(), String.t()) :: iodata()
   @callback rollup_sql(iodata()) :: iodata()
+  @doc """
+  Optional whole-query lowering for engines that emulate grouped-prefix rollup.
+
+  Return SQL with structural parameter markers, output aliases, and resolved
+  joins. The core validates query policy before dispatch and finalizes all binds
+  after composition. Adapters with native ROLLUP keep using `rollup_sql/1`.
+  """
+  @callback render_rollup(Selecto.t(), keyword()) :: {term(), list(), list() | nil}
   @callback rollup_literal_order(pos_integer()) :: iodata() | String.t()
   @callback rollup_sort_fix(connection()) :: boolean()
   @callback supports?(atom()) :: boolean()
 
   @optional_callbacks adapter_contract_version: 0,
+                      execute_query: 4,
                       parameter_placeholder: 2,
                       stream: 4,
                       disconnect: 1,
@@ -202,6 +219,7 @@ defmodule Selecto.DB.Adapter do
                       verify_function: 3,
                       format_datetime: 2,
                       rollup_sql: 1,
+                      render_rollup: 2,
                       rollup_literal_order: 1,
                       rollup_sort_fix: 1
 end

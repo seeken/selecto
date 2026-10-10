@@ -803,7 +803,10 @@ defmodule Selecto.Executor do
   """
   def execute_with_adapter(adapter, connection, query, params, aliases, opts \\ []) do
     try do
-      case adapter.execute(connection, query, params, opts) do
+      execution_port =
+        if function_exported?(adapter, :execute_query, 4), do: :execute_query, else: :execute
+
+      case apply(adapter, execution_port, [connection, query, params, opts]) do
         {:ok, result} ->
           case Selecto.AdapterSupport.normalize_result(adapter, result) do
             {:ok, normalized} ->

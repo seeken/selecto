@@ -133,11 +133,25 @@ defmodule Selecto.Json do
     adapter = Keyword.get(opts, :adapter)
 
     case Selecto.DialectSupport.render_json(adapter, callback, fragment, %{adapter: adapter}) do
-      {:ok, sql} -> IO.iodata_to_binary(sql)
-      {:error, %Selecto.Error{} = error} -> raise Selecto.Error.to_exception(error)
-      {:error, reason} -> raise ArgumentError, "adapter JSON rendering failed: #{inspect(reason)}"
+      {:ok, sql} ->
+        # Keep bound value markers intact until the complete query is finalized.
+        # Existing marker-free convenience results remain binary-compatible.
+        if contains_params?(sql), do: sql, else: IO.iodata_to_binary(sql)
+
+      {:error, %Selecto.Error{} = error} ->
+        raise Selecto.Error.to_exception(error)
+
+      {:error, reason} ->
+        raise ArgumentError, "adapter JSON rendering failed: #{inspect(reason)}"
     end
   end
+
+  defp contains_params?({:param, _value}), do: true
+
+  defp contains_params?(fragments) when is_list(fragments),
+    do: Enum.any?(fragments, &contains_params?/1)
+
+  defp contains_params?(_fragment), do: false
 
   defp traverse_schema(schema, []) when is_map(schema), do: schema
 

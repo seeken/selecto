@@ -16,6 +16,9 @@ defmodule Selecto.Builder.Sql do
   from both the root and a joined table. The aliases change only the output
   column names, never the rows, so DISTINCT, GROUP BY and ORDER BY keep their
   meaning.
+
+  Adapter lowerings may instead set `preserve_projection_aliases: true` to emit
+  each selected expression's authored output alias in a derived row query.
   """
 
   import Selecto.Builder.Sql.Helpers
@@ -33,14 +36,32 @@ defmodule Selecto.Builder.Sql do
   @spec build(Selecto.Types.t(), Selecto.Types.sql_generation_options()) ::
           {String.t(), list(), [any()]}
   def build(selecto, opts) do
+    {iodata, aliases} = build_iodata(selecto, opts)
+    {sql, params} = Params.finalize(iodata, adapter: selecto.adapter)
+    {sql, aliases, params}
+  end
+
+  @doc false
+  # Internal composition keeps parameter markers until the complete statement
+  # is finalized. Parsing placeholder text out of finalized SQL cannot safely
+  # distinguish binds from quoted literals or comments.
+  def build_iodata(selecto, opts) do
+    {iodata, aliases, _joins} = build_iodata_with_joins(selecto, opts)
+    {iodata, aliases}
+  end
+
+  @doc false
+  # Adapter compositions preserve parameter markers and the resolved joins.
+  def build_iodata_with_joins(selecto, opts) do
     # Check for Set Operations first as they completely override query structure
     cond do
       Selecto.Builder.SetOperations.has_set_operations?(selecto) ->
-        build_set_operation_query(selecto, opts)
+        {iodata, aliases} = build_set_operation_iodata(selecto, opts)
+        {iodata, aliases, nil}
 
       true ->
         :ok = Selecto.Policy.validate_query!(selecto)
-        build_standard_query(selecto, opts)
+        build_query_iodata_with_joins(selecto, opts)
     end
   end
 
@@ -51,13 +72,10 @@ defmodule Selecto.Builder.Sql do
   @spec build_with_joins(Selecto.Types.t(), Selecto.Types.sql_generation_options()) ::
           {String.t(), list(), [any()], list() | nil}
   def build_with_joins(selecto, opts) do
-    if Selecto.Builder.SetOperations.has_set_operations?(selecto) do
-      {sql, aliases, params} = build_set_operation_query(selecto, opts)
-      {sql, aliases, params, nil}
-    else
-      :ok = Selecto.Policy.validate_query!(selecto)
-      build_standard_query_with_joins(selecto, opts)
-    end
+    {iodata, aliases, joins} = build_iodata_with_joins(selecto, opts)
+
+    {sql, params} = Params.finalize(iodata, adapter: selecto.adapter)
+    {sql, aliases, params, joins}
   end
 
   @doc """
@@ -214,12 +232,7 @@ defmodule Selecto.Builder.Sql do
     build_from_with_ctes(selecto, joins_in_order)
   end
 
-  defp build_standard_query(selecto, opts) do
-    {sql, aliases, params, _joins_in_order} = build_standard_query_with_joins(selecto, opts)
-    {sql, aliases, params}
-  end
-
-  defp build_standard_query_with_joins(selecto, opts) do
+  defp build_standard_query_iodata_with_joins(selecto, opts) do
     # Phase 4: All SQL builders now use iodata parameterization.
     {aliases, sel_joins, select_iodata, select_params} =
       build_select_with_subselects(selecto, %{}, opts)
@@ -438,15 +451,18 @@ defmodule Selecto.Builder.Sql do
         adapter
       )
 
-    # Phase 4: All parameters are now properly handled through iodata - no sentinel patterns remain
-    {sql, final_params} =
-      Params.finalize(final_query_iodata,
-        adapter: adapter
-      )
+    {final_query_iodata, aliases, joins_in_order}
+  end
 
-    # CTE params are already integrated into the iodata, so final_params contains everything
-    # Don't double-count parameters
-    {sql, aliases, final_params, joins_in_order}
+  defp build_query_iodata_with_joins(selecto, opts) do
+    rollup? = Enum.any?(selecto.set.group_by, &match?({:rollup, _}, &1))
+
+    if rollup? and
+         Selecto.AdapterSupport.callback_available?(selecto.adapter, :render_rollup, 2) do
+      selecto.adapter.render_rollup(selecto, opts)
+    else
+      build_standard_query_iodata_with_joins(selecto, opts)
+    end
   end
 
   defp finalize_section(iodata, _adapter, _type) when iodata in [[], [""], ["()"], "", "()"],
@@ -533,22 +549,40 @@ defmodule Selecto.Builder.Sql do
     adapter = Map.get(selecto, :adapter, Selecto.AdapterSupport.default_adapter())
 
     if Selecto.AdapterSupport.adapter_name(adapter) in [:mssql, :mysql, :mariadb, :sqlite] do
-      [adapter: adapter, table_alias: "selecto_root"]
+      [adapter: adapter, table_alias: "selecto_root", selecto: selecto]
     else
-      [adapter: adapter]
+      [adapter: adapter, selecto: selecto]
     end
   end
 
   defp collect_requested_joins(selecto, inferred_join_groups) do
     explicit_joins = selecto.set |> Map.get(:active_joins, []) |> List.wrap()
 
+    json_joins =
+      [:json_selects, :json_filters, :json_order_by]
+      |> Enum.flat_map(&Map.get(selecto.set, &1, []))
+      |> Enum.flat_map(fn
+        {%{column: column}, _direction} -> json_column_join(selecto, column)
+        %{column: column} -> json_column_join(selecto, column)
+      end)
+
     inferred_join_groups
     |> List.flatten()
     |> Kernel.++(explicit_joins)
+    |> Kernel.++(json_joins)
     |> Enum.uniq()
   end
 
-  defp build_set_operation_query(selecto, opts) do
+  defp json_column_join(selecto, column) when is_binary(column) do
+    case Selecto.field(selecto, column) do
+      %{requires_join: join} when not is_nil(join) -> [join]
+      _ -> []
+    end
+  end
+
+  defp json_column_join(_selecto, _column), do: []
+
+  defp build_set_operation_iodata(selecto, opts) do
     case Selecto.Builder.SetOperations.validate_set_operations_for_sql(selecto) do
       :ok ->
         :ok
@@ -589,17 +623,11 @@ defmodule Selecto.Builder.Sql do
     # Combine set operations with any outer ORDER BY/LIMIT/OFFSET
     final_iodata = [set_op_iodata] ++ order_by_iodata ++ limit_iodata ++ offset_iodata
 
-    # Finalize the SQL
-    {sql, final_params} =
-      Selecto.SQL.Params.finalize(final_iodata,
-        adapter: adapter
-      )
-
     # For set operations, we don't return field aliases since the result schema
     # depends on the left query's structure
     aliases = []
 
-    {sql, aliases, final_params}
+    {final_iodata, aliases}
   end
 
   defp pagination_sections(selecto, adapter, prefix \\ "\n        ") do
@@ -630,8 +658,14 @@ defmodule Selecto.Builder.Sql do
     else
       limit_iodata =
         case limit_value do
-          nil -> []
-          value -> [prefix, "limit ", Integer.to_string(value)]
+          nil ->
+            if not is_nil(offset_value) and
+                 Selecto.AdapterSupport.adapter_name(adapter) == :sqlite,
+               do: [prefix, "limit -1"],
+               else: []
+
+          value ->
+            [prefix, "limit ", Integer.to_string(value)]
         end
 
       offset_iodata =
@@ -870,7 +904,10 @@ defmodule Selecto.Builder.Sql do
 
     aliases = Enum.reverse(aliases)
     joins = Enum.reverse(joins)
-    selects_iodata = selects_iodata |> Enum.reverse() |> maybe_alias_projections(selecto, opts)
+
+    selects_iodata =
+      selects_iodata |> Enum.reverse() |> maybe_alias_projections(selecto, opts, aliases)
+
     params = Enum.reverse(params)
 
     # SELECT clauses are now native iodata, just intersperse with commas
@@ -879,15 +916,22 @@ defmodule Selecto.Builder.Sql do
     {aliases, joins, final_select_iodata, params}
   end
 
-  defp maybe_alias_projections(selects_iodata, selecto, opts) do
-    if Keyword.get(opts, :unique_projection_aliases, false) do
-      selects_iodata
-      |> Enum.with_index(1)
-      |> Enum.map(fn {select_iodata, position} ->
-        [select_iodata, " AS ", quote_identifier(selecto, projection_alias(position))]
-      end)
-    else
-      selects_iodata
+  defp maybe_alias_projections(selects_iodata, selecto, opts, aliases) do
+    cond do
+      Keyword.get(opts, :preserve_projection_aliases, false) ->
+        Enum.zip_with(selects_iodata, aliases, fn expression, name ->
+          [expression, " AS ", quote_identifier(selecto, name)]
+        end)
+
+      Keyword.get(opts, :unique_projection_aliases, false) ->
+        selects_iodata
+        |> Enum.with_index(1)
+        |> Enum.map(fn {select_iodata, position} ->
+          [select_iodata, " AS ", quote_identifier(selecto, projection_alias(position))]
+        end)
+
+      true ->
+        selects_iodata
     end
   end
 
@@ -1153,6 +1197,29 @@ defmodule Selecto.Builder.Sql do
 
   defp build_join_on_clause(selecto, join, config) do
     base_on =
+      case Map.get(config, :portable_association) do
+        association when is_map(association) ->
+          Selecto.Builder.Association.predicate(
+            selecto,
+            association,
+            to_string(join),
+            to_string(config.requires_join)
+          )
+
+        nil ->
+          build_standard_join_on_clause(selecto, join, config)
+      end
+
+    append_param_filters_to_on_clause(
+      selecto,
+      join,
+      base_on,
+      Map.get(config, :param_filters, %{})
+    )
+  end
+
+  defp build_standard_join_on_clause(selecto, join, config) do
+    base_on =
       case Map.get(config, :on, []) do
         on_conditions when is_list(on_conditions) and on_conditions != [] ->
           requires_join = Map.get(config, :requires_join, :selecto_root)
@@ -1173,14 +1240,7 @@ defmodule Selecto.Builder.Sql do
           ]
       end
 
-    base_on = append_association_scope_to_on_clause(selecto, join, base_on, config)
-
-    append_param_filters_to_on_clause(
-      selecto,
-      join,
-      base_on,
-      Map.get(config, :param_filters, %{})
-    )
+    append_association_scope_to_on_clause(selecto, join, base_on, config)
   end
 
   defp append_association_scope_to_on_clause(selecto, join, base_on, config) do

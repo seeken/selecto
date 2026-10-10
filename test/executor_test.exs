@@ -112,6 +112,24 @@ defmodule Selecto.ExecutorTest do
              Executor.execute_with_adapter(Adapter, :single, "select 1", [], ["id"])
   end
 
+  defmodule GovernedAdapter do
+    def execute_query(connection, query, params, opts) do
+      send(self(), {:governed_query, connection, query, params, opts})
+      {:ok, %{rows: [[1]], columns: ["id"]}}
+    end
+
+    def execute(_, _, _, _), do: raise("trusted execution port selected")
+  end
+
+  test "execute_with_adapter prefers the governed read query port when implemented" do
+    assert {:ok, {[[1]], ["id"], ["id"]}} =
+             Executor.execute_with_adapter(GovernedAdapter, :connection, "select ?", [1], ["id"],
+               timeout: 500
+             )
+
+    assert_received {:governed_query, :connection, "select ?", [1], [timeout: 500]}
+  end
+
   test "execute_with_adapter wraps adapter errors" do
     assert {:error, %Selecto.Error{type: :query_error}} =
              Executor.execute_with_adapter(Adapter, :error, "select 1", [], ["id"])

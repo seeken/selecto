@@ -6,6 +6,9 @@ defmodule Selecto.Domain.Contract.Shared.Core do
   def relation_field_ref(relation_id, field), do: "#{field_id(relation_id)}.#{field_id(field)}"
 
   def field_index(source, schemas, projection, joins \\ %{}) do
+    aliases =
+      Selecto.Domain.Shared.JoinAliases.index(%{source: source, schemas: schemas, joins: joins})
+
     source_fields =
       source
       |> relation_fields()
@@ -17,6 +20,7 @@ defmodule Selecto.Domain.Contract.Shared.Core do
           schema
           |> relation_fields()
           |> Enum.map(&"#{field_id(schema_id)}.#{&1}")
+          |> Enum.reject(&Selecto.Domain.Shared.JoinAliases.claimed_field?(aliases, &1))
         end)
       else
         []
@@ -27,7 +31,9 @@ defmodule Selecto.Domain.Contract.Shared.Core do
       |> map_value(:custom_columns)
       |> case do
         custom_columns when is_map(custom_columns) ->
-          Enum.map(custom_columns, fn {field, _} -> field_id(field) end)
+          custom_columns
+          |> Enum.map(fn {field, _} -> field_id(field) end)
+          |> Enum.reject(&Selecto.Domain.Shared.JoinAliases.claimed_field?(aliases, &1))
 
         _ ->
           []
@@ -35,52 +41,31 @@ defmodule Selecto.Domain.Contract.Shared.Core do
 
     source_fields
     |> MapSet.union(MapSet.new(schema_fields))
-    |> MapSet.union(MapSet.new(join_alias_fields(joins, source, schemas)))
+    |> MapSet.union(MapSet.new(join_alias_fields(aliases)))
     |> MapSet.union(MapSet.new(custom_fields))
   end
 
-  defp join_alias_fields(joins, relation, schemas) when is_map(joins) and is_map(relation) do
-    associations = map_value(relation, :associations) || %{}
+  defp join_alias_fields(aliases) do
+    fields = Enum.map(Selecto.Domain.Shared.JoinAliases.field_columns(aliases), & &1.field)
 
-    Enum.flat_map(joins, fn {join_id, join_spec} ->
-      target_id =
-        associations
-        |> map_entry(join_id)
-        |> map_value(:queryable)
+    display =
+      aliases
+      |> Selecto.Domain.Shared.JoinAliases.namespaces()
+      |> Enum.flat_map(fn
+        {id, [join]} ->
+          if map_value(join.config, :type) in [:star_dimension, "star_dimension"] and
+               non_empty_atom_or_string?(map_value(join.config, :display_field)) do
+            [id <> "_display"]
+          else
+            []
+          end
 
-      target_relation = map_entry(schemas, target_id) || map_entry(schemas, join_id) || %{}
-
-      aliased_fields =
-        target_relation
-        |> relation_fields()
-        |> Enum.map(&"#{field_id(join_id)}.#{&1}")
-
-      display_alias =
-        if map_value(join_spec, :type) in [:star_dimension, "star_dimension"] and
-             non_empty_atom_or_string?(map_value(join_spec, :display_field)) do
-          ["#{field_id(join_id)}_display"]
-        else
+        {_id, _ambiguous} ->
           []
-        end
+      end)
 
-      nested_fields =
-        join_spec
-        |> map_value(:joins)
-        |> join_alias_fields(target_relation, schemas)
-
-      aliased_fields ++ display_alias ++ nested_fields
-    end)
+    fields ++ display
   end
-
-  defp join_alias_fields(_joins, _relation, _schemas), do: []
-
-  defp map_entry(map, key) when is_map(map) and (is_atom(key) or is_binary(key)) do
-    Enum.find_value(map, fn {candidate, value} ->
-      if field_id(candidate) == field_id(key), do: value
-    end)
-  end
-
-  defp map_entry(_map, _key), do: nil
 
   def relation_fields(relation) when is_map(relation) do
     fields =

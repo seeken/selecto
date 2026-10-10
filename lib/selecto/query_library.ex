@@ -430,6 +430,27 @@ defmodule Selecto.QueryLibrary do
   defp cast_parameter!(_id, type, value) when type in [:float, "float"] and is_float(value),
     do: value
 
+  defp cast_parameter!(id, type, %Decimal{} = value) when type in [:float, "float"] do
+    # Exact JSON decoders supply Decimal. Convert only for an explicitly
+    # declared floating parameter, with bounded expansion and no overflow or
+    # nonzero underflow. Decimal parameters retain their exact value below.
+    %Decimal{sign: sign, coef: coefficient, exp: exponent} = value
+
+    unless sign in [-1, 1] and is_integer(coefficient) and coefficient >= 0 and
+             is_integer(exponent) and exponent in -4_096..4_096 and
+             byte_size(Integer.to_string(coefficient)) <= 4_096 do
+      invalid_parameter!(id, type, value)
+    end
+
+    # Decimal 2.3's direct conversion can wrap an out-of-range exponent into a
+    # different finite float. The VM parser rejects overflow reliably instead.
+    {float, ""} = value |> Decimal.to_string(:scientific) |> Float.parse()
+    if float == 0.0 and coefficient != 0, do: invalid_parameter!(id, type, value)
+    float
+  rescue
+    _ -> invalid_parameter!(id, type, value)
+  end
+
   defp cast_parameter!(_id, type, value)
        when type in [:float, "float"] and is_integer(value),
        do: value / 1

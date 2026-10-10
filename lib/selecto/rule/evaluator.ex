@@ -6,14 +6,31 @@ defmodule Selecto.Rule.Evaluator do
   as obligations until a host supplies the corresponding authoritative stage.
   """
 
-  alias Selecto.Rule.{Contract, Result}
+  alias Selecto.Rule.{Budget, Contract, Pattern, Result}
 
   @missing :__selecto_rule_missing__
-  @max_text_bytes 4096
 
   @spec evaluate(Contract.t(), atom() | String.t(), term(), keyword()) :: Result.t()
-  def evaluate(%Contract{} = contract, scope, values, opts \\ []) do
+  def evaluate(contract, scope, values, opts \\ [])
+
+  def evaluate(%Contract{bindings: bindings}, _scope, values, _opts)
+      when map_size(bindings) > 1000 do
+    %Result{
+      values: values,
+      disposition: :error,
+      outcomes: [
+        %{disposition: :error, code: :evaluation_limit, enforcement: "required", path: []}
+      ]
+    }
+  end
+
+  def evaluate(%Contract{} = contract, scope, values, opts) do
     scope = to_string(scope)
+
+    opts =
+      opts
+      |> Keyword.put(:rule_budget, Budget.new())
+      |> Keyword.put(:rule_original_values, values)
 
     {values, outcomes, obligations} =
       contract.bindings
@@ -37,18 +54,33 @@ defmodule Selecto.Rule.Evaluator do
   @doc "Evaluates one compiled test against one value."
   @spec evaluate_test(map(), term(), keyword()) :: :passed | {:failed, map()} | {:error, map()}
   def evaluate_test(test, value, opts \\ []) when is_map(test) do
-    safe_evaluate(test, value, opts)
+    opts = Keyword.put(opts, :rule_budget, Budget.new())
+
+    with :ok <- guarded_values(value, opts),
+         :ok <- guarded_values(Keyword.get(opts, :values, %{}), opts),
+         :ok <- guarded_values(Keyword.get(opts, :condition_values, %{}), opts) do
+      safe_evaluate(test, value, opts)
+    end
   end
 
   @doc "Applies a compiled normalizer pipeline to one value."
   @spec normalize([map()], term()) :: {:ok, term()} | {:error, map()}
   def normalize(steps, value) when is_list(steps) do
+    opts = [rule_budget: Budget.new()]
+    with :ok <- guarded_values(value, opts), do: normalize_steps(steps, value, opts)
+  end
+
+  defp normalize_steps(steps, value, opts) do
+    Budget.artifact(steps, Keyword.fetch!(opts, :rule_budget))
+
     Enum.reduce_while(steps, {:ok, value}, fn step, {:ok, current} ->
-      case safe_normalize_step(step, current) do
+      case safe_normalize_step(step, current, opts) do
         {:ok, normalized} -> {:cont, {:ok, normalized}}
         {:error, error} -> {:halt, {:error, error}}
       end
     end)
+  rescue
+    Budget.Limit -> evaluation_limit()
   end
 
   defp applies?(binding, scope, opts) do
@@ -74,31 +106,43 @@ defmodule Selecto.Rule.Evaluator do
         {values, outcomes, obligations ++ [obligation]}
 
       true ->
-        value = fetch_path(values, binding.subject.path)
         definition = Map.fetch!(contract.definitions, binding.rule.id)
         normalizer = binding.normalizer && Map.fetch!(contract.normalizers, binding.normalizer.id)
 
-        with :passed <- evaluate_condition(binding.condition, values, opts),
-             {:ok, normalized} <- apply_normalizer(normalizer, value),
-             result <-
-               safe_evaluate(definition.test, normalized, Keyword.put(opts, :values, values)) do
+        with :ok <- guarded_values(values, opts),
+             value = fetch_path(values, binding.subject.path, opts),
+             :ok <- guarded_original_patterns(definition.test, binding, opts),
+             {:ok, normalized} <- apply_normalizer(normalizer, value, opts) do
           updated =
             if normalizer && value != @missing,
-              do: put_path(values, binding.subject.path, normalized),
+              do: put_path(values, binding.subject.path, normalized, opts),
               else: values
+
+          evaluation_opts = Keyword.put(opts, :values, updated)
+
+          result =
+            case evaluate_condition(
+                   binding.condition,
+                   normalized,
+                   Keyword.put(evaluation_opts, :condition_values, updated)
+                 ) do
+              :passed -> safe_evaluate(definition.test, normalized, evaluation_opts)
+              :not_applicable -> :not_applicable
+              {:error, error} -> {:error, error}
+            end
 
           outcome = outcome(binding, definition, result)
           {updated, outcomes ++ [outcome], obligations}
         else
-          :not_applicable ->
-            outcome = outcome(binding, definition, :not_applicable)
-            {values, outcomes ++ [outcome], obligations}
-
           {:error, error} ->
             outcome = outcome(binding, definition, {:error, error})
             {values, outcomes ++ [outcome], obligations}
         end
     end
+  rescue
+    Budget.Limit ->
+      definition = Map.fetch!(contract.definitions, binding.rule.id)
+      {values, outcomes ++ [outcome(binding, definition, evaluation_limit())], obligations}
   end
 
   defp evaluate_condition(nil, _values, _opts), do: :passed
@@ -111,9 +155,52 @@ defmodule Selecto.Rule.Evaluator do
     end
   end
 
-  defp apply_normalizer(nil, value), do: {:ok, value}
-  defp apply_normalizer(_normalizer, @missing), do: {:ok, @missing}
-  defp apply_normalizer(normalizer, value), do: normalize(normalizer.steps, value)
+  defp apply_normalizer(nil, value, _opts), do: {:ok, value}
+  defp apply_normalizer(_normalizer, @missing, _opts), do: {:ok, @missing}
+
+  defp apply_normalizer(normalizer, value, opts),
+    do: normalize_steps(normalizer.steps, value, opts)
+
+  defp guarded_original_patterns(test, binding, opts) do
+    record = Keyword.fetch!(opts, :rule_original_values)
+    original = fetch_path(record, binding.subject.path, opts)
+    Budget.artifact(test, Keyword.fetch!(opts, :rule_budget))
+    Budget.artifact(binding.condition, Keyword.fetch!(opts, :rule_budget))
+    original_patterns(test, original, record, opts)
+    original_patterns(binding.condition, original, record, opts)
+    :ok
+  end
+
+  defp original_patterns(%{"op" => "text.pattern"}, value, _record, opts) when is_binary(value),
+    do: Budget.pattern_text(value, Keyword.fetch!(opts, :rule_budget))
+
+  defp original_patterns(%{"op" => op, "rules" => rules}, value, record, opts)
+       when op in ["all", "any"],
+       do: Enum.each(rules, &original_patterns(&1, value, record, opts))
+
+  defp original_patterns(%{"op" => "not", "rule" => rule}, value, record, opts),
+    do: original_patterns(rule, value, record, opts)
+
+  defp original_patterns(
+         %{"op" => "path.test", "path" => path, "test" => test},
+         _value,
+         record,
+         opts
+       ),
+       do: original_patterns(test, fetch_path(record, path, opts), record, opts)
+
+  defp original_patterns(
+         %{"op" => "object.shape", "properties" => properties},
+         value,
+         record,
+         opts
+       ),
+       do:
+         Enum.each(properties, fn {key, test} ->
+           original_patterns(test, fetch_path(value, [key], opts), record, opts)
+         end)
+
+  defp original_patterns(_test, _value, _record, _opts), do: :ok
 
   defp outcome(binding, definition, result) do
     {disposition, diagnostic} =
@@ -142,6 +229,7 @@ defmodule Selecto.Rule.Evaluator do
     required_obligations = Enum.filter(obligations, &(&1.enforcement == "required"))
 
     cond do
+      Enum.any?(outcomes, &(&1.disposition == :error and &1.code == :evaluation_limit)) -> :error
       Enum.any?(required, &(&1.disposition == :error)) -> :error
       Enum.any?(required, &(&1.disposition == :failed)) -> :failed
       required_obligations != [] -> :pending
@@ -149,24 +237,24 @@ defmodule Selecto.Rule.Evaluator do
     end
   end
 
-  defp do_evaluate(%{"op" => "presence.required"}, value, _opts) do
+  defp evaluate_node(%{"op" => "presence.required"}, value, _opts) do
     if value == @missing, do: failed(:required, "value is required"), else: :passed
   end
 
-  defp do_evaluate(%{"op" => "presence.non_null"}, value, _opts) do
+  defp evaluate_node(%{"op" => "presence.non_null"}, value, _opts) do
     if value in [@missing, nil], do: failed(:null, "value must not be null"), else: :passed
   end
 
-  defp do_evaluate(%{"op" => "presence.absent"}, value, _opts) do
+  defp evaluate_node(%{"op" => "presence.absent"}, value, _opts) do
     if value == @missing, do: :passed, else: failed(:forbidden, "value must be absent")
   end
 
-  defp do_evaluate(%{"op" => "type.is", "type" => type}, value, _opts) do
+  defp evaluate_node(%{"op" => "type.is", "type" => type}, value, opts) do
     valid =
       case type do
         type when type in ["text", "string"] -> is_binary(value)
         "integer" -> is_integer(value)
-        "decimal" -> match?({:ok, _decimal}, decimal(value))
+        "decimal" -> match?({:ok, _decimal}, decimal(value, opts))
         "boolean" -> is_boolean(value)
         "collection" -> is_list(value)
         "object" -> is_map(value)
@@ -175,45 +263,41 @@ defmodule Selecto.Rule.Evaluator do
     if valid, do: :passed, else: failed(:invalid_type, "value has the wrong portable type")
   end
 
-  defp do_evaluate(%{"op" => "text.nonblank"}, value, _opts) when is_binary(value) do
+  defp evaluate_node(%{"op" => "text.nonblank"}, value, _opts) when is_binary(value) do
     if String.trim(value) == "", do: failed(:blank, "text must not be blank"), else: :passed
   end
 
-  defp do_evaluate(%{"op" => "text.nonblank"}, _value, _opts),
+  defp evaluate_node(%{"op" => "text.nonblank"}, _value, _opts),
     do: failed(:invalid_type, "value must be text")
 
-  defp do_evaluate(%{"op" => "text.length"} = test, value, _opts) when is_binary(value) do
+  defp evaluate_node(%{"op" => "text.length"} = test, value, _opts) when is_binary(value) do
     check_bounds(
-      String.length(value),
+      value |> String.to_charlist() |> length(),
       test,
       :invalid_text_length,
       "text length is outside its declared bounds"
     )
   end
 
-  defp do_evaluate(%{"op" => "text.length"}, _value, _opts),
+  defp evaluate_node(%{"op" => "text.length"}, _value, _opts),
     do: failed(:invalid_type, "value must be text")
 
-  defp do_evaluate(%{"op" => "text.pattern"} = test, value, _opts)
-       when is_binary(value) and byte_size(value) <= @max_text_bytes do
-    pattern =
-      if test["match"] == "full", do: "\\A(?:#{test["pattern"]})\\z", else: test["pattern"]
-
-    case Regex.compile(pattern) do
-      {:ok, regex} ->
-        if Regex.match?(regex, value),
+  defp evaluate_node(%{"op" => "text.pattern"} = test, value, opts) when is_binary(value) do
+    case Pattern.compile(test["pattern"]) do
+      {:ok, automaton} ->
+        if Pattern.matches?(automaton, value, test["match"], Keyword.fetch!(opts, :rule_budget)),
           do: :passed,
           else: failed(:pattern_mismatch, "text does not match its declared pattern")
 
-      {:error, reason} ->
-        errored(:invalid_pattern, "compiled text pattern is invalid", reason: inspect(reason))
+      {:error, :evaluation_limit} ->
+        evaluation_limit()
+
+      {:error, _reason} ->
+        errored(:invalid_pattern, "compiled text pattern is invalid")
     end
   end
 
-  defp do_evaluate(%{"op" => "text.pattern"}, value, _opts) when is_binary(value),
-    do: errored(:text_budget_exceeded, "text exceeds the portable pattern input budget")
-
-  defp do_evaluate(%{"op" => "text.pattern"}, _value, _opts),
+  defp evaluate_node(%{"op" => "text.pattern"}, _value, _opts),
     do: failed(:invalid_type, "value must be text")
 
   for {op, function} <- [
@@ -221,14 +305,14 @@ defmodule Selecto.Rule.Evaluator do
         {"text.suffix", :ends_with?},
         {"text.contains", :contains?}
       ] do
-    defp do_evaluate(%{"op" => unquote(op), "text" => expected}, value, _opts)
+    defp evaluate_node(%{"op" => unquote(op), "text" => expected}, value, _opts)
          when is_binary(value) do
       if apply(String, unquote(function), [value, expected]),
         do: :passed,
         else: failed(:text_mismatch, "text does not satisfy its declared content rule")
     end
 
-    defp do_evaluate(%{"op" => unquote(op)}, _value, _opts),
+    defp evaluate_node(%{"op" => unquote(op)}, _value, _opts),
       do: failed(:invalid_type, "value must be text")
   end
 
@@ -238,9 +322,9 @@ defmodule Selecto.Rule.Evaluator do
         {"number.lt", :lt},
         {"number.lte", :lte}
       ] do
-    defp do_evaluate(%{"op" => unquote(op), "bound" => bound}, value, _opts) do
-      with {:ok, number} <- decimal(value) do
-        valid = compare(number, bound.decimal, unquote(comparison))
+    defp evaluate_node(%{"op" => unquote(op), "bound" => bound}, value, opts) do
+      with {:ok, number} <- decimal(value, opts) do
+        valid = compare(number, bound.decimal, unquote(comparison), opts)
 
         if valid,
           do: :passed,
@@ -255,17 +339,17 @@ defmodule Selecto.Rule.Evaluator do
     end
   end
 
-  defp do_evaluate(%{"op" => "number.range"} = test, value, _opts) do
-    with {:ok, number} <- decimal(value) do
+  defp evaluate_node(%{"op" => "number.range"} = test, value, opts) do
+    with {:ok, number} <- decimal(value, opts) do
       minimum =
         if test["include_min"],
-          do: Decimal.compare(number, test["min"].decimal) in [:eq, :gt],
-          else: Decimal.compare(number, test["min"].decimal) == :gt
+          do: compare(number, test["min"].decimal, :gte, opts),
+          else: compare(number, test["min"].decimal, :gt, opts)
 
       maximum =
         if test["include_max"],
-          do: Decimal.compare(number, test["max"].decimal) in [:eq, :lt],
-          else: Decimal.compare(number, test["max"].decimal) == :lt
+          do: compare(number, test["max"].decimal, :lte, opts),
+          else: compare(number, test["max"].decimal, :lt, opts)
 
       if minimum and maximum,
         do: :passed,
@@ -275,8 +359,13 @@ defmodule Selecto.Rule.Evaluator do
     end
   end
 
-  defp do_evaluate(%{"op" => "number.integer"}, value, _opts) do
-    with {:ok, number} <- decimal(value) do
+  defp evaluate_node(%{"op" => "number.integer"}, value, opts) do
+    with {:ok, number} <- decimal(value, opts) do
+      Budget.spend(
+        Keyword.fetch!(opts, :rule_budget),
+        Budget.number(number, Keyword.fetch!(opts, :rule_budget))
+      )
+
       if Decimal.equal?(number, Decimal.round(number, 0)),
         do: :passed,
         else: failed(:not_integer, "number must be an integer")
@@ -285,9 +374,16 @@ defmodule Selecto.Rule.Evaluator do
     end
   end
 
-  defp do_evaluate(%{"op" => "number.multiple_of", "factor" => factor}, value, _opts) do
-    with {:ok, number} <- decimal(value) do
-      if Decimal.equal?(Decimal.rem(number, factor.decimal), Decimal.new(0)),
+  defp evaluate_node(%{"op" => "number.multiple_of", "factor" => factor}, value, opts) do
+    with {:ok, number} <- decimal(value, opts) do
+      Budget.arithmetic(number, factor.decimal, Keyword.fetch!(opts, :rule_budget), :remainder)
+
+      remainder =
+        Decimal.Context.with(%Decimal.Context{precision: 8194}, fn ->
+          Decimal.rem(number, factor.decimal)
+        end)
+
+      if Decimal.equal?(remainder, Decimal.new(0)),
         do: :passed,
         else: failed(:not_multiple, "number is not a declared multiple")
     else
@@ -295,19 +391,23 @@ defmodule Selecto.Rule.Evaluator do
     end
   end
 
-  defp do_evaluate(%{"op" => "membership.in", "values" => allowed}, value, _opts) do
-    if Enum.member?(allowed, value),
+  defp evaluate_node(%{"op" => "membership.in", "values" => allowed}, value, opts) do
+    Budget.value(allowed, Keyword.fetch!(opts, :rule_budget))
+
+    if Enum.any?(allowed, &equal?(value, &1, opts)),
       do: :passed,
       else: failed(:not_included, "value is not in the declared set")
   end
 
-  defp do_evaluate(%{"op" => "membership.not_in", "values" => denied}, value, _opts) do
-    if Enum.member?(denied, value),
+  defp evaluate_node(%{"op" => "membership.not_in", "values" => denied}, value, opts) do
+    Budget.value(denied, Keyword.fetch!(opts, :rule_budget))
+
+    if Enum.any?(denied, &equal?(value, &1, opts)),
       do: failed(:excluded, "value is in the excluded set"),
       else: :passed
   end
 
-  defp do_evaluate(%{"op" => "collection.count"} = test, value, _opts) when is_list(value),
+  defp evaluate_node(%{"op" => "collection.count"} = test, value, _opts) when is_list(value),
     do:
       check_bounds(
         length(value),
@@ -316,14 +416,14 @@ defmodule Selecto.Rule.Evaluator do
         "collection count is outside its declared bounds"
       )
 
-  defp do_evaluate(%{"op" => "collection.count"}, _value, _opts),
+  defp evaluate_node(%{"op" => "collection.count"}, _value, _opts),
     do: failed(:invalid_type, "value must be a collection")
 
-  defp do_evaluate(%{"op" => "collection.sum", "path" => path} = test, value, _opts)
+  defp evaluate_node(%{"op" => "collection.sum", "path" => path} = test, value, opts)
        when is_list(value) do
-    case collection_sum(value, path) do
+    case collection_sum(value, path, opts) do
       {:ok, total} ->
-        case check_numeric_bounds(total, test) do
+        case check_numeric_bounds(total, test, opts) do
           :ok ->
             :passed
 
@@ -345,12 +445,14 @@ defmodule Selecto.Rule.Evaluator do
     end
   end
 
-  defp do_evaluate(%{"op" => "collection.sum"}, _value, _opts),
+  defp evaluate_node(%{"op" => "collection.sum"}, _value, _opts),
     do: failed(:invalid_type, "value must be a collection")
 
-  defp do_evaluate(%{"op" => "collection.unique_by", "paths" => paths}, value, _opts)
+  defp evaluate_node(%{"op" => "collection.unique_by", "paths" => paths}, value, opts)
        when is_list(value) do
-    keys = Enum.map(value, fn item -> Enum.map(paths, &fetch_path(item, &1)) end)
+    Budget.value(paths, Keyword.fetch!(opts, :rule_budget))
+    keys = Enum.map(value, fn item -> Enum.map(paths, &fetch_path(item, &1, opts)) end)
+    Budget.value(keys, Keyword.fetch!(opts, :rule_budget))
 
     if Enum.any?(keys, fn key -> Enum.any?(key, &(&1 == @missing)) end),
       do: failed(:missing_unique_field, "collection uniqueness fields are missing"),
@@ -361,10 +463,10 @@ defmodule Selecto.Rule.Evaluator do
         )
   end
 
-  defp do_evaluate(%{"op" => "collection.unique_by"}, _value, _opts),
+  defp evaluate_node(%{"op" => "collection.unique_by"}, _value, _opts),
     do: failed(:invalid_type, "value must be a collection")
 
-  defp do_evaluate(%{"op" => "object.shape"} = test, value, opts) when is_map(value) do
+  defp evaluate_node(%{"op" => "object.shape"} = test, value, opts) when is_map(value) do
     keys = Map.keys(value) |> Enum.map(&to_string/1)
     required = test["required"]
     properties = test["properties"]
@@ -381,35 +483,39 @@ defmodule Selecto.Rule.Evaluator do
     end
   end
 
-  defp do_evaluate(%{"op" => "object.shape"}, _value, _opts),
+  defp evaluate_node(%{"op" => "object.shape"}, _value, _opts),
     do: failed(:invalid_type, "value must be an object")
 
-  defp do_evaluate(%{"op" => "path.test", "path" => path, "test" => nested_test}, value, opts) do
-    do_evaluate(nested_test, fetch_path(value, path), opts)
+  defp evaluate_node(%{"op" => "path.test", "path" => path, "test" => nested_test}, value, opts) do
+    do_evaluate(
+      nested_test,
+      fetch_path(Keyword.get(opts, :condition_values, value), path, opts),
+      opts
+    )
   end
 
-  defp do_evaluate(%{"op" => "value.eq", "value" => expected}, value, _opts),
+  defp evaluate_node(%{"op" => "value.eq", "value" => expected}, value, opts),
     do:
-      if(value == expected,
+      if(equal?(value, expected, opts),
         do: :passed,
         else: failed(:not_equal, "value does not equal its declared value")
       )
 
-  defp do_evaluate(%{"op" => "value.neq", "value" => expected}, value, _opts),
+  defp evaluate_node(%{"op" => "value.neq", "value" => expected}, value, opts),
     do:
-      if(value != expected,
+      if(not equal?(value, expected, opts),
         do: :passed,
         else: failed(:equal_to_excluded, "value equals its excluded value")
       )
 
-  defp do_evaluate(
+  defp evaluate_node(
          %{"op" => "value.compare_path", "comparison" => comparison, "path" => path},
          value,
          opts
        ) do
-    related = fetch_path(Keyword.get(opts, :values, %{}), path)
+    related = fetch_path(Keyword.get(opts, :values, %{}), path, opts)
 
-    case compare_related(value, related, comparison) do
+    case compare_related(value, related, comparison, opts) do
       :passed -> :passed
       {:failed, _details} = failed -> failed
     end
@@ -420,7 +526,7 @@ defmodule Selecto.Rule.Evaluator do
         {"temporal.time", :time},
         {"temporal.instant", :instant}
       ] do
-    defp do_evaluate(%{"op" => unquote(op)}, value, _opts) do
+    defp evaluate_node(%{"op" => unquote(op)}, value, _opts) do
       case temporal(value, unquote(kind)) do
         {:ok, _value} -> :passed
         :error -> failed(:invalid_temporal_value, "value is not a valid #{unquote(kind)}")
@@ -428,7 +534,7 @@ defmodule Selecto.Rule.Evaluator do
     end
   end
 
-  defp do_evaluate(
+  defp evaluate_node(
          %{
            "op" => "temporal.compare_path",
            "kind" => kind,
@@ -438,7 +544,7 @@ defmodule Selecto.Rule.Evaluator do
          value,
          opts
        ) do
-    related = fetch_path(Keyword.get(opts, :values, %{}), path)
+    related = fetch_path(Keyword.get(opts, :values, %{}), path, opts)
 
     with {:ok, value} <- temporal(value, temporal_kind(kind)),
          {:ok, related} <- temporal(related, temporal_kind(kind)) do
@@ -449,32 +555,32 @@ defmodule Selecto.Rule.Evaluator do
     end
   end
 
-  defp do_evaluate(%{"op" => "all", "rules" => rules}, value, opts) do
+  defp evaluate_node(%{"op" => "all", "rules" => rules}, value, opts) do
     results = Enum.map(rules, &do_evaluate(&1, value, opts))
 
     cond do
-      Enum.any?(results, &match?({:failed, _}, &1)) ->
-        Enum.find(results, &match?({:failed, _}, &1))
-
       Enum.any?(results, &match?({:error, _}, &1)) ->
         Enum.find(results, &match?({:error, _}, &1))
+
+      Enum.any?(results, &match?({:failed, _}, &1)) ->
+        Enum.find(results, &match?({:failed, _}, &1))
 
       true ->
         :passed
     end
   end
 
-  defp do_evaluate(%{"op" => "any", "rules" => rules}, value, opts) do
+  defp evaluate_node(%{"op" => "any", "rules" => rules}, value, opts) do
     results = Enum.map(rules, &do_evaluate(&1, value, opts))
 
     cond do
-      Enum.any?(results, &(&1 == :passed)) -> :passed
       Enum.any?(results, &match?({:error, _}, &1)) -> Enum.find(results, &match?({:error, _}, &1))
+      Enum.any?(results, &(&1 == :passed)) -> :passed
       true -> hd(results)
     end
   end
 
-  defp do_evaluate(%{"op" => "not", "rule" => rule}, value, opts) do
+  defp evaluate_node(%{"op" => "not", "rule" => rule}, value, opts) do
     case do_evaluate(rule, value, opts) do
       :passed -> failed(:negated_rule_matched, "negated rule matched")
       {:failed, _details} -> :passed
@@ -482,12 +588,21 @@ defmodule Selecto.Rule.Evaluator do
     end
   end
 
-  defp do_evaluate(_test, _value, _opts),
+  defp evaluate_node(_test, _value, _opts),
     do: errored(:unsupported_rule, "compiled rule is unsupported")
 
+  defp do_evaluate(test, value, opts) do
+    Budget.spend(Keyword.fetch!(opts, :rule_budget))
+    evaluate_node(test, value, opts)
+  end
+
   defp safe_evaluate(test, value, opts) do
+    Budget.artifact(test, Keyword.fetch!(opts, :rule_budget))
     do_evaluate(test, value, opts)
   rescue
+    Budget.Limit ->
+      evaluation_limit()
+
     error ->
       errored(:rule_evaluation_error, "rule evaluation failed safely",
         exception: Exception.message(error)
@@ -498,7 +613,7 @@ defmodule Selecto.Rule.Evaluator do
     properties
     |> Enum.sort_by(fn {key, _test} -> key end)
     |> Enum.reduce_while(:passed, fn {key, property_test}, :passed ->
-      case fetch_path(value, [key]) do
+      case fetch_path(value, [key], opts) do
         @missing ->
           {:cont, :passed}
 
@@ -512,9 +627,16 @@ defmodule Selecto.Rule.Evaluator do
     end)
   end
 
-  defp safe_normalize_step(step, value) do
-    normalize_step(step, value)
+  defp safe_normalize_step(step, value, opts) do
+    Budget.spend(Keyword.fetch!(opts, :rule_budget))
+
+    with {:ok, normalized} <- normalize_step(step, value),
+         :ok <- guarded_values(normalized, opts),
+         do: {:ok, normalized}
   rescue
+    Budget.Limit ->
+      evaluation_limit()
+
     error ->
       {:error,
        %{
@@ -525,7 +647,7 @@ defmodule Selecto.Rule.Evaluator do
   end
 
   defp normalize_step(%{"op" => "text.trim"}, value) when is_binary(value),
-    do: {:ok, Regex.replace(~r/\A[ \t\r\n]+|[ \t\r\n]+\z/, value, "")}
+    do: {:ok, Regex.replace(~r/\A[ \t\r\n\v\f]+|[ \t\r\n\v\f]+\z/, value, "")}
 
   defp normalize_step(%{"op" => "text.uppercase"}, value) when is_binary(value),
     do: ascii_case(value, :upcase)
@@ -577,69 +699,89 @@ defmodule Selecto.Rule.Evaluator do
         )
   end
 
-  defp collection_sum(values, path) do
+  defp collection_sum(values, path, opts) do
     Enum.reduce_while(values, {:ok, Decimal.new(0)}, fn value, {:ok, total} ->
-      case fetch_path(value, path) do
+      case fetch_path(value, path, opts) do
         @missing ->
           {:halt, {:error, :missing}}
 
         item ->
-          case decimal(item) do
-            {:ok, number} -> {:cont, {:ok, Decimal.add(total, number)}}
-            :error -> {:halt, {:error, :invalid}}
+          case decimal(item, opts) do
+            {:ok, number} ->
+              Budget.arithmetic(total, number, Keyword.fetch!(opts, :rule_budget), :add)
+
+              sum =
+                Decimal.Context.with(%Decimal.Context{precision: 8194}, fn ->
+                  Decimal.add(total, number)
+                end)
+
+              Budget.number(sum, Keyword.fetch!(opts, :rule_budget))
+              {:cont, {:ok, sum}}
+
+            :error ->
+              {:halt, {:error, :invalid}}
           end
       end
     end)
   end
 
-  defp check_numeric_bounds(total, test) do
+  defp check_numeric_bounds(total, test, opts) do
     cond do
       exact = test["exact"] ->
-        if Decimal.equal?(total, exact.decimal), do: :ok, else: {:error, :exact}
+        if compare(total, exact.decimal, :eq, opts), do: :ok, else: {:error, :exact}
 
       minimum = test["min"] ->
-        if Decimal.compare(total, minimum.decimal) in [:eq, :gt],
-          do: check_numeric_maximum(total, test["max"]),
+        if compare(total, minimum.decimal, :gte, opts),
+          do: check_numeric_maximum(total, test["max"], opts),
           else: {:error, :minimum}
 
       true ->
-        check_numeric_maximum(total, test["max"])
+        check_numeric_maximum(total, test["max"], opts)
     end
   end
 
-  defp check_numeric_maximum(_total, nil), do: :ok
+  defp check_numeric_maximum(_total, nil, _opts), do: :ok
 
-  defp check_numeric_maximum(total, maximum) do
-    if Decimal.compare(total, maximum.decimal) in [:eq, :lt],
+  defp check_numeric_maximum(total, maximum, opts) do
+    if compare(total, maximum.decimal, :lte, opts),
       do: :ok,
       else: {:error, :maximum}
   end
 
-  defp compare(left, right, :gt), do: Decimal.compare(left, right) == :gt
-  defp compare(left, right, :gte), do: Decimal.compare(left, right) in [:gt, :eq]
-  defp compare(left, right, :lt), do: Decimal.compare(left, right) == :lt
-  defp compare(left, right, :lte), do: Decimal.compare(left, right) in [:lt, :eq]
+  defp compare(left, right, kind, opts) do
+    Budget.arithmetic(left, right, Keyword.fetch!(opts, :rule_budget), :compare)
+    comparison = Decimal.compare(left, right)
 
-  defp compare_related(_value, @missing, _comparison),
+    case kind do
+      :gt -> comparison == :gt
+      :gte -> comparison in [:gt, :eq]
+      :lt -> comparison == :lt
+      :lte -> comparison in [:lt, :eq]
+      :eq -> comparison == :eq
+    end
+  end
+
+  defp compare_related(_value, @missing, _comparison, _opts),
     do: failed(:missing_related_value, "related comparison value is missing")
 
-  defp compare_related(left, right, comparison) when comparison in ["eq", "neq"] do
-    valid = if comparison == "eq", do: left == right, else: left != right
+  defp compare_related(left, right, comparison, opts) when comparison in ["eq", "neq"] do
+    same? = equal?(left, right, opts)
+    valid = if comparison == "eq", do: same?, else: not same?
 
     if valid,
       do: :passed,
       else: failed(:related_value_comparison, "value violates its related-field comparison")
   end
 
-  defp compare_related(left, right, comparison) do
-    with {:ok, left} <- decimal(left),
-         {:ok, right} <- decimal(right) do
+  defp compare_related(left, right, comparison, opts) do
+    with {:ok, left} <- decimal(left, opts),
+         {:ok, right} <- decimal(right, opts) do
       valid =
         case comparison do
-          "gt" -> compare(left, right, :gt)
-          "gte" -> compare(left, right, :gte)
-          "lt" -> compare(left, right, :lt)
-          "lte" -> compare(left, right, :lte)
+          "gt" -> compare(left, right, :gt, opts)
+          "gte" -> compare(left, right, :gte, opts)
+          "lt" -> compare(left, right, :lt, opts)
+          "lte" -> compare(left, right, :lte, opts)
         end
 
       if valid,
@@ -707,43 +849,84 @@ defmodule Selecto.Rule.Evaluator do
   defp compare_temporal(%DateTime{} = left, %DateTime{} = right),
     do: DateTime.compare(left, right)
 
-  defp decimal(value) when is_integer(value), do: {:ok, Decimal.new(value)}
-  defp decimal(%Decimal{} = value), do: {:ok, value}
+  defp decimal(value, opts) when is_integer(value) do
+    Budget.value(value, Keyword.fetch!(opts, :rule_budget))
+    {:ok, Decimal.new(value)}
+  end
 
-  defp decimal(value) when is_binary(value) do
-    case Decimal.parse(value) do
-      {decimal, ""} -> {:ok, decimal}
-      _ -> :error
+  defp decimal(%Decimal{} = value, opts) do
+    Budget.number(value, Keyword.fetch!(opts, :rule_budget))
+    {:ok, value}
+  end
+
+  defp decimal(value, opts) when is_binary(value) do
+    Budget.pattern_text(value, Keyword.fetch!(opts, :rule_budget))
+
+    if Regex.match?(~r/\A-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?\z/, value) do
+      case Decimal.parse(value) do
+        {decimal, ""} ->
+          Budget.number(decimal, Keyword.fetch!(opts, :rule_budget))
+          {:ok, decimal}
+
+        _ ->
+          :error
+      end
+    else
+      :error
     end
   end
 
-  defp decimal(_value), do: :error
+  defp decimal(_value, _opts), do: :error
 
-  defp fetch_path(value, []), do: value
+  defp equal?(left, right, opts) do
+    Budget.value(left, Keyword.fetch!(opts, :rule_budget))
+    Budget.value(right, Keyword.fetch!(opts, :rule_budget))
+    left == right
+  end
 
-  defp fetch_path(map, [segment | rest]) when is_map(map) do
+  defp fetch_path(value, [], _opts), do: value
+
+  defp fetch_path(map, [segment | rest], opts) when is_map(map) do
+    Budget.spend(Keyword.fetch!(opts, :rule_budget), map_size(map) + 1)
+
     case Enum.find(map, fn {key, _value} -> to_string(key) == segment end) do
       nil -> @missing
-      {_key, value} -> fetch_path(value, rest)
+      {_key, value} -> fetch_path(value, rest, opts)
     end
   end
 
-  defp fetch_path(_value, _path), do: @missing
+  defp fetch_path(_value, _path, opts) do
+    Budget.spend(Keyword.fetch!(opts, :rule_budget))
+    @missing
+  end
 
-  defp put_path(map, [segment], value) when is_map(map) do
+  defp put_path(map, [segment], value, opts) when is_map(map) do
+    Budget.spend(Keyword.fetch!(opts, :rule_budget), map_size(map) + 1)
+
     case Enum.find(Map.keys(map), &(to_string(&1) == segment)) do
       nil -> Map.put(map, segment, value)
       key -> Map.put(map, key, value)
     end
   end
 
-  defp put_path(map, [segment | rest], value) when is_map(map) do
+  defp put_path(map, [segment | rest], value, opts) when is_map(map) do
+    Budget.spend(Keyword.fetch!(opts, :rule_budget), map_size(map) + 1)
     key = Enum.find(Map.keys(map), segment, &(to_string(&1) == segment))
     child = Map.get(map, key, %{})
-    Map.put(map, key, put_path(child, rest, value))
+    Map.put(map, key, put_path(child, rest, value, opts))
   end
 
-  defp put_path(value, _path, _replacement), do: value
+  defp put_path(value, _path, _replacement, _opts), do: value
+
+  defp guarded_values(values, opts) do
+    Budget.value(values, Keyword.fetch!(opts, :rule_budget))
+    :ok
+  rescue
+    Budget.Limit -> evaluation_limit()
+  end
+
+  defp evaluation_limit,
+    do: errored(:evaluation_limit, "portable rule evaluation limit exceeded")
 
   defp failed(code, message, attrs \\ []),
     do: {:failed, attrs |> Map.new() |> Map.merge(%{code: code, message: message})}

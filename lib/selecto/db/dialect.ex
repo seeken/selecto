@@ -57,6 +57,8 @@ defmodule Selecto.DB.Dialect do
               render_result()
   @callback render_table_function_join(TableFunctionJoin.t(), Selecto.t() | map()) ::
               render_result()
+  @callback render_lateral_subquery(TableFunctionJoin.t(), Selecto.t() | map()) ::
+              render_result()
   @callback render_window_frame_boundary(FrameBoundary.t(), Selecto.t() | map()) ::
               render_result()
   @callback render_view_definition(Definition.t(), Selecto.t() | map()) :: render_result()
@@ -81,6 +83,7 @@ defmodule Selecto.DB.Dialect do
                       render_hierarchy_adjacency: 2,
                       render_hierarchy_materialized_path: 2,
                       render_table_function_join: 2,
+                      render_lateral_subquery: 2,
                       render_window_frame_boundary: 2,
                       render_view_definition: 2,
                       render_view_refresh: 2,

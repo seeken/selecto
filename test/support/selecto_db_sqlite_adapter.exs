@@ -30,7 +30,15 @@ defmodule SelectoDBSQLite.Adapter do
   def connect(opts) when is_list(opts) do
     with :ok <- ensure_exqlite() do
       database = Keyword.get(opts, :database, ":memory:")
-      Exqlite.Sqlite3.open(database)
+
+      if database == ":memory:" do
+        with {:ok, connection} <- Exqlite.Sqlite3.open(database),
+             :ok <- Exqlite.Sqlite3.execute(connection, "PRAGMA temp_store=MEMORY") do
+          {:ok, connection}
+        end
+      else
+        {:error, :test_sqlite_requires_memory}
+      end
     end
   end
 

@@ -79,7 +79,13 @@ defmodule Selecto.Domain.Contract.DetailActions do
       payload = detail_action_payload(action_spec)
       editor = Core.map_value(payload, :editor)
       primary_key = Core.map_value(source, :primary_key) || :id
-      target = Core.map_value(payload, :target_field) || primary_key
+
+      target =
+        case Core.map_value(payload, :target_field) do
+          nil -> primary_key
+          provided -> provided
+        end
+
       required = Core.map_value(action_spec, :required_fields) || []
 
       errors
@@ -87,16 +93,65 @@ defmodule Selecto.Domain.Contract.DetailActions do
       |> require_target(action_id, target, required)
       |> reject_record_editor_settings(action_id, payload)
       |> validate_editor_presentation(action_id, payload)
+      |> validate_editor_title(action_id, payload, required)
     else
       errors
     end
   end
 
+  defp validate_editor_title(errors, action_id, payload, required) do
+    title = Core.map_value(payload, :title)
+    path = [:detail_actions, action_id, :payload, :title]
+
+    if Core.non_empty_string?(title) do
+      placeholder = ~r/\{\{\s*([^}]+?)\s*\}\}/
+
+      fields =
+        required
+        |> List.wrap()
+        |> Enum.filter(&(is_atom(&1) or is_binary(&1)))
+        |> Enum.map(&to_string/1)
+
+      invalid_fields =
+        placeholder
+        |> Regex.scan(title, capture: :all_but_first)
+        |> List.flatten()
+        |> Enum.map(&String.trim/1)
+        |> Enum.reject(&(&1 in fields))
+
+      bare = Regex.replace(placeholder, title, "")
+
+      if invalid_fields == [] and not String.contains?(bare, ["{", "}"]) do
+        errors
+      else
+        [
+          Core.error(
+            :invalid_record_editor_title,
+            path,
+            "record-editor title must use required fields in valid placeholders",
+            fields: invalid_fields
+          )
+          | errors
+        ]
+      end
+    else
+      [
+        Core.error(
+          :invalid_record_editor_title,
+          path,
+          "record-editor title must be a non-empty string"
+        )
+        | errors
+      ]
+    end
+  end
+
   defp require_editor(errors, action_id, editor, editors) do
     exists =
-      is_map(editors) and
+      Core.non_empty_atom_or_string?(editor) and is_map(editors) and
         Enum.any?(editors, fn {key, value} ->
-          to_string(key) == to_string(editor) and is_map(value)
+          Core.non_empty_atom_or_string?(key) and to_string(key) == to_string(editor) and
+            is_map(value)
         end)
 
     if exists do
@@ -115,7 +170,10 @@ defmodule Selecto.Domain.Contract.DetailActions do
   end
 
   defp require_target(errors, action_id, target, required) do
-    if Enum.any?(List.wrap(required), &(to_string(&1) == to_string(target))) do
+    if Core.non_empty_atom_or_string?(target) and is_list(required) and
+         Enum.any?(required, fn field ->
+           Core.non_empty_atom_or_string?(field) and to_string(field) == to_string(target)
+         end) do
       errors
     else
       [
@@ -169,7 +227,8 @@ defmodule Selecto.Domain.Contract.DetailActions do
         ]
       end
 
-    if is_nil(navigation) or is_boolean(navigation) do
+    if Core.fetch_map_value(payload, :navigation_enabled) == :__missing__ or
+         is_boolean(navigation) do
       errors
     else
       [

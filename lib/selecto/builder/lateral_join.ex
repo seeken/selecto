@@ -168,6 +168,23 @@ defmodule Selecto.Builder.LateralJoin do
 
     subquery = spec.subquery_builder.(dummy_base)
 
+    fragment = %TableFunctionJoin{
+      join_type: spec.join_type,
+      alias: spec.alias,
+      source_sql: [],
+      source_kind: :subquery,
+      options: %{query: subquery}
+    }
+
+    case Selecto.DialectSupport.render_lateral_subquery(adapter, fragment, selecto) do
+      :not_implemented -> build_native_subquery_join(spec, adapter, selecto, subquery)
+      {:ok, sql} -> {sql, []}
+      {:error, %Error{} = error} -> raise Error.to_exception(error)
+      {:error, reason} -> raise ArgumentError, "unsupported lateral subquery: #{inspect(reason)}"
+    end
+  end
+
+  defp build_native_subquery_join(spec, adapter, selecto, subquery) do
     # Generate SQL for the subquery
     {subquery_sql, params} = Selecto.to_sql(subquery)
 
@@ -232,13 +249,13 @@ defmodule Selecto.Builder.LateralJoin do
        when function_name in [:json_each, :json_tree] do
     function_sql = String.upcase(to_string(function_name))
 
-    args =
+    {args, params} =
       case path do
-        nil -> [source_ref]
-        value -> [source_ref, ", ", "'", escape_sql_literal(value), "'"]
+        nil -> {[source_ref], []}
+        value -> {[source_ref, ", ", {:param, value}], [value]}
       end
 
-    {[function_sql, "(", args, ")"], []}
+    {[function_sql, "(", args, ")"], params}
   end
 
   defp build_table_function_sql(unknown) do

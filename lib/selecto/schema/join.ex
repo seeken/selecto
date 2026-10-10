@@ -116,6 +116,21 @@ defmodule Selecto.Schema.Join do
         association = source.associations[id]
 
         case association do
+          %{through: through} = assoc when is_map(through) ->
+            queryable = domain.schemas[assoc.queryable]
+            assoc = Map.put_new(assoc, :field, id)
+
+            join =
+              configure(id, assoc, config, parent, source, queryable)
+              |> Map.put(:portable_association, assoc)
+
+            acc = acc ++ [join]
+
+            case Map.get(config, :joins) do
+              nil -> acc
+              nested -> acc ++ normalize_joins(queryable, nested, id, domain)
+            end
+
           # Handle through associations by expanding the intermediate joins
           %{through: through_path} ->
             expand_through_joins(id, through_path, config, parent, source, domain, acc)
@@ -140,6 +155,7 @@ defmodule Selecto.Schema.Join do
             join =
               configure(id, association, config, parent, source, queryable)
               |> attach_association_scope!(id, association, source, queryable)
+              |> attach_association_policy(association)
 
             acc = acc ++ [join]
 
@@ -1029,6 +1045,29 @@ defmodule Selecto.Schema.Join do
 
       authored_keys ->
         authored_keys
+    end
+  end
+
+  defp attach_association_policy(join, association) do
+    case map_value(association, :where) do
+      policy when is_map(policy) and map_size(policy) > 0 ->
+        # Carry the scope keys resolved by attach_association_scope! (authored
+        # or inferred from tenant fields) so the portable predicate keeps them.
+        association =
+          case {Map.get(join, :source_scope_key), Map.get(join, :target_scope_key)} do
+            {nil, nil} ->
+              association
+
+            {source_scope_key, target_scope_key} ->
+              association
+              |> Map.put(:source_scope_key, source_scope_key)
+              |> Map.put(:target_scope_key, target_scope_key)
+          end
+
+        Map.put(join, :portable_association, association)
+
+      _ ->
+        join
     end
   end
 

@@ -1,0 +1,53 @@
+{
+  "domain": {
+    "schema_version": 1,
+    "domain_version": "1",
+    "name": "Orders",
+    "source": {
+      "source_table": "orders",
+      "primary_key": "id",
+      "fields": ["id", "status", "total"],
+      "columns": {
+        "id": {"type": "integer"},
+        "status": {"type": "string"},
+        "total": {"type": "decimal"}
+      },
+      "associations": {}
+    },
+    "schemas": {},
+    "joins": {},
+    "writes": {
+      "operations": {"update": {"enabled": true}},
+      "fields": {"status": {"updatable": true}, "total": {"updatable": true}}
+    },
+    "actions": {"approve": {"selection": {"mode": "rows"}}},
+    "editors": {
+      "order_profile": {
+        "label": "Edit order",
+        "fields": [
+          {"field": "status", "control": "select", "required": true,
+           "options": [{"value": "approved", "label": "Approved"}]},
+          "total"
+        ],
+        "actions": ["approve", "approve"]
+      }
+    },
+    "detail_actions": {
+      "open_order": {"name": "Edit order", "type": "record_editor",
+        "required_fields": ["id", "id"], "payload": {"editor": "order_profile"}}
+    }
+  },
+  "rejection_probes": [
+    {"id": "update_disabled", "path": ["writes", "operations", "update", "enabled"], "value": false},
+    {"id": "unpublished_field", "path": ["editors", "order_profile", "fields"], "value": ["id"]},
+    {"id": "internal_field", "path": ["source", "columns", "status", "internal"], "value": true},
+    {"id": "duplicate_field", "path": ["editors", "order_profile", "fields"], "value": ["status", "status"]},
+    {"id": "bad_option", "path": ["editors", "order_profile", "fields"],
+      "value": [{"field": "status", "options": [{"value": ["bad"], "label": "Bad"}]}]},
+    {"id": "group_action", "path": ["actions", "approve", "selection", "mode"], "value": "groups"},
+    {"id": "missing_editor", "path": ["detail_actions", "open_order", "payload", "editor"], "value": "missing"},
+    {"id": "missing_target", "path": ["detail_actions", "open_order", "required_fields"], "value": ["status"]},
+    {"id": "unsafe_payload", "path": ["detail_actions", "open_order", "payload", "url_template"], "value": "javascript:alert(1)"},
+    {"id": "bad_title_placeholder", "path": ["detail_actions", "open_order", "payload", "title"], "value": "Order {{status}}"}
+  ]
+}

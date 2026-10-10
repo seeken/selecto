@@ -151,6 +151,71 @@ defmodule Selecto.QueryMemberDataTest do
     assert sql =~ ~r/limit 1/i
   end
 
+  test "strict data member children inherit the host policy and receive their own seals" do
+    parent = Selecto.configure(domain(), :compile_only, mode: :strict)
+
+    spec =
+      Selecto.QueryMembers.Data.to_runtime(
+        parent,
+        :laterals,
+        "latest_order",
+        domain().query_members.laterals.latest_order
+      )
+
+    child = spec.source.(parent)
+    assert child.policy.mode == :strict
+    assert child.policy.domain_sql == :declared
+    assert child.policy.domain_seal != parent.policy.domain_seal
+    assert :ok == Selecto.Policy.validate_query!(child)
+
+    assert :ok ==
+             Selecto.Policy.ensure_nested_query_allowed!(parent, child, :laterals, "latest_order")
+
+    {statement, []} =
+      parent
+      |> Selecto.with_lateral(:latest_order)
+      |> Selecto.select(["name", "latest_order.id"])
+      |> sql()
+
+    assert statement =~ "LATERAL"
+    assert parent.domain == domain()
+    tampered = %{child | domain: put_in(child.domain, [:source, :source_table], "another_source")}
+    assert_raise Selecto.PolicyViolation, fn -> Selecto.to_sql(tampered) end
+
+    restricted_parent =
+      Selecto.configure(Map.delete(domain(), :query_members), :compile_only,
+        mode: :strict,
+        domain_sql: :forbid
+      )
+
+    restricted_spec =
+      Selecto.QueryMembers.Data.to_runtime(
+        restricted_parent,
+        :laterals,
+        "latest_order",
+        domain().query_members.laterals.latest_order
+      )
+
+    assert restricted_spec.source.(restricted_parent).policy.domain_sql == :forbid
+  end
+
+  test "strict data children validate their actual relation before compilation" do
+    parent = Selecto.configure(domain(), :compile_only, mode: :strict)
+
+    invalid_schema = %{domain().schemas.order | source_table: 123}
+    invalid_parent = %{parent | domain: put_in(parent.domain, [:schemas, :order], invalid_schema)}
+
+    spec =
+      Selecto.QueryMembers.Data.to_runtime(
+        invalid_parent,
+        :laterals,
+        "latest_order",
+        domain().query_members.laterals.latest_order
+      )
+
+    assert_raise Selecto.DomainValidator.ValidationError, fn -> spec.source.(invalid_parent) end
+  end
+
   test "previous outside a recursive step is rejected" do
     bad = %{
       ctes: %{

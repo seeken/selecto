@@ -15,7 +15,8 @@ defmodule Selecto.Write.RecordRequest do
             relation: nil,
             predicate: nil,
             context: %{},
-            fields: []
+            fields: [],
+            ownership: nil
 
   @type t :: %__MODULE__{
           format: String.t(),
@@ -24,6 +25,7 @@ defmodule Selecto.Write.RecordRequest do
           relation: atom() | String.t(),
           predicate: term(),
           context: map(),
-          fields: [String.t()]
+          fields: [String.t()],
+          ownership: map() | nil
         }
 end

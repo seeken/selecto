@@ -1917,13 +1917,21 @@ defmodule Selecto.Builder.Sql.Select do
   defp compile_value(selecto, ["divide", left, right], retarget_aliases) do
     {[l, r], joins, params} = compile_values(selecto, [left, right], retarget_aliases)
 
-    {[
-       "(",
-       computed_cast!(selecto, l, "decimal"),
-       " / ",
-       computed_cast!(selecto, r, "decimal"),
-       ")"
-     ], joins, params}
+    if Selecto.AdapterSupport.adapter_name(selecto.adapter) == :sqlite do
+      {render_computed_value!(selecto, %Selecto.Dialect.ComputedValue{
+         operation: :divide,
+         expression: [l, r],
+         type: "decimal"
+       }), joins, params}
+    else
+      {[
+         "(",
+         computed_cast!(selecto, l, "decimal"),
+         " / ",
+         computed_cast!(selecto, r, "decimal"),
+         ")"
+       ], joins, params}
+    end
   end
 
   defp compile_value(selecto, [op, left, right], retarget_aliases)
