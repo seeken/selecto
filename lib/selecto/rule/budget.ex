@@ -82,7 +82,7 @@ defmodule Selecto.Rule.Budget do
   defp check(value, counter, depth, maximum) when is_map(value) do
     if map_size(value) > @items, do: refuse()
 
-    Enum.each(value, fn {key, child} ->
+    Enum.each(Map.to_list(value), fn {key, child} ->
       cond do
         is_binary(key) -> text(key, counter)
         is_atom(key) -> :ok

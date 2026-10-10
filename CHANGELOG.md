@@ -3,6 +3,10 @@
 
 ## Unreleased
 
+- Preserve numeric and textual kinds for portable `type.is` predicates.
+  Numeric strings remain text; exact numeric rules still accept their declared
+  decimal-string operands. Genuine numeric values retain decimal membership,
+  and scalar structs such as Decimal or Date do not become portable objects.
 - Refuse portable evaluator resource exhaustion even for advisory rules.
   Oversized subjects, expensive conditions/logical branches and shared
   normalizer budgets cannot authorize a write. Ordinary advisory validation
