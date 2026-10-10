@@ -747,6 +747,44 @@ defmodule Selecto.ScopedJoinTest do
     ])
   end
 
+  test "inferred tenant scope survives an association policy on a flat join and a collection" do
+    domain =
+      update_in(inferred_domain(), [:source, :associations, :customer], fn association ->
+        Map.put(association, :where, %{company_name: "acme"})
+      end)
+
+    {join_sql, join_params} =
+      domain
+      |> Selecto.configure(:mock_connection)
+      |> Selecto.select(["id", "customer.company_name"])
+      |> Selecto.to_sql()
+
+    assert join_sql =~
+             ~s(customer."id" = selecto_root."customer_id" AND customer."organization_id" = selecto_root."tenant_id" AND customer."company_name" = $1)
+
+    assert join_params == ["acme"]
+
+    {subselect_sql, subselect_params} =
+      domain
+      |> Selecto.configure(:mock_connection)
+      |> Selecto.select(["id"])
+      |> Selecto.subselect([
+        %{
+          fields: ["id", "company_name"],
+          target_schema: :customers,
+          format: :json_agg,
+          alias: "customers",
+          join_path: [:customer]
+        }
+      ])
+      |> Selecto.to_sql()
+
+    assert subselect_sql =~
+             ~s(sub_customers."id" = selecto_root."customer_id" AND sub_customers."organization_id" = selecto_root."tenant_id" AND sub_customers."company_name" = $1)
+
+    assert subselect_params == ["acme"]
+  end
+
   defp inferred_domain do
     scoped_domain()
     |> put_in([:source, :tenant_field], :tenant_id)
