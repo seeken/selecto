@@ -333,8 +333,8 @@ defmodule Selecto.QueryLibraryTest do
           Decimal.new("1e309"),
           Decimal.new("-1e309"),
           Decimal.new("1e-400"),
-          Decimal.new("1e100000000"),
-          Decimal.new(String.duplicate("9", 4097))
+          Decimal.new(1, 1, 100_000_000),
+          Decimal.new(1, String.to_integer(String.duplicate("9", 4097)), 0)
         ] do
       assert_raise ArgumentError, ~r/segment parameter :minimum must be :float/, fn ->
         typed

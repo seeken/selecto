@@ -101,7 +101,7 @@ defmodule Selecto.Rule.StandaloneContractTest do
           %{type: "decimal", value: "1e3"},
           Decimal.new("NaN"),
           Decimal.new("Infinity"),
-          Decimal.new("1e1000000"),
+          Decimal.new(1, 1, 1_000_000),
           String.duplicate("1", 4097)
         ] do
       assert {:error,

@@ -95,8 +95,21 @@ defmodule Selecto.CannedPage.State do
   def typed!(type, value) when type in [:decimal, :numeric] do
     text = scalar!(value)
     ensure!(Regex.match?(~r/\A-?\d+(?:\.\d+)?\z/, text))
-    # Preserve decimal precision across the browser and driver boundary.
-    text |> Decimal.new() |> Decimal.normalize()
+    # Preserve decimal precision across the browser and driver boundary. The
+    # pattern admits no exponent, so the text's own length bounds its digits
+    # and exponent. Size Decimal's parse limits and context from it rather than
+    # the decimal128 defaults, which would refuse or round long values.
+    size = byte_size(text)
+
+    case Decimal.parse(text, max_digits: size, max_exponent: size) do
+      {decimal, ""} ->
+        Decimal.Context.with(%Decimal.Context{precision: size, emax: size, emin: -size}, fn ->
+          Decimal.normalize(decimal)
+        end)
+
+      _ ->
+        raise ArgumentError, "invalid decimal value"
+    end
   end
 
   def typed!(:boolean, value) when value in [true, false], do: value

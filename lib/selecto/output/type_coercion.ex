@@ -169,7 +169,9 @@ defmodule Selecto.Output.TypeCoercion do
       {:module, Decimal} ->
         try do
           case value do
-            val when is_binary(val) -> Decimal.new(val)
+            # A database text value carries every digit it has, so only
+            # Decimal's exponent limit (the amplification guard) applies.
+            val when is_binary(val) -> Decimal.new(val, max_digits: :infinity)
             val when is_integer(val) -> Decimal.new(val)
             val when is_float(val) -> Decimal.from_float(val)
             %Decimal{} = val -> val

@@ -12,6 +12,20 @@ defmodule Selecto.Rule.Budget do
   @items 1000
   @max_integer String.duplicate("9", @bytes) |> String.to_integer()
 
+  # Decimal 3 defaults to decimal128 limits: parsing stops at 34 significant
+  # digits and arithmetic rounds to 34. Rule numbers are already bounded by
+  # @bytes (see number/2), so parsing and arithmetic are sized from that bound
+  # instead. Selecto's own refusals remain the only effective cap, and any
+  # operation that would still round refuses rather than return an inexact
+  # result. Two admitted operands align to at most 2 * @bytes digits.
+  @exact_digits 2 * @bytes + 2
+  @exact_context %Decimal.Context{
+    precision: @exact_digits,
+    emax: @exact_digits,
+    emin: -@exact_digits,
+    traps: [:invalid_operation, :division_by_zero, :inexact, :overflow, :underflow]
+  }
+
   # One invocation owns this in-memory counter. It is never stored in the
   # process dictionary, returned in results, or shared with another invocation.
   def new do
@@ -57,6 +71,22 @@ defmodule Selecto.Rule.Budget do
   end
 
   def number(_value, _counter), do: refuse()
+
+  # Callers bound the text first (pattern_text/2); this keeps Decimal's parse
+  # limits at that same bound rather than the decimal128 default.
+  def parse_number(text) when is_binary(text) do
+    case Decimal.parse(text, max_digits: @bytes, max_exponent: @bytes) do
+      {decimal, ""} -> {:ok, decimal}
+      _ -> :error
+    end
+  end
+
+  # Runs Decimal arithmetic on operands already admitted by number/2.
+  def exact(fun) when is_function(fun, 0) do
+    Decimal.Context.with(@exact_context, fun)
+  rescue
+    Decimal.Error -> refuse()
+  end
 
   def arithmetic(left, right, counter, kind) do
     a = number(left, counter)

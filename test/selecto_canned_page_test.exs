@@ -53,6 +53,13 @@ defmodule Selecto.CannedPageTest do
     assert Selecto.CannedPage.State.typed!(:float, "1.25") === 1.25
     assert Selecto.CannedPage.State.typed!(:float, 1.0e-10) === 1.0e-10
     assert Selecto.CannedPage.State.typed!(:decimal, "1.250") == Decimal.new("1.25")
+
+    # Longer than Decimal 3's 34-digit default: kept exactly, not refused or rounded.
+    long = String.duplicate("9", 60) <> "." <> String.duplicate("1", 40)
+
+    assert Selecto.CannedPage.State.typed!(:decimal, long <> "000") ==
+             Decimal.new(long, max_digits: 100)
+
     page = page(base())
 
     assert {:ok, %{"filters" => %{"category" => ["food"]}}} =

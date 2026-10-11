@@ -467,7 +467,11 @@ defmodule Selecto.QueryLibrary do
 
   defp cast_parameter!(id, type, value)
        when type in [:decimal, "decimal"] and (is_binary(value) or is_integer(value)) do
-    Decimal.new(value)
+    # Bound text parameters like the float conversion above instead of by
+    # Decimal 3's decimal128 default of 34 digits.
+    if is_binary(value),
+      do: Decimal.new(value, max_digits: 4_096, max_exponent: 4_096),
+      else: Decimal.new(value)
   rescue
     _ -> invalid_parameter!(id, type, value)
   end

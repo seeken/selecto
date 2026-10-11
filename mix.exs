@@ -121,7 +121,7 @@ defmodule Selecto.MixProject do
       {:uuid, "~> 1.1"},
       {:telemetry, "~> 1.4"},
       {:db_connection, "~> 2.0"},
-      {:decimal, ">= 0.0.0"},
+      {:decimal, "~> 3.1 and >= 3.1.2"},
       {:ex_doc, "~> 0.40", only: :dev, runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},

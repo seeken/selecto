@@ -272,7 +272,7 @@ defmodule Selecto.Rule.ResourceTest do
     assert {:error, %{code: :evaluation_limit}} = check(%{op: "presence.required"}, nested)
 
     assert {:error, %{code: :evaluation_limit}} =
-             check(%{op: "number.integer"}, Decimal.new("1e1000000"))
+             check(%{op: "number.integer"}, Decimal.new(1, 1, 1_000_000))
 
     assert {:error, %{code: :evaluation_limit}} =
              check(%{op: "number.integer"}, Integer.pow(10, 5000))
@@ -325,6 +325,77 @@ defmodule Selecto.Rule.ResourceTest do
 
     assert {:failed, %{code: :invalid_type}} = check(%{op: "number.integer"}, "1e2")
     assert {:failed, %{code: :invalid_type}} = check(%{op: "number.integer"}, 1.0)
+  end
+
+  test "long literals inside Selecto's bounds stay exact beyond Decimal's decimal128 defaults" do
+    # Decimal 3 parses and rounds at 34 significant digits by default. Rule
+    # literals and values are bounded by Selecto (4096 bytes and the work
+    # budget), so a 60-digit or 4096-byte literal must still compile and
+    # evaluate exactly.
+    integer = String.duplicate("9", 60)
+    fraction = "0." <> String.duplicate("0", 58) <> "1"
+    widest = String.duplicate("7", 4096)
+
+    assert :passed = check(%{op: "number.lte", bound: integer}, integer)
+
+    assert {:failed, %{code: :numeric_bound}} =
+             check(%{op: "number.lt", bound: integer}, integer)
+
+    assert {:failed, %{code: :numeric_bound}} =
+             check(%{op: "number.lte", bound: integer}, integer <> ".00000000000000000000001")
+
+    assert :passed = check(%{op: "number.gte", bound: widest}, widest)
+    assert :passed = check(%{op: "number.integer"}, integer <> ".000")
+    assert {:failed, %{code: :not_integer}} = check(%{op: "number.integer"}, integer <> ".5")
+    assert :passed = check(%{op: "number.multiple_of", factor: "3"}, integer)
+
+    assert {:failed, %{code: :not_multiple}} =
+             check(%{op: "number.multiple_of", factor: "3"}, String.duplicate("9", 59) <> "8")
+
+    assert :passed = check(%{op: "number.multiple_of", factor: fraction}, integer)
+
+    exact = integer <> "." <> String.duplicate("0", 58) <> "1"
+
+    assert :passed =
+             check(%{op: "collection.sum", path: [:n], exact: exact}, [
+               %{n: integer},
+               %{n: fraction}
+             ])
+
+    assert {:failed, _} =
+             check(%{op: "collection.sum", path: [:n], exact: integer <> ".0"}, [
+               %{n: integer},
+               %{n: fraction}
+             ])
+
+    # The 2048-digit factor compiles; its remainder is refused by Selecto's
+    # own work budget rather than by Decimal's parse limit.
+    factor = String.duplicate("9", 2048)
+    assert {:ok, _} = Contract.compile_test(%{op: "number.multiple_of", factor: factor})
+  end
+
+  test "literals beyond Selecto's bounds hit Selecto's own refusal codes under Decimal 3" do
+    over = String.duplicate("1", 4097)
+
+    assert {:error, %{code: :invalid_number_literal}} =
+             Contract.compile_test(%{op: "number.lte", bound: over})
+
+    assert {:error, %{code: :invalid_number_literal}} =
+             Contract.compile_test(%{
+               op: "number.lte",
+               bound: "0." <> String.duplicate("1", 4095)
+             })
+
+    assert {:error, %{code: :evaluation_limit}} =
+             check(%{op: "number.lte", bound: "1"}, over)
+
+    assert {:error, %{code: :evaluation_limit}} =
+             check(%{op: "number.lte", bound: "1"}, Decimal.new(1, 1, 4097))
+
+    digits = String.duplicate("9", 2048)
+
+    assert {:error, %{code: :evaluation_limit}} =
+             check(%{op: "number.multiple_of", factor: digits}, digits)
   end
 
   defp pattern(source, mode \\ "full"),

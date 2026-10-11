@@ -1542,7 +1542,12 @@ defmodule Selecto.Rule.Contract do
 
   defp decimal(value) when is_binary(value) and byte_size(value) <= @max_numeric_literal_bytes do
     if Regex.match?(~r/\A-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?\z/, value) do
-      case Decimal.parse(value) do
+      # Decimal 3 would otherwise refuse literals beyond decimal128's 34
+      # digits; this contract's own byte bound is the only literal cap.
+      case Decimal.parse(value,
+             max_digits: @max_numeric_literal_bytes,
+             max_exponent: @max_numeric_literal_bytes
+           ) do
         {decimal, ""} -> {:ok, decimal}
         _ -> :error
       end

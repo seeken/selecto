@@ -366,7 +366,7 @@ defmodule Selecto.Rule.Evaluator do
         Budget.number(number, Keyword.fetch!(opts, :rule_budget))
       )
 
-      if Decimal.equal?(number, Decimal.round(number, 0)),
+      if Decimal.integer?(number),
         do: :passed,
         else: failed(:not_integer, "number must be an integer")
     else
@@ -378,10 +378,7 @@ defmodule Selecto.Rule.Evaluator do
     with {:ok, number} <- decimal(value, opts) do
       Budget.arithmetic(number, factor.decimal, Keyword.fetch!(opts, :rule_budget), :remainder)
 
-      remainder =
-        Decimal.Context.with(%Decimal.Context{precision: 8194}, fn ->
-          Decimal.rem(number, factor.decimal)
-        end)
+      remainder = Budget.exact(fn -> Decimal.rem(number, factor.decimal) end)
 
       if Decimal.equal?(remainder, Decimal.new(0)),
         do: :passed,
@@ -710,10 +707,7 @@ defmodule Selecto.Rule.Evaluator do
             {:ok, number} ->
               Budget.arithmetic(total, number, Keyword.fetch!(opts, :rule_budget), :add)
 
-              sum =
-                Decimal.Context.with(%Decimal.Context{precision: 8194}, fn ->
-                  Decimal.add(total, number)
-                end)
+              sum = Budget.exact(fn -> Decimal.add(total, number) end)
 
               Budget.number(sum, Keyword.fetch!(opts, :rule_budget))
               {:cont, {:ok, sum}}
@@ -863,12 +857,12 @@ defmodule Selecto.Rule.Evaluator do
     Budget.pattern_text(value, Keyword.fetch!(opts, :rule_budget))
 
     if Regex.match?(~r/\A-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?\z/, value) do
-      case Decimal.parse(value) do
-        {decimal, ""} ->
+      case Budget.parse_number(value) do
+        {:ok, decimal} ->
           Budget.number(decimal, Keyword.fetch!(opts, :rule_budget))
           {:ok, decimal}
 
-        _ ->
+        :error ->
           :error
       end
     else
