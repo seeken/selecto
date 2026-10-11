@@ -22,6 +22,7 @@ defmodule Selecto.Builder.Association do
     conditions =
       [key] ++
         direct_scope(selecto, association, target_alias, source_alias) ++
+        tenant_scope(selecto, association, target_alias, source_alias) ++
         policies(selecto, target_alias, value(association, :where, %{}))
 
     Enum.intersperse(conditions, " AND ")
@@ -80,6 +81,16 @@ defmodule Selecto.Builder.Association do
       _ ->
         raise ArgumentError,
               "association scope requires both :source_scope_key and :target_scope_key"
+    end
+  end
+
+  # The tenant pair resolved by Selecto.Schema.Join.association_boundary!/5
+  # whenever both relations declare tenant_field. It is ANDed in addition to any
+  # authored scope keys, for direct and through associations alike.
+  defp tenant_scope(selecto, association, target_alias, source_alias) do
+    case value(association, :tenant_scope) do
+      nil -> []
+      {source, target} -> [equality(selecto, target_alias, target, source_alias, source)]
     end
   end
 

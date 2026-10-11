@@ -1063,24 +1063,22 @@ defmodule Selecto.Builder.Subselect do
          target_alias,
          source_alias
        ) do
-    # Resolve scope keys through the schema (authored keys or inferred tenant
-    # fields, validated against both relations), then render the shared
+    # Resolve the relation boundary through the schema (scope keys and tenant
+    # pair, validated against both relations), then render the shared
     # domain-owned association predicate (through bridges, policies, quoting).
-    association =
-      case Selecto.Schema.Join.association_scope_keys!(
-             association_id,
-             association,
-             source_relation,
-             target_relation
-           ) do
-        {nil, nil} ->
-          association
+    root_domain = if source_relation == selecto.domain.source, do: selecto.domain
 
-        {source_scope_key, target_scope_key} ->
-          association
-          |> Map.put(:source_scope_key, source_scope_key)
-          |> Map.put(:target_scope_key, target_scope_key)
-      end
+    association =
+      Map.merge(
+        association,
+        Selecto.Schema.Join.association_boundary!(
+          association_id,
+          association,
+          source_relation,
+          target_relation,
+          root_domain
+        )
+      )
 
     Selecto.Builder.Association.predicate(selecto, association, target_alias, source_alias)
   end

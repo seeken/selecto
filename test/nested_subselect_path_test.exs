@@ -20,7 +20,7 @@ defmodule Selecto.NestedSubselectPathTest do
     refute sql =~ "j_next"
   end
 
-  test "a complete authored final pair overrides tenant inference on that edge only" do
+  test "a complete authored final pair is ANDed with the tenant pair on that edge" do
     authored =
       domain()
       |> put_in([:schemas, :member_nodes, :associations, :next, :source_scope_key], :permit_key)
@@ -30,7 +30,7 @@ defmodule Selecto.NestedSubselectPathTest do
 
     assert sql =~ ~s(j_members."tenant_id" = sub_parents."organization_id")
     assert sql =~ ~s(sub_parents_children."incoming_key" = j_members."permit_key")
-    refute sql =~ ~s(sub_parents_children."tenant_id" = j_members."tenant_id")
+    assert sql =~ ~s(sub_parents_children."tenant_id" = j_members."tenant_id")
   end
 
   test "a scalar child filter binds at the final child while retaining all suffix edges" do

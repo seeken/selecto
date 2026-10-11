@@ -316,6 +316,10 @@ defmodule Selecto.Tenant do
     * `:scope` - a filter or list of filters the surface accepts from the host,
       such as a co-domain lookup scope.
 
+  A trusted tenant attached to a read whose root cannot carry its tenant field
+  (a shared root with no such field) is refused with `:missing_tenant_scope`
+  rather than read unbounded or failed later as an unknown field.
+
   Returns `{:ok, :not_required}` when the domain declares no tenant field,
   `{:ok, {:tenant, tenant_id}}` when the trusted tenant bounds the surface,
   `{:ok, :host_scope}` when a tenant conjunct does, and otherwise an error whose
@@ -331,7 +335,9 @@ defmodule Selecto.Tenant do
 
     case domain_tenant_field(selecto) do
       nil ->
-        {:ok, :not_required}
+        if access == :read and unbindable_tenant?(selecto),
+          do: {:error, unbindable_tenant_error(selecto)},
+          else: {:ok, :not_required}
 
       field ->
         tenant_id = trusted_tenant(selecto, field)
@@ -614,6 +620,9 @@ defmodule Selecto.Tenant do
     tenant_id = map_get(tenant_context, :tenant_id)
 
     cond do
+      not is_nil(tenant_id) and not root_carries_field?(selecto, field) ->
+        {:invalid, "not bindable to the query root", %{code: :missing_tenant_scope}}
+
       has_prefix and is_nil(tenant_id) and required_values == [] ->
         :valid
 
@@ -698,6 +707,30 @@ defmodule Selecto.Tenant do
   defp defined_scalars?(values), do: values != [] and Enum.all?(values, &defined_scalar?/1)
 
   defp defined_scalar?(value), do: is_binary(value) or is_number(value) or is_boolean(value)
+
+  # A trusted tenant whose field the root cannot carry. Engine tenants are not
+  # bound onto joined relations of a shared root (lesson 42); the read is
+  # refused with a typed `:missing_tenant_scope` instead.
+  defp unbindable_tenant?(selecto) do
+    context = tenant(selecto) || %{}
+
+    defined_scalar?(Map.get(context, :tenant_id)) and
+      not root_carries_field?(selecto, tenant_field(selecto, []))
+  end
+
+  defp unbindable_tenant_error(selecto) do
+    Selecto.Error.validation_error("Trusted tenant scope is required", %{
+      code: :missing_tenant_scope,
+      tenant_field: tenant_field(selecto, []),
+      reason: :tenant_field_not_on_root
+    })
+  end
+
+  defp root_carries_field?(%Selecto{config: %{columns: columns}} = selecto, field)
+       when is_map(columns),
+       do: not is_nil(Selecto.Fields.field(selecto, field))
+
+  defp root_carries_field?(_selecto, _field), do: true
 
   defp trusted_tenant(selecto, field) do
     context = tenant(selecto) || %{}

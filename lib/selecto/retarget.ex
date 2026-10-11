@@ -436,6 +436,16 @@ defmodule Selecto.Retarget do
   # conditions on that field. A root whose required filters cannot reach it
   # fails closed rather than reading every tenant's target rows.
   defp carry_tenant_scope!(retargeted, origin, plan) do
+    # A trusted tenant on a shared root is refused rather than bound (lesson
+    # 42), so no hop of the path, however deep, is read under it unbounded.
+    if is_nil(Selecto.Tenant.domain_tenant_field(origin)) and
+         match?({:error, _}, Selecto.Tenant.tenant_boundary(origin)) do
+      fail!(
+        :missing_tenant_scope,
+        "retarget to #{plan.path} cannot bind the trusted tenant to a shared root"
+      )
+    end
+
     case Map.get(plan.relation, :tenant_field) do
       nil ->
         retargeted

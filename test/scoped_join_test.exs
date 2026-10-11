@@ -79,7 +79,7 @@ defmodule Selecto.ScopedJoinTest do
              "customer.id = selecto_root.customer_id and selecto_root.tenant_id = customer.organization_id"
   end
 
-  test "explicit association scope remains authoritative over declared tenant defaults" do
+  test "explicit association scope is ANDed with the declared tenant pair" do
     domain =
       inferred_domain()
       |> put_in([:source, :associations, :customer, :source_scope_key], :id)
@@ -90,7 +90,7 @@ defmodule Selecto.ScopedJoinTest do
 
     {sql, []} = Selecto.to_sql(query)
     assert sql =~ "selecto_root.id = customer.id"
-    refute sql =~ "selecto_root.tenant_id = customer.organization_id"
+    assert sql =~ "selecto_root.tenant_id = customer.organization_id"
   end
 
   test "an intentionally tenantless target keeps its ordinary join" do
@@ -130,7 +130,7 @@ defmodule Selecto.ScopedJoinTest do
     end
   end
 
-  test "correlated explicit scope overrides inferred scope and preserves filter binds" do
+  test "correlated explicit scope keeps the tenant pair and preserves filter binds" do
     domain =
       inferred_domain()
       |> put_in([:source, :associations, :customer, :source_scope_key], :id)
@@ -139,7 +139,7 @@ defmodule Selecto.ScopedJoinTest do
     query = correlated_query(domain, :json_agg, filters: [{"company_name", "Owned"}])
     {sql, ["Owned"]} = Selecto.to_sql(query)
     assert sql =~ ~s(sub_customers."id" = selecto_root."id")
-    refute sql =~ ~s(sub_customers."organization_id" = selecto_root."tenant_id")
+    assert sql =~ ~s(sub_customers."organization_id" = selecto_root."tenant_id")
   end
 
   test "correlated scope accepts authored string keys and field names" do
@@ -150,7 +150,7 @@ defmodule Selecto.ScopedJoinTest do
 
     {sql, []} = domain |> correlated_query(:json_agg) |> Selecto.to_sql()
     assert sql =~ ~s(sub_customers."id" = selecto_root."id")
-    refute sql =~ ~s(sub_customers."organization_id" = selecto_root."tenant_id")
+    assert sql =~ ~s(sub_customers."organization_id" = selecto_root."tenant_id")
   end
 
   test "correlation stays tenantless when either relation has no declared tenant field" do
@@ -312,12 +312,12 @@ defmodule Selecto.ScopedJoinTest do
     assert sql =~
              ~s(sub_child_orders."customer_id" = j_customer."id" AND sub_child_orders."name" = j_customer."company_name")
 
-    refute sql =~ ~s(sub_child_orders."child_tenant" = j_customer."organization_id")
+    assert sql =~ ~s(sub_child_orders."child_tenant" = j_customer."organization_id")
     refute sql =~ ~s(j_orders."id" = sub_child_orders."id")
     refute sql =~ "INNER JOIN child_orders"
   end
 
-  test "flattened complete non-tenant scope pairs override each inferred edge and preserve binds" do
+  test "flattened complete non-tenant scope pairs keep each edge's tenant pair and preserve binds" do
     domain =
       flattened_domain()
       |> put_in([:source, :associations, :customer, :source_scope_key], :id)
@@ -350,17 +350,17 @@ defmodule Selecto.ScopedJoinTest do
 
       assert sql =~ ~s(j_customer."id" = selecto_root."id")
       assert sql =~ "order by selecto_root.id"
-      refute sql =~ ~s(j_customer."organization_id" = selecto_root."tenant_id")
+      assert sql =~ ~s(j_customer."organization_id" = selecto_root."tenant_id")
       refute sql =~ "O'Brien"
 
       if target_schema == :child_orders do
         assert sql =~ ~s(#{target_alias}."name" = j_customer."company_name")
-        refute sql =~ ~s(#{target_alias}."child_tenant" = j_customer."organization_id")
+        assert sql =~ ~s(#{target_alias}."child_tenant" = j_customer."organization_id")
       else
         assert sql =~ ~s(j_orders."name" = j_customer."company_name")
         assert sql =~ ~s(#{target_alias}."name" = j_orders."name")
-        refute sql =~ ~s(j_orders."child_tenant" = j_customer."organization_id")
-        refute sql =~ ~s(#{target_alias}."item_tenant" = j_orders."child_tenant")
+        assert sql =~ ~s(j_orders."child_tenant" = j_customer."organization_id")
+        assert sql =~ ~s(#{target_alias}."item_tenant" = j_orders."child_tenant")
       end
     end
   end

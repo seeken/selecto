@@ -65,7 +65,15 @@ different names, such as root `tenant_id` and target `organization_id`. A dirty
 foreign reference then behaves like a missing target in a left join, preserving
 the root row without exposing a foreign name or changing joined counts.
 
-A complete `source_scope_key` / `target_scope_key` pair remains authoritative.
+A complete `source_scope_key` / `target_scope_key` pair is ANDed into the join
+in addition to the tenant pair; authored keys on a non-tenant column such as
+`region_id` never replace tenant pairing. Through associations pair the root
+and target tenant fields the same way, with or without authored bridge keys.
+On a two-column root (a write scope tenant field that differs from
+`tenant_field`) the target's `tenant_field` pairs with the root column of the
+same name, and a target matching neither is refused with `invalid_domain`, as is
+a declared tenant field that is not a declared field. Advanced join kinds
+(hierarchy, tagging, OLAP, enhanced) that cannot render the pair are refused.
 A partial pair is invalid, including when domain validation is disabled.
 A genuinely tenantless target keeps its ordinary join. This guard supplements
 the host's root tenant scope; it does not establish that root authority.
@@ -82,8 +90,8 @@ declared association path. The final association binds the selected target row
 through its foreign key and scope, preserving path membership even when target
 IDs repeat across tenants. The path must end at the same physical relation as
 `target_schema`; incompatible targets fail before database execution. Complete
-authored scope pairs retain precedence, and tenantless intermediate relations
-retain their authored visibility.
+authored scope pairs are ANDed with each edge's tenant pair, and tenantless
+intermediate relations retain their authored visibility.
 
 Nested JSON collections follow every association after the immediate parent's
 path. A full child path must extend that parent path; the builder does not

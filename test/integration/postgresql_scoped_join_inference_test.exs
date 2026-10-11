@@ -15,7 +15,7 @@ defmodule Selecto.Integration.PostgreSQLScopedJoinInferenceTest do
                     __DIR__
                   )
   @terminal_fixture_sha "272773ff13ea265290100887606ccd6ca67b52a2402112a1fcf6e4f4df96d49e"
-  @terminal_model_sha "95124f1fc3082af91c6cae99dc9dcc88876011f17247d11f010b72923cf9fcd7"
+  @terminal_model_sha "d513cf264ba5c6fe142c7c48edd35f40854b1b5523e711264c782005b27ed0f4"
   @terminal_tables %{
     "roots" => "selecto_adv_terminal_roots",
     "middles" => "selecto_adv_terminal_middles",
@@ -319,7 +319,7 @@ defmodule Selecto.Integration.PostgreSQLScopedJoinInferenceTest do
     assert inputs["table_names"] == @terminal_tables
     case_input = Map.fetch!(inputs["cases"], case_id)
     expected = Map.fetch!(model["cases"], case_id)
-    assert expected["tenant_O1_claim"] == case_id not in ["TFM005", "TFM006"]
+    assert expected["tenant_O1_claim"] == (case_id != "TFM005")
 
     for {name, columns} <- [
           {"roots",
@@ -532,11 +532,10 @@ defmodule Selecto.Integration.PostgreSQLScopedJoinInferenceTest do
       parents =
         dataset["accounts"]["rows"]
         |> Enum.filter(fn account ->
+          # Authored scope keys never replace the tenant pair (lesson 41).
           Enum.at(person, 3) == hd(account) and
-            if(parent_scope == :explicit_identity,
-              do: hd(account) == 201,
-              else: Enum.at(person, 1) == Enum.at(account, 1)
-            )
+            Enum.at(person, 1) == Enum.at(account, 1) and
+            (parent_scope != :explicit_identity or hd(account) == 201)
         end)
         |> Enum.sort_by(&{hd(&1), Enum.at(&1, 2)})
         |> Enum.map(fn account ->
