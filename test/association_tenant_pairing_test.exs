@@ -30,7 +30,11 @@ defmodule Selecto.AssociationTenantPairingTest do
           "CREATE TABLE site_orders (id INTEGER, tenant_id INTEGER, site_id INTEGER, person_id INTEGER, total INTEGER)",
           "INSERT INTO site_orders VALUES (100, 7, 3, 1, 10), (101, 8, 3, 1, 99)",
           "CREATE TABLE site_lines (id INTEGER PRIMARY KEY, site_id INTEGER, order_id INTEGER, name TEXT)",
-          "INSERT INTO site_lines VALUES (1000, 3, 100, 'own-site line'), (1001, 4, 100, 'other-site line'), (1002, 7, 100, 'site-7 line')"
+          "INSERT INTO site_lines VALUES (1000, 3, 100, 'own-site line'), (1001, 4, 100, 'other-site line'), (1002, 7, 100, 'site-7 line')",
+          "CREATE TABLE stock (id INTEGER PRIMARY KEY, tenant_id INTEGER, name TEXT)",
+          "INSERT INTO stock VALUES (1, 7, 'widget')",
+          "CREATE TABLE region_lines (id INTEGER PRIMARY KEY, site_id INTEGER, region_id INTEGER, code TEXT)",
+          "INSERT INTO region_lines VALUES (1, 3, 5, 'own-site'), (2, 4, 5, 'other-site')"
         ],
         do: :ok = Exqlite.Sqlite3.execute(db, statement)
 
@@ -263,7 +267,7 @@ defmodule Selecto.AssociationTenantPairingTest do
         |> Selecto.select(["id", "accounts.name"])
 
       {sql, params} = Selecto.to_sql(retargeted)
-      assert sql =~ ~r/accounts\."tenant_id" = \$\d+|accounts\."tenant_id" = \?/
+      assert sql =~ ~s(accounts."tenant_id" IN ()
       assert 7 in params
       assert rows(retargeted) == [[5, "own"]]
     end
@@ -312,6 +316,125 @@ defmodule Selecto.AssociationTenantPairingTest do
 
       assert {:error, %Selecto.Error{details: %{code: :tenant_scope_mismatch}}} =
                Selecto.execute(mismatched)
+    end
+  end
+
+  describe "review follow-ups" do
+    test "a shared root that merely has a tenant_id column is refused under an engine tenant",
+         %{db: db} do
+      base = stock_domain() |> Selecto.configure(db, adapter: Adapter) |> with_tenant()
+
+      assert {:error, %Selecto.Error{details: %{code: :missing_tenant_scope}}} =
+               Selecto.Tenant.tenant_boundary(base)
+
+      for query <- [base, Selecto.apply_tenant_scope(base)] do
+        assert {:error, %Selecto.Error{details: %{code: :missing_tenant_scope}}} =
+                 query |> Selecto.select(["id", "orders.total"]) |> Selecto.execute()
+      end
+
+      error = assert_raise Selecto.Retarget.Error, fn -> Selecto.retarget(base, :orders) end
+      assert error.code == :missing_tenant_scope
+    end
+
+    test "a tenant context naming another column than the declared tenant_field is refused",
+         %{db: db} do
+      query =
+        site_domain()
+        |> Selecto.configure(db, adapter: Adapter, validate: false)
+        |> Selecto.with_tenant(%{tenant_id: 3, tenant_field: "site_id"})
+        |> Selecto.select(["id"])
+
+      assert {:error, %Selecto.Error{details: %{code: :missing_tenant_scope}}} =
+               Selecto.execute(query)
+    end
+
+    test "every positive tenant conjunct form scopes the root and carries across shared hops",
+         %{db: db} do
+      for required <- [
+            {"tenant_id", {:eq, 7}},
+            {"tenant_id", {:=, 7}},
+            {"tenant_id", {"=", 7}},
+            {:and, [{"tenant_id", {:eq, 7}}]}
+          ] do
+        base =
+          regional_domain()
+          |> Selecto.configure(db, adapter: Adapter)
+          |> Selecto.Tenant.require_tenant_filter(required)
+
+        assert rows(Selecto.select(base, ["id", "accounts.name"])) == [[1, "own"]]
+
+        retargeted = base |> Selecto.retarget(:region) |> Selecto.select(["id", "accounts.name"])
+        assert rows(retargeted) == [[5, "own"]]
+      end
+    end
+
+    test "a two-column root scoped only by its site column pairs shared hops by name",
+         %{db: db} do
+      base =
+        site_regional_domain()
+        |> Selecto.configure(db, adapter: Adapter, validate: false)
+        |> Selecto.Tenant.require_tenant_filter("site_id", 3)
+
+      # Both site-3 people (tenants 7 and 8) are admitted by the site scope;
+      # the other site's line is not.
+      assert rows(base |> Selecto.select(["id", "lines.code"]) |> Selecto.order_by(["id"])) ==
+               [[1, "own-site"], [2, "own-site"]]
+
+      retargeted = base |> Selecto.retarget(:region) |> Selecto.select(["id", "lines.code"])
+      assert rows(retargeted) == [[5, "own-site"]]
+
+      # An engine tenant binds tenant_id; site rows come back by name (41c).
+      engine =
+        site_regional_domain()
+        |> Selecto.configure(db, adapter: Adapter, validate: false)
+        |> with_tenant()
+
+      assert rows(Selecto.select(engine, ["id", "lines.code"])) == [[1, "own-site"]]
+
+      retargeted = engine |> Selecto.retarget(:region) |> Selecto.select(["id", "lines.code"])
+      assert rows(retargeted) == [[5, "own-site"]]
+    end
+
+    test "a join_through many-to-many pairs the tenants in joins and collections", %{db: db} do
+      base = m2m_domain() |> Selecto.configure(db, adapter: Adapter) |> with_tenant()
+
+      query = base |> Selecto.select(["id", "account.name"]) |> Selecto.order_by(["account.name"])
+      assert rows(query) == [[1, "own"]]
+
+      collection =
+        base
+        |> Selecto.select(["id"])
+        |> Selecto.subselect([
+          %{
+            fields: ["name"],
+            target_schema: :account,
+            format: :count,
+            alias: "accounts",
+            join_path: [:account]
+          }
+        ])
+
+      {sql, _params} = Selecto.to_sql(collection)
+      assert sql =~ ~s(EXISTS (SELECT 1 FROM "memberships")
+      assert rows(collection) == [[1, 1]]
+    end
+
+    test "an engine tenant intersects required and host tenant conjuncts", %{db: db} do
+      base = regional_domain() |> Selecto.configure(db, adapter: Adapter) |> with_tenant()
+
+      intersected = Selecto.Tenant.require_tenant_filter(base, {"tenant_id", {:in, [7, 8]}})
+      assert rows(Selecto.select(intersected, ["id"])) == [[1]]
+
+      assert {:error, %Selecto.Error{details: %{code: :tenant_scope_mismatch}}} =
+               base
+               |> Selecto.Tenant.require_tenant_filter("tenant_id", 8)
+               |> Selecto.select(["id"])
+               |> Selecto.execute()
+
+      # An ordinary filter on another tenant is ANDed with the binding.
+      assert rows(base |> Selecto.filter({"tenant_id", 8}) |> Selecto.select(["id"])) == []
+
+      assert {"tenant_id", 7} in Selecto.query_filters(base)
     end
   end
 
@@ -423,6 +546,89 @@ defmodule Selecto.AssociationTenantPairingTest do
       },
       joins: %{orders: %{type: :left, joins: %{lines: %{type: :left}}}},
       writes: %{scope: %{tenant: %{field: :site_id, required: true}}}
+    }
+  end
+
+  # stock (shared, with a tenant_id column it does not declare) -> orders.
+  defp stock_domain do
+    %{
+      name: "L42B",
+      source:
+        relation("stock", [:id, :tenant_id, :name], nil, %{
+          orders: %{
+            queryable: :orders,
+            field: :orders,
+            owner_key: :id,
+            related_key: :product_id,
+            cardinality: :many
+          }
+        }),
+      schemas: %{
+        orders: relation("orders", [:id, :tenant_id, :product_id, :total], :tenant_id, %{})
+      },
+      joins: %{orders: %{type: :left}}
+    }
+  end
+
+  # A two-column root: people (tenant_id, writes site_id) -> region (shared)
+  # -> lines (site_id).
+  defp site_regional_domain do
+    %{
+      name: "L41E",
+      source:
+        relation("people", [:id, :tenant_id, :region_id, :account_id, :site_id], :tenant_id, %{
+          region: %{
+            queryable: :regions,
+            field: :region,
+            owner_key: :region_id,
+            related_key: :id,
+            cardinality: :one
+          }
+        }),
+      schemas: %{
+        regions:
+          relation("regions", [:id, :name], nil, %{
+            lines: %{
+              queryable: :lines,
+              field: :lines,
+              owner_key: :id,
+              related_key: :region_id,
+              cardinality: :many
+            }
+          }),
+        lines: relation("region_lines", [:id, :site_id, :region_id, :code], :site_id, %{})
+      },
+      joins: %{region: %{type: :left, joins: %{lines: %{type: :left}}}},
+      writes: %{scope: %{tenant: %{field: :site_id, required: true}}}
+    }
+  end
+
+  # people -> accounts through the memberships join table (Ecto style).
+  defp m2m_domain do
+    %{
+      name: "M2M",
+      source:
+        relation("people", [:id, :tenant_id, :region_id, :account_id, :site_id], :tenant_id, %{
+          account: %{
+            queryable: :account,
+            field: :account,
+            owner_key: :id,
+            related_key: :id,
+            cardinality: :many,
+            join_through: "memberships",
+            join_keys: [person_id: :id, account_id: :id]
+          }
+        }),
+      schemas: %{
+        account:
+          relation(
+            "accounts",
+            [:id, :tenant_id, :region_id, :name, :person_id, :site_id],
+            :tenant_id,
+            %{}
+          )
+      },
+      joins: %{account: %{type: :left}}
     }
   end
 

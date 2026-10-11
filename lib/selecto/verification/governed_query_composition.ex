@@ -482,6 +482,7 @@ defmodule Selecto.Verification.GovernedQueryComposition do
       source: %{
         source_table: "accounts",
         primary_key: :id,
+        tenant_field: :tenant_id,
         fields: [:id, :name, :active, :tenant_id, :team_id],
         redact_fields: [],
         columns: %{

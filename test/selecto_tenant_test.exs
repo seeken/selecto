@@ -12,6 +12,7 @@ defmodule Selecto.TenantTest do
       source: %{
         source_table: "accounts",
         primary_key: :id,
+        tenant_field: :tenant_id,
         fields: [:id, :name, :active, :tenant_id],
         redact_fields: [],
         columns: %{
@@ -423,11 +424,22 @@ defmodule Selecto.TenantTest do
     end
 
     test "domains without tenant_field need no boundary" do
-      assert Selecto.Tenant.domain_tenant_field(domain()) == nil
-      assert {:ok, :not_required} = Selecto.Tenant.tenant_boundary(selecto(domain()))
+      shared = update_in(domain(), [:source], &Map.delete(&1, :tenant_field))
+      assert Selecto.Tenant.domain_tenant_field(shared) == nil
+      assert {:ok, :not_required} = Selecto.Tenant.tenant_boundary(selecto(shared))
 
       assert {:ok, :not_required} =
-               Selecto.Tenant.tenant_boundary(selecto(domain()), access: :write)
+               Selecto.Tenant.tenant_boundary(selecto(shared), access: :write)
+
+      # A trusted tenant binds only a DECLARED tenant_field: a shared root that
+      # merely has a tenant_id column is refused (lesson 42).
+      attached = shared |> selecto() |> Selecto.with_tenant(%{tenant_id: "acme"})
+
+      assert {:error, %Selecto.Error{details: %{code: :missing_tenant_scope}}} =
+               Selecto.Tenant.tenant_boundary(attached)
+
+      assert {:error, %Selecto.Error{details: %{code: :missing_tenant_scope}}} =
+               attached |> Selecto.apply_tenant_scope() |> Selecto.validate_tenant_scope()
     end
 
     test "a tenant conjunct in the trusted host scope bounds reads and writes" do

@@ -451,26 +451,73 @@ defmodule Selecto.Retarget do
       )
     end
 
+    # A trusted tenant the origin root cannot bind (a context naming another
+    # column than the declared tenant_field) is refused here, typed.
+    if Selecto.Tenant.engine_filters(origin) == [] and
+         match?(
+           {:error, %{details: %{code: :missing_tenant_scope}}},
+           Selecto.Tenant.validate_scope(origin)
+         ) do
+      fail!(
+        :missing_tenant_scope,
+        "retarget to #{plan.path} cannot bind the trusted tenant to its root"
+      )
+    end
+
     root_field = Selecto.Tenant.domain_tenant_field(origin)
     columns = Selecto.Tenant.domain_tenant_columns(origin)
     target_field = plan.relation |> Map.get(:tenant_field) |> then(&(&1 && to_string(&1)))
 
     cond do
       # An untenanted target, or the scope column of a two-column domain
-      # (bounded by the context path's by-name pairing, lesson 41c), carries
-      # the origin's admitted tenants for the relations and members it reaches
-      # later (lesson 41b).
+      # (bounded by the context path's by-name pairing, lesson 41c), is bounded
+      # by the context. The tenant relations and members it reaches later carry
+      # the scoped origin's admitted tenants (origin_column_query/2, lesson
+      # 41b). An origin whose scope cannot be carried is refused.
       is_nil(target_field) or (length(columns) > 1 and target_field != root_field) ->
-        case root_field && Selecto.Tenant.carry_conditions(origin, root_field) do
-          {:ok, admitted} ->
-            put_in(retargeted.set[:tenant_carry], %{field: root_field, conditions: admitted})
-
-          _unscoped ->
-            retargeted
+        if not is_nil(root_field) and not Selecto.Tenant.scoped?(origin) and
+             Selecto.Tenant.carry_conditions(origin, root_field) == :error do
+          fail!(
+            :missing_tenant_scope,
+            "retarget to #{plan.path} cannot carry the root tenant scope",
+            tenant_field: root_field
+          )
         end
+
+        retargeted
 
       true ->
         carry_target_scope!(retargeted, origin, plan, target_field)
+    end
+  end
+
+  @doc false
+  # The scoped origin of a retargeted query projected onto the root column
+  # whose values a relation's `target_field` takes (by name in a two-column
+  # domain): the admitted tenant set a tenant relation reached later from an
+  # untenanted retarget target is bound to (lesson 41b). `:error` when the
+  # origin root has no such column.
+  @spec origin_column_query(Types.t(), String.t()) :: {:ok, Types.t()} | :error
+  def origin_column_query(selecto, target_field) do
+    with %{origin: origin} <- get_retarget_config(selecto),
+         column when is_binary(column) <-
+           Selecto.Tenant.source_tenant_column(origin, target_field) do
+      set =
+        origin.set
+        |> Map.merge(%{selected: [column], order_by: [], group_by: []})
+        |> Map.drop([
+          :limit,
+          :offset,
+          :subselected,
+          :window_functions,
+          :json_selects,
+          :json_order_by,
+          :array_operations
+        ])
+
+      {:ok, %{origin | set: set}}
+    else
+      _ -> :error
     end
   end
 

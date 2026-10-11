@@ -108,77 +108,39 @@ defmodule Selecto.Builder.Association do
   # The condition binding a tenant relation reached across an untenanted hop
   # to the query's admitted tenants (lesson 41b), or [] for an unscoped query.
   #
-  # A scoped root that declares tenant_field (a trusted engine tenant or a
-  # required tenant conjunct, or a retargeted root bounded by its context)
-  # pairs the target with the root row: by name in a two-column domain, else
-  # with the root's tenant_field. A retargeted untenanted root carries its
-  # origin's admitted tenant set by value onto the same-named field. A target
-  # neither can reach is refused.
+  # A scoped root that declares tenant_field pairs the target with the root
+  # row: with the root's tenant_field in a one-column domain, by name in a
+  # two-column domain. A retargeted query of a scoped origin binds the target
+  # to the origin's admitted values of that column. A scoped query that can do
+  # neither is refused.
   def carried_tenant(selecto, target_alias, field) do
     field = to_string(field)
-    root_field = Selecto.Tenant.domain_tenant_field(selecto)
-    columns = Selecto.Tenant.domain_tenant_columns(selecto)
-    carry = Selecto.Tenant.tenant_carry(selecto)
-
-    root_column =
-      cond do
-        is_nil(root_field) or not anchored?(selecto, root_field) -> nil
-        length(columns) < 2 -> root_field
-        field in columns and root_declares?(selecto, field) -> field
-        true -> :unpaired
-      end
 
     cond do
-      is_binary(root_column) ->
+      not Selecto.Tenant.scoped?(selecto) ->
+        []
+
+      column = Selecto.Tenant.source_tenant_column(selecto, field) ->
+        [column(selecto, target_alias, field), " = ", column(selecto, "selecto_root", column)]
+
+      match?({:ok, _}, Selecto.Retarget.origin_column_query(selecto, field)) ->
+        {:ok, query} = Selecto.Retarget.origin_column_query(selecto, field)
+
         [
           column(selecto, target_alias, field),
-          " = ",
-          column(selecto, "selecto_root", root_column)
+          " IN (",
+          Selecto.Builder.Sql.Where.subquery_iodata(query),
+          ")"
         ]
 
-      carry != nil and carry.field == field ->
-        values(selecto, target_alias, field, carry.conditions)
-
-      root_column == :unpaired or carry != nil ->
+      true ->
         raise Selecto.PolicyViolation,
           type: :missing_tenant_scope,
           message:
             "relation tenant field #{inspect(field)} is reached across an untenanted hop " <>
               "and the query tenant scope cannot be carried onto it"
-
-      true ->
-        []
     end
   end
-
-  defp anchored?(selecto, root_field) do
-    match?({:ok, _}, Selecto.Tenant.carry_conditions(selecto, root_field)) or
-      Selecto.Retarget.has_retarget?(selecto)
-  end
-
-  defp root_declares?(selecto, field) do
-    selecto
-    |> Selecto.domain()
-    |> Map.get(:source, %{})
-    |> value(:fields, [])
-    |> Enum.any?(&(to_string(&1) == field))
-  end
-
-  defp values(selecto, target_alias, field, conditions) do
-    target = column(selecto, target_alias, field)
-
-    conditions
-    |> Enum.map(fn
-      {_field, {:in, list}} when is_list(list) -> in_list(target, list)
-      {_field, list} when is_list(list) -> in_list(target, list)
-      {_field, scalar} -> [target, " = ", {:param, scalar}]
-    end)
-    |> Enum.intersperse(" AND ")
-    |> then(&["(", &1, ")"])
-  end
-
-  defp in_list(target, list),
-    do: [target, " IN (", Enum.intersperse(Enum.map(list, &{:param, &1}), ", "), ")"]
 
   defp bridge_scope(selecto, through, bridge_alias, target_alias, source_alias) do
     case {value(through, :source_scope_key), value(through, :through_scope_key),

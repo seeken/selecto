@@ -80,18 +80,23 @@ defmodule Selecto.Builder.Sql.Tagging do
       main_foreign_key
     ]
 
-    tag_join_iodata = [
-      " LEFT JOIN ",
-      config.source,
-      " ",
-      tag_table_alias,
-      " ON ",
-      join_table_alias,
-      ".",
-      tag_foreign_key,
-      " = ",
-      build_selector_string(selecto, join, related_key)
-    ]
+    # The association boundary (tenant pair, scope keys, carried tenant)
+    # binds the target relation (lesson 41).
+    tag_on =
+      Selecto.Builder.Sql.append_association_boundary(
+        selecto,
+        join,
+        [
+          join_table_alias,
+          ".",
+          tag_foreign_key,
+          " = ",
+          build_selector_string(selecto, join, related_key)
+        ],
+        config
+      )
+
+    tag_join_iodata = [" LEFT JOIN ", config.source, " ", tag_table_alias, " ON ", tag_on]
 
     combined_join_iodata = [intermediate_join_iodata, tag_join_iodata]
     {fc ++ combined_join_iodata, p, ctes}

@@ -18,6 +18,7 @@ defmodule Selecto.StreamTest do
       source: %{
         source_table: "users",
         primary_key: :id,
+        tenant_field: :tenant_id,
         fields: [:id, :name, :tenant_id],
         redact_fields: [],
         columns: %{
