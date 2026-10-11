@@ -964,7 +964,10 @@ defmodule Selecto.Builder.Sql do
           if Map.get(config, :join_type) == :subquery do
             build_subquery_join(selecto, join, config, fc, p, ctes)
           else
-            case detect_advanced_join_pattern(config) do
+            pattern = detect_advanced_join_pattern(config)
+            ensure_boundary_renderable!(join, config, pattern)
+
+            case pattern do
               {:hierarchy, pattern} ->
                 Hierarchy.build_hierarchy_join_with_cte(
                   selecto,
@@ -1103,6 +1106,21 @@ defmodule Selecto.Builder.Sql do
         raise ArgumentError, "Invalid :on condition for join: #{inspect(other)}"
     end)
     |> Enum.intersperse(" and ")
+  end
+
+  # Only the basic and portable join renderers AND an association's scope keys
+  # and tenant pair into the join. An advanced join builder that would drop a
+  # resolved relation boundary is refused rather than reading across it.
+  defp ensure_boundary_renderable!(_join, _config, :basic), do: :ok
+
+  defp ensure_boundary_renderable!(join, config, pattern) do
+    if Enum.any?([:source_scope_key, :target_scope_key, :tenant_scope], &Map.get(config, &1)) do
+      raise ArgumentError,
+            "invalid_domain: join #{inspect(join)} of kind #{inspect(pattern)} cannot apply " <>
+              "its association scope or tenant pair"
+    end
+
+    :ok
   end
 
   # Phase 1: Join pattern detection for advanced join types
@@ -1244,6 +1262,30 @@ defmodule Selecto.Builder.Sql do
   end
 
   defp append_association_scope_to_on_clause(selecto, join, base_on, config) do
+    base_on
+    |> append_scope_keys_to_on_clause(selecto, join, config)
+    |> append_tenant_scope_to_on_clause(selecto, join, config)
+  end
+
+  # The tenant pair from Selecto.Schema.Join.association_boundary!/5, ANDed in
+  # addition to any authored scope keys.
+  defp append_tenant_scope_to_on_clause(base_on, selecto, join, config) do
+    case Map.get(config, :tenant_scope) do
+      nil ->
+        base_on
+
+      {source_tenant, target_tenant} ->
+        [
+          base_on,
+          " and ",
+          build_selector_string(selecto, config.requires_join, source_tenant),
+          " = ",
+          build_selector_string(selecto, join, target_tenant)
+        ]
+    end
+  end
+
+  defp append_scope_keys_to_on_clause(base_on, selecto, join, config) do
     case {Map.get(config, :source_scope_key), Map.get(config, :target_scope_key)} do
       {nil, nil} ->
         base_on

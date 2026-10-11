@@ -8386,8 +8386,8 @@
       ]
     },
     "TFM006": {
-      "scope_kind": "explicit_non_tenant_pair",
-      "tenant_O1_claim": false,
+      "scope_kind": "explicit_non_tenant_pair_with_tenant_pair",
+      "tenant_O1_claim": true,
       "variants": [
         {
           "variant": "baseline",
@@ -8696,14 +8696,7 @@
                 ],
                 [
                   2,
-                  [
-                    {
-                      "id": 305,
-                      "workspace_id": 8,
-                      "mid_ref": 601,
-                      "name": "first-edge-foreign"
-                    }
-                  ]
+                  []
                 ],
                 [
                   3,
@@ -8748,7 +8741,7 @@
                 ],
                 [
                   2,
-                  1
+                  0
                 ],
                 [
                   3,
@@ -8786,14 +8779,7 @@
                 ],
                 [
                   2,
-                  [
-                    {
-                      "id": 305,
-                      "workspace_id": 8,
-                      "mid_ref": 601,
-                      "name": "first-edge-foreign"
-                    }
-                  ]
+                  []
                 ],
                 [
                   3,
@@ -9255,25 +9241,12 @@
                       "workspace_id": 7,
                       "mid_ref": 501,
                       "name": "owned301"
-                    },
-                    {
-                      "id": 406,
-                      "workspace_id": 8,
-                      "mid_ref": 501,
-                      "name": "new reachable global foreign"
                     }
                   ]
                 ],
                 [
                   2,
-                  [
-                    {
-                      "id": 305,
-                      "workspace_id": 8,
-                      "mid_ref": 601,
-                      "name": "first-edge-foreign changed outside"
-                    }
-                  ]
+                  []
                 ],
                 [
                   3,
@@ -9314,11 +9287,11 @@
               "rows": [
                 [
                   1,
-                  2
+                  1
                 ],
                 [
                   2,
-                  1
+                  0
                 ],
                 [
                   3,
@@ -9815,14 +9788,7 @@
                 ],
                 [
                   2,
-                  [
-                    {
-                      "id": 305,
-                      "workspace_id": 8,
-                      "mid_ref": 601,
-                      "name": "first-edge-foreign"
-                    }
-                  ]
+                  []
                 ],
                 [
                   3,
@@ -9867,7 +9833,7 @@
                 ],
                 [
                   2,
-                  1
+                  0
                 ],
                 [
                   3,
@@ -9905,14 +9871,7 @@
                 ],
                 [
                   2,
-                  [
-                    {
-                      "id": 305,
-                      "workspace_id": 8,
-                      "mid_ref": 601,
-                      "name": "first-edge-foreign"
-                    }
-                  ]
+                  []
                 ],
                 [
                   3,
@@ -11068,5 +11027,5 @@
       ]
     }
   },
-  "semantics": "Follow each authored edge identity AND complete explicit pair in precedence; otherwise inferred immediate declared tenants when both exist. Evaluate the actual final physical candidate; no primary-key-only proxy. SQL NULL equality does not match."
+  "semantics": "Follow each authored edge identity AND complete explicit pair AND, whenever both relations declare tenant_field, their tenant pair (authored pairs never replace it); otherwise inferred immediate declared tenants when both exist. Evaluate the actual final physical candidate; no primary-key-only proxy. SQL NULL equality does not match."
 }

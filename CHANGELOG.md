@@ -3,6 +3,16 @@
 
 ## Unreleased
 
+- Always pair tenant fields in association joins. When both relations declare
+  `tenant_field`, the tenant equality is ANDed into flat joins, through-bridge
+  joins and correlated collections in addition to any authored scope keys, so
+  authored `region_id` keys no longer drop tenant pairing (lesson 41). Two-column
+  roots pair by name; unpairable tenant fields and advanced join kinds that
+  cannot render the pair are refused with `invalid_domain`.
+- A trusted tenant on a shared root (no tenant field) is a typed
+  `:missing_tenant_scope` refusal from `tenant_boundary/2`, `validate_scope/2`,
+  execution and retarget, instead of an unknown-field failure (lesson 42).
+
 - Preserve numeric and textual kinds for portable `type.is` predicates.
   Numeric strings remain text; exact numeric rules still accept their declared
   decimal-string operands. Genuine numeric values retain decimal membership,
