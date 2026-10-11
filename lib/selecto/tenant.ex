@@ -314,8 +314,47 @@ defmodule Selecto.Tenant do
       end
   end
 
-  defp scope_filters(selecto),
-    do: uniq_filters(Selecto.Query.required_filters(selecto) ++ engine_filters(selecto))
+  # The filters that scope a read: required, engine-bound and host-applied
+  # filters, the same set tenant_boundary/2 accepts as a host scope (lesson
+  # 41f). A request filter only ever adds binding.
+  defp scope_filters(selecto) do
+    set = Map.get(selecto, :set) || %{}
+
+    uniq_filters(
+      Selecto.Query.required_filters(selecto) ++
+        engine_filters(selecto) ++ List.wrap(Map.get(set, :filtered, []))
+    )
+  end
+
+  @doc false
+  # Whether an unscoped read's filters nonetheless read a tenant column (for
+  # example `tenant_id IN (7, 8)` under OR, NOT 9, or `< 9`): such a scope
+  # cannot be carried across a shared hop and is refused rather than read
+  # unbounded (lesson 41, N4).
+  @spec unprovable_scope?(Selecto.Types.t()) :: boolean()
+  def unprovable_scope?(selecto) do
+    columns = domain_tenant_columns(selecto)
+
+    columns != [] and not scoped?(selecto) and
+      Enum.any?(scope_filters(selecto), &mentions_column?(&1, columns))
+  end
+
+  defp mentions_column?({key, value}, columns) when is_atom(key) or is_binary(key) do
+    (key not in [:and, :or, :not] and normalize_field(key) in columns) or
+      mentions_column?(value, columns)
+  end
+
+  defp mentions_column?(term, columns) when is_tuple(term),
+    do: term |> Tuple.to_list() |> mentions_column?(columns)
+
+  defp mentions_column?(terms, columns) when is_list(terms),
+    do:
+      Enum.any?(terms, fn
+        term when is_binary(term) -> term in columns
+        term -> mentions_column?(term, columns)
+      end)
+
+  defp mentions_column?(_term, _columns), do: false
 
   defp retarget_origin(%{set: %{retarget_state: %{origin: %Selecto{} = origin}}}), do: origin
   defp retarget_origin(_selecto), do: nil
@@ -436,10 +475,11 @@ defmodule Selecto.Tenant do
   A surface has a boundary when either holds:
 
     1. The query carries a trusted tenant attached with `with_tenant/2` whose
-       tenant field is the domain's tenant field. For writes the domain must
-       also declare `writes.scope.tenant` on that field, and the write executor
-       applies the tenant. For reads the caller ANDs the tenant into the read,
-       as `require_read_boundary/2` does.
+       tenant field is the domain's tenant field. For writes the executor binds
+       the tenant to that declared field, with or without `writes.scope.tenant`
+       (on a two-column domain the scope column is not bound to it; lessons 47
+       and 47a). For reads the caller ANDs the tenant into the read, as
+       `require_read_boundary/2` does.
     2. The trusted host scope holds a positive tenant conjunct (see
        `tenant_conjunct?/2`). The trusted host scope is the domain and query
        required filters, the filters the host applied before handing the query
@@ -479,7 +519,9 @@ defmodule Selecto.Tenant do
         tenant_id = trusted_tenant(selecto, field)
 
         cond do
-          not is_nil(tenant_id) and (access == :read or write_scope_field(selecto) == field) ->
+          # A trusted tenant on the declared tenant_field bounds reads and
+          # writes alike; the write executor binds it (lesson 47).
+          not is_nil(tenant_id) ->
             {:ok, {:tenant, tenant_id}}
 
           tenant_conjunct?(trusted_host_scope(selecto, opts), field) ->
@@ -904,8 +946,6 @@ defmodule Selecto.Tenant do
     if defined_scalar?(tenant_id) and normalize_field(Map.get(context, :tenant_field)) == field,
       do: tenant_id
   end
-
-  defp write_scope_field(%Selecto{domain: domain}), do: domain_write_tenant_field(domain)
 
   defp domain_write_tenant_field(domain) do
     tenant = domain |> lenient_get(:writes) |> lenient_get(:scope) |> lenient_get(:tenant)
