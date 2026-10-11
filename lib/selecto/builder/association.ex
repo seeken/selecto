@@ -117,6 +117,13 @@ defmodule Selecto.Builder.Association do
     field = to_string(field)
 
     cond do
+      Selecto.Tenant.unprovable_scope?(selecto) ->
+        raise Selecto.PolicyViolation,
+          type: :missing_tenant_scope,
+          message:
+            "relation tenant field #{inspect(field)} is reached across an untenanted hop " <>
+              "and the query's tenant predicate cannot be carried onto it"
+
       not Selecto.Tenant.scoped?(selecto) ->
         []
 

@@ -483,7 +483,7 @@ defmodule Selecto.TenantTest do
       end
     end
 
-    test "a trusted tenant bounds reads, and writes only under writes.scope.tenant" do
+    test "a trusted tenant bounds reads and writes, with or without writes.scope.tenant" do
       attached =
         tenant_field_domain([])
         |> selecto()
@@ -491,8 +491,8 @@ defmodule Selecto.TenantTest do
 
       assert {:ok, {:tenant, "acme"}} = Selecto.Tenant.tenant_boundary(attached)
 
-      assert {:error, %Selecto.Error{details: %{code: :missing_tenant_scope}}} =
-               Selecto.Tenant.tenant_boundary(attached, access: :write)
+      # Lesson 47: the write executor binds the declared tenant_field.
+      assert {:ok, {:tenant, "acme"}} = Selecto.Tenant.tenant_boundary(attached, access: :write)
 
       scoped =
         tenant_field_domain([], scoped_writes())

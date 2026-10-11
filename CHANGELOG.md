@@ -3,6 +3,11 @@
 
 ## Unreleased
 
+- Host-applied tenant filters scope shared-hop joins like required ones, and
+  a tenant predicate with no positive conjunct (under OR or NOT, or a range)
+  cannot cross a shared hop (refused with `missing_tenant_scope`). A trusted
+  tenant is a write boundary with or without `writes.scope.tenant` (lesson 47).
+
 - Always pair tenant fields in association joins. When both relations declare
   `tenant_field`, the tenant equality is ANDed into flat joins, through-bridge
   joins and correlated collections in addition to any authored scope keys, so

@@ -438,6 +438,38 @@ defmodule Selecto.AssociationTenantPairingTest do
     end
   end
 
+  describe "re-review follow-ups" do
+    test "a host-applied tenant filter scopes shared hops like a required one (N1)", %{db: db} do
+      for host <- [{"tenant_id", 7}, {"tenant_id", {:in, [7, 9]}}] do
+        base =
+          regional_domain() |> Selecto.configure(db, adapter: Adapter) |> Selecto.filter(host)
+
+        assert rows(Selecto.select(base, ["id", "accounts.name"])) == [[1, "own"]]
+
+        retargeted = base |> Selecto.retarget(:region) |> Selecto.select(["id", "accounts.name"])
+        assert rows(retargeted) == [[5, "own"]]
+      end
+    end
+
+    test "a tenant predicate without a positive conjunct cannot cross a shared hop (N4)",
+         %{db: db} do
+      for required <- [
+            {:or, [{"tenant_id", 7}, {"tenant_id", 8}]},
+            {:not, {"tenant_id", 9}},
+            {"tenant_id", {:<, 9}}
+          ] do
+        query =
+          regional_domain()
+          |> Selecto.configure(db, adapter: Adapter)
+          |> Selecto.Tenant.require_tenant_filter(required)
+          |> Selecto.select(["id", "accounts.name"])
+
+        error = assert_raise Selecto.PolicyViolation, fn -> Selecto.execute(query) end
+        assert error.type == :missing_tenant_scope
+      end
+    end
+  end
+
   defp scoped(db, domain) do
     domain
     |> Selecto.configure(db, adapter: Adapter)
