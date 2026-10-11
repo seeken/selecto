@@ -6649,8 +6649,8 @@
       ]
     },
     "TFM005": {
-      "scope_kind": "genuine_global_intermediate",
-      "tenant_O1_claim": false,
+      "scope_kind": "genuine_global_intermediate_carried_root_tenant",
+      "tenant_O1_claim": true,
       "variants": [
         {
           "variant": "baseline",
@@ -6959,25 +6959,11 @@
                 ],
                 [
                   2,
-                  [
-                    {
-                      "id": 305,
-                      "workspace_id": 8,
-                      "mid_ref": 601,
-                      "name": "first-edge-foreign"
-                    }
-                  ]
+                  []
                 ],
                 [
                   3,
-                  [
-                    {
-                      "id": 302,
-                      "workspace_id": 8,
-                      "mid_ref": 502,
-                      "name": "second-edge-foreign"
-                    }
-                  ]
+                  []
                 ],
                 [
                   4,
@@ -7025,11 +7011,11 @@
                 ],
                 [
                   2,
-                  1
+                  0
                 ],
                 [
                   3,
-                  1
+                  0
                 ],
                 [
                   4,
@@ -7063,14 +7049,7 @@
                 ],
                 [
                   2,
-                  [
-                    {
-                      "id": 305,
-                      "workspace_id": 8,
-                      "mid_ref": 601,
-                      "name": "first-edge-foreign"
-                    }
-                  ]
+                  []
                 ],
                 [
                   3,
@@ -7112,14 +7091,7 @@
                 ],
                 [
                   3,
-                  [
-                    {
-                      "id": 302,
-                      "workspace_id": 8,
-                      "mid_ref": 502,
-                      "name": "second-edge-foreign"
-                    }
-                  ]
+                  []
                 ],
                 [
                   4,
@@ -7539,36 +7511,16 @@
                       "workspace_id": 7,
                       "mid_ref": 501,
                       "name": "owned301"
-                    },
-                    {
-                      "id": 406,
-                      "workspace_id": 8,
-                      "mid_ref": 501,
-                      "name": "new reachable global foreign"
                     }
                   ]
                 ],
                 [
                   2,
-                  [
-                    {
-                      "id": 305,
-                      "workspace_id": 8,
-                      "mid_ref": 601,
-                      "name": "first-edge-foreign changed outside"
-                    }
-                  ]
+                  []
                 ],
                 [
                   3,
-                  [
-                    {
-                      "id": 302,
-                      "workspace_id": 8,
-                      "mid_ref": 502,
-                      "name": "second-edge-foreign changed outside"
-                    }
-                  ]
+                  []
                 ],
                 [
                   4,
@@ -7612,15 +7564,15 @@
               "rows": [
                 [
                   1,
-                  2
+                  1
                 ],
                 [
                   2,
-                  1
+                  0
                 ],
                 [
                   3,
-                  1
+                  0
                 ],
                 [
                   4,
@@ -8113,25 +8065,11 @@
                 ],
                 [
                   2,
-                  [
-                    {
-                      "id": 305,
-                      "workspace_id": 8,
-                      "mid_ref": 601,
-                      "name": "first-edge-foreign"
-                    }
-                  ]
+                  []
                 ],
                 [
                   3,
-                  [
-                    {
-                      "id": 302,
-                      "workspace_id": 8,
-                      "mid_ref": 502,
-                      "name": "second-edge-foreign"
-                    }
-                  ]
+                  []
                 ],
                 [
                   4,
@@ -8179,11 +8117,11 @@
                 ],
                 [
                   2,
-                  1
+                  0
                 ],
                 [
                   3,
-                  1
+                  0
                 ],
                 [
                   4,
@@ -8217,14 +8155,7 @@
                 ],
                 [
                   2,
-                  [
-                    {
-                      "id": 305,
-                      "workspace_id": 8,
-                      "mid_ref": 601,
-                      "name": "first-edge-foreign"
-                    }
-                  ]
+                  []
                 ],
                 [
                   3,
@@ -8266,14 +8197,7 @@
                 ],
                 [
                   3,
-                  [
-                    {
-                      "id": 302,
-                      "workspace_id": 8,
-                      "mid_ref": 502,
-                      "name": "second-edge-foreign"
-                    }
-                  ]
+                  []
                 ],
                 [
                   4,
@@ -11027,5 +10951,5 @@
       ]
     }
   },
-  "semantics": "Follow each authored edge identity AND complete explicit pair AND, whenever both relations declare tenant_field, their tenant pair (authored pairs never replace it); otherwise inferred immediate declared tenants when both exist. Evaluate the actual final physical candidate; no primary-key-only proxy. SQL NULL equality does not match."
+  "semantics": "Follow each authored edge identity AND complete explicit pair AND, whenever both relations declare tenant_field, their tenant pair (authored pairs never replace it); otherwise inferred immediate declared tenants when both exist. Under the scoped root, a tenant relation reached across an untenanted intermediate is paired with the root's tenant column. Evaluate the actual final physical candidate; no primary-key-only proxy. SQL NULL equality does not match."
 }

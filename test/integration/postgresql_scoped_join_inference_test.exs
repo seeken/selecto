@@ -15,7 +15,7 @@ defmodule Selecto.Integration.PostgreSQLScopedJoinInferenceTest do
                     __DIR__
                   )
   @terminal_fixture_sha "272773ff13ea265290100887606ccd6ca67b52a2402112a1fcf6e4f4df96d49e"
-  @terminal_model_sha "d513cf264ba5c6fe142c7c48edd35f40854b1b5523e711264c782005b27ed0f4"
+  @terminal_model_sha "ac63edc0591c85de1dd633639e7d5d9bd34e0cc00d7a94de3a33ee56455495bc"
   @terminal_tables %{
     "roots" => "selecto_adv_terminal_roots",
     "middles" => "selecto_adv_terminal_middles",
@@ -319,7 +319,7 @@ defmodule Selecto.Integration.PostgreSQLScopedJoinInferenceTest do
     assert inputs["table_names"] == @terminal_tables
     case_input = Map.fetch!(inputs["cases"], case_id)
     expected = Map.fetch!(model["cases"], case_id)
-    assert expected["tenant_O1_claim"] == (case_id != "TFM005")
+    assert expected["tenant_O1_claim"] == true
 
     for {name, columns} <- [
           {"roots",

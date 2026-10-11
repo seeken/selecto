@@ -221,13 +221,16 @@ defmodule Selecto.TenantTest do
 
     mismatched = Selecto.require_tenant_filter(unapplied, {"tenant_id", "other"})
 
-    for query <- [required, unapplied, mismatched] do
+    for query <- [required, mismatched] do
       assert_raise RuntimeError, ~r/Tenant scope is/, fn -> Selecto.gen_sql(query, []) end
       assert {_sql, _aliases, _params} = Selecto.gen_sql(query, validate_tenant: false)
     end
 
-    assert {_sql, _aliases, params} = Selecto.gen_sql(Selecto.apply_tenant_scope(unapplied), [])
-    assert "acme" in params
+    # A trusted tenant is bound onto the root of every read (lesson 43).
+    for query <- [unapplied, Selecto.apply_tenant_scope(unapplied)] do
+      assert {_sql, _aliases, params} = Selecto.gen_sql(query, [])
+      assert "acme" in params
+    end
   end
 
   test "validate_tenant_scope returns error when tenant is required but missing" do
@@ -239,14 +242,16 @@ defmodule Selecto.TenantTest do
              Selecto.validate_tenant_scope(query)
   end
 
-  test "tenant context id does not satisfy required scope until it becomes a filter" do
+  test "a trusted tenant context id is bound onto the root without an explicit filter" do
     query =
       tenant_required_domain()
       |> selecto()
       |> Selecto.with_tenant(%{tenant_id: "acme", required: true})
 
-    assert {:error, %Selecto.Error{type: :validation_error}} =
-             Selecto.validate_tenant_scope(query)
+    # Lesson 43: the engine tenant limits every read, binding the root.
+    assert :ok = Selecto.validate_tenant_scope(query)
+    assert {_sql, params} = query |> Selecto.select(["name"]) |> Selecto.to_sql()
+    assert "acme" in params
 
     assert :ok =
              query
@@ -286,8 +291,8 @@ defmodule Selecto.TenantTest do
         required: true
       })
 
-    assert {:error, %Selecto.Error{details: %{code: :tenant_scope_missing}}} =
-             Selecto.validate_tenant_scope(compound)
+    # The attached row identity is bound onto the root of every read (lesson 43).
+    assert :ok = Selecto.validate_tenant_scope(compound)
 
     assert :ok =
              compound

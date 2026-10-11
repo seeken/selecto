@@ -1066,8 +1066,6 @@ defmodule Selecto.Builder.Subselect do
     # Resolve the relation boundary through the schema (scope keys and tenant
     # pair, validated against both relations), then render the shared
     # domain-owned association predicate (through bridges, policies, quoting).
-    root_domain = if source_relation == selecto.domain.source, do: selecto.domain
-
     association =
       Map.merge(
         association,
@@ -1076,7 +1074,7 @@ defmodule Selecto.Builder.Subselect do
           association,
           source_relation,
           target_relation,
-          root_domain
+          selecto.domain
         )
       )
 

@@ -271,18 +271,20 @@ defmodule Selecto.RetargetTest do
       assert params == [7, 5, "west", 7]
     end
 
-    test "an attached tenant that was never applied still fails closed after a retarget" do
+    test "an attached tenant that was never applied is bound through a retarget" do
+      # Lesson 43: the engine tenant binds the origin root, so the retarget
+      # context and a tenant-scoped target both carry it.
       for target <- [:orders, :product] do
-        retargeted =
+        {sql, params} =
           tenant_domain()
           |> configure()
           |> Selecto.Tenant.with_tenant(%{tenant_id: 7, tenant_field: "tenant_id"})
           |> Selecto.retarget(target)
           |> Selecto.Tenant.apply_tenant_scope()
+          |> sql()
 
-        assert_raise RuntimeError, ~r/Tenant scope is required but missing/, fn ->
-          Selecto.to_sql(retargeted)
-        end
+        assert sql =~ "tenant_id"
+        assert 7 in params
       end
     end
 

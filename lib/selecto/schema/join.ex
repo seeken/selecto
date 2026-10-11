@@ -121,7 +121,7 @@ defmodule Selecto.Schema.Join do
             assoc = Map.put_new(assoc, :field, id)
 
             boundary =
-              association_boundary!(id, assoc, source, queryable, root_domain(parent, domain))
+              association_boundary!(id, assoc, source, queryable, domain)
 
             join =
               configure(id, assoc, config, parent, source, queryable)
@@ -162,7 +162,7 @@ defmodule Selecto.Schema.Join do
                 association,
                 source,
                 queryable,
-                root_domain(parent, domain)
+                domain
               )
               |> attach_association_policy(association)
 
@@ -224,7 +224,7 @@ defmodule Selecto.Schema.Join do
               intermediate,
               source,
               intermediate_queryable,
-              root_domain(parent, domain)
+              domain
             )
 
           # Now get the final association from the intermediate schema
@@ -251,7 +251,7 @@ defmodule Selecto.Schema.Join do
                 final_assoc_data,
                 intermediate_queryable,
                 final_queryable,
-                nil
+                domain
               )
 
             # Mark the final join as a through join for special handling
@@ -290,7 +290,7 @@ defmodule Selecto.Schema.Join do
               first,
               source,
               first_queryable,
-              root_domain(parent, domain)
+              domain
             )
 
           # Recursively expand the remaining path
@@ -1012,28 +1012,27 @@ defmodule Selecto.Schema.Join do
     join
   end
 
-  defp attach_association_scope!(join, association_id, association, source, target, root_domain) do
-    Map.merge(
-      join,
-      association_boundary!(association_id, association, source, target, root_domain)
-    )
+  defp attach_association_scope!(join, association_id, association, source, target, domain) do
+    Map.merge(join, association_boundary!(association_id, association, source, target, domain))
   end
-
-  defp root_domain(:selecto_root, domain), do: domain
-  defp root_domain(_parent, _domain), do: nil
 
   @doc false
   # The relation boundary of one association edge, shared by flat joins,
-  # through bridges and correlated subselects: its scope keys (authored, or
-  # inferred from the tenant pair when none are authored) and, whenever both
-  # relations declare tenant_field, the tenant pair. Authored scope keys never
-  # replace the tenant pair, so a join on a non-tenant scope key such as
-  # region_id still pairs the tenants (lesson 41). `root_domain` is the domain
-  # when `source` is its root relation, so an edge from a two-column root pairs
-  # its tenant columns by name (lesson 41a); pass nil for any other source.
+  # through bridges and correlated subselects:
+  #
+  #   * its scope keys (authored, or inferred from the tenant pair when none
+  #     are authored);
+  #   * `:tenant_scope`, the tenant pair, whenever both relations declare
+  #     tenant_field. Authored scope keys never replace it (lesson 41);
+  #   * `:carry_tenant_field`, the target's tenant field, when the target
+  #     declares tenant_field but the source does not. A scoped query carries
+  #     its root's admitted tenants onto it across the shared hop (lesson 41b).
+  #
+  # `domain` gives the domain's tenant columns: in a two-column domain every
+  # hop pairs tenant columns by name, never by position (lessons 41a, 41b).
   @spec association_boundary!(term(), map(), map(), map(), map() | nil) :: map()
-  def association_boundary!(association_id, association, source, target, root_domain \\ nil) do
-    tenant_pair = tenant_pair(association_id, source, target, root_domain)
+  def association_boundary!(association_id, association, source, target, domain \\ nil) do
+    tenant_pair = tenant_pair(association_id, source, target, domain)
 
     scope =
       case association_scope_keys!(association_id, association, source, target, tenant_pair) do
@@ -1041,11 +1040,15 @@ defmodule Selecto.Schema.Join do
         {source_key, target_key} -> %{source_scope_key: source_key, target_scope_key: target_key}
       end
 
-    case tenant_pair do
-      nil ->
+    case {tenant_pair, map_value(source, :tenant_field), map_value(target, :tenant_field)} do
+      {nil, nil, target_tenant} when not is_nil(target_tenant) ->
+        validate_tenant_field!(association_id, :target, target, target_tenant)
+        Map.put(scope, :carry_tenant_field, target_tenant)
+
+      {nil, _source_tenant, _target_tenant} ->
         scope
 
-      {source_tenant, target_tenant} = pair ->
+      {{source_tenant, target_tenant} = pair, _source_tenant, _target_tenant} ->
         validate_tenant_field!(association_id, :source, source, source_tenant)
         validate_tenant_field!(association_id, :target, target, target_tenant)
 
@@ -1057,30 +1060,31 @@ defmodule Selecto.Schema.Join do
   end
 
   # `{source_tenant_column, target_tenant_field}` when both relations declare
-  # tenant_field, otherwise nil. A one-column source pairs its tenant_field with
-  # the target's, whatever their names. A two-column root (its write scope
-  # tenant field differs from its tenant_field) pairs the target's tenant_field
-  # with the root column of the same name, never by position, and a target
-  # whose tenant_field names neither root column is refused.
-  defp tenant_pair(association_id, source, target, root_domain) do
+  # tenant_field, otherwise nil. In a one-column domain the source's
+  # tenant_field pairs with the target's, whatever their names. In a two-column
+  # domain (its write scope tenant field differs from its tenant_field) every
+  # hop pairs by name: the target's tenant_field must be the source's
+  # tenant_field, or one of the domain's tenant columns that the source also
+  # declares. Anything else is refused.
+  defp tenant_pair(association_id, source, target, domain) do
     case {map_value(source, :tenant_field), map_value(target, :tenant_field)} do
       {source_tenant, target_tenant}
       when not is_nil(source_tenant) and not is_nil(target_tenant) ->
-        case source_tenant_columns(source_tenant, root_domain) do
-          [only] ->
-            {only, target_tenant}
+        columns = if is_map(domain), do: Selecto.Tenant.domain_tenant_columns(domain), else: []
 
-          columns ->
-            case Enum.find(columns, &same_key?(&1, target_tenant)) do
-              nil ->
-                raise ArgumentError,
-                      "invalid_domain: association #{inspect(association_id)} target tenant field " <>
-                        "#{inspect(target_tenant)} matches none of the root tenant columns " <>
-                        "#{inspect(columns)}, so the tenant pair cannot be made"
+        cond do
+          length(columns) < 2 or same_key?(source_tenant, target_tenant) ->
+            {source_tenant, target_tenant}
 
-              column ->
-                {column, target_tenant}
-            end
+          Enum.any?(columns, &same_key?(&1, target_tenant)) and
+              declares_field?(source, target_tenant) ->
+            {target_tenant, target_tenant}
+
+          true ->
+            raise ArgumentError,
+                  "invalid_domain: association #{inspect(association_id)} target tenant field " <>
+                    "#{inspect(target_tenant)} cannot be paired by name with the tenant columns " <>
+                    "#{inspect(columns)}, so the tenant pair cannot be made"
         end
 
       _ ->
@@ -1088,20 +1092,8 @@ defmodule Selecto.Schema.Join do
     end
   end
 
-  defp source_tenant_columns(source_tenant, root_domain) when is_map(root_domain) do
-    write_tenant =
-      root_domain
-      |> map_value(:writes)
-      |> map_value(:scope)
-      |> map_value(:tenant)
-      |> then(&(map_value(&1, :field) || map_value(&1, :tenant_field)))
-
-    if not is_nil(write_tenant) and not same_key?(write_tenant, source_tenant),
-      do: [source_tenant, write_tenant],
-      else: [source_tenant]
-  end
-
-  defp source_tenant_columns(source_tenant, _domain), do: [source_tenant]
+  defp declares_field?(relation, field),
+    do: Enum.any?(map_value(relation, :fields) || [], &same_key?(&1, field))
 
   defp same_key?(left, right),
     do: not is_nil(left) and not is_nil(right) and to_string(left) == to_string(right)
@@ -1151,7 +1143,14 @@ defmodule Selecto.Schema.Join do
       policy when is_map(policy) and map_size(policy) > 0 ->
         # Carry the boundary resolved by attach_association_scope! (scope keys
         # and tenant pair) so the portable predicate keeps it.
-        boundary = Map.take(join, [:source_scope_key, :target_scope_key, :tenant_scope])
+        boundary =
+          Map.take(join, [
+            :source_scope_key,
+            :target_scope_key,
+            :tenant_scope,
+            :carry_tenant_field
+          ])
+
         Map.put(join, :portable_association, Map.merge(association, boundary))
 
       _ ->

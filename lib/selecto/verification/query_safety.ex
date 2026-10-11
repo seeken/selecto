@@ -5,7 +5,8 @@ defmodule Selecto.Verification.QuerySafety do
   The model enumerates tenant-required and tenant-optional domains, absent,
   row-scoped, and schema-scoped tenant contexts, explicit scope application,
   and ordinary user filters. It checks fail-closed validation, preservation of
-  required filters, and SQL parameterization for every state.
+  required filters, and SQL parameterization for every state. An attached row
+  tenant is bound onto the root whether or not its scope was applied.
 
   A passing result is a proof over this finite model, not a claim about all
   possible Selecto programs. See `Selecto.Verification.BoundedModel`.
@@ -146,7 +147,7 @@ defmodule Selecto.Verification.QuerySafety do
     end
   end
 
-  defp row_scope_is_parameterized(%{context: :tenant_id, apply_scope?: true} = state) do
+  defp row_scope_is_parameterized(%{context: :tenant_id} = state) do
     {sql, params} = Selecto.to_sql(state.query)
 
     cond do
@@ -204,15 +205,13 @@ defmodule Selecto.Verification.QuerySafety do
        when context in [:mismatched_tenant_id, :ambiguous_tenant_id],
        do: false
 
-  defp expected_valid?(%{context: context, apply_scope?: false})
-       when context in [:tenant_id, :compound_tenant],
-       do: false
-
   defp expected_valid?(%{tenant_required?: false}), do: true
 
   defp expected_valid?(%{context: :prefix}), do: true
-  defp expected_valid?(%{context: :compound_tenant, apply_scope?: true}), do: true
-  defp expected_valid?(%{context: :tenant_id, apply_scope?: true}), do: true
+  # An attached trusted tenant is bound onto the root of every read, applied
+  # explicitly or not (lesson 43).
+  defp expected_valid?(%{context: :compound_tenant}), do: true
+  defp expected_valid?(%{context: :tenant_id}), do: true
   defp expected_valid?(_state), do: false
 
   defp attach_context(query, :none, _tenant_required?), do: query

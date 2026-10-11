@@ -90,8 +90,10 @@ declared association path. The final association binds the selected target row
 through its foreign key and scope, preserving path membership even when target
 IDs repeat across tenants. The path must end at the same physical relation as
 `target_schema`; incompatible targets fail before database execution. Complete
-authored scope pairs are ANDed with each edge's tenant pair, and tenantless
-intermediate relations retain their authored visibility.
+authored scope pairs are ANDed with each edge's tenant pair. A tenantless
+intermediate relation retains its authored visibility only in an unscoped read;
+under a trusted tenant or a required tenant conjunct, a tenant relation reached
+across it is paired with the root's tenant column.
 
 Nested JSON collections follow every association after the immediate parent's
 path. A full child path must extend that parent path; the builder does not
