@@ -365,7 +365,7 @@ defmodule Selecto.ScopedJoinTest do
     end
   end
 
-  test "flattened tenantless intermediate relation does not infer transitive tenant scope" do
+  test "flattened tenantless intermediate relation keeps authored visibility only when unscoped" do
     domain =
       update_in(flattened_domain(), [:schemas, :customers], &Map.delete(&1, :tenant_field))
 
@@ -375,6 +375,16 @@ defmodule Selecto.ScopedJoinTest do
     refute sql =~ ~s(j_customer."organization_id" = selecto_root."tenant_id")
     refute sql =~ ~s(sub_child_orders."child_tenant" = j_customer."organization_id")
     refute sql =~ ~s(sub_child_orders."child_tenant" = selecto_root."tenant_id")
+
+    # A scoped root carries its tenant across the shared hop (lesson 41b).
+    {sql, [7]} =
+      domain
+      |> flattened_query(:json_agg)
+      |> Selecto.with_tenant(%{tenant_id: 7, tenant_field: "tenant_id"})
+      |> Selecto.to_sql()
+
+    assert sql =~ ~s(sub_child_orders."child_tenant" = selecto_root."tenant_id")
+    refute sql =~ ~s(sub_child_orders."child_tenant" = j_customer."organization_id")
   end
 
   test "flattened tenantless final target retains its parent FK without an inferred guard" do

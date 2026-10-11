@@ -324,6 +324,7 @@ defmodule Selecto.ExecuteEntryPointTest do
           adapter
           |> query()
           |> Selecto.Tenant.with_tenant(%{tenant_id: 5, tenant_field: :tenant_id})
+          |> Selecto.Tenant.require_tenant_filter("tenant_id", 6)
 
         assert {:error, %Selecto.Error{type: :validation_error}} = Selecto.execute(query)
         refute_received {:adapter_execute, _pid, _opts}

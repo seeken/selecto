@@ -792,8 +792,10 @@ defmodule Selecto.Builder.Sql do
     domain_required_filters = Map.get(Selecto.domain(selecto), :required_filters, [])
     set_required_filters = Map.get(selecto.set, :required_filters, [])
 
+    # A trusted engine tenant is bound onto the root of every read (lesson 43).
     regular_filters =
-      (domain_required_filters ++ set_required_filters ++ set_filters)
+      (domain_required_filters ++
+         set_required_filters ++ Selecto.Tenant.engine_filters(selecto) ++ set_filters)
       |> Enum.uniq()
 
     # Add JSON filters if they exist
@@ -1114,7 +1116,10 @@ defmodule Selecto.Builder.Sql do
   defp ensure_boundary_renderable!(_join, _config, :basic), do: :ok
 
   defp ensure_boundary_renderable!(join, config, pattern) do
-    if Enum.any?([:source_scope_key, :target_scope_key, :tenant_scope], &Map.get(config, &1)) do
+    if Enum.any?(
+         [:source_scope_key, :target_scope_key, :tenant_scope, :carry_tenant_field],
+         &Map.get(config, &1)
+       ) do
       raise ArgumentError,
             "invalid_domain: join #{inspect(join)} of kind #{inspect(pattern)} cannot apply " <>
               "its association scope or tenant pair"
@@ -1265,6 +1270,22 @@ defmodule Selecto.Builder.Sql do
     base_on
     |> append_scope_keys_to_on_clause(selecto, join, config)
     |> append_tenant_scope_to_on_clause(selecto, join, config)
+    |> append_carried_tenant_to_on_clause(selecto, join, config)
+  end
+
+  # A tenant relation reached across an untenanted hop carries the query's
+  # admitted tenants (lesson 41b).
+  defp append_carried_tenant_to_on_clause(base_on, selecto, join, config) do
+    case Map.get(config, :carry_tenant_field) do
+      nil ->
+        base_on
+
+      field ->
+        case Selecto.Builder.Association.carried_tenant(selecto, to_string(join), field) do
+          [] -> base_on
+          condition -> [base_on, " and ", condition]
+        end
+    end
   end
 
   # The tenant pair from Selecto.Schema.Join.association_boundary!/5, ANDed in

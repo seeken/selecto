@@ -1,6 +1,8 @@
 defmodule Selecto.AssociationTenantPairingTest do
-  # Lesson 41: authored scope keys never replace tenant pairing. Lesson 42: a
-  # trusted tenant on a shared root is a typed refusal.
+  # Lesson 41: authored scope keys never replace tenant pairing, two-column
+  # domains pair by name at every hop, and a shared hop carries the root's
+  # admitted tenants. Lesson 42: a trusted tenant on a shared root is a typed
+  # refusal. Lesson 43: a trusted tenant binds the root of every read.
   use ExUnit.Case, async: true
 
   alias SelectoDBSQLite.Adapter
@@ -21,7 +23,14 @@ defmodule Selecto.AssociationTenantPairingTest do
           "CREATE TABLE products (id INTEGER PRIMARY KEY, order_id INTEGER, name TEXT)",
           "CREATE TABLE orders (id INTEGER, tenant_id INTEGER, product_id INTEGER, total INTEGER)",
           "INSERT INTO products VALUES (1, 201, 'widget')",
-          "INSERT INTO orders VALUES (101, 7, 1, 10), (201, 8, 1, 9999)"
+          "INSERT INTO orders VALUES (101, 7, 1, 10), (201, 8, 1, 9999)",
+          "INSERT INTO people VALUES (2, 8, 5, 50, 3)",
+          "CREATE TABLE regions (id INTEGER PRIMARY KEY, name TEXT)",
+          "INSERT INTO regions VALUES (5, 'north')",
+          "CREATE TABLE site_orders (id INTEGER, tenant_id INTEGER, site_id INTEGER, person_id INTEGER, total INTEGER)",
+          "INSERT INTO site_orders VALUES (100, 7, 3, 1, 10), (101, 8, 3, 1, 99)",
+          "CREATE TABLE site_lines (id INTEGER PRIMARY KEY, site_id INTEGER, order_id INTEGER, name TEXT)",
+          "INSERT INTO site_lines VALUES (1000, 3, 100, 'own-site line'), (1001, 4, 100, 'other-site line'), (1002, 7, 100, 'site-7 line')"
         ],
         do: :ok = Exqlite.Sqlite3.execute(db, statement)
 
@@ -151,7 +160,7 @@ defmodule Selecto.AssociationTenantPairingTest do
       unmatched = put_in(domain, [:schemas, :account, :tenant_field], :region_id)
 
       assert_raise ArgumentError,
-                   ~r/invalid_domain: .*matches none of the root tenant columns/,
+                   ~r/invalid_domain: .*cannot be paired by name/,
                    fn ->
                      Selecto.configure(unmatched, :mock_connection, validate: false)
                    end
@@ -197,6 +206,115 @@ defmodule Selecto.AssociationTenantPairingTest do
     end
   end
 
+  describe "lesson 41b: shared hops and every-hop pairing" do
+    test "a tenant relation reached across a shared hop carries the scoped root's tenants",
+         %{db: db} do
+      base = Selecto.configure(regional_domain(), db, adapter: Adapter)
+
+      scoped =
+        base
+        |> with_tenant()
+        |> Selecto.select(["id", "accounts.name"])
+        |> Selecto.order_by(["accounts.name"])
+
+      {sql, _params} = Selecto.to_sql(scoped)
+      assert sql =~ ~s(accounts."tenant_id" = selecto_root."tenant_id")
+      assert rows(scoped) == [[1, "own"]]
+
+      # An unscoped trusted read keeps the authored visibility.
+      unscoped =
+        base
+        |> Selecto.select(["id", "accounts.name"])
+        |> Selecto.order_by(["id", "accounts.name"])
+
+      assert rows(unscoped) == [
+               [1, "own"],
+               [1, "tenant-8 secret"],
+               [2, "own"],
+               [2, "tenant-8 secret"]
+             ]
+
+      collection =
+        base
+        |> with_tenant()
+        |> Selecto.select(["id"])
+        |> Selecto.subselect([
+          %{
+            fields: ["name"],
+            target_schema: :accounts,
+            format: :count,
+            alias: "accounts",
+            join_path: [:region, :accounts]
+          }
+        ])
+
+      {sql, _params} = Selecto.to_sql(collection)
+      assert sql =~ ~s(sub_accounts."tenant_id" = selecto_root."tenant_id")
+      assert rows(collection) == [[1, 1]]
+    end
+
+    test "a retarget to a shared relation carries the admitted tenants onto later joins",
+         %{db: db} do
+      retargeted =
+        regional_domain()
+        |> Selecto.configure(db, adapter: Adapter)
+        |> with_tenant()
+        |> Selecto.retarget(:region)
+        |> Selecto.select(["id", "accounts.name"])
+
+      {sql, params} = Selecto.to_sql(retargeted)
+      assert sql =~ ~r/accounts\."tenant_id" = \$\d+|accounts\."tenant_id" = \?/
+      assert 7 in params
+      assert rows(retargeted) == [[5, "own"]]
+    end
+
+    test "a two-column domain pairs by name at every hop and returns the caller's own site rows",
+         %{db: db} do
+      query =
+        site_domain()
+        |> Selecto.configure(db, adapter: Adapter, validate: false)
+        |> with_tenant()
+        |> Selecto.select(["id", "orders.total", "lines.name"])
+        |> Selecto.order_by(["lines.name"])
+
+      {sql, _params} = Selecto.to_sql(query)
+      assert sql =~ "orders.site_id = lines.site_id"
+      refute sql =~ "orders.tenant_id = lines.site_id"
+      assert rows(query) == [[1, 10, "own-site line"]]
+
+      retargeted =
+        site_domain()
+        |> Selecto.configure(db, adapter: Adapter, validate: false)
+        |> with_tenant()
+        |> Selecto.retarget("orders.lines")
+        |> Selecto.select(["id", "name"])
+
+      assert rows(retargeted) == [[1000, "own-site line"]]
+
+      missing_site =
+        update_in(site_domain(), [:schemas, :orders, :fields], &List.delete(&1, :site_id))
+
+      assert_raise ArgumentError, ~r/invalid_domain: association :lines .*by name/, fn ->
+        Selecto.configure(missing_site, db, adapter: Adapter, validate: false)
+      end
+    end
+  end
+
+  describe "lesson 43: a trusted tenant binds the root of every read" do
+    test "an unapplied engine tenant still limits SDK reads", %{db: db} do
+      base = Selecto.configure(regional_domain(), db, adapter: Adapter)
+      query = base |> with_tenant() |> Selecto.select(["id"])
+
+      assert rows(query) == [[1]]
+      assert rows(Selecto.select(base, ["id"]) |> Selecto.order_by(["id"])) == [[1], [2]]
+
+      mismatched = Selecto.Tenant.require_tenant_filter(query, "tenant_id", 8)
+
+      assert {:error, %Selecto.Error{details: %{code: :tenant_scope_mismatch}}} =
+               Selecto.execute(mismatched)
+    end
+  end
+
   defp scoped(db, domain) do
     domain
     |> Selecto.configure(db, adapter: Adapter)
@@ -235,6 +353,76 @@ defmodule Selecto.AssociationTenantPairingTest do
           )
       },
       joins: %{account: %{type: :left}}
+    }
+  end
+
+  # people (tenant) -> region (shared) -> accounts (tenant).
+  defp regional_domain do
+    %{
+      name: "L41b",
+      source:
+        relation("people", [:id, :tenant_id, :region_id, :account_id, :site_id], :tenant_id, %{
+          region: %{
+            queryable: :regions,
+            field: :region,
+            owner_key: :region_id,
+            related_key: :id,
+            cardinality: :one
+          }
+        }),
+      schemas: %{
+        regions:
+          relation("regions", [:id, :name], nil, %{
+            accounts: %{
+              queryable: :accounts,
+              field: :accounts,
+              owner_key: :id,
+              related_key: :region_id,
+              cardinality: :many
+            }
+          }),
+        accounts:
+          relation(
+            "accounts",
+            [:id, :tenant_id, :region_id, :name, :person_id, :site_id],
+            :tenant_id,
+            %{}
+          )
+      },
+      joins: %{region: %{type: :left, joins: %{accounts: %{type: :left}}}}
+    }
+  end
+
+  # A two-column root: tenant_id reads, site_id writes. people -> orders
+  # (tenant_id) -> lines (site_id).
+  defp site_domain do
+    %{
+      name: "L41c",
+      source:
+        relation("people", [:id, :tenant_id, :region_id, :account_id, :site_id], :tenant_id, %{
+          orders: %{
+            queryable: :orders,
+            field: :orders,
+            owner_key: :id,
+            related_key: :person_id,
+            cardinality: :many
+          }
+        }),
+      schemas: %{
+        orders:
+          relation("site_orders", [:id, :tenant_id, :site_id, :person_id, :total], :tenant_id, %{
+            lines: %{
+              queryable: :lines,
+              field: :lines,
+              owner_key: :id,
+              related_key: :order_id,
+              cardinality: :many
+            }
+          }),
+        lines: relation("site_lines", [:id, :site_id, :order_id, :name], :site_id, %{})
+      },
+      joins: %{orders: %{type: :left, joins: %{lines: %{type: :left}}}},
+      writes: %{scope: %{tenant: %{field: :site_id, required: true}}}
     }
   end
 

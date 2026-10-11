@@ -6,6 +6,14 @@ defmodule Selecto.Tenant do
   queries. Tenant scope is enforced by appending tenant constraints to the
   query's required filter bucket (`set.required_filters`).
 
+  An attached trusted tenant (`with_tenant/2` with a `:tenant_id`) limits every
+  read, whether or not `apply_tenant_scope/2` was called: the SQL builder binds
+  `tenant_field = tenant_id` onto the root, intersected with any required
+  tenant filter (a disagreement is `:tenant_scope_mismatch`). A root that cannot
+  carry the tenant field is refused with `:missing_tenant_scope`. Tenant
+  relations joined across an untenanted hop of a scoped read are paired with
+  the root's tenant column (by name in a two-column domain).
+
   `tenant_boundary/2` is the tenant boundary that public surfaces (the API
   query and write handlers, canned pages and co-domain lookups) require on a
   domain that declares `source.tenant_field`; `tenant_conjunct?/2` is its
@@ -233,19 +241,82 @@ defmodule Selecto.Tenant do
           {:ok, [Selecto.Types.filter()]} | :unscoped | :error
   def carry_conditions(selecto, target_field) do
     target_field = normalize_field(target_field)
-    required = Selecto.Query.required_filters(selecto)
+    # The engine tenant is bound onto the root of every read (lesson 43).
+    required = uniq_filters(Selecto.Query.required_filters(selecto) ++ engine_filters(selecto))
     root_field = domain_tenant_field(selecto)
+    carry = tenant_carry(selecto)
 
+    # A two-column domain carries a conjunct only onto its same-named column
+    # (lesson 41c); a one-column domain carries it onto the target's field.
     carried =
-      if root_field,
+      if root_field && (length(domain_tenant_columns(selecto)) < 2 or root_field == target_field),
         do: Enum.flat_map(required, &carry_conjunct(&1, root_field, target_field)),
         else: []
 
     cond do
-      required == [] -> :unscoped
-      carried == [] -> :error
-      true -> {:ok, carried}
+      carried != [] ->
+        {:ok, carried}
+
+      carry != nil and carry.field == target_field ->
+        {:ok, Enum.flat_map(carry.conditions, &carry_conjunct(&1, carry.field, target_field))}
+
+      required == [] and carry == nil ->
+        :unscoped
+
+      true ->
+        :error
     end
+  end
+
+  @doc false
+  # The admitted tenant set a retargeted query over an untenanted (or
+  # differently named) target carries for the tenant relations it reaches
+  # later: `%{field: root_tenant_field, conditions: [filter]}` or nil.
+  @spec tenant_carry(Selecto.Types.t()) :: %{field: String.t(), conditions: list()} | nil
+  def tenant_carry(%{set: %{tenant_carry: %{field: _, conditions: _} = carry}}), do: carry
+  def tenant_carry(_selecto), do: nil
+
+  @doc false
+  # The domain's tenant columns: `source.tenant_field` and, when it differs,
+  # the write scope tenant field (a two-column root). A retargeted domain keeps
+  # its origin's columns under `:tenant_columns`.
+  @spec domain_tenant_columns(Selecto.Types.t() | map()) :: [String.t()]
+  def domain_tenant_columns(%Selecto{domain: domain}), do: domain_tenant_columns(domain)
+
+  def domain_tenant_columns(domain) when is_map(domain) do
+    case lenient_get(domain, :tenant_columns) do
+      columns when is_list(columns) and columns != [] ->
+        Enum.map(columns, &normalize_field/1)
+
+      _ ->
+        case domain_tenant_field(domain) do
+          nil ->
+            []
+
+          field ->
+            case domain_write_tenant_field(domain) do
+              nil -> [field]
+              ^field -> [field]
+              write_field -> [field, write_field]
+            end
+        end
+    end
+  end
+
+  def domain_tenant_columns(_domain), do: []
+
+  @doc false
+  # The engine tenant bound onto the root of every read (lesson 43): the
+  # attached trusted tenant on its field, when the root carries that field.
+  @spec engine_filters(Selecto.Types.t()) :: [Selecto.Types.filter()]
+  def engine_filters(selecto) do
+    context = tenant(selecto) || %{}
+    tenant_id = Map.get(context, :tenant_id)
+    field = tenant_field(selecto, [])
+
+    if defined_scalar?(tenant_id) and root_carries_field?(selecto, field),
+      do: [{field, tenant_id}],
+      else: []
   end
 
   defp carry_conjunct({:and, filters}, root_field, target_field) when is_list(filters),
@@ -626,8 +697,9 @@ defmodule Selecto.Tenant do
       has_prefix and is_nil(tenant_id) and required_values == [] ->
         :valid
 
+      # A trusted tenant is bound onto the root of every read (lesson 43).
       not is_nil(tenant_id) and required_values == [] ->
-        {:invalid, "required but missing", %{code: :tenant_scope_missing}}
+        :valid
 
       required_values == [] and tenant_required?(selecto, opts) ->
         {:invalid, "required but missing", %{code: :tenant_scope_missing}}
@@ -740,7 +812,9 @@ defmodule Selecto.Tenant do
       do: tenant_id
   end
 
-  defp write_scope_field(%Selecto{domain: domain}) do
+  defp write_scope_field(%Selecto{domain: domain}), do: domain_write_tenant_field(domain)
+
+  defp domain_write_tenant_field(domain) do
     tenant = domain |> lenient_get(:writes) |> lenient_get(:scope) |> lenient_get(:tenant)
 
     case lenient_get(tenant, :field) || lenient_get(tenant, :tenant_field) do

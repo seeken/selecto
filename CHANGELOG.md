@@ -9,6 +9,17 @@
   authored `region_id` keys no longer drop tenant pairing (lesson 41). Two-column
   roots pair by name; unpairable tenant fields and advanced join kinds that
   cannot render the pair are refused with `invalid_domain`.
+- Bind an attached trusted tenant onto the root of every read (execute,
+  stream, to_sql, retarget contexts and members), not only reads that called
+  `apply_tenant_scope/2`; a disagreeing required tenant filter is
+  `:tenant_scope_mismatch` (decision 43).
+- Carry a scoped root's tenant across untenanted hops: a tenant relation joined
+  through a shared intermediate is paired with the root's tenant column, and a
+  retarget onto a shared relation (or a two-column domain's scope column)
+  carries the admitted tenant set onto later joins and members (lesson 41b).
+  Two-column domains pair tenant columns by name at every hop and in
+  retargeted domains; the engine tenant binds only `source.tenant_field`
+  (decision 41c).
 - A trusted tenant on a shared root (no tenant field) is a typed
   `:missing_tenant_scope` refusal from `tenant_boundary/2`, `validate_scope/2`,
   execution and retarget, instead of an unknown-field failure (lesson 42).

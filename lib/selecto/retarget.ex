@@ -416,13 +416,18 @@ defmodule Selecto.Retarget do
 
   # The domain rooted at the target relation: its own associations and the
   # join subtree below the target, over the same schemas.
+  # A two-column domain keeps its tenant columns so every later hop still
+  # pairs by name (lesson 41b).
   defp target_domain(domain, relation, joins) do
+    columns = Selecto.Tenant.domain_tenant_columns(domain)
+
     %{
       source: Map.put_new(relation, :associations, %{}),
       schemas: Map.get(domain, :schemas, %{}),
       joins: joins || %{}
     }
     |> maybe_put(:name, Map.get(domain, :name))
+    |> maybe_put(:tenant_columns, if(length(columns) > 1, do: columns))
   end
 
   defp configure_options(selecto) do
@@ -446,32 +451,48 @@ defmodule Selecto.Retarget do
       )
     end
 
-    case Map.get(plan.relation, :tenant_field) do
-      nil ->
+    root_field = Selecto.Tenant.domain_tenant_field(origin)
+    columns = Selecto.Tenant.domain_tenant_columns(origin)
+    target_field = plan.relation |> Map.get(:tenant_field) |> then(&(&1 && to_string(&1)))
+
+    cond do
+      # An untenanted target, or the scope column of a two-column domain
+      # (bounded by the context path's by-name pairing, lesson 41c), carries
+      # the origin's admitted tenants for the relations and members it reaches
+      # later (lesson 41b).
+      is_nil(target_field) or (length(columns) > 1 and target_field != root_field) ->
+        case root_field && Selecto.Tenant.carry_conditions(origin, root_field) do
+          {:ok, admitted} ->
+            put_in(retargeted.set[:tenant_carry], %{field: root_field, conditions: admitted})
+
+          _unscoped ->
+            retargeted
+        end
+
+      true ->
+        carry_target_scope!(retargeted, origin, plan, target_field)
+    end
+  end
+
+  defp carry_target_scope!(retargeted, origin, plan, target_field) do
+    case Selecto.Tenant.carry_conditions(origin, target_field) do
+      :unscoped ->
         retargeted
 
-      target_field ->
-        target_field = to_string(target_field)
+      :error ->
+        fail!(
+          :missing_tenant_scope,
+          "retarget to #{plan.path} reads a tenant-scoped relation but the root tenant scope cannot be applied to it",
+          tenant_field: target_field
+        )
 
-        case Selecto.Tenant.carry_conditions(origin, target_field) do
-          :unscoped ->
-            retargeted
+      {:ok, carried} ->
+        retargeted =
+          Enum.reduce(carried, retargeted, &Selecto.Tenant.require_tenant_filter(&2, &1))
 
-          :error ->
-            fail!(
-              :missing_tenant_scope,
-              "retarget to #{plan.path} reads a tenant-scoped relation but the root tenant scope cannot be applied to it",
-              tenant_field: target_field
-            )
-
-          {:ok, carried} ->
-            retargeted =
-              Enum.reduce(carried, retargeted, &Selecto.Tenant.require_tenant_filter(&2, &1))
-
-            case Selecto.Tenant.tenant(origin) do
-              nil -> retargeted
-              tenant -> %{retargeted | tenant: Map.put(tenant, :tenant_field, target_field)}
-            end
+        case Selecto.Tenant.tenant(origin) do
+          nil -> retargeted
+          tenant -> %{retargeted | tenant: Map.put(tenant, :tenant_field, target_field)}
         end
     end
   end
