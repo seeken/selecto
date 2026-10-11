@@ -1066,6 +1066,8 @@ defmodule Selecto.Builder.Subselect do
     # Resolve the relation boundary through the schema (scope keys and tenant
     # pair, validated against both relations), then render the shared
     # domain-owned association predicate (through bridges, policies, quoting).
+    association = bridge_join_through!(association_id, association)
+
     association =
       Map.merge(
         association,
@@ -1080,6 +1082,36 @@ defmodule Selecto.Builder.Subselect do
 
     Selecto.Builder.Association.predicate(selecto, association, target_alias, source_alias)
   end
+
+  # A many-to-many `join_through` association correlates through its join
+  # table, as a through bridge, never by matching the target key to the owner
+  # key directly.
+  defp bridge_join_through!(association_id, %{join_through: table} = association) do
+    table =
+      cond do
+        is_binary(table) -> table
+        is_atom(table) and function_exported?(table, :__schema__, 1) -> table.__schema__(:source)
+        true -> nil
+      end
+
+    case Map.get(association, :join_keys) do
+      [{owner_fk, owner_key}, {related_fk, related_key} | _] when is_binary(table) ->
+        association
+        |> Map.drop([:join_through, :join_keys])
+        |> Map.merge(%{
+          owner_key: owner_key,
+          related_key: related_key,
+          through: %{table: table, owner_key: owner_fk, related_key: related_fk}
+        })
+
+      _ ->
+        raise ArgumentError,
+              "many-to-many association #{inspect(association_id)} needs a join table and " <>
+                "join_keys to correlate a subselect"
+    end
+  end
+
+  defp bridge_join_through!(_association_id, association), do: association
 
   defp build_exists_correlation(selecto, target_schema, [assoc_name], source_alias) do
     build_direct_correlation_with_assoc(selecto, target_schema, assoc_name, source_alias)

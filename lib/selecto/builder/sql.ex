@@ -1115,6 +1115,9 @@ defmodule Selecto.Builder.Sql do
   # resolved relation boundary is refused rather than reading across it.
   defp ensure_boundary_renderable!(_join, _config, :basic), do: :ok
 
+  # The many-to-many builder ANDs the boundary into its target join.
+  defp ensure_boundary_renderable!(_join, %{join_type: :many_to_many}, {:tagging, _}), do: :ok
+
   defp ensure_boundary_renderable!(join, config, pattern) do
     if Enum.any?(
          [:source_scope_key, :target_scope_key, :tenant_scope, :carry_tenant_field],
@@ -1265,6 +1268,12 @@ defmodule Selecto.Builder.Sql do
 
     append_association_scope_to_on_clause(selecto, join, base_on, config)
   end
+
+  @doc false
+  # The association boundary (scope keys, tenant pair, carried tenant) ANDed
+  # onto a join's ON clause; shared with the many-to-many builder.
+  def append_association_boundary(selecto, join, base_on, config),
+    do: append_association_scope_to_on_clause(selecto, join, base_on, config)
 
   defp append_association_scope_to_on_clause(selecto, join, base_on, config) do
     base_on

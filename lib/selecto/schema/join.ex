@@ -334,7 +334,7 @@ defmodule Selecto.Schema.Join do
   end
 
   # Configure many-to-many joins (with join_through table)
-  defp configure_many_to_many(id, association, config, parent, from_source, queryable, _domain) do
+  defp configure_many_to_many(id, association, config, parent, from_source, queryable, domain) do
     name = Map.get(config, :name, id)
     join_through = association.join_through
 
@@ -411,6 +411,7 @@ defmodule Selecto.Schema.Join do
         )
     }
     |> parameterize()
+    |> attach_association_scope!(id, association, from_source, queryable, domain)
   end
 
   defp foreign_key_from_table(table) when is_atom(table),

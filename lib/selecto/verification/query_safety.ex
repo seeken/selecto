@@ -268,6 +268,7 @@ defmodule Selecto.Verification.QuerySafety do
       source: %{
         source_table: "accounts",
         primary_key: :id,
+        tenant_field: :tenant_id,
         fields: [:id, :name, :active, :tenant_id],
         redact_fields: [],
         columns: %{

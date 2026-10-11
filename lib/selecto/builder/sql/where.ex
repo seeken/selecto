@@ -1187,6 +1187,11 @@ defmodule Selecto.Builder.Sql.Where do
   defp canonical_text_search_mode(:web), do: :websearch
   defp canonical_text_search_mode(mode), do: mode
 
+  @doc false
+  # A finalized Selecto query rendered as parameter-marked iodata for embedding
+  # as a subquery, its root alias renamed so it cannot capture the outer root.
+  def subquery_iodata(%Selecto{} = query_selecto), do: selecto_subquery_to_iodata(query_selecto)
+
   defp selecto_subquery_to_iodata(%Selecto{} = query_selecto) do
     {sql, params} = Selecto.to_sql(query_selecto)
 

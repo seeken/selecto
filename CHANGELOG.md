@@ -20,6 +20,14 @@
   Two-column domains pair tenant columns by name at every hop and in
   retargeted domains; the engine tenant binds only `source.tenant_field`
   (decision 41c).
+- Bind the engine tenant only onto a DECLARED root tenant_field (a shared root
+  with a same-named column, or a context naming another column, is refused),
+  carry it into `query_filters/2` so query-scoped writes keep it, and
+  intersect it with required tenant conjuncts (refusing one that excludes
+  it). Recognise `{:eq, v}`, `{:=, v}` and `{"=", v}` tenant conjuncts, refuse
+  a scoped read whose scope cannot be carried, carry a retarget origin's
+  admitted values as a subquery, and pair tenants in `join_through`
+  many-to-many joins and collections (review follow-ups to lessons 41-43).
 - A trusted tenant on a shared root (no tenant field) is a typed
   `:missing_tenant_scope` refusal from `tenant_boundary/2`, `validate_scope/2`,
   execution and retarget, instead of an unknown-field failure (lesson 42).

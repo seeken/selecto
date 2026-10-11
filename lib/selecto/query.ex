@@ -227,7 +227,14 @@ defmodule Selecto.Query do
         []
       end
 
-    [required_filters(selecto), set_filters, post_retarget_filters]
+    # The trusted engine tenant is bound onto every read and so onto every
+    # query-scoped write built from these filters (lesson 43).
+    [
+      required_filters(selecto),
+      Selecto.Tenant.engine_filters(selecto),
+      set_filters,
+      post_retarget_filters
+    ]
     |> Enum.flat_map(fn
       filters when is_list(filters) -> filters
       _ -> []

@@ -203,6 +203,7 @@ defmodule Selecto.CannedPageTest do
     domain = base.domain
     domain = put_in(domain, [:source, :fields], domain.source.fields ++ [:tenant_id])
     domain = put_in(domain, [:source, :columns, :tenant_id], %{type: :string})
+    domain = put_in(domain, [:source, :tenant_field], :tenant_id)
     query = Selecto.configure(domain, :mock_connection)
     page = page(query)
 

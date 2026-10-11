@@ -9,10 +9,13 @@ defmodule Selecto.Tenant do
   An attached trusted tenant (`with_tenant/2` with a `:tenant_id`) limits every
   read, whether or not `apply_tenant_scope/2` was called: the SQL builder binds
   `tenant_field = tenant_id` onto the root, intersected with any required
-  tenant filter (a disagreement is `:tenant_scope_mismatch`). A root that cannot
-  carry the tenant field is refused with `:missing_tenant_scope`. Tenant
-  relations joined across an untenanted hop of a scoped read are paired with
-  the root's tenant column (by name in a two-column domain).
+  tenant conjunct (one that excludes it is `:tenant_scope_mismatch`); other
+  filters are ANDed with it. It binds only the root's DECLARED tenant_field: a
+  root without one, or a context naming another column, is refused with
+  `:missing_tenant_scope`. `query_filters/2` carries the binding into
+  query-scoped writes. Tenant relations joined across an untenanted hop of a
+  scoped read are paired with the root's tenant column (by name in a
+  two-column domain), or with a retarget origin's admitted values.
 
   `tenant_boundary/2` is the tenant boundary that public surfaces (the API
   query and write handlers, canned pages and co-domain lookups) require on a
@@ -235,32 +238,41 @@ defmodule Selecto.Tenant do
   @doc false
   # The query's tenant conditions re-expressed on `target_field` of a relation
   # the query reads outside its own joins: a retarget target or a query member.
-  # `:unscoped` when the query has no required filters; `:error` when it has
-  # some but none is a tenant condition on the root tenant field.
+  #
+  # Conjuncts carry by value: in a one-column domain from the root tenant
+  # field, in a two-column domain only from the same-named column (lesson
+  # 41c). A retargeted query whose origin is scoped carries the origin's
+  # admitted values of that column as a subquery (lesson 41b). `:unscoped` when
+  # the query has no scope at all; `:error` when it is scoped (or has required
+  # filters) but its scope cannot be carried onto `target_field`.
   @spec carry_conditions(Selecto.Types.t(), atom() | String.t()) ::
           {:ok, [Selecto.Types.filter()]} | :unscoped | :error
   def carry_conditions(selecto, target_field) do
     target_field = normalize_field(target_field)
-    # The engine tenant is bound onto the root of every read (lesson 43).
-    required = uniq_filters(Selecto.Query.required_filters(selecto) ++ engine_filters(selecto))
-    root_field = domain_tenant_field(selecto)
-    carry = tenant_carry(selecto)
+    required = scope_filters(selecto)
 
-    # A two-column domain carries a conjunct only onto its same-named column
-    # (lesson 41c); a one-column domain carries it onto the target's field.
     carried =
-      if root_field && (length(domain_tenant_columns(selecto)) < 2 or root_field == target_field),
-        do: Enum.flat_map(required, &carry_conjunct(&1, root_field, target_field)),
-        else: []
+      case source_tenant_column(selecto, target_field) do
+        nil -> []
+        column -> Enum.flat_map(required, &carry_conjunct(&1, column, target_field))
+      end
+
+    origin = retarget_origin(selecto)
 
     cond do
       carried != [] ->
         {:ok, carried}
 
-      carry != nil and carry.field == target_field ->
-        {:ok, Enum.flat_map(carry.conditions, &carry_conjunct(&1, carry.field, target_field))}
+      origin != nil and scoped?(origin) ->
+        case Selecto.Retarget.origin_column_query(selecto, target_field) do
+          {:ok, query} -> {:ok, [{target_field, {:subquery, :in, query}}]}
+          :error -> :error
+        end
 
-      required == [] and carry == nil ->
+      scoped?(selecto) ->
+        :error
+
+      required == [] ->
         :unscoped
 
       true ->
@@ -269,12 +281,53 @@ defmodule Selecto.Tenant do
   end
 
   @doc false
-  # The admitted tenant set a retargeted query over an untenanted (or
-  # differently named) target carries for the tenant relations it reaches
-  # later: `%{field: root_tenant_field, conditions: [filter]}` or nil.
-  @spec tenant_carry(Selecto.Types.t()) :: %{field: String.t(), conditions: list()} | nil
-  def tenant_carry(%{set: %{tenant_carry: %{field: _, conditions: _} = carry}}), do: carry
-  def tenant_carry(_selecto), do: nil
+  # The root column whose values a relation's `target_field` takes: the root
+  # tenant field in a one-column domain, the same-named tenant column the root
+  # declares in a two-column domain, otherwise nil.
+  @spec source_tenant_column(Selecto.Types.t(), atom() | String.t()) :: String.t() | nil
+  def source_tenant_column(selecto, target_field) do
+    target_field = normalize_field(target_field)
+    root_field = domain_tenant_field(selecto)
+    columns = domain_tenant_columns(selecto)
+
+    cond do
+      is_nil(root_field) -> nil
+      length(columns) < 2 -> root_field
+      target_field in columns and root_declares?(selecto, target_field) -> target_field
+      true -> nil
+    end
+  end
+
+  @doc false
+  # Whether a read is tenant scoped: its root declares tenant_field and the
+  # trusted engine tenant or a required positive tenant conjunct bounds one of
+  # the domain's tenant columns, or it is a retarget of a scoped origin.
+  @spec scoped?(Selecto.Types.t()) :: boolean()
+  def scoped?(selecto) do
+    filters = scope_filters(selecto)
+
+    (not is_nil(domain_tenant_field(selecto)) and
+       Enum.any?(domain_tenant_columns(selecto), &tenant_conjunct?(filters, &1))) or
+      case retarget_origin(selecto) do
+        nil -> false
+        origin -> scoped?(origin)
+      end
+  end
+
+  defp scope_filters(selecto),
+    do: uniq_filters(Selecto.Query.required_filters(selecto) ++ engine_filters(selecto))
+
+  defp retarget_origin(%{set: %{retarget_state: %{origin: %Selecto{} = origin}}}), do: origin
+  defp retarget_origin(_selecto), do: nil
+
+  defp root_declares?(selecto, field) do
+    selecto
+    |> Selecto.domain()
+    |> lenient_get(:source)
+    |> lenient_get(:fields)
+    |> List.wrap()
+    |> Enum.any?(&(normalize_field(&1) == field))
+  end
 
   @doc false
   # The domain's tenant columns: `source.tenant_field` and, when it differs,
@@ -307,16 +360,25 @@ defmodule Selecto.Tenant do
 
   @doc false
   # The engine tenant bound onto the root of every read (lesson 43): the
-  # attached trusted tenant on its field, when the root carries that field.
+  # attached trusted tenant on the root's DECLARED tenant_field, when the
+  # tenant context names that field. Anything else is unbindable and refused.
   @spec engine_filters(Selecto.Types.t()) :: [Selecto.Types.filter()]
   def engine_filters(selecto) do
     context = tenant(selecto) || %{}
     tenant_id = Map.get(context, :tenant_id)
-    field = tenant_field(selecto, [])
+    declared = domain_tenant_field(selecto)
 
-    if defined_scalar?(tenant_id) and root_carries_field?(selecto, field),
-      do: [{field, tenant_id}],
-      else: []
+    if defined_scalar?(tenant_id) and not is_nil(declared) and
+         tenant_field(selecto, []) == declared,
+       do: [{declared, tenant_id}],
+       else: []
+  end
+
+  # A trusted tenant the root cannot bind: no declared tenant_field (a shared
+  # root, lesson 42), or a context naming another column.
+  defp unbindable_tenant?(selecto) do
+    context = tenant(selecto) || %{}
+    defined_scalar?(Map.get(context, :tenant_id)) and engine_filters(selecto) == []
   end
 
   defp carry_conjunct({:and, filters}, root_field, target_field) when is_list(filters),
@@ -333,6 +395,9 @@ defmodule Selecto.Tenant do
 
   defp carried_value?(value) when is_binary(value) or is_number(value), do: true
   defp carried_value?({:in, values}) when is_list(values) and values != [], do: true
+
+  defp carried_value?({operator, value}) when operator in [:eq, :=, "="],
+    do: is_binary(value) or is_number(value)
 
   defp carried_value?(values) when is_list(values) and values != [],
     do: Enum.all?(values, &(is_binary(&1) or is_number(&1)))
@@ -691,15 +756,14 @@ defmodule Selecto.Tenant do
     tenant_id = map_get(tenant_context, :tenant_id)
 
     cond do
-      not is_nil(tenant_id) and not root_carries_field?(selecto, field) ->
+      not is_nil(tenant_id) and unbindable_tenant?(selecto) ->
         {:invalid, "not bindable to the query root", %{code: :missing_tenant_scope}}
 
       has_prefix and is_nil(tenant_id) and required_values == [] ->
         :valid
 
-      # A trusted tenant is bound onto the root of every read (lesson 43).
-      not is_nil(tenant_id) and required_values == [] ->
-        :valid
+      not is_nil(tenant_id) ->
+        engine_status(selecto, field, tenant_id, required_values)
 
       required_values == [] and tenant_required?(selecto, opts) ->
         {:invalid, "required but missing", %{code: :tenant_scope_missing}}
@@ -710,18 +774,63 @@ defmodule Selecto.Tenant do
       length(Enum.uniq(required_values)) > 1 ->
         {:invalid, "ambiguous", %{code: :tenant_scope_ambiguous, filter_values: required_values}}
 
-      not is_nil(tenant_id) and List.first(required_values) != tenant_id ->
+      true ->
+        :valid
+    end
+  end
+
+  # A trusted tenant is bound onto the root of every read (lesson 43). A
+  # required tenant conjunct that excludes it is a mismatch; one that admits it
+  # is intersected. Ordinary filters (host or request) are ANDed with the
+  # binding in SQL, so a disagreeing one simply matches no rows.
+  defp engine_status(selecto, field, tenant_id, required_values) do
+    scalars = Enum.filter(required_values, &defined_scalar?/1)
+
+    excluding =
+      selecto
+      |> tenant_conjunct_value_sets(field)
+      |> Enum.find(&(tenant_id not in &1))
+
+    cond do
+      length(Enum.uniq(scalars)) > 1 ->
+        {:invalid, "ambiguous", %{code: :tenant_scope_ambiguous, filter_values: required_values}}
+
+      excluding != nil ->
         {:invalid, "mismatched",
          %{
            code: :tenant_scope_mismatch,
            expected_tenant_id: tenant_id,
-           filter_value: List.first(required_values)
+           filter_value: if(length(excluding) == 1, do: hd(excluding), else: excluding)
          }}
 
       true ->
         :valid
     end
   end
+
+  # The admitted value set of each positive required conjunct on `field`.
+  defp tenant_conjunct_value_sets(selecto, field) do
+    selecto
+    |> Selecto.Query.required_filters()
+    |> Enum.flat_map(&conjunct_value_sets(&1, field))
+  end
+
+  defp conjunct_value_sets({:and, filters}, field) when is_list(filters),
+    do: Enum.flat_map(filters, &conjunct_value_sets(&1, field))
+
+  defp conjunct_value_sets({filter_field, value}, field)
+       when is_atom(filter_field) or is_binary(filter_field) do
+    if normalize_field(filter_field) == field and positive_tenant_value?(value),
+      do: [conjunct_values(value)],
+      else: []
+  end
+
+  defp conjunct_value_sets(_filter, _field), do: []
+
+  defp conjunct_values({:in, values}), do: values
+  defp conjunct_values({_operator, value}), do: [value]
+  defp conjunct_values(values) when is_list(values), do: values
+  defp conjunct_values(value), do: [value]
 
   defp tenant_field(selecto, opts) do
     tenant_context = tenant(selecto) || %{}
@@ -780,16 +889,6 @@ defmodule Selecto.Tenant do
 
   defp defined_scalar?(value), do: is_binary(value) or is_number(value) or is_boolean(value)
 
-  # A trusted tenant whose field the root cannot carry. Engine tenants are not
-  # bound onto joined relations of a shared root (lesson 42); the read is
-  # refused with a typed `:missing_tenant_scope` instead.
-  defp unbindable_tenant?(selecto) do
-    context = tenant(selecto) || %{}
-
-    defined_scalar?(Map.get(context, :tenant_id)) and
-      not root_carries_field?(selecto, tenant_field(selecto, []))
-  end
-
   defp unbindable_tenant_error(selecto) do
     Selecto.Error.validation_error("Trusted tenant scope is required", %{
       code: :missing_tenant_scope,
@@ -797,12 +896,6 @@ defmodule Selecto.Tenant do
       reason: :tenant_field_not_on_root
     })
   end
-
-  defp root_carries_field?(%Selecto{config: %{columns: columns}} = selecto, field)
-       when is_map(columns),
-       do: not is_nil(Selecto.Fields.field(selecto, field))
-
-  defp root_carries_field?(_selecto, _field), do: true
 
   defp trusted_tenant(selecto, field) do
     context = tenant(selecto) || %{}
