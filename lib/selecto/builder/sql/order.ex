@@ -141,12 +141,14 @@ defmodule Selecto.Builder.Sql.Order do
   # against the FROM tables first, so an alias would read a same-named hidden
   # column instead (an existence/NULLness oracle).
   #
-  # Under GROUP BY a parameter-bearing selected expression keeps its
-  # select-list position as the sort key: MySQL's ONLY_FULL_GROUP_BY cannot
-  # match a repeated `?` expression to the grouped item, but it admits an
-  # aggregate of it. MIN over a group that is constant in the expression is
-  # that value, and NULL exactly when the group's key is NULL. ROLLUP's
-  # super-aggregate rows break that equality, so they are refused.
+  # Under GROUP BY the term tests MIN(expression) for every grouped key that
+  # is not itself an aggregate. MySQL's ONLY_FULL_GROUP_BY does not match a
+  # repeated computed expression (upper(name), a `?` literal) to its grouped
+  # item, but admits an aggregate of it; MIN over a group that is constant in
+  # the expression is that value, and NULL exactly when the group's key is
+  # NULL. A selected key keeps its select-list position as the sort key.
+  # ROLLUP's super-aggregate rows break that equality: a plain grouped column
+  # is tested directly there, and anything else is refused.
   defp null_placed(selecto, {:literal_position, position}, dir) when is_integer(position) do
     key = [Integer.to_string(position)]
 
@@ -162,8 +164,12 @@ defmodule Selecto.Builder.Sql.Order do
 
       true ->
         case Enum.at(Map.get(selecto.set, :selected, []), position - 1) do
-          nil -> refuse_null_order(position)
-          selected -> positional_null_term(selecto, selected, key, dir)
+          nil ->
+            refuse_null_order(position)
+
+          selected ->
+            {c, j, p, _alias} = Selecto.Builder.Sql.Select.build(selecto, selected)
+            placed(selecto, selected, {c, j, p}, {key, []}, dir)
         end
     end
   end
@@ -171,35 +177,59 @@ defmodule Selecto.Builder.Sql.Order do
   defp null_placed(selecto, order, dir) do
     {c, j, p} = build_order_selector(selecto, order, false)
 
-    case grouped_parameter_position(selecto, order, p) do
-      position when is_integer(position) ->
-        key = [Integer.to_string(position)]
+    key =
+      case grouped?(selecto) && selected_index(selecto, order) do
+        index when is_integer(index) -> {[Integer.to_string(index)], []}
+        _ -> nil
+      end
 
-        if postgresql_null_order?(selecto) do
-          {j, grouped_null_clause(selecto, c, key, dir), p}
+    placed(selecto, order, {c, j, p}, key, dir)
+  end
+
+  defp placed(selecto, selector, {c, j, p}, key, dir) do
+    cond do
+      not grouped?(selecto) or aggregate?(selector) ->
+        {sort, sort_params} = key || {c, p}
+        {j, null_clause(c, sort, dir), p ++ sort_params}
+
+      rollup?(selecto) ->
+        if p == [] and plain_column?(c) do
+          {sort, sort_params} = key || {c, p}
+          {j, null_clause(c, sort, dir), p ++ sort_params}
         else
-          {j, [key, " ", plain_direction(dir)], []}
+          refuse_null_order(selector)
         end
 
-      _ ->
-        {j, null_clause(c, c, dir), p ++ p}
+      true ->
+        test = ["MIN(", c, ")"]
+        {sort, sort_params} = key || {test, p}
+        {j, null_clause(test, sort, dir), p ++ sort_params}
     end
   end
 
-  defp positional_null_term(selecto, selected, key, dir) do
-    {c, j, p, _alias} = Selecto.Builder.Sql.Select.build(selecto, selected)
-
-    cond do
-      p == [] -> {j, null_clause(c, key, dir), []}
-      grouped?(selecto) -> {j, grouped_null_clause(selecto, c, key, dir), p}
-      true -> {j, null_clause(c, key, dir), p}
+  defp selected_index(selecto, order) do
+    case Enum.find_index(Map.get(selecto.set, :selected, []), &(&1 == order)) do
+      nil -> nil
+      index -> index + 1
     end
   end
 
-  defp grouped_null_clause(selecto, expression, key, dir) do
-    if rollup?(selecto),
-      do: refuse_null_order(key),
-      else: null_clause(["MIN(", expression, ")"], key, dir)
+  @aggregates ~w(count count_distinct sum avg min max stddev variance string_agg array_agg json_agg jsonb_agg bool_and bool_or every)
+
+  defp aggregate?({:field, inner, _alias}), do: aggregate?(inner)
+  defp aggregate?({:as, inner, _alias}), do: aggregate?(inner)
+  defp aggregate?({name, _args}) when is_atom(name), do: Atom.to_string(name) in @aggregates
+
+  defp aggregate?({:func, name, _args}) when is_binary(name) or is_atom(name),
+    do: name |> to_string() |> String.downcase() |> then(&(&1 in @aggregates))
+
+  defp aggregate?(_selector), do: false
+
+  defp plain_column?(iodata) do
+    sql = IO.iodata_to_binary(iodata)
+    Regex.match?(~r/\A[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*\z/, sql)
+  rescue
+    _ -> false
   end
 
   defp refuse_null_order(order) do
@@ -234,11 +264,6 @@ defmodule Selecto.Builder.Sql.Order do
           nil -> false
         end
       end)
-  end
-
-  defp grouped_parameter_position(selecto, order, params) do
-    if (is_binary(order) or is_atom(order)) and grouped?(selecto) and params != [],
-      do: Selecto.Builder.Sql.Select.selected_position(selecto, order, params)
   end
 
   defp order_entry({dir, order}) when dir in @dir_list, do: {order, dir}

@@ -204,11 +204,10 @@ defmodule Selecto.Builder.LateralJoin do
     # derived-row projection by its output alias, so the outer query can read
     # `matched.order_id` for `X.as("id", "order_id")`. Other adapters keep
     # their native column names (PostgreSQL's `count` for `count(*)`).
-    {subquery_sql, params} =
-      Selecto.to_sql(subquery,
-        preserve_projection_aliases:
-          AdapterSupport.supports_feature?(adapter, :lateral_projection_aliases)
-      )
+    preserve? = AdapterSupport.supports_feature?(adapter, :lateral_projection_aliases)
+    if preserve?, do: refuse_placeholder_aliases!(subquery)
+
+    {subquery_sql, params} = Selecto.to_sql(subquery, preserve_projection_aliases: preserve?)
 
     subquery_sql =
       subquery_sql
@@ -220,6 +219,21 @@ defmodule Selecto.Builder.LateralJoin do
 
     # Params are now embedded as {:param, value} markers in subquery_iodata.
     {render_join!(spec, adapter, selecto, ["(", subquery_iodata, ")"], :subquery), []}
+  end
+
+  # The finalized child is re-bound by placeholder position, so a `?` inside
+  # a quoted output alias would shift every parameter; refuse it as invalid
+  # input before any SQL is produced.
+  defp refuse_placeholder_aliases!(subquery) do
+    {_iodata, aliases} = Selecto.Builder.Sql.build_iodata(subquery, [])
+
+    if Enum.any?(aliases, &(is_binary(&1) and String.contains?(&1, "?"))) do
+      raise Error.to_exception(
+              Error.validation_error("Lateral output aliases cannot contain '?'", %{
+                unsupported_feature: :lateral_projection_alias
+              })
+            )
+    end
   end
 
   # Build table function SQL
