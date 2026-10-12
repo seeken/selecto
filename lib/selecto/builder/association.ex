@@ -36,8 +36,8 @@ defmodule Selecto.Builder.Association do
     target_key =
       case value(through, :target_key_cast) do
         nil -> target_key
-        type when type in [:string, "string"] -> ["CAST(", target_key, " AS TEXT)"]
-        type when type in [:integer, "integer"] -> ["CAST(", target_key, " AS INTEGER)"]
+        type when type in [:string, "string"] -> key_cast(selecto, target_key, "string")
+        type when type in [:integer, "integer"] -> key_cast(selecto, target_key, "integer")
         other -> raise ArgumentError, "unsupported association target key cast: #{inspect(other)}"
       end
 
@@ -69,6 +69,22 @@ defmodule Selecto.Builder.Association do
       Enum.intersperse(conditions, " AND "),
       ")"
     ]
+  end
+
+  # MySQL and MariaDB have no TEXT or INTEGER cast target; their dialects
+  # render the canonical computed-value cast instead.
+  defp key_cast(selecto, key, type) do
+    if Selecto.AdapterSupport.adapter_name(selecto.adapter) in [:mysql, :mariadb] do
+      fragment = %Selecto.Dialect.ComputedValue{operation: :cast, expression: key, type: type}
+
+      case Selecto.DialectSupport.render_computed_value(selecto.adapter, fragment, selecto) do
+        {:ok, sql} -> sql
+        {:error, %Selecto.Error{} = error} -> raise Selecto.Error.to_exception(error)
+        {:error, reason} -> raise ArgumentError, "unsupported key cast: #{inspect(reason)}"
+      end
+    else
+      ["CAST(", key, if(type == "string", do: " AS TEXT)", else: " AS INTEGER)")]
+    end
   end
 
   defp direct_scope(selecto, association, target_alias, source_alias) do

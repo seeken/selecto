@@ -213,17 +213,44 @@ defmodule Selecto.Builder.Window do
   defp build_order_by(_selecto, []), do: {[], []}
 
   defp build_order_by(selecto, order_specs) do
+    postgresql_nulls? =
+      Selecto.AdapterSupport.supports_feature?(selecto.adapter, :postgresql_null_order)
+
     order_items =
       order_specs
       |> Enum.map(fn {field, direction} ->
         resolved_field = resolve_field_reference(selecto, field)
-        direction_str = String.upcase(to_string(direction))
-        [resolved_field, " ", direction_str]
+
+        if postgresql_nulls?,
+          do: null_placed_order(resolved_field, direction),
+          else: [resolved_field, " ", String.upcase(to_string(direction))]
       end)
       |> Enum.intersperse(", ")
 
     {["ORDER BY ", order_items], []}
   end
+
+  # `:postgresql_null_order` adapters (MySQL, MariaDB) place NULLs as
+  # PostgreSQL does inside window ORDER BY too; explicit placement wins.
+  defp null_placed_order(field, direction) when direction in [:asc, :asc_nulls_last],
+    do: ["CASE WHEN ", field, " IS NULL THEN 1 ELSE 0 END ASC, ", field, " ASC"]
+
+  defp null_placed_order(field, direction) when direction in [:desc, :desc_nulls_first],
+    do: ["CASE WHEN ", field, " IS NULL THEN 0 ELSE 1 END ASC, ", field, " DESC"]
+
+  defp null_placed_order(field, :asc_nulls_first), do: [field, " ASC"]
+  defp null_placed_order(field, :desc_nulls_last), do: [field, " DESC"]
+
+  defp null_placed_order(_field, direction),
+    do:
+      raise(
+        Selecto.Error.to_exception(
+          Selecto.Error.validation_error("Unsupported window ordering direction", %{
+            direction: direction,
+            unsupported_feature: :window_order
+          })
+        )
+      )
 
   # Build window frame clause
   defp build_frame_clause(_selecto, nil), do: {[], []}

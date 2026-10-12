@@ -84,7 +84,8 @@ defmodule Selecto.Builder.Subselect do
     target_alias = generate_subquery_alias(subselect_config.target_schema)
     adapter_name = AdapterSupport.adapter_name(Map.get(selecto, :adapter))
 
-    if Map.get(subselect_config, :limit) && adapter_name not in [:postgresql, :sqlite] do
+    if Map.get(subselect_config, :limit) && adapter_name not in [:postgresql, :sqlite] &&
+         not dialect_collection_limit?(selecto, subselect_config) do
       raise ArgumentError, "per-parent collection limits require PostgreSQL or SQLite"
     end
 
@@ -233,7 +234,8 @@ defmodule Selecto.Builder.Subselect do
         target_table,
         target_alias,
         where_clause
-      )
+      ),
+      windowed_aggregate_limit(selecto, subselect_config)
     ]
 
     all_params = select_params ++ correlation_params ++ additional_params ++ cursor_params
@@ -326,6 +328,7 @@ defmodule Selecto.Builder.Subselect do
       child_select,
       " FROM ",
       collection_from_clause(selecto, child_config, child_table, child_alias, where_clause),
+      windowed_aggregate_limit(selecto, child_config),
       "), ",
       empty_json,
       ")"
@@ -376,11 +379,42 @@ defmodule Selecto.Builder.Subselect do
         do: nil,
         else: order_by_sql
 
+    options = %{column_sql: expression, order_by_sql: order_by_sql}
+
+    # Dialects that bound the aggregate itself (MariaDB's JSON_ARRAYAGG ...
+    # LIMIT) receive the per-parent limit with the ordering.
+    options =
+      if AdapterSupport.supports_feature?(Map.get(selecto, :adapter), :json_agg_limit),
+        do: Map.put(options, :limit, Map.get(subselect_config, :limit)),
+        else: options
+
     render_json_operation!(selecto, %JsonOperation{
       operation: :json_agg,
       clause: :select,
-      options: %{column_sql: expression, order_by_sql: order_by_sql}
+      options: options
     })
+  end
+
+  # Per-parent limits beyond PostgreSQL and SQLite are adapter-declared:
+  # `:correlated_derived_table` limits a correlated derived rowset (MySQL
+  # 8.0.14+), and `:json_agg_limit` limits the JSON aggregate itself.
+  defp dialect_collection_limit?(selecto, config) do
+    adapter = Map.get(selecto, :adapter)
+
+    AdapterSupport.supports_feature?(adapter, :correlated_derived_table) or
+      (config.format == :json_agg and AdapterSupport.supports_feature?(adapter, :json_agg_limit))
+  end
+
+  # A dialect whose ordered JSON aggregate is a full-frame window function
+  # (MySQL's JSON_ARRAYAGG has no ORDER BY) repeats the whole array on every
+  # row of the scalar subquery, so the subquery reads one of them.
+  defp windowed_aggregate_limit(selecto, config) do
+    {order_by_sql, []} = build_subquery_order_by(selecto, config, "selecto_window_order")
+
+    if config.format == :json_agg and order_by_sql != [] and
+         AdapterSupport.supports_feature?(Map.get(selecto, :adapter), :windowed_json_agg),
+       do: " LIMIT 1",
+       else: []
   end
 
   defp collection_from_clause(selecto, config, table, target_alias, where_clause) do
@@ -418,32 +452,46 @@ defmodule Selecto.Builder.Subselect do
         [table, " ", target_alias, " WHERE ", where_clause]
 
       limit when is_integer(limit) and limit > 0 ->
-        if AdapterSupport.adapter_name(Map.get(selecto, :adapter)) != :postgresql do
-          raise ArgumentError, "per-parent collection limits require PostgreSQL or SQLite"
+        adapter = Map.get(selecto, :adapter)
+
+        cond do
+          AdapterSupport.adapter_name(adapter) == :postgresql or
+              AdapterSupport.supports_feature?(adapter, :correlated_derived_table) ->
+            limited_collection_rowset(selecto, config, table, target_alias, where_clause, limit)
+
+          config.format == :json_agg and
+              AdapterSupport.supports_feature?(adapter, :json_agg_limit) ->
+            # The JSON aggregate carries the ordered limit.
+            [table, " ", target_alias, " WHERE ", where_clause]
+
+          true ->
+            raise ArgumentError, "per-parent collection limits require PostgreSQL or SQLite"
         end
-
-        {order_by_sql, []} = build_subquery_order_by(selecto, config, target_alias)
-
-        [
-          "(SELECT ",
-          target_alias,
-          ".* FROM ",
-          table,
-          " ",
-          target_alias,
-          " WHERE ",
-          where_clause,
-          " ORDER BY ",
-          order_by_sql,
-          " LIMIT ",
-          Integer.to_string(limit),
-          ") ",
-          target_alias
-        ]
 
       _ ->
         raise ArgumentError, "per-parent collection limit must be a positive integer"
     end
+  end
+
+  defp limited_collection_rowset(selecto, config, table, target_alias, where_clause, limit) do
+    {order_by_sql, []} = build_subquery_order_by(selecto, config, target_alias)
+
+    [
+      "(SELECT ",
+      target_alias,
+      ".* FROM ",
+      table,
+      " ",
+      target_alias,
+      " WHERE ",
+      where_clause,
+      " ORDER BY ",
+      order_by_sql,
+      " LIMIT ",
+      Integer.to_string(limit),
+      ") ",
+      target_alias
+    ]
   end
 
   defp render_json_object!(selecto, pairs) do
@@ -1348,6 +1396,12 @@ defmodule Selecto.Builder.Subselect do
         {[], []}
 
       order_specs ->
+        # The collection cursor predicate assumes PostgreSQL NULL placement
+        # (last ascending, first descending); `:postgresql_null_order`
+        # adapters (MySQL, MariaDB) order the same way with a leading term.
+        postgresql_nulls? =
+          AdapterSupport.supports_feature?(Map.get(selecto, :adapter), :postgresql_null_order)
+
         order_clauses =
           Enum.map(order_specs, fn
             {direction, field} ->
@@ -1360,21 +1414,32 @@ defmodule Selecto.Builder.Subselect do
                   _ -> "ASC"
                 end
 
-              [target_alias, ".", field_name, " ", direction_sql]
+              collection_order_term(
+                [target_alias, ".", field_name],
+                direction_sql,
+                postgresql_nulls?
+              )
 
             field when is_atom(field) ->
               field_name = adapter_quote_identifier(selecto, to_string(field))
-              [target_alias, ".", field_name]
+              collection_order_term([target_alias, ".", field_name], nil, postgresql_nulls?)
 
             field when is_binary(field) ->
               field_name = adapter_quote_identifier(selecto, field)
-              [target_alias, ".", field_name]
+              collection_order_term([target_alias, ".", field_name], nil, postgresql_nulls?)
           end)
 
         order_clause = Enum.intersperse(order_clauses, [", "])
         {order_clause, []}
     end
   end
+
+  defp collection_order_term(column, nil, false), do: column
+  defp collection_order_term(column, direction, false), do: [column, " ", direction]
+  defp collection_order_term(column, nil, true), do: collection_order_term(column, "ASC", true)
+
+  defp collection_order_term(column, direction, true),
+    do: ["(", column, " IS NULL) ", direction, ", ", column, " ", direction]
 
   defp stable_collection_order(selecto, config) do
     orders = Map.get(config, :order_by, [])
