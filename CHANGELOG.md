@@ -19,10 +19,14 @@
   select-list position (`1 IS NULL` tested the literal). The placement term
   never names an output alias (MySQL resolves identifiers inside an ORDER BY
   expression against FROM columns first, which would read a same-named hidden
-  column). Under GROUP BY, a parameter-bearing selected expression keeps its
-  position as the sort key and the term tests `MIN(expression)`, which MySQL's
-  ONLY_FULL_GROUP_BY admits; with ROLLUP that ordering is refused
-  (`unsupported_feature`). The same placement covers window ORDER BY, JSON
+  column). Under GROUP BY every non-aggregate key (columns, upper(), coalesce
+  with a literal, extract, `?`-bearing expressions) is tested as
+  `MIN(expression)`, which MySQL's ONLY_FULL_GROUP_BY admits, and a selected
+  key keeps its position as the sort key; with ROLLUP a plain grouped column
+  is tested directly and any other key is refused (`unsupported_feature`).
+  A native lateral child whose output alias contains `?` is refused as a
+  validation error before any SQL (the finalized child is re-bound by
+  placeholder position). The same placement covers window ORDER BY, JSON
   ORDER BY, ordering by position, and set-operation ORDER BY (the operands
   then name their projections `selecto_projection_<n>`, the only names a set
   result can be ordered by); a window direction it cannot place is refused.
