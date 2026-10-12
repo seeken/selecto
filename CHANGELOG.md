@@ -3,6 +3,29 @@
 
 ## Unreleased
 
+- Native LATERAL subqueries name each projection by its output alias for
+  adapters declaring `:lateral_projection_aliases` (MySQL), so the outer query
+  can read `matched.order_id` for `X.as("id", "order_id")`.
+- Adapter-declared collection hooks: per-parent limits through a correlated
+  derived rowset (`:correlated_derived_table`) or a limited JSON aggregate
+  (`:json_agg_limit`), a full-frame windowed ordered JSON aggregate
+  (`:windowed_json_agg`, read with `LIMIT 1`), json_each-style rowsets rendered
+  by the dialect (`:json_table_rowset`), and PostgreSQL NULL placement for
+  unqualified ASC/DESC (`:postgresql_null_order`). PostgreSQL and SQLite SQL
+  is unchanged.
+- MySQL and MariaDB association key casts use the dialect's computed-value
+  cast (no `CAST(... AS TEXT)`).
+- An ORDER BY whose NULL placement repeats the expression no longer uses a
+  select-list position (`1 IS NULL` tested the literal). The placement term
+  never names an output alias (MySQL resolves identifiers inside an ORDER BY
+  expression against FROM columns first, which would read a same-named hidden
+  column). Under GROUP BY, a parameter-bearing selected expression keeps its
+  position as the sort key and the term tests `MIN(expression)`, which MySQL's
+  ONLY_FULL_GROUP_BY admits; with ROLLUP that ordering is refused
+  (`unsupported_feature`). The same placement covers window ORDER BY, JSON
+  ORDER BY, ordering by position, and set-operation ORDER BY (the operands
+  then name their projections `selecto_projection_<n>`, the only names a set
+  result can be ordered by); a window direction it cannot place is refused.
 - Host-applied tenant filters scope shared-hop joins like required ones, and
   a tenant predicate with no positive conjunct (under OR or NOT, or a range)
   cannot cross a shared hop (refused with `missing_tenant_scope`). A trusted

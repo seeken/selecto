@@ -67,12 +67,27 @@ defmodule Selecto.Builder.LateralJoin do
   end
 
   defp build_table_function_lateral_join(
-         %Spec{table_function: {function_name, _, _}} = spec,
+         %Spec{table_function: {function_name, source_ref, path}} = spec,
          adapter,
-         _selecto
+         selecto
        )
        when function_name in [:json_each, :json_tree] do
-    build_sqlite_json_rowset_join(spec, adapter)
+    if not AdapterSupport.supports_feature?(adapter, :json_rowset) and
+         AdapterSupport.supports_feature?(adapter, :json_table_rowset) do
+      # Dialects without json_each render the rowset natively (MySQL and
+      # MariaDB JSON_TABLE) and validate the path they must inline.
+      fragment = %TableFunctionJoin{
+        join_type: spec.join_type,
+        alias: spec.alias,
+        source_sql: [],
+        source_kind: :json_rowset,
+        options: %{function: function_name, source: source_ref, path: path}
+      }
+
+      {render_join_fragment!(adapter, fragment, selecto), []}
+    else
+      build_sqlite_json_rowset_join(spec, adapter)
+    end
   end
 
   defp build_table_function_lateral_join(
@@ -185,8 +200,15 @@ defmodule Selecto.Builder.LateralJoin do
   end
 
   defp build_native_subquery_join(spec, adapter, selecto, subquery) do
-    # Generate SQL for the subquery
-    {subquery_sql, params} = Selecto.to_sql(subquery)
+    # Adapters declaring `:lateral_projection_aliases` (MySQL) name each
+    # derived-row projection by its output alias, so the outer query can read
+    # `matched.order_id` for `X.as("id", "order_id")`. Other adapters keep
+    # their native column names (PostgreSQL's `count` for `count(*)`).
+    {subquery_sql, params} =
+      Selecto.to_sql(subquery,
+        preserve_projection_aliases:
+          AdapterSupport.supports_feature?(adapter, :lateral_projection_aliases)
+      )
 
     subquery_sql =
       subquery_sql
@@ -341,6 +363,10 @@ defmodule Selecto.Builder.LateralJoin do
       source_kind: source_kind
     }
 
+    render_join_fragment!(adapter, fragment, selecto)
+  end
+
+  defp render_join_fragment!(adapter, fragment, selecto) do
     case Selecto.DialectSupport.render_table_function_join(adapter, fragment, selecto || %{}) do
       {:ok, sql} ->
         sql

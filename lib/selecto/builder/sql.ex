@@ -593,9 +593,19 @@ defmodule Selecto.Builder.Sql do
 
     :ok = Selecto.Policy.validate_query!(selecto)
 
-    # Build set operations using the dedicated builder
+    # Build set operations using the dedicated builder. Outer NULL-placement
+    # terms read the operands' projections by collision-free names.
+    operand_opts =
+      if Selecto.Builder.SetOperations.should_apply_outer_order_by?(selecto) and
+           Selecto.Builder.Sql.Order.set_projection_aliases?(
+             selecto,
+             Selecto.Builder.SetOperations.outer_order_by(selecto)
+           ),
+         do: Keyword.put(opts, :unique_projection_aliases, true),
+         else: opts
+
     {set_op_iodata, _set_op_params} =
-      Selecto.Builder.SetOperations.build_set_operations(selecto, opts)
+      Selecto.Builder.SetOperations.build_set_operations(selecto, operand_opts)
 
     # Check if we need to add ORDER BY to the entire set operation result
     {order_by_iodata, _order_by_params} =
@@ -867,7 +877,17 @@ defmodule Selecto.Builder.Sql do
                 _ -> " asc"
               end
 
-            {[], [json_sql, dir_str], []}
+            # `:postgresql_null_order` adapters place NULLs as PostgreSQL does.
+            clause =
+              if Selecto.AdapterSupport.supports_feature?(selecto.adapter, :postgresql_null_order) and
+                   not AdapterSQL.native_null_ordering?(selecto) do
+                null_rank = if direction == :desc, do: " THEN 0 ELSE 1", else: " THEN 1 ELSE 0"
+                ["CASE WHEN ", json_sql, " IS NULL", null_rank, " END asc, ", json_sql, dir_str]
+              else
+                [json_sql, dir_str]
+              end
+
+            {[], clause, []}
           end)
           |> Enum.reduce({[], [], []}, fn {j, c, p}, {acc_j, acc_c, acc_p} ->
             {Enum.reverse(j, acc_j), [c | acc_c], Enum.reverse(p, acc_p)}

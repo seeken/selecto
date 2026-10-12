@@ -41,7 +41,10 @@ defmodule Selecto.Builder.Sql.Order do
   def order(selecto, {{:case, when_clauses, else_clause}, dir})
       when dir in @dir_list and is_list(when_clauses) do
     {case_iodata, joins, params} = build_order_case_expression(selecto, when_clauses, else_clause)
-    {joins, build_order_clause(selecto, case_iodata, dir), order_params(params, dir)}
+
+    if null_term?(selecto, dir),
+      do: {joins, null_clause(case_iodata, case_iodata, dir), params ++ params},
+      else: {joins, build_order_clause(selecto, case_iodata, dir), params}
   end
 
   def order(selecto, {{:case, when_clauses}, dir})
@@ -49,16 +52,10 @@ defmodule Selecto.Builder.Sql.Order do
     order(selecto, {{:case, when_clauses, nil}, dir})
   end
 
-  def order(selecto, {dir, order}) when dir in @dir_list do
-    {c, j, p} = build_order_selector(selecto, order)
-    {j, build_order_clause(selecto, c, dir), order_params(p, dir)}
-  end
+  def order(selecto, {dir, order}) when dir in @dir_list, do: ordered(selecto, order, dir)
 
-  def order(selecto, {order, dir}) when dir in @dir_list do
-    # Handle {field, direction} format which is the standard in this codebase
-    {c, j, p} = build_order_selector(selecto, order)
-    {j, build_order_clause(selecto, c, dir), order_params(p, dir)}
-  end
+  # Handle {field, direction} format which is the standard in this codebase
+  def order(selecto, {order, dir}) when dir in @dir_list, do: ordered(selecto, order, dir)
 
   def order(selecto, order_by) do
     order(selecto, {:asc_nulls_first, order_by})
@@ -129,16 +126,149 @@ defmodule Selecto.Builder.Sql.Order do
     {case_iodata, all_joins, all_params ++ else_params}
   end
 
-  defp build_order_selector(selecto, order) when is_binary(order) or is_atom(order) do
-    {c, j, p} = Selecto.Builder.Sql.Select.prep_selector(selecto, order)
-
-    case Selecto.Builder.Sql.Select.selected_position(selecto, order, p) do
-      nil -> {c, j, p}
-      position -> {[Integer.to_string(position)], j, []}
+  defp ordered(selecto, order, dir) do
+    if null_term?(selecto, dir) do
+      null_placed(selecto, order, dir)
+    else
+      {c, j, p} = build_order_selector(selecto, order)
+      {j, build_order_clause(selecto, c, dir), p}
     end
   end
 
-  defp build_order_selector(selecto, order) do
+  # A NULL-placement term needs the expression itself: `1 IS NULL` would test
+  # the literal, not the selected column at position 1. No term ever names an
+  # output alias: MySQL resolves an identifier inside an ORDER BY expression
+  # against the FROM tables first, so an alias would read a same-named hidden
+  # column instead (an existence/NULLness oracle).
+  #
+  # Under GROUP BY a parameter-bearing selected expression keeps its
+  # select-list position as the sort key: MySQL's ONLY_FULL_GROUP_BY cannot
+  # match a repeated `?` expression to the grouped item, but it admits an
+  # aggregate of it. MIN over a group that is constant in the expression is
+  # that value, and NULL exactly when the group's key is NULL. ROLLUP's
+  # super-aggregate rows break that equality, so they are refused.
+  defp null_placed(selecto, {:literal_position, position}, dir) when is_integer(position) do
+    key = [Integer.to_string(position)]
+
+    cond do
+      not postgresql_null_order?(selecto) ->
+        {[], [key, " ", plain_direction(dir)], []}
+
+      # A set-operation result has no FROM scope; its operands name every
+      # projection `selecto_projection_<n>` (Builder.Sql), and that is the only
+      # name its ORDER BY can resolve.
+      Selecto.Builder.SetOperations.has_set_operations?(selecto) ->
+        {[], null_clause(projection_name(selecto, position), key, dir), []}
+
+      true ->
+        case Enum.at(Map.get(selecto.set, :selected, []), position - 1) do
+          nil -> refuse_null_order(position)
+          selected -> positional_null_term(selecto, selected, key, dir)
+        end
+    end
+  end
+
+  defp null_placed(selecto, order, dir) do
+    {c, j, p} = build_order_selector(selecto, order, false)
+
+    case grouped_parameter_position(selecto, order, p) do
+      position when is_integer(position) ->
+        key = [Integer.to_string(position)]
+
+        if postgresql_null_order?(selecto) do
+          {j, grouped_null_clause(selecto, c, key, dir), p}
+        else
+          {j, [key, " ", plain_direction(dir)], []}
+        end
+
+      _ ->
+        {j, null_clause(c, c, dir), p ++ p}
+    end
+  end
+
+  defp positional_null_term(selecto, selected, key, dir) do
+    {c, j, p, _alias} = Selecto.Builder.Sql.Select.build(selecto, selected)
+
+    cond do
+      p == [] -> {j, null_clause(c, key, dir), []}
+      grouped?(selecto) -> {j, grouped_null_clause(selecto, c, key, dir), p}
+      true -> {j, null_clause(c, key, dir), p}
+    end
+  end
+
+  defp grouped_null_clause(selecto, expression, key, dir) do
+    if rollup?(selecto),
+      do: refuse_null_order(key),
+      else: null_clause(["MIN(", expression, ")"], key, dir)
+  end
+
+  defp refuse_null_order(order) do
+    raise Selecto.Error.to_exception(
+            Selecto.Error.validation_error(
+              "PostgreSQL NULL placement cannot be expressed for this ordering",
+              %{order: inspect(order), unsupported_feature: :null_ordering}
+            )
+          )
+  end
+
+  defp grouped?(selecto), do: Map.get(selecto.set, :group_by, []) != []
+
+  defp rollup?(selecto),
+    do: Enum.any?(Map.get(selecto.set, :group_by, []), &match?({:rollup, _}, &1))
+
+  defp projection_name(selecto, position),
+    do:
+      Selecto.Builder.Sql.Helpers.force_quote_identifier(
+        selecto,
+        Selecto.Builder.Sql.projection_alias(position)
+      )
+
+  @doc false
+  # True when a set-operation ORDER BY needs a NULL-placement term, so the
+  # operands must name their projections `selecto_projection_<n>`.
+  def set_projection_aliases?(selecto, order_by) do
+    postgresql_null_order?(selecto) and not native_null_ordering?(selecto) and
+      Enum.any?(order_by, fn entry ->
+        case order_entry(entry) do
+          {_order, dir} -> null_term?(selecto, dir)
+          nil -> false
+        end
+      end)
+  end
+
+  defp grouped_parameter_position(selecto, order, params) do
+    if (is_binary(order) or is_atom(order)) and grouped?(selecto) and params != [],
+      do: Selecto.Builder.Sql.Select.selected_position(selecto, order, params)
+  end
+
+  defp order_entry({dir, order}) when dir in @dir_list, do: {order, dir}
+  defp order_entry({order, dir}) when dir in @dir_list, do: {order, dir}
+  defp order_entry(order) when is_binary(order) or is_atom(order), do: {order, :asc_nulls_first}
+  defp order_entry({:literal_position, _} = order), do: {order, :asc_nulls_first}
+  defp order_entry(_order), do: nil
+
+  defp null_clause(test, key, dir) when dir in [:asc, :asc_nulls_last],
+    do: ["CASE WHEN ", test, " IS NULL THEN 1 ELSE 0 END asc, ", key, " asc"]
+
+  defp null_clause(test, key, dir) when dir in [:desc, :desc_nulls_first],
+    do: ["CASE WHEN ", test, " IS NULL THEN 0 ELSE 1 END asc, ", key, " desc"]
+
+  defp plain_direction(dir) when dir in [:asc, :asc_nulls_first, :asc_nulls_last], do: "asc"
+  defp plain_direction(_dir), do: "desc"
+
+  defp build_order_selector(selecto, order, allow_position? \\ true)
+
+  defp build_order_selector(selecto, order, allow_position?)
+       when is_binary(order) or is_atom(order) do
+    {c, j, p} = Selecto.Builder.Sql.Select.prep_selector(selecto, order)
+
+    case allow_position? && Selecto.Builder.Sql.Select.selected_position(selecto, order, p) do
+      position when is_integer(position) -> {[Integer.to_string(position)], j, []}
+      _ -> {c, j, p}
+    end
+  end
+
+  defp build_order_selector(selecto, order, _allow_position?) do
     {c, j, p, _a} = Selecto.Builder.Sql.Select.build(selecto, order)
     {c, j, p}
   end
@@ -160,21 +290,27 @@ defmodule Selecto.Builder.Sql.Order do
         :desc_nulls_last ->
           [order_iodata, " desc"]
 
-        :asc_nulls_last ->
-          ["CASE WHEN ", order_iodata, " IS NULL THEN 1 ELSE 0 END asc, ", order_iodata, " asc"]
-
-        :desc_nulls_first ->
-          ["CASE WHEN ", order_iodata, " IS NULL THEN 0 ELSE 1 END asc, ", order_iodata, " desc"]
+        dir when dir in [:asc_nulls_last, :desc_nulls_first] ->
+          null_clause(order_iodata, order_iodata, dir)
       end
     end
   end
 
-  defp order_params(params, dir) when dir in [:asc_nulls_last, :desc_nulls_first],
-    do: params ++ params
-
-  defp order_params(params, _dir), do: params
+  # True when the clause needs a NULL-placement term: an explicit NULLS
+  # FIRST/LAST the database cannot spell, or (for `:postgresql_null_order`
+  # adapters, MySQL and MariaDB) an unqualified ASC/DESC, which PostgreSQL
+  # sorts NULLs last and first respectively.
+  defp null_term?(selecto, dir) do
+    not native_null_ordering?(selecto) and
+      (dir in [:asc_nulls_last, :desc_nulls_first] or
+         (dir in [:asc, :desc] and postgresql_null_order?(selecto)))
+  end
 
   defp native_null_ordering?(selecto) do
     AdapterSQL.native_null_ordering?(selecto)
+  end
+
+  defp postgresql_null_order?(selecto) do
+    Selecto.AdapterSupport.supports_feature?(AdapterSQL.adapter(selecto), :postgresql_null_order)
   end
 end

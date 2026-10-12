@@ -9,7 +9,7 @@ defmodule Selecto.Dialect.TableFunction.Join do
           source_sql: iodata(),
           alias: String.t(),
           ordinality_alias: String.t() | nil,
-          source_kind: :table_function | :subquery | nil,
+          source_kind: :table_function | :subquery | :json_rowset | nil,
           options: map()
         }
 end
