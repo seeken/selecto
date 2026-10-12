@@ -128,6 +128,23 @@ selecto = Selecto.configure(domain, Repo)
   |> Selecto.execute()
 ```
 
+## Engine Tenant and Writes
+
+For governed writes, install `selecto_updato` and bind the authenticated tenant
+once on the configured engine. The domain declares `source.tenant_field` and
+the write/action grants:
+
+```elixir
+engine = Selecto.configure(domain, connection, adapter: adapter) |> Selecto.with_tenant(8)
+engine |> Selecto.write() |> SelectoUpdato.insert(%{name: "Test"}) |> SelectoUpdato.execute()
+```
+
+Reads, writes, `Selecto.action/2` drafts and `Selecto.transaction/3` callback
+engines inherit that binding. No matching tenant assignment or repeated field
+name is needed. A different typed identity or contradictory required predicate
+refuses. Structured tenant contexts remain available for prefix and advanced
+scope configuration; their existing obligations are retained on later calls.
+
 ## Configuration Providers
 
 A trusted application provider can derive a domain from another configuration

@@ -37,14 +37,98 @@ defmodule Selecto.Tenant do
         }
 
   @doc """
-  Attach tenant context to a Selecto query.
+  Bind a scalar trusted tenant from the domain's declared field, or attach a
+  structured prefix/advanced context while preserving existing obligations.
   """
-  @spec with_tenant(Selecto.Types.t(), tenant_context() | keyword() | String.t() | atom() | nil) ::
+  @spec with_tenant(
+          Selecto.Types.t(),
+          tenant_context() | keyword() | String.t() | number() | atom() | nil
+        ) ::
           Selecto.Types.t()
-  def with_tenant(selecto, tenant_context) do
-    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :with_tenant)
-    %{selecto | tenant: normalize_context(tenant_context)}
+  def with_tenant(selecto, tenant_id) when is_binary(tenant_id) or is_number(tenant_id) do
+    field = domain_tenant_field(selecto)
+
+    if is_nil(field), do: raise(ArgumentError, "with_tenant requires source.tenant_field")
+
+    if is_binary(tenant_id) and String.trim(tenant_id) == "",
+      do: raise(ArgumentError, "tenant identity must be nonblank")
+
+    context = normalize_context(%{tenant_id: tenant_id, tenant_field: field, required: true})
+    stored = tenant(selecto)
+
+    context =
+      if stored,
+        do: Map.put(context, :namespace, Map.get(stored, :namespace, @default_namespace)),
+        else: context
+
+    ensure_context_compatible!(stored, context, :tenant)
+
+    if Enum.any?(
+         required_tenant_values(Selecto.required_filters(selecto), field),
+         fn values -> not Enum.any?(values, &(&1 === tenant_id)) end
+       ),
+       do: raise(ArgumentError, "tenant identity conflicts with required predicates")
+
+    selecto
+    |> attach_context(merge_contexts(stored, context))
+    |> apply_tenant_scope()
   end
+
+  def with_tenant(selecto, tenant_context) do
+    context = normalize_domain_context(selecto, tenant_context)
+    stored = tenant(selecto)
+    ensure_context_compatible!(stored, context, :tenant)
+    attach_context(selecto, merge_contexts(stored, context))
+  end
+
+  defp normalize_domain_context(selecto, context) when is_map(context) do
+    if Map.has_key?(context, :tenant_field) or Map.has_key?(context, "tenant_field"),
+      do: normalize_context(context),
+      else:
+        normalize_context(
+          Map.put(context, :tenant_field, domain_tenant_field(selecto) || @default_tenant_field)
+        )
+  end
+
+  defp normalize_domain_context(selecto, context) when is_list(context) do
+    ensure_unique_keyword_keys!(context)
+    normalize_domain_context(selecto, Map.new(context))
+  end
+
+  defp normalize_domain_context(_selecto, context), do: normalize_context(context)
+
+  defp attach_context(selecto, context) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :with_tenant)
+    %{selecto | tenant: context}
+  end
+
+  defp required_tenant_values(filters, field) do
+    Enum.flat_map(filters, fn
+      {:and, nested} when is_list(nested) ->
+        required_tenant_values(nested, field)
+
+      {key, value} when is_atom(key) or is_binary(key) ->
+        if key not in [:or, :not] and normalize_field(key) == field,
+          do: tenant_value_set(value),
+          else: []
+
+      {key, op, value} when op in [:eq, :=, "=", :in, "in"] ->
+        if normalize_field(key) == field, do: tenant_value_set(value), else: []
+
+      _ ->
+        []
+    end)
+  end
+
+  defp tenant_value_set({op, value}) when op in [:eq, :=, "=", :in, "in"],
+    do: tenant_value_set(value)
+
+  defp tenant_value_set(values) when is_list(values), do: [values]
+
+  defp tenant_value_set(value) when is_binary(value) or is_number(value) or is_nil(value),
+    do: [[value]]
+
+  defp tenant_value_set(_), do: []
 
   @doc """
   Read the tenant context from a Selecto query.
@@ -738,7 +822,7 @@ defmodule Selecto.Tenant do
     for key <- [:tenant_id, :tenant_field, :prefix],
         left = Map.get(stored, key),
         right = Map.get(override, key),
-        not is_nil(left) and not is_nil(right) and left != right do
+        not is_nil(left) and not is_nil(right) and left !== right do
       raise ArgumentError,
             "#{source} override conflicts with attached tenant context for #{key}: " <>
               "#{inspect(left)} != #{inspect(right)}"

@@ -188,6 +188,9 @@ defmodule Selecto.Query do
 
   - `:include_post_retarget` - accepted for compatibility; a retargeted query
     keeps its target filters in `set.filtered`.
+  - `:include_engine_tenant` - defaults to true. Trusted integrations inspecting
+    separately authored host predicates may omit the implicit engine predicate;
+    required filters remain present, and the engine binding is unchanged.
 
   A retargeted query is refused: its filters describe the target rows, and
   its context restriction is not a filter list, so they cannot scope writes
@@ -231,7 +234,10 @@ defmodule Selecto.Query do
     # query-scoped write built from these filters (lesson 43).
     [
       required_filters(selecto),
-      Selecto.Tenant.engine_filters(selecto),
+      if(Keyword.get(opts, :include_engine_tenant, true),
+        do: Selecto.Tenant.engine_filters(selecto),
+        else: []
+      ),
       set_filters,
       post_retarget_filters
     ]

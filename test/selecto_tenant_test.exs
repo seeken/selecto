@@ -53,6 +53,70 @@ defmodule Selecto.TenantTest do
            }
   end
 
+  test "scalar tenant binding derives the custom domain field and preserves obligations" do
+    custom = put_in(domain(), [:source, :tenant_field], :account_key)
+    base = selecto(custom)
+    bound = Selecto.with_tenant(base, 8)
+    assert is_nil(Selecto.tenant(base))
+    assert Selecto.tenant(bound).tenant_id === 8
+    assert Selecto.tenant(bound).tenant_field == "account_key"
+    assert {"active", true} in Selecto.required_filters(bound)
+    assert {"account_key", 8} in Selecto.required_filters(bound)
+    assert Selecto.with_tenant(bound, 8) == bound
+
+    prefixed =
+      base
+      |> Selecto.with_tenant(prefix: "tenant_eight", namespace: "customers")
+      |> Selecto.with_tenant(8)
+
+    assert Selecto.tenant(prefixed).prefix == "tenant_eight"
+    assert Selecto.tenant(prefixed).tenant_field == "account_key"
+    assert Selecto.tenant(prefixed).namespace == "customers"
+
+    for conflicting <- [9, "8", 8.0] do
+      assert_raise ArgumentError, ~r/conflicts/, fn -> Selecto.with_tenant(bound, conflicting) end
+    end
+
+    assert_raise ArgumentError, ~r/source.tenant_field/, fn ->
+      custom
+      |> update_in([:source], &Map.delete(&1, :tenant_field))
+      |> selecto()
+      |> Selecto.with_tenant(8)
+    end
+
+    assert_raise ArgumentError, ~r/nonblank/, fn -> Selecto.with_tenant(base, " ") end
+  end
+
+  test "scalar tenant binding rejects contradictory required conjuncts" do
+    for predicate <- [
+          {"tenant_id", 9},
+          {:and, [{"tenant_id", :eq, 9}]},
+          {"tenant_id", {:in, [9, 10]}}
+        ] do
+      assert_raise ArgumentError, ~r/required predicates/, fn ->
+        domain() |> Map.put(:required_filters, [predicate]) |> selecto() |> Selecto.with_tenant(8)
+      end
+    end
+  end
+
+  test "structured compatibility calls cannot remove or replace a binding" do
+    bound = domain() |> selecto() |> Selecto.with_tenant(8)
+    assert Selecto.with_tenant(bound, nil) == bound
+
+    assert_raise ArgumentError, ~r/conflicts/, fn ->
+      Selecto.with_tenant(bound, %{tenant_id: 9})
+    end
+  end
+
+  test "host predicate inspection can omit only the implicit tenant without changing authority" do
+    bound = domain() |> selecto() |> Selecto.with_tenant(tenant_id: "acme")
+    assert {"tenant_id", "acme"} in Selecto.query_filters(bound)
+    assert Selecto.query_filters(bound, include_engine_tenant: false) == [{"active", true}]
+    assert Selecto.tenant(bound).tenant_id == "acme"
+    required = Selecto.require_tenant_filter(bound, "tenant_id", "acme")
+    assert {"tenant_id", "acme"} in Selecto.query_filters(required, include_engine_tenant: false)
+  end
+
   test "apply_tenant_scope adds tenant filter as required filter" do
     query =
       domain()
