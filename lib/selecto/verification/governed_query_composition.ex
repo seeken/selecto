@@ -241,13 +241,26 @@ defmodule Selecto.Verification.GovernedQueryComposition do
 
   defp apply_unsafe_form(:mixed_compound_tenant_union, state) do
     left = ensure_compound_scope(state.query, "tenant-a")
-    right = ensure_compound_scope(state.query, "tenant-b")
+    # Bind an independent engine: rebinding an existing tenant now refuses
+    # before composition, while this probe must still exercise the union gate.
+    right =
+      state.policy_mode
+      |> base_query(
+        state.tenant_mode,
+        if(state.tenant_mode == :row, do: "tenant-b", else: "tenant-a")
+      )
+      |> ensure_compound_scope("tenant-b")
+
     Selecto.union(left, right)
   end
 
   defp apply_unsafe_form(:mixed_attached_tenant_union, state) do
-    left = Selecto.with_tenant(state.query, %{tenant_id: "tenant-a", required: false})
-    right = Selecto.with_tenant(state.query, %{tenant_id: "tenant-b", required: false})
+    fresh =
+      Selecto.configure(domain(), state.query.runtime, mode: state.policy_mode)
+      |> Selecto.select(["id", "name"])
+
+    left = Selecto.with_tenant(fresh, %{tenant_id: "tenant-a", required: false})
+    right = Selecto.with_tenant(fresh, %{tenant_id: "tenant-b", required: false})
     Selecto.union(left, right)
   end
 

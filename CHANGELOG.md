@@ -3,6 +3,12 @@
 
 ## Unreleased
 
+- Scalar `with_tenant/2` resolves `source.tenant_field`, preserves typed tenant
+  identity and refuses conflicting bindings or required predicates. Structured
+  compatibility calls retain existing obligations instead of clearing them.
+- Add optional Updato-backed `write/1` and `action/2` entry points and an
+  adapter-owned `transaction/3` callback with inherited engine context.
+
 - Native LATERAL subqueries name each projection by its output alias for
   adapters declaring `:lateral_projection_aliases` (MySQL), so the outer query
   can read `matched.order_id` for `X.as("id", "order_id")`.

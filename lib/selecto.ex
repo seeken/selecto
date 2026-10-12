@@ -833,10 +833,61 @@ defmodule Selecto do
   defdelegate required_filters(selecto), to: Selecto.Query
 
   @doc """
-  Attach tenant context to the query state.
+  Bind a scalar trusted tenant using the domain's `source.tenant_field`.
+  The binding constrains reads and writes and supplies omitted insert tenant
+  values. Rebinding or contradictory required predicates refuse. Structured
+  contexts remain available for prefix/advanced scope configuration and retain
+  their obligations on later calls. Hosts must authenticate this value.
   """
-  @spec with_tenant(t(), map() | keyword() | String.t() | atom() | nil) :: t()
+  @spec with_tenant(t(), map() | keyword() | String.t() | number() | atom() | nil) :: t()
   defdelegate with_tenant(selecto, tenant_context), to: Selecto.Tenant
+
+  @doc """
+  Start a governed write bound to this configured engine and its tenant.
+  Requires the optional `selecto_updato` package. Compose with its native
+  insert/update/delete/upsert helpers, then call `SelectoUpdato.execute/1`
+  or `SelectoUpdato.preview/1` without repeating the engine.
+  """
+  def write(%Selecto{} = selecto), do: updato_call(:new, [selecto])
+
+  @doc """
+  Start a named domain action bound to this engine. Use Updato's `target/2`,
+  `inputs/2`, `preview/1` and `execute/1`; authorization runs freshly per phase.
+  Requires the optional `selecto_updato` package.
+  """
+  def action(%Selecto{} = selecto, name), do: updato_call(:action, [selecto, name])
+
+  defp updato_call(function, args) do
+    module = Module.concat([SelectoUpdato])
+
+    if Code.ensure_loaded?(module) and function_exported?(module, function, length(args)),
+      do: apply(module, function, args),
+      else: raise(ArgumentError, "this operation requires a compatible selecto_updato package")
+  end
+
+  @doc """
+  Run a callback with an engine bound to the adapter's transaction connection.
+  Domain, tenant and required predicates are retained. Return values and
+  rollback follow the adapter transaction contract: raise (including a failed
+  `{:ok, result} = ...` match) to abort the callback.
+  """
+  def transaction(%Selecto{} = selecto, callback, opts \\ []) when is_function(callback, 1) do
+    adapter = Selecto.Runtime.Context.adapter(selecto)
+    connection = Selecto.Runtime.Context.connection(selecto)
+
+    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :transaction, 3) do
+      adapter.transaction(
+        connection,
+        fn tx -> callback.(with_runtime_connection(selecto, tx)) end,
+        opts
+      )
+    else
+      {:error,
+       Selecto.Error.validation_error("Adapter does not support transactions", %{
+         code: :unsupported_transaction
+       })}
+    end
+  end
 
   @doc """
   Read tenant context from query state.
