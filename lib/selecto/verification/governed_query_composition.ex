@@ -320,12 +320,10 @@ defmodule Selecto.Verification.GovernedQueryComposition do
     expected_policy? = state.policy_mode == :strict
     mismatched = Enum.reject(queries, &(Selecto.Policy.strict?(&1) == expected_policy?))
 
-    cond do
-      mismatched != [] ->
-        {:error, %{policy_mismatches: Enum.map(mismatched, &query_summary/1)}}
-
-      Selecto.Policy.validate_query!(state.query) == :ok ->
-        :ok
+    if mismatched != [] do
+      {:error, %{policy_mismatches: Enum.map(mismatched, &query_summary/1)}}
+    else
+      Selecto.Policy.validate_query!(state.query)
     end
   end
 
