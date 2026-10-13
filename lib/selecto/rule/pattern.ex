@@ -168,8 +168,6 @@ defmodule Selecto.Rule.Pattern do
     {{:char, {:literal, literal}}, rest}
   end
 
-  defp atom([], _depth), do: invalid()
-
   defp repeat(node, [quantifier | rest]) when quantifier in [?*, ?+, ??],
     do:
       {{:repeat, node, if(quantifier == ?+, do: 1, else: 0),

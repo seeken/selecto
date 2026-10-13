@@ -383,7 +383,7 @@ defmodule Selecto.Domain.Choices do
          {:ok, schema} <- fetch_key(schemas, schema_id),
          columns when is_map(columns) <- map_value(schema, :columns),
          {:ok, column} when is_map(column) <- fetch_key(columns, schema_field) do
-      projected_field = "#{field_id(schema_id)}.#{field_id(schema_field)}"
+      projected_field = "#{schema_id}.#{schema_field}"
       projection_column = projection_column(projection, projected_field)
 
       {:ok,
@@ -723,10 +723,6 @@ defmodule Selecto.Domain.Choices do
       ArgumentError -> nil
     end
   end
-
-  defp field_id(field) when is_atom(field), do: Atom.to_string(field)
-  defp field_id(field) when is_binary(field), do: field
-  defp field_id(field), do: inspect(field)
 
   defp error(code, path, message, attrs) do
     attrs

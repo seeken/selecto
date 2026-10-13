@@ -547,7 +547,8 @@ defmodule Selecto.Types do
           include_comments: boolean(),
           pretty_print: boolean(),
           emit_user_ctes: boolean(),
-          unique_projection_aliases: boolean()
+          unique_projection_aliases: boolean(),
+          preserve_projection_aliases: boolean()
         ]
 
   # Option provider types for select filters
