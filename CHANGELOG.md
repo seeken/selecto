@@ -3,6 +3,28 @@
 
 ## Unreleased
 
+- SQLite now places NULLs as PostgreSQL does: last for an unqualified ASC and
+  first for an unqualified DESC. Previously SQLite used its own default, which
+  is the reverse. Explicit `:asc_nulls_first`/`:desc_nulls_last` and friends
+  are unchanged. This covers top-level ORDER BY (a leading
+  `CASE WHEN x IS NULL ...` term), window ORDER BY inside `OVER (...)`, and
+  bounded collection ordering and its cursors. Set-operation ORDER BY uses
+  native `NULLS FIRST/LAST` on the projected position, because a compound
+  SELECT rejects a CASE term. On a live connection, such a query needs SQLite
+  3.30.0 or later, read via the provider's `connection_capabilities/1`. A
+  provider that is older or cannot report its version is refused
+  (`unsupported_feature: :null_ordering`). Compile-only contexts render the
+  native syntax. PostgreSQL and other adapters' SQL is unchanged.
+  - Behaviour change: on SQLite, ordering a ROLLUP query by a computed
+    (non-column, non-aggregate) grouped key with plain `:asc`/`:desc` is now
+    refused (`unsupported_feature: :null_ordering`) instead of rendering a
+    plain sort, as on MySQL and MariaDB. A set-operation ORDER BY on a
+    `{:raw_sql, ...}` key with plain `:asc`/`:desc` now gets a CASE term,
+    which SQLite rejects at execution in a compound SELECT.
+  - Known gap: `json_order_by/2` on SQLite still renders a bare ASC/DESC and
+    therefore sorts NULLs first ascending, unlike the other ORDER BY keys in
+    the same clause.
+
 - Scalar `with_tenant/2` resolves `source.tenant_field`, preserves typed tenant
   identity and refuses conflicting bindings or required predicates. Structured
   compatibility calls retain existing obligations instead of clearing them.
