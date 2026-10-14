@@ -146,6 +146,38 @@ defmodule Selecto.SQLiteNullOrderTest do
     end
   end
 
+  describe "window ORDER BY" do
+    test "ASC ranks NULL last and DESC ranks NULL first", %{base: base} do
+      for {dir, expected} <- [asc: @expected.asc, desc: @expected.desc] do
+        query =
+          base
+          |> Selecto.select(["id"])
+          |> Selecto.window_function(:row_number, [],
+            over: [order_by: [{"bucket", dir}]],
+            as: "rn"
+          )
+          |> Selecto.order_by([{"id", :asc}])
+
+        ranked = rows(query) |> Enum.sort_by(fn [_id, rn] -> rn end) |> Enum.map(&hd/1)
+        assert ranked == expected, "#{dir}"
+      end
+    end
+
+    test "renders the NULL-placement term inside OVER", %{base: base} do
+      {sql, _params} =
+        base
+        |> Selecto.select(["id"])
+        |> Selecto.window_function(:row_number, [],
+          over: [order_by: [{"bucket", :desc}]],
+          as: "rn"
+        )
+        |> Selecto.to_sql()
+
+      assert sql =~
+               "ORDER BY CASE WHEN selecto_root.bucket IS NULL THEN 0 ELSE 1 END ASC, selecto_root.bucket DESC"
+    end
+  end
+
   # Captured from 81b89bf, before SQLite NULL ordering changed. Every SQLite
   # change is gated on the adapter name, so PostgreSQL output is identical.
   test "PostgreSQL output is unchanged" do
