@@ -45,6 +45,23 @@ defmodule SelectoDBSQLite.Adapter do
   def connect(other), do: {:error, {:invalid_connection_options, other}}
 
   @impl true
+  def disconnect(connection) when is_reference(connection) do
+    with :ok <- ensure_exqlite(), do: Exqlite.Sqlite3.close(connection)
+  end
+
+  def disconnect(%{connection: connection}), do: disconnect(connection)
+  def disconnect(_connection), do: :ok
+
+  # Mirrors the real provider: connected renderers read the server version
+  # from the open connection rather than assuming one.
+  def connection_capabilities(connection) do
+    case execute(connection, "SELECT sqlite_version()", [], []) do
+      {:ok, %{rows: [[version]]}} when is_binary(version) -> %{server_version: version}
+      _ -> %{server_version: nil}
+    end
+  end
+
+  @impl true
   def execute(connection, query, params, opts) do
     with :ok <- ensure_exqlite() do
       connection = unwrap_connection(connection)

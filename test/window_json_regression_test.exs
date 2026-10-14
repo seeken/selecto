@@ -596,8 +596,11 @@ defmodule Selecto.WindowJsonRegressionTest do
     assert downcased =~
              ~s|where (( json_extract("selecto_root"."metadata", '$.price_band') = ? ) and ( json_type("selecto_root"."metadata", '$.warehouse.zone') is not null ))|
 
+    # The regular key takes PostgreSQL's DESC placement (NULLs first) through
+    # a leading CASE term. The JSON key still renders a bare ASC, which SQLite
+    # sorts NULLs first (a known gap in the JSON ORDER BY path).
     assert downcased =~
-             ~s|order by selecto_root.price desc, json_extract("selecto_root"."metadata", '$.warehouse.zone') asc|
+             ~s|order by case when selecto_root.price is null then 0 else 1 end asc, selecto_root.price desc, json_extract("selecto_root"."metadata", '$.warehouse.zone') asc|
   end
 
   test "sqlite json_filter supports containment helper" do

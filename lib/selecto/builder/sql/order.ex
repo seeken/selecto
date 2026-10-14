@@ -153,6 +153,10 @@ defmodule Selecto.Builder.Sql.Order do
     key = [Integer.to_string(position)]
 
     cond do
+      sqlite?(selecto) and Selecto.Builder.SetOperations.has_set_operations?(selecto) ->
+        require_sqlite_set_null_order!(selecto)
+        {[], [key, " ", @dirs[sqlite_set_direction(dir)]], []}
+
       not postgresql_null_order?(selecto) ->
         {[], [key, " ", plain_direction(dir)], []}
 
@@ -257,7 +261,9 @@ defmodule Selecto.Builder.Sql.Order do
   # True when a set-operation ORDER BY needs a NULL-placement term, so the
   # operands must name their projections `selecto_projection_<n>`.
   def set_projection_aliases?(selecto, order_by) do
-    postgresql_null_order?(selecto) and not native_null_ordering?(selecto) and
+    # SQLite orders set results natively by position (see null_placed/3).
+    not sqlite?(selecto) and postgresql_null_order?(selecto) and
+      not native_null_ordering?(selecto) and
       Enum.any?(order_by, fn entry ->
         case order_entry(entry) do
           {_order, dir} -> null_term?(selecto, dir)
@@ -322,9 +328,9 @@ defmodule Selecto.Builder.Sql.Order do
   end
 
   # True when the clause needs a NULL-placement term: an explicit NULLS
-  # FIRST/LAST the database cannot spell, or (for `:postgresql_null_order`
-  # adapters, MySQL and MariaDB) an unqualified ASC/DESC, which PostgreSQL
-  # sorts NULLs last and first respectively.
+  # FIRST/LAST the database cannot spell, or (for SQLite and the
+  # `:postgresql_null_order` adapters, MySQL and MariaDB) an unqualified
+  # ASC/DESC, which PostgreSQL sorts NULLs last and first respectively.
   defp null_term?(selecto, dir) do
     not native_null_ordering?(selecto) and
       (dir in [:asc_nulls_last, :desc_nulls_first] or
@@ -335,7 +341,70 @@ defmodule Selecto.Builder.Sql.Order do
     AdapterSQL.native_null_ordering?(selecto)
   end
 
+  # SQLite compound SELECT accepts NULLS FIRST/LAST on projected positions,
+  # but rejects an added CASE expression. Connected queries must prove the
+  # native syntax version (3.30.0); explicitly compile-only contexts may
+  # render it. A connection whose version cannot be read is refused.
+  defp require_sqlite_set_null_order!(selecto) do
+    connection = Selecto.Runtime.Context.connection(selecto)
+
+    unless connection in [nil, :compile_only, :mock_connection] do
+      version = sqlite_server_version(AdapterSQL.adapter(selecto), connection)
+
+      unless sqlite_version_at_least?(version, {3, 30, 0}) do
+        raise Selecto.Error.to_exception(
+                Selecto.Error.validation_error(
+                  "SQLite provider does not support NULL ordering for set results",
+                  %{
+                    adapter: :sqlite,
+                    unsupported_feature: :null_ordering,
+                    minimum_server_version: "3.30.0",
+                    server_version: version
+                  }
+                )
+              )
+      end
+    end
+  end
+
+  # Unqualified set-result directions take PostgreSQL's placement: NULLs
+  # last ascending and first descending.
+  defp sqlite_set_direction(:asc), do: :asc_nulls_last
+  defp sqlite_set_direction(:desc), do: :desc_nulls_first
+  defp sqlite_set_direction(dir), do: dir
+
+  defp sqlite_version_at_least?(version, minimum) when is_binary(version) do
+    case Regex.run(~r/\A(\d+)\.(\d+)\.(\d+)\z/, version, capture: :all_but_first) do
+      [major, minor, patch] ->
+        {String.to_integer(major), String.to_integer(minor), String.to_integer(patch)} >= minimum
+
+      _ ->
+        false
+    end
+  end
+
+  defp sqlite_version_at_least?(_version, _minimum), do: false
+
+  defp sqlite_server_version(adapter, connection) do
+    if Selecto.AdapterSupport.callback_available?(adapter, :connection_capabilities, 1) do
+      case adapter.connection_capabilities(connection) do
+        capabilities when is_map(capabilities) -> Map.get(capabilities, :server_version)
+        _ -> nil
+      end
+    end
+  rescue
+    _ -> nil
+  catch
+    _, _ -> nil
+  end
+
+  defp sqlite?(selecto),
+    do: Selecto.AdapterSupport.adapter_name(AdapterSQL.adapter(selecto)) == :sqlite
+
   defp postgresql_null_order?(selecto) do
-    Selecto.AdapterSupport.supports_feature?(AdapterSQL.adapter(selecto), :postgresql_null_order)
+    adapter = AdapterSQL.adapter(selecto)
+
+    sqlite?(selecto) or
+      Selecto.AdapterSupport.supports_feature?(adapter, :postgresql_null_order)
   end
 end
