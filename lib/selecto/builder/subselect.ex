@@ -1397,10 +1397,13 @@ defmodule Selecto.Builder.Subselect do
 
       order_specs ->
         # The collection cursor predicate assumes PostgreSQL NULL placement
-        # (last ascending, first descending); `:postgresql_null_order`
-        # adapters (MySQL, MariaDB) order the same way with a leading term.
+        # (last ascending, first descending); SQLite and
+        # `:postgresql_null_order` adapters emulate it with a leading term.
+        adapter = Map.get(selecto, :adapter)
+
         postgresql_nulls? =
-          AdapterSupport.supports_feature?(Map.get(selecto, :adapter), :postgresql_null_order)
+          AdapterSupport.adapter_name(adapter) == :sqlite or
+            AdapterSupport.supports_feature?(adapter, :postgresql_null_order)
 
         order_clauses =
           Enum.map(order_specs, fn
