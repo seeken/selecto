@@ -221,14 +221,32 @@ defmodule Selecto.Builder.Window do
       |> Enum.map(fn {field, direction} ->
         resolved_field = resolve_field_reference(selecto, field)
 
-        if postgresql_nulls?,
-          do: null_placed_order(resolved_field, direction),
-          else: [resolved_field, " ", String.upcase(to_string(direction))]
+        cond do
+          AdapterSupport.adapter_name(selecto.adapter) == :sqlite ->
+            null_placed_order(resolved_field, sqlite_order_direction(direction))
+
+          postgresql_nulls? ->
+            null_placed_order(resolved_field, direction)
+
+          true ->
+            [resolved_field, " ", String.upcase(to_string(direction))]
+        end
       end)
       |> Enum.intersperse(", ")
 
     {["ORDER BY ", order_items], []}
   end
+
+  # The bounded SQLite lateral lowering passes these known string directions
+  # through Window.Spec. Normalize only the SQLite path; other adapters retain
+  # their existing ordering SQL and validation behavior.
+  defp sqlite_order_direction("asc"), do: :asc
+  defp sqlite_order_direction("desc"), do: :desc
+  defp sqlite_order_direction("asc nulls first"), do: :asc_nulls_first
+  defp sqlite_order_direction("asc nulls last"), do: :asc_nulls_last
+  defp sqlite_order_direction("desc nulls first"), do: :desc_nulls_first
+  defp sqlite_order_direction("desc nulls last"), do: :desc_nulls_last
+  defp sqlite_order_direction(direction), do: direction
 
   # `:postgresql_null_order` adapters (MySQL, MariaDB) place NULLs as
   # PostgreSQL does inside window ORDER BY too; explicit placement wins.
