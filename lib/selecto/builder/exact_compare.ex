@@ -19,9 +19,17 @@ defmodule Selecto.Builder.ExactCompare do
   # A column takes the exact form when its name is a tenant or site column the
   # domain declares (the root's tenant_field, its writes.scope tenant field,
   # its tenant_columns, and every schema's tenant_field), unless every
-  # declaration of that name in the domain gives it a non-text type (integer,
-  # decimal, UUID or binary key types compare exactly already). A column whose
-  # type is not declared takes the exact form: it is correct for numbers too.
+  # declaration of that name in the domain gives it a type that compares
+  # exactly already (integer, decimal, boolean, temporal, binary). A column
+  # whose type is not declared takes the exact form: it is correct for numbers
+  # too.
+  #
+  # The form is a mode: `true` converts the column to utf8mb4 before taking
+  # its bytes (text, of any character set); `:bytes` takes the stored bytes
+  # as they are. UUID types (:uuid, :binary_id) get `:bytes`: stored as
+  # BINARY(16) the bytes are the value (CONVERT would mangle them), stored as
+  # CHAR(36) text they are its ASCII bytes, so 'A0EE...' and a trailing-space
+  # 'a0ee... ' never equal 'a0ee...'. `false` is the plain comparison.
 
   alias Selecto.AdapterSupport
 
@@ -29,9 +37,10 @@ defmodule Selecto.Builder.ExactCompare do
 
   @non_text_types ~w(id integer bigint smallint tinyint serial bigserial int
                      decimal numeric float double real boolean bool
-                     uuid binary_id binary bytea date time datetime naive_datetime
+                     binary bytea date time datetime naive_datetime
                      utc_datetime utc_datetime_usec naive_datetime_usec timestamp
                      timestamptz)
+  @byte_types ~w(uuid binary_id)
 
   @doc false
   def enabled?(%{adapter: adapter}) when is_atom(adapter) and not is_nil(adapter),
@@ -40,7 +49,7 @@ defmodule Selecto.Builder.ExactCompare do
   def enabled?(_selecto), do: false
 
   @doc false
-  # Whether a column named `name` takes the exact form on this query.
+  # The mode a column named `name` takes on this query (false when plain).
   def column?(selecto, name) when is_atom(name) and not is_nil(name),
     do: column?(selecto, Atom.to_string(name))
 
@@ -51,13 +60,23 @@ defmodule Selecto.Builder.ExactCompare do
   def column?(_selecto, _name), do: false
 
   @doc false
-  # Whether a column named `name` of `domain` is a text (or undeclared-type)
-  # tenant/site column.
+  # The mode of a tenant/site column named `name` of `domain`, by its declared
+  # types (false when it is not a tenant/site column or compares exactly).
   def exact_name?(domain, name) when is_map(domain) and is_binary(name) do
-    name in tenant_names(domain) and not non_text_everywhere?(domain, name)
+    name in tenant_names(domain) and name_mode(domain, name)
   end
 
   def exact_name?(_domain, _name), do: false
+
+  @doc false
+  # The strongest of several modes: converting beats bytes beats plain.
+  def strongest(modes) do
+    cond do
+      Enum.any?(modes, &(&1 == true)) -> true
+      Enum.any?(modes, &(&1 == :bytes)) -> :bytes
+      true -> false
+    end
+  end
 
   @doc false
   # `left = right`, exact when `exact?`. A column side is converted to utf8mb4
@@ -65,18 +84,18 @@ defmodule Selecto.Builder.ExactCompare do
   # column's own charset bytes, so a utf16, ucs2, utf32 or latin1 tenant column
   # would never equal the utf8mb4 bound value. A bound value (`{:param, _}` or
   # `?`) is already utf8mb4.
-  def eq(left, right, true),
-    do: ["(", left, " = ", right, " AND ", bytes(left), " = ", bytes(right), ")"]
+  def eq(left, right, mode) when mode in [true, :bytes],
+    do: ["(", left, " = ", right, " AND ", bytes(left, mode), " = ", bytes(right, mode), ")"]
 
   def eq(left, right, _exact?), do: [left, " = ", right]
 
   @doc false
   # `left IN (values)` for parameter markers or rendered values, exact when
   # `exact?`: `left IN (v, ...) AND <bytes(left)> IN (<bytes(v)>, ...)`.
-  def in_list(left, values, true) do
+  def in_list(left, values, mode) when mode in [true, :bytes] do
     plain = Enum.intersperse(values, ", ")
-    cast = values |> Enum.map(&bytes/1) |> Enum.intersperse(", ")
-    ["(", left, " IN (", plain, ") AND ", bytes(left), " IN (", cast, "))"]
+    cast = values |> Enum.map(&bytes(&1, mode)) |> Enum.intersperse(", ")
+    ["(", left, " IN (", plain, ") AND ", bytes(left, mode), " IN (", cast, "))"]
   end
 
   def in_list(left, values, _exact?), do: [left, " IN (", Enum.intersperse(values, ", "), ")"]
@@ -87,18 +106,18 @@ defmodule Selecto.Builder.ExactCompare do
   # `bytes_subquery` selects the utf8mb4 bytes of the subquery's single
   # column (see bytes_subquery/2). Both fragments bind their parameter
   # markers in SQL-text order.
-  def in_subquery(left, plain, bytes_subquery, true),
-    do: ["(", left, " IN ", plain, " AND ", bytes(left), " IN ", bytes_subquery, ")"]
+  def in_subquery(left, plain, bytes_subquery, mode) when mode in [true, :bytes],
+    do: ["(", left, " IN ", plain, " AND ", bytes(left, mode), " IN ", bytes_subquery, ")"]
 
   def in_subquery(left, plain, _bytes_subquery, _exact?), do: [left, " IN ", plain]
 
   @doc false
   # A subquery fragment selecting the utf8mb4 bytes of `column` of the derived
   # table built from `subquery` (iodata with its own parentheses).
-  def bytes_subquery(subquery, column),
+  def bytes_subquery(subquery, column, mode \\ true),
     do: [
       "(SELECT ",
-      bytes(["`selecto_exact`.`", column, "`"]),
+      bytes(["`selecto_exact`.`", column, "`"], mode),
       " FROM ",
       subquery,
       " AS `selecto_exact`)"
@@ -106,17 +125,67 @@ defmodule Selecto.Builder.ExactCompare do
 
   @doc false
   # The utf8mb4 bytes of a column expression or a bound value.
-  def bytes({:param, _value} = param), do: ["CAST(", param, " AS BINARY)"]
-  def bytes("?"), do: "CAST(? AS BINARY)"
-  def bytes(expression), do: ["CAST(CONVERT(", expression, " USING utf8mb4) AS BINARY)"]
+  # With `:bytes` a column's stored bytes are taken as they are.
+  def bytes(expression, mode \\ true)
+  def bytes({:param, _value} = param, _mode), do: ["CAST(", param, " AS BINARY)"]
+  def bytes("?", _mode), do: "CAST(? AS BINARY)"
+  def bytes(expression, :bytes), do: ["CAST(", expression, " AS BINARY)"]
+  def bytes(expression, _mode), do: ["CAST(CONVERT(", expression, " USING utf8mb4) AS BINARY)"]
 
   @doc false
-  # Whether a column named `name` takes the exact form by type alone: false
-  # only when every declaration of it in `domain` is a non-text type.
+  # The mode a column named `name` takes by its declared types alone (true
+  # when undeclared).
   def text_column?(domain, name) when is_map(domain) and (is_binary(name) or is_atom(name)),
-    do: not non_text_everywhere?(domain, to_string(name))
+    do: name_mode(domain, to_string(name))
 
   def text_column?(_domain, _name), do: true
+
+  @doc false
+  # Whether a scope-key pair that decides tenant identity (direct scope keys,
+  # the tenant pair, root -> bridge and bridge -> target scope keys) takes the
+  # exact form: on an exact-compare adapter whenever EITHER side may hold
+  # text, judged by each column's own declared type in its own relation. A
+  # relation or column that is not declared counts as text. Two columns both
+  # declared non-text (integers, say) keep the plain comparison. Comparing an
+  # INT tenant with a VARCHAR scope plainly is numeric on MySQL, so '07',
+  # '7 ' and '7e0' would all equal 7.
+  def pair?(selecto, {left_relation, left_field}, {right_relation, right_field}) do
+    enabled?(selecto) and
+      strongest([
+        type_mode(declared_type(left_relation, left_field)),
+        type_mode(declared_type(right_relation, right_field))
+      ])
+  end
+
+  @doc false
+  # The domain relation (the root source or a schema) stored in `table`, or nil.
+  def relation_for_table(%{domain: domain}, table), do: relation_for_table(domain, table)
+
+  def relation_for_table(domain, table) when is_map(domain) and not is_nil(table) do
+    table = to_string(table)
+
+    relations =
+      [get(domain, :source)] ++
+        case get(domain, :schemas) do
+          schemas when is_map(schemas) -> Map.values(schemas)
+          _ -> []
+        end
+
+    Enum.find(relations, fn relation ->
+      is_map(relation) and to_string(get(relation, :source_table) || "") == table
+    end)
+  end
+
+  def relation_for_table(_domain, _table), do: nil
+
+  defp declared_type(relation, field) when is_map(relation) and not is_nil(field) do
+    case column_spec(relation, to_string(field)) do
+      nil -> nil
+      spec -> column_type(spec)
+    end
+  end
+
+  defp declared_type(_relation, _field), do: nil
 
   defp tenant_names(domain) do
     root = Selecto.Tenant.domain_tenant_columns(domain)
@@ -147,9 +216,9 @@ defmodule Selecto.Builder.ExactCompare do
 
   defp write_tenant_field(_relation), do: nil
 
-  # True only when the name is declared somewhere and every declaration types
-  # it as a non-text value.
-  defp non_text_everywhere?(domain, name) do
+  # The mode of a name across its declarations in the domain; an undeclared
+  # name is text.
+  defp name_mode(domain, name) do
     relations =
       [get(domain, :source)] ++
         case get(domain, :schemas) do
@@ -166,7 +235,7 @@ defmodule Selecto.Builder.ExactCompare do
         end
       end)
 
-    types != [] and Enum.all?(types, &non_text_type?/1)
+    if types == [], do: true, else: strongest(Enum.map(types, &type_mode/1))
   end
 
   defp column_spec(relation, name) when is_map(relation) do
@@ -186,10 +255,26 @@ defmodule Selecto.Builder.ExactCompare do
   defp column_type(_spec), do: nil
 
   @doc false
-  # Whether a declared column type takes the exact form: text types and an
-  # undeclared (nil) or unrecognised type do; integer, decimal, UUID, binary,
-  # boolean and temporal types compare exactly already.
-  def text_type?(type), do: not non_text_type?(type)
+  # The mode of a declared column type: text, undeclared (nil) and
+  # unrecognised types convert (true), UUID types compare stored bytes
+  # (:bytes), and integer, decimal, binary, boolean and temporal types
+  # compare exactly already (false).
+  def type_mode(type) do
+    cond do
+      byte_type?(type) -> :bytes
+      non_text_type?(type) -> false
+      true -> true
+    end
+  end
+
+  @doc false
+  def text_type?(type), do: type_mode(type) != false
+
+  defp byte_type?(type) when is_atom(type) and not is_nil(type),
+    do: byte_type?(Atom.to_string(type))
+
+  defp byte_type?(type) when is_binary(type), do: String.downcase(type) in @byte_types
+  defp byte_type?(_type), do: false
 
   defp non_text_type?(type) when is_atom(type) and not is_nil(type),
     do: non_text_type?(Atom.to_string(type))

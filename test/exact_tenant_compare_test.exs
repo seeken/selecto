@@ -123,4 +123,73 @@ defmodule Selecto.ExactTenantCompareTest do
 
     assert params == [2]
   end
+
+  test "through scope pairs compare exactly when either column may hold text" do
+    through_domain = fn target_type ->
+      %{
+        name: "Thru",
+        source: %{
+          relation(
+            "orders",
+            [id: :integer, tenant_id: :integer, name: :string],
+            %{
+              targets: %{
+                queryable: :target,
+                field: :targets,
+                owner_key: :id,
+                related_key: :id,
+                cardinality: :many,
+                through: %{
+                  table: "bridges",
+                  owner_key: :order_id,
+                  related_key: :target_id,
+                  source_scope_key: :tenant_id,
+                  through_scope_key: :scope_code,
+                  target_scope_key: :org_code
+                }
+              }
+            },
+            :tenant_id
+          )
+          | fields: [:id, :tenant_id, :name]
+        },
+        schemas: %{
+          target:
+            relation("targets", [id: :integer, org_code: target_type, name: :string], %{}, nil),
+          bridge:
+            relation(
+              "bridges",
+              [id: :integer, order_id: :integer, target_id: :integer, scope_code: :integer],
+              %{},
+              nil
+            )
+        },
+        joins: %{targets: %{type: :left, name: "targets"}}
+      }
+    end
+
+    compile = fn target_type ->
+      through_domain.(target_type)
+      |> Selecto.configure(Selecto.Runtime.Context.new(ExactAdapter, :compile_only),
+        validate: false
+      )
+      |> Selecto.with_tenant(7)
+      |> Selecto.select(["id", "targets.name"])
+      |> Selecto.to_sql()
+      |> elem(0)
+      |> String.replace(~r/\s+/, " ")
+    end
+
+    # A VARCHAR target scope beside the INT root tenant: numeric compare
+    # would admit '07' and '7e0', so the pair compares bytes.
+    text = compile.(:string)
+
+    assert text =~
+             "(targets.`org_code` = selecto_root.`tenant_id` AND " <>
+               "CAST(CONVERT(targets.`org_code` USING utf8mb4) AS BINARY) = " <>
+               "CAST(CONVERT(selecto_root.`tenant_id` USING utf8mb4) AS BINARY))"
+
+    # Integer-declared on both sides stays plain.
+    refute compile.(:integer) =~ "BINARY"
+  end
 end

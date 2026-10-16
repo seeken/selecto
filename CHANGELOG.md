@@ -3,6 +3,23 @@
 
 ## Unreleased
 
+- MySQL and MariaDB: scope-key pairs that decide tenant identity now compare
+  exactly when either column may hold text, by each column's own declared
+  type. This covers direct scope keys, the tenant pair, and the root -> bridge
+  and bridge -> target scope keys of through associations. An undeclared
+  relation or column counts as text. Before, the choice went by column name,
+  so an INT root tenant paired with a VARCHAR target scope (for example
+  `org_code`) compared numerically, and tenant 7 reached targets scoped
+  `'07'`, `'7 '`, `' 7'` and `'7e0'` on joins, collections and retargets.
+  Columns declared integer on both sides keep the plain comparison.
+- UUID tenant and site columns (`:uuid`, `:binary_id`) compare by their stored
+  bytes, without CONVERT: `CAST(col AS BINARY) = CAST(? AS BINARY)`. That is
+  exact for BINARY(16) and for CHAR(36)/VARCHAR text storage alike, so
+  `'A0EE...'` and a trailing-space UUID no longer match `'a0ee...'`. A filter
+  on a column with a declared type uses that type rather than the name's
+  declarations across the domain.
+
+
 - `:invalid_session` (a MySQL-family session refused by the adapter's
   per-call check) survives driver-error normalization, so hosts can tell it
   from other database errors.
