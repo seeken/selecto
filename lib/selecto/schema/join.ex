@@ -1034,6 +1034,7 @@ defmodule Selecto.Schema.Join do
   @spec association_boundary!(term(), map(), map(), map(), map() | nil) :: map()
   def association_boundary!(association_id, association, source, target, domain \\ nil) do
     tenant_pair = tenant_pair(association_id, source, target, domain)
+    validate_through_scope!(association_id, association, source, target)
 
     scope =
       case association_scope_keys!(association_id, association, source, target, tenant_pair) do
@@ -1156,6 +1157,25 @@ defmodule Selecto.Schema.Join do
 
       _ ->
         join
+    end
+  end
+
+  # A through association's source and target scope keys must be declared
+  # fields of their relations: a target scope key the target does not expose
+  # cannot be correlated (a retarget would silently identify the target by
+  # its key alone and read rows of other scopes).
+  defp validate_through_scope!(association_id, association, source, target) do
+    case map_value(association, :through) do
+      through when is_map(through) ->
+        source_key = map_value(through, :source_scope_key)
+        target_key = map_value(through, :target_scope_key)
+
+        if source_key, do: validate_scope_field!(association_id, :source, source, source_key)
+        if target_key, do: validate_scope_field!(association_id, :target, target, target_key)
+        :ok
+
+      _ ->
+        :ok
     end
   end
 

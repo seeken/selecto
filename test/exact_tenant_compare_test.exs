@@ -61,7 +61,7 @@ defmodule Selecto.ExactTenantCompareTest do
     |> Selecto.configure(Selecto.Runtime.Context.new(adapter, :compile_only), validate: false)
     |> Selecto.with_tenant(tenant)
     |> Selecto.select(["id", "customer.name"])
-    |> Selecto.filter([{"tenant_id", {:in, [tenant, tenant]}}, {"name", {:>, "x"}}])
+    |> Selecto.filter([{"tenant_id", {:in, [tenant, tenant]}}, {"name", "x"}])
     |> Selecto.to_sql()
   end
 
@@ -83,8 +83,8 @@ defmodule Selecto.ExactTenantCompareTest do
                "CAST(CONVERT(selecto_root.tenant_id USING utf8mb4) AS BINARY) IN " <>
                "(CAST(? AS BINARY), CAST(? AS BINARY)))"
 
-    # A range comparison keeps the plain form.
-    assert sql =~ "selecto_root.name > ?"
+    # The caller's own filter on a non-tenant column keeps the plain form.
+    assert sql =~ "selecto_root.name = ?"
     assert params == ["t1", "t1", "t1", "t1", "t1", "t1", "x"]
   end
 
@@ -216,19 +216,47 @@ defmodule Selecto.ExactTenantCompareTest do
       |> elem(0)
     end
 
-    test "every mechanism compares the scope column by its bytes" do
+    test "every host mechanism compares the scope column by its bytes at any depth" do
       exact =
         "(selecto_root.org_key = ? AND CAST(CONVERT(selecto_root.org_key USING utf8mb4) AS BINARY) = CAST(? AS BINARY))"
 
-      for {domain, fun} <- [
-            {host_domain([{"org_key", "t1"}]), & &1},
-            {host_domain(), &Selecto.Tenant.require_tenant_filter(&1, "org_key", "t1")},
-            {host_domain(), &Selecto.filter(&1, [{"org_key", "t1"}])},
-            {host_domain(), &Selecto.with_tenant(&1, %{required_filters: [{"org_key", "t1"}]})}
+      shapes = [
+        {"org_key", "t1"},
+        {:or, [{"org_key", "t1"}, {"org_key", "zz"}]},
+        {:and, [{"id", {:gte, 0}}, {:or, [{"org_key", "t1"}, {"org_key", "zz"}]}]},
+        {:or, [{"org_key", "t1"}, {"id", {:lt, 0}}]},
+        {:not, {"org_key", {"!=", "t1"}}},
+        {:not, {"org_key", {:not_in, ["t1"]}}}
+      ]
+
+      for shape <- shapes,
+          {domain, fun} <- [
+            {host_domain([shape]), & &1},
+            {host_domain(), &Selecto.Tenant.require_tenant_filter(&1, shape)},
+            {host_domain(), &Selecto.with_tenant(&1, %{required_filters: [shape]})}
           ] do
-        assert host_sql(domain, ExactAdapter, fun) =~ exact
+        sql = host_sql(domain, ExactAdapter, fun)
+
+        assert sql =~ exact or
+                 sql =~ "(selecto_root.org_key IN (?) AND CAST(CONVERT(selecto_root.org_key",
+               inspect(shape)
+
         refute host_sql(domain, SelectoDBSQLite.Adapter, fun) =~ "BINARY"
       end
+
+      # The caller's own filter is not host scope.
+      refute host_sql(host_domain(), ExactAdapter, &Selecto.filter(&1, [{"org_key", "t1"}])) =~
+               "BINARY"
+    end
+
+    test "a host predicate on a non-text column keeps the plain comparison" do
+      domain =
+        put_in(host_domain([{"at", {"!=", "2024-01-01 10:00:00"}}]), [:source, :columns, :at], %{
+          type: :naive_datetime
+        })
+        |> update_in([:source, :fields], &(&1 ++ [:at]))
+
+      refute host_sql(domain, ExactAdapter, & &1) =~ "BINARY"
     end
 
     test "a trusted context's required filters apply without a tenant_id" do
@@ -241,5 +269,67 @@ defmodule Selecto.ExactTenantCompareTest do
 
       assert sql =~ "org_key"
     end
+  end
+
+  test "a through target scope key the target does not declare is refused at configure" do
+    domain = %{
+      name: "Th",
+      source:
+        relation(
+          "items",
+          [id: :integer, tenant_key: :string],
+          %{
+            th: %{
+              queryable: :acc,
+              field: :th,
+              owner_key: :id,
+              related_key: :id,
+              cardinality: :many,
+              through: %{
+                table: "bridge",
+                owner_key: :item_id,
+                related_key: :acc_id,
+                source_scope_key: :tenant_key,
+                through_scope_key: :org_key,
+                target_scope_key: :org_key
+              }
+            }
+          },
+          :tenant_key
+        ),
+      schemas: %{acc: relation("acc", [id: :integer, label: :string], %{}, nil)},
+      joins: %{th: %{type: :left, name: "th"}}
+    }
+
+    assert_raise ArgumentError, ~r/target scope field :org_key is not declared/, fn ->
+      Selecto.configure(
+        domain,
+        Selecto.Runtime.Context.new(SelectoDBSQLite.Adapter, :compile_only),
+        validate: false
+      )
+    end
+  end
+
+  test "a trusted context whose required filters exclude its tenant is a typed mismatch" do
+    domain = %{
+      name: "S",
+      source: relation("s", [id: :integer, tenant_id: :integer], %{}, :tenant_id),
+      schemas: %{},
+      joins: %{}
+    }
+
+    selecto =
+      Selecto.configure(
+        domain,
+        Selecto.Runtime.Context.new(SelectoDBSQLite.Adapter, :compile_only),
+        validate: false
+      )
+
+    error =
+      assert_raise Selecto.PolicyViolation, fn ->
+        Selecto.with_tenant(selecto, %{tenant_id: 1, required_filters: [{"tenant_id", 2}]})
+      end
+
+    assert error.type == :tenant_scope_mismatch
   end
 end

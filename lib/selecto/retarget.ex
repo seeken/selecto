@@ -497,10 +497,25 @@ defmodule Selecto.Retarget do
     through = association |> Map.get(:through) |> then(&if(is_map(&1), do: &1, else: %{}))
     fields = relation |> Map.get(:fields, []) |> List.wrap() |> Enum.map(&to_string/1)
 
-    [Map.get(association, :target_scope_key), Map.get(through, :target_scope_key)]
-    |> Enum.reject(&is_nil/1)
-    |> Enum.uniq_by(&to_string/1)
-    |> Enum.filter(&(to_string(&1) in fields and to_string(&1) != to_string(primary_key)))
+    keys =
+      [Map.get(association, :target_scope_key), Map.get(through, :target_scope_key)]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq_by(&to_string/1)
+      |> Enum.reject(&(to_string(&1) == to_string(primary_key)))
+
+    # A scope key the target does not expose cannot identify its rows: refuse
+    # rather than fall back to the key alone.
+    case Enum.reject(keys, &(to_string(&1) in fields)) do
+      [] ->
+        keys
+
+      missing ->
+        fail!(
+          :invalid_retarget,
+          "the retarget target must expose the scope keys that confine it",
+          scope_keys: Enum.map(missing, &to_string/1)
+        )
+    end
   end
 
   defp target_scope_keys(_hop, _primary_key), do: []
