@@ -60,13 +60,15 @@ defmodule Selecto.Error do
   }
 
   # Adapter categories without a portable SQLSTATE: a value that does not fit
-  # its column, a lock wait that timed out, and a session whose settings the
-  # adapter refuses (MySQL family).
+  # its column, a lock wait that timed out, a session whose settings the
+  # adapter refuses, and a stored temporal value outside years 1-9999
+  # (MySQL family).
   @driver_categories [
     :database_error,
     :data_violation,
     :lock_timeout,
-    :invalid_session | Map.values(@sqlstate_categories)
+    :invalid_session,
+    :datetime_field_overflow | Map.values(@sqlstate_categories)
   ]
   @recoverable_categories [:unique_violation, :foreign_key_violation, :not_null_violation]
 
