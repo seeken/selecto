@@ -107,8 +107,8 @@ defmodule Selecto.Builder.Sql.Where do
     query_iodata = selecto_subquery_to_iodata(query_selecto)
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     in_subquery_clause(selecto, conf, field, sel, in_subquery_fragment(query_iodata), fn ->
-       exact_subquery_iodata(query_selecto)
+     in_subquery_clause(selecto, conf, field, sel, in_subquery_fragment(query_iodata), fn mode ->
+       exact_subquery_iodata(query_selecto, mode)
      end), param}
   end
 
@@ -700,9 +700,10 @@ defmodule Selecto.Builder.Sql.Where do
 
   # A tenant/site column on an exact-compare adapter (MySQL, MariaDB) matches
   # its stored bytes, not its collation (Selecto.Builder.ExactCompare).
-  defp build_list_clause(_selecto, selector, typed_values, negate?, true) do
+  defp build_list_clause(_selecto, selector, typed_values, negate?, mode)
+       when mode in [true, :bytes] do
     placeholders = Enum.map(typed_values, fn value -> {:param, value} end)
-    clause = ExactCompare.in_list(selector, placeholders, true)
+    clause = ExactCompare.in_list(selector, placeholders, mode)
 
     if negate?, do: [" NOT ", clause, " "], else: [" ", clause, " "]
   end
@@ -1090,8 +1091,8 @@ defmodule Selecto.Builder.Sql.Where do
   # every other adapter, renders exactly as before.
   defp comparison_clause(selecto, conf, field, sel, operator, right)
        when operator in ["=", "!="] do
-    if exact?(selecto, conf, field) do
-      exact = ExactCompare.eq(sel, right, true)
+    if mode = exact?(selecto, conf, field) do
+      exact = ExactCompare.eq(sel, right, mode)
       if operator == "=", do: [" ", exact, " "], else: [" NOT ", exact, " "]
     else
       [" ", sel, " ", operator, " ", right, " "]
@@ -1105,17 +1106,25 @@ defmodule Selecto.Builder.Sql.Where do
   # prebuilt subquery (nil) compares its own values as bytes, which matches
   # utf8mb4 columns and refuses rows of other character sets (fails closed).
   defp in_subquery_clause(selecto, conf, field, sel, fragment, bytes_fun) do
-    if exact?(selecto, conf, field) do
-      bytes = if bytes_fun, do: bytes_fun.(), else: fragment
-      [" ", ExactCompare.in_subquery(sel, fragment, bytes, true), " "]
+    if mode = exact?(selecto, conf, field) do
+      bytes = if bytes_fun, do: bytes_fun.(mode), else: fragment
+      [" ", ExactCompare.in_subquery(sel, fragment, bytes, mode), " "]
     else
       [" ", sel, " in ", fragment, " "]
     end
   end
 
+  # The exact mode of a tenant/site column: by the field's own declared type
+  # when it has one, else by the name's declarations across the domain.
   defp exact?(selecto, conf, field) do
-    ExactCompare.enabled?(selecto) and
-      ExactCompare.exact_name?(Map.get(selecto, :domain), column_name(conf, field))
+    with true <- ExactCompare.enabled?(selecto),
+         mode when mode != false <-
+           ExactCompare.exact_name?(Map.get(selecto, :domain), column_name(conf, field)) do
+      case conf do
+        %{type: type} when not is_nil(type) -> ExactCompare.type_mode(type)
+        _ -> mode
+      end
+    end
   end
 
   defp column_name(conf, field) when is_map(conf),
@@ -1262,14 +1271,15 @@ defmodule Selecto.Builder.Sql.Where do
   @doc false
   # The subquery selecting the utf8mb4 bytes of a single-column Selecto
   # subquery (Selecto.Builder.ExactCompare.bytes_subquery/2).
-  def exact_subquery_iodata(%Selecto{} = query_selecto) do
+  def exact_subquery_iodata(%Selecto{} = query_selecto, mode \\ true) do
     {sql, _aliases, params} = Selecto.gen_sql(query_selecto, unique_projection_aliases: true)
     sql = rewrite_subquery_root_alias(sql, build_subquery_root_alias(query_selecto))
     iodata = Selecto.SQL.Params.rebind_finalized(sql, params, query_selecto.adapter)
 
     ExactCompare.bytes_subquery(
       ["(", iodata, ")"],
-      Selecto.Builder.Sql.projection_alias(1)
+      Selecto.Builder.Sql.projection_alias(1),
+      mode
     )
   end
 

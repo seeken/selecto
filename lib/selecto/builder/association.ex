@@ -5,11 +5,21 @@ defmodule Selecto.Builder.Association do
 
   # Association predicates are domain-owned. Keep policy values bound while
   # sharing exactly the same relation boundary for flat joins and collections.
-  def predicate(selecto, association, target_alias, source_alias) do
+  #
+  # `relations` names the source and target relations (`:source`, `:target`)
+  # so that scope-key pairs are compared by each column's declared type
+  # (Selecto.Builder.ExactCompare.pair?/3); a missing relation counts as
+  # undeclared, i.e. text.
+  def predicate(selecto, association, target_alias, source_alias, relations \\ %{}) do
+    relations =
+      Map.put_new_lazy(relations, :target, fn ->
+        target_relation(selecto, value(association, :queryable))
+      end)
+
     key =
       case value(association, :through) do
         through when is_map(through) ->
-          bridge(selecto, association, through, target_alias, source_alias)
+          bridge(selecto, association, through, target_alias, source_alias, relations)
 
         _ ->
           equality(
@@ -23,15 +33,15 @@ defmodule Selecto.Builder.Association do
 
     conditions =
       [key] ++
-        direct_scope(selecto, association, target_alias, source_alias) ++
-        tenant_scope(selecto, association, target_alias, source_alias) ++
+        direct_scope(selecto, association, target_alias, source_alias, relations) ++
+        tenant_scope(selecto, association, target_alias, source_alias, relations) ++
         carried(selecto, value(association, :carry_tenant_field), target_alias) ++
         policies(selecto, target_alias, value(association, :where, %{}))
 
     Enum.intersperse(conditions, " AND ")
   end
 
-  defp bridge(selecto, association, through, target_alias, source_alias) do
+  defp bridge(selecto, association, through, target_alias, source_alias, relations) do
     bridge_alias = target_alias <> "_bridge"
     target_key = column(selecto, target_alias, value(association, :related_key))
 
@@ -59,7 +69,14 @@ defmodule Selecto.Builder.Association do
         ),
         [column(selecto, bridge_alias, value(through, :related_key)), " = ", target_key]
       ] ++
-        bridge_scope(selecto, through, bridge_alias, target_alias, source_alias) ++
+        bridge_scope(
+          selecto,
+          through,
+          bridge_alias,
+          target_alias,
+          source_alias,
+          Map.put(relations, :bridge, ExactCompare.relation_for_table(selecto, table))
+        ) ++
         policies(selecto, bridge_alias, value(through, :where, %{}))
 
     [
@@ -89,13 +106,19 @@ defmodule Selecto.Builder.Association do
     end
   end
 
-  defp direct_scope(selecto, association, target_alias, source_alias) do
+  defp direct_scope(selecto, association, target_alias, source_alias, relations) do
     case {value(association, :source_scope_key), value(association, :target_scope_key)} do
       {nil, nil} ->
         []
 
       {source, target} when not is_nil(source) and not is_nil(target) ->
-        [equality(selecto, target_alias, target, source_alias, source)]
+        [
+          scope_equality(
+            selecto,
+            {target_alias, relations[:target], target},
+            {source_alias, relations[:source], source}
+          )
+        ]
 
       _ ->
         raise ArgumentError,
@@ -106,10 +129,19 @@ defmodule Selecto.Builder.Association do
   # The tenant pair resolved by Selecto.Schema.Join.association_boundary!/5
   # whenever both relations declare tenant_field. It is ANDed in addition to any
   # authored scope keys, for direct and through associations alike.
-  defp tenant_scope(selecto, association, target_alias, source_alias) do
+  defp tenant_scope(selecto, association, target_alias, source_alias, relations) do
     case value(association, :tenant_scope) do
-      nil -> []
-      {source, target} -> [equality(selecto, target_alias, target, source_alias, source)]
+      nil ->
+        []
+
+      {source, target} ->
+        [
+          scope_equality(
+            selecto,
+            {target_alias, relations[:target], target},
+            {source_alias, relations[:source], source}
+          )
+        ]
     end
   end
 
@@ -149,19 +181,22 @@ defmodule Selecto.Builder.Association do
         ExactCompare.eq(
           column(selecto, target_alias, field),
           column(selecto, "selecto_root", column),
-          ExactCompare.column?(selecto, field) or ExactCompare.column?(selecto, column)
+          ExactCompare.strongest([
+            ExactCompare.column?(selecto, field),
+            ExactCompare.column?(selecto, column)
+          ])
         )
 
       match?({:ok, _}, Selecto.Retarget.origin_column_query(selecto, field)) ->
         {:ok, query} = Selecto.Retarget.origin_column_query(selecto, field)
 
-        exact? = ExactCompare.column?(selecto, field)
+        mode = ExactCompare.column?(selecto, field)
 
         ExactCompare.in_subquery(
           column(selecto, target_alias, field),
           ["(", Selecto.Builder.Sql.Where.subquery_iodata(query), ")"],
-          if(exact?, do: Selecto.Builder.Sql.Where.exact_subquery_iodata(query)),
-          exact?
+          if(mode, do: Selecto.Builder.Sql.Where.exact_subquery_iodata(query, mode)),
+          mode
         )
 
       true ->
@@ -173,7 +208,7 @@ defmodule Selecto.Builder.Association do
     end
   end
 
-  defp bridge_scope(selecto, through, bridge_alias, target_alias, source_alias) do
+  defp bridge_scope(selecto, through, bridge_alias, target_alias, source_alias, relations) do
     case {value(through, :source_scope_key), value(through, :through_scope_key),
           value(through, :target_scope_key)} do
       {nil, nil, nil} ->
@@ -182,8 +217,16 @@ defmodule Selecto.Builder.Association do
       {source, bridge, target}
       when not is_nil(source) and not is_nil(bridge) and not is_nil(target) ->
         [
-          equality(selecto, bridge_alias, bridge, source_alias, source),
-          equality(selecto, target_alias, target, source_alias, source)
+          scope_equality(
+            selecto,
+            {bridge_alias, relations[:bridge], bridge},
+            {source_alias, relations[:source], source}
+          ),
+          scope_equality(
+            selecto,
+            {target_alias, relations[:target], target},
+            {source_alias, relations[:source], source}
+          )
         ]
 
       _ ->
@@ -221,8 +264,50 @@ defmodule Selecto.Builder.Association do
       ExactCompare.eq(
         column(selecto, left_alias, left),
         column(selecto, right_alias, right),
-        ExactCompare.column?(selecto, left) or ExactCompare.column?(selecto, right)
+        ExactCompare.strongest([
+          ExactCompare.column?(selecto, left),
+          ExactCompare.column?(selecto, right)
+        ])
       )
+
+  # A scope-key pair decides tenant identity: exact on MySQL and MariaDB when
+  # either column may hold text by its own declared type, or names a tenant
+  # column (Selecto.Builder.ExactCompare.pair?/3).
+  defp scope_equality(
+         selecto,
+         {left_alias, left_relation, left},
+         {right_alias, right_relation, right}
+       ),
+       do:
+         ExactCompare.eq(
+           column(selecto, left_alias, left),
+           column(selecto, right_alias, right),
+           ExactCompare.strongest([
+             ExactCompare.column?(selecto, left),
+             ExactCompare.column?(selecto, right),
+             ExactCompare.pair?(selecto, {left_relation, left}, {right_relation, right})
+           ])
+         )
+
+  defp target_relation(selecto, queryable) do
+    schemas = selecto |> Map.get(:domain, %{}) |> Kernel.||(%{}) |> value(:schemas, %{})
+
+    case queryable do
+      nil -> nil
+      key when is_map(schemas) -> Map.get(schemas, key) || value(schemas, key_atom(key))
+      _ -> nil
+    end
+  end
+
+  defp key_atom(key) when is_atom(key), do: key
+
+  defp key_atom(key) when is_binary(key) do
+    String.to_existing_atom(key)
+  rescue
+    ArgumentError -> nil
+  end
+
+  defp key_atom(_key), do: nil
 
   defp column(selecto, alias_name, field) when is_atom(field) or is_binary(field),
     do: [to_string(alias_name), ".", selecto.adapter.quote_identifier(to_string(field))]

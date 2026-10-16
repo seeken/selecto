@@ -1260,7 +1260,8 @@ defmodule Selecto.Builder.Sql do
             selecto,
             association,
             to_string(join),
-            to_string(config.requires_join)
+            to_string(config.requires_join),
+            join_relations(selecto, config)
           )
 
         nil ->
@@ -1295,8 +1296,10 @@ defmodule Selecto.Builder.Sql do
           ExactCompare.eq(
             build_selector_string(selecto, join, config.my_key),
             owner_sql,
-            ExactCompare.column?(selecto, config.my_key) or
+            ExactCompare.strongest([
+              ExactCompare.column?(selecto, config.my_key),
               ExactCompare.column?(selecto, config.owner_key)
+            ])
           )
       end
 
@@ -1345,11 +1348,36 @@ defmodule Selecto.Builder.Sql do
           ExactCompare.eq(
             build_selector_string(selecto, config.requires_join, source_tenant),
             build_selector_string(selecto, join, target_tenant),
-            ExactCompare.column?(selecto, source_tenant) or
-              ExactCompare.column?(selecto, target_tenant)
+            scope_pair_exact?(selecto, config, source_tenant, target_tenant)
           )
         ]
     end
+  end
+
+  # The relations of a join edge: its parent (`from_source`) and the relation
+  # its table holds; either may be unknown (nil, counted as undeclared).
+  defp join_relations(selecto, config) do
+    %{
+      source: Map.get(config, :from_source),
+      target: ExactCompare.relation_for_table(selecto, Map.get(config, :source))
+    }
+  end
+
+  # A scope-key or tenant pair decides tenant identity: exact on MySQL and
+  # MariaDB when either column names a tenant column or may hold text by its
+  # own declared type (Selecto.Builder.ExactCompare.pair?/3).
+  defp scope_pair_exact?(selecto, config, source_field, target_field) do
+    relations = join_relations(selecto, config)
+
+    ExactCompare.strongest([
+      ExactCompare.column?(selecto, source_field),
+      ExactCompare.column?(selecto, target_field),
+      ExactCompare.pair?(
+        selecto,
+        {relations.source, source_field},
+        {relations.target, target_field}
+      )
+    ])
   end
 
   defp append_scope_keys_to_on_clause(base_on, selecto, join, config) do
@@ -1365,8 +1393,7 @@ defmodule Selecto.Builder.Sql do
           ExactCompare.eq(
             build_selector_string(selecto, config.requires_join, source_scope_key),
             build_selector_string(selecto, join, target_scope_key),
-            ExactCompare.column?(selecto, source_scope_key) or
-              ExactCompare.column?(selecto, target_scope_key)
+            scope_pair_exact?(selecto, config, source_scope_key, target_scope_key)
           )
         ]
 
@@ -1449,9 +1476,10 @@ defmodule Selecto.Builder.Sql do
       selector = build_selector_string(selecto, join, field)
       placeholders = Enum.map(values, fn value -> {:param, value} end)
 
-      if ExactCompare.column?(selecto, field),
-        do: ExactCompare.in_list(selector, placeholders, true),
-        else: [selector, " in (", Enum.intersperse(placeholders, ", "), ")"]
+      case ExactCompare.column?(selecto, field) do
+        false -> [selector, " in (", Enum.intersperse(placeholders, ", "), ")"]
+        mode -> ExactCompare.in_list(selector, placeholders, mode)
+      end
     end
   end
 

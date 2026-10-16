@@ -1128,7 +1128,13 @@ defmodule Selecto.Builder.Subselect do
         )
       )
 
-    Selecto.Builder.Association.predicate(selecto, association, target_alias, source_alias)
+    Selecto.Builder.Association.predicate(
+      selecto,
+      association,
+      target_alias,
+      source_alias,
+      %{source: source_relation, target: target_relation}
+    )
   end
 
   # A many-to-many `join_through` association correlates through its join
