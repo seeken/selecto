@@ -332,4 +332,33 @@ defmodule Selecto.ExactTenantCompareTest do
 
     assert error.type == :tenant_scope_mismatch
   end
+
+  test "type names classify three ways after normalising" do
+    alias Selecto.Builder.ExactCompare
+
+    for text <- [
+          :string,
+          "TEXT",
+          "varchar(255)",
+          "char(16)",
+          "character varying(40)",
+          "char varying",
+          "national varchar",
+          "national character varying",
+          "NVARCHAR",
+          "citext",
+          "longtext",
+          "varchar(16) character set utf8mb4 collate utf8mb4_bin",
+          {:parameterized, {Ecto.Enum, %{}}}
+        ],
+        do: assert(ExactCompare.type_mode(text) == true, inspect(text))
+
+    for plain <- [:integer, :decimal, "DECIMAL(10,2)", :naive_datetime, :time_usec, :map, :binary],
+        do: assert(ExactCompare.type_mode(plain) == false, inspect(plain))
+
+    # Names that merely contain "char" or "text", custom types, uuid and
+    # undeclared columns are guarded (server-decided).
+    for guarded <- [nil, "charge_amount", "context_ts", "texture", :uuid, :"Elixir.MyApp.Key"],
+        do: assert(ExactCompare.type_mode(guarded) == :server, inspect(guarded))
+  end
 end

@@ -14,9 +14,12 @@
 - Column types are classified three ways, after normalising the type name
   (lowercase; strip any `(...)` suffix and any charset or collate clause;
   Ecto parameterized types and Ecto.Enum are recognised).
-  - Known text compares by converted bytes: string, text, char, varchar,
-    character varying, citext, enum and anything containing "char" or
-    "text".
+  - Known text compares by converted bytes. The normalised names are:
+    string; text, tinytext, mediumtext and longtext; char, character,
+    nchar, national char and national character; varchar, char varying,
+    character varying, nvarchar and national varchar; citext; clob; enum;
+    set. A name that merely contains "char" or "text" (`charge_amount`,
+    `context_ts`) is guarded, not text.
   - Known non-text compares plainly: numeric, boolean, temporal, json/map
     and binary types.
   - Everything else is guarded, and the server decides: undeclared columns,
