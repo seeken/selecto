@@ -12,6 +12,7 @@ defmodule Selecto.Builder.Sql.Where do
 
   alias Selecto.AdapterSQL
   alias Selecto.AdapterSupport
+  alias Selecto.Builder.ExactCompare
   alias Selecto.Builder.Sql.Select
   alias Selecto.Dialect.DateTime.Operation, as: DateTimeOperation
   alias Selecto.Dialect.Text.Normalization, as: TextNormalization
@@ -106,7 +107,9 @@ defmodule Selecto.Builder.Sql.Where do
     query_iodata = selecto_subquery_to_iodata(query_selecto)
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     [" ", sel, " in ", in_subquery_fragment(query_iodata), " "], param}
+     in_subquery_clause(selecto, conf, field, sel, in_subquery_fragment(query_iodata), fn ->
+       exact_subquery_iodata(query_selecto)
+     end), param}
   end
 
   def build(selecto, {field, {:subquery, :in, query, params}}) do
@@ -115,7 +118,8 @@ defmodule Selecto.Builder.Sql.Where do
     query_iodata = Selecto.SQL.Params.rebind_finalized(query, params, selecto.adapter)
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     [" ", sel, " in ", in_subquery_fragment(query_iodata), " "], param ++ params}
+     in_subquery_clause(selecto, conf, field, sel, in_subquery_fragment(query_iodata), nil),
+     param ++ params}
   end
 
   def build(selecto, {field, {:subquery, :in, query}}) do
@@ -123,7 +127,7 @@ defmodule Selecto.Builder.Sql.Where do
     {sel, join, param} = Select.prep_selector(selecto, field)
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     [" ", sel, " in ", in_subquery_fragment(query), " "], param}
+     in_subquery_clause(selecto, conf, field, sel, in_subquery_fragment(query), nil), param}
   end
 
   def build(selecto, {field, comp, {:subquery, agg, %Selecto{} = query_selecto}})
@@ -358,7 +362,7 @@ defmodule Selecto.Builder.Sql.Where do
       end
 
     {List.wrap(conf.requires_join) ++ List.wrap(join) ++ List.wrap(ref_join),
-     [" ", sel, " ", sql_op, " ", ref_sel, " "], param ++ ref_params}
+     comparison_clause(selecto, conf, field, sel, sql_op, ref_sel), param ++ ref_params}
   end
 
   def build(selecto, {field, {comp, {:ref, ref_field}}}) when comp in ~w[= != < > <= >=] do
@@ -367,7 +371,7 @@ defmodule Selecto.Builder.Sql.Where do
     {ref_sel, ref_join, ref_params} = Select.prep_selector(selecto, {:ref, ref_field})
 
     {List.wrap(conf.requires_join) ++ List.wrap(join) ++ List.wrap(ref_join),
-     [" ", sel, " ", comp, " ", ref_sel, " "], param ++ ref_params}
+     comparison_clause(selecto, conf, field, sel, comp, ref_sel), param ++ ref_params}
   end
 
   def build(selecto, {field, {:not_like, value}}) do
@@ -409,7 +413,8 @@ defmodule Selecto.Builder.Sql.Where do
       end
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     [" ", sel, " ", sql_op, " ", {:param, to_field_value(conf, value)}, " "], param}
+     comparison_clause(selecto, conf, field, sel, sql_op, {:param, to_field_value(conf, value)}),
+     param}
   end
 
   def build(selecto, {field, {comp, value}}) when comp in ~w[= != < > <= >=] do
@@ -417,7 +422,8 @@ defmodule Selecto.Builder.Sql.Where do
     {sel, join, param} = Select.prep_selector(selecto, field)
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     [" ", sel, " ", comp, " ", {:param, to_field_value(conf, value)}, " "], param}
+     comparison_clause(selecto, conf, field, sel, comp, {:param, to_field_value(conf, value)}),
+     param}
   end
 
   # Structured-value path with :in operator.
@@ -432,7 +438,9 @@ defmodule Selecto.Builder.Sql.Where do
         conf = field_conf(selecto, field)
         {sel, join, param} = Select.prep_selector(selecto, field)
         typed_values = Enum.map(list, fn i -> to_field_value(conf, i) end)
-        in_clause = build_list_clause(selecto, sel, typed_values, false)
+
+        in_clause =
+          build_list_clause(selecto, sel, typed_values, false, exact?(selecto, conf, field))
 
         {List.wrap(conf.requires_join) ++ List.wrap(join), in_clause, param}
     end
@@ -443,7 +451,7 @@ defmodule Selecto.Builder.Sql.Where do
     {sel, join, param} = Select.prep_selector(selecto, field)
 
     typed_values = Enum.map(list, fn i -> to_field_value(conf, i) end)
-    in_clause = build_list_clause(selecto, sel, typed_values, false)
+    in_clause = build_list_clause(selecto, sel, typed_values, false, exact?(selecto, conf, field))
 
     {List.wrap(conf.requires_join) ++ List.wrap(join), in_clause, param}
   end
@@ -453,7 +461,9 @@ defmodule Selecto.Builder.Sql.Where do
     {sel, join, param} = Select.prep_selector(selecto, field)
 
     typed_values = Enum.map(list, fn i -> to_field_value(conf, i) end)
-    not_in_clause = build_list_clause(selecto, sel, typed_values, true)
+
+    not_in_clause =
+      build_list_clause(selecto, sel, typed_values, true, exact?(selecto, conf, field))
 
     {List.wrap(conf.requires_join) ++ List.wrap(join), not_in_clause, param}
   end
@@ -463,7 +473,7 @@ defmodule Selecto.Builder.Sql.Where do
     {sel, join, param} = Select.prep_selector(selecto, field)
 
     typed_values = Enum.map(list, fn i -> to_field_value(conf, i) end)
-    in_clause = build_list_clause(selecto, sel, typed_values, false)
+    in_clause = build_list_clause(selecto, sel, typed_values, false, exact?(selecto, conf, field))
 
     {List.wrap(conf.requires_join) ++ List.wrap(join), in_clause, param}
   end
@@ -491,7 +501,7 @@ defmodule Selecto.Builder.Sql.Where do
     {ref_sel, ref_join, ref_params} = Select.prep_selector(selecto, {:ref, ref_field})
 
     {List.wrap(conf.requires_join) ++ List.wrap(join) ++ List.wrap(ref_join),
-     [" ", sel, " = ", ref_sel, " "], param ++ ref_params}
+     comparison_clause(selecto, conf, field, sel, "=", ref_sel), param ++ ref_params}
   end
 
   # Handle array filter specifications (must come before generic {field, value})
@@ -641,7 +651,8 @@ defmodule Selecto.Builder.Sql.Where do
         {sel, join, param} = Select.prep_selector(selecto, field)
 
         {List.wrap(conf.requires_join) ++ List.wrap(join),
-         [" ", sel, " = ", {:param, to_field_value(conf, value)}, " "], param}
+         comparison_clause(selecto, conf, field, sel, "=", {:param, to_field_value(conf, value)}),
+         param}
     end
   end
 
@@ -650,7 +661,8 @@ defmodule Selecto.Builder.Sql.Where do
     {sel, join, param} = Select.prep_selector(selecto, field)
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     [" ", sel, " = ", {:param, to_field_value(conf, value)}, " "], param}
+     comparison_clause(selecto, conf, field, sel, "=", {:param, to_field_value(conf, value)}),
+     param}
   end
 
   def build(_sel, other) do
@@ -686,7 +698,16 @@ defmodule Selecto.Builder.Sql.Where do
     raise "WHERE clause builder error: Unrecognized filter structure (type: #{type_name}). This usually means an aggregate or filter configuration is generating an invalid filter format."
   end
 
-  defp build_list_clause(selecto, selector, typed_values, negate?) do
+  # A tenant/site column on an exact-compare adapter (MySQL, MariaDB) matches
+  # its stored bytes, not its collation (Selecto.Builder.ExactCompare).
+  defp build_list_clause(_selecto, selector, typed_values, negate?, true) do
+    placeholders = Enum.map(typed_values, fn value -> {:param, value} end)
+    clause = ExactCompare.in_list(selector, placeholders, true)
+
+    if negate?, do: [" NOT ", clause, " "], else: [" ", clause, " "]
+  end
+
+  defp build_list_clause(selecto, selector, typed_values, negate?, _exact?) do
     if AdapterSQL.array_any_comparison?(selecto) do
       if negate? do
         [" NOT (", selector, " = ANY(", {:param, typed_values}, ")) "]
@@ -824,7 +845,8 @@ defmodule Selecto.Builder.Sql.Where do
       end
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     [" ", sel, " ", sql_op, " ", {:param, to_field_value(conf, value)}, " "], param}
+     comparison_clause(selecto, conf, field, sel, sql_op, {:param, to_field_value(conf, value)}),
+     param}
   end
 
   defp get_root_alias(selecto) do
@@ -1063,6 +1085,44 @@ defmodule Selecto.Builder.Sql.Where do
   defp expression_predicate_sql(expression, value),
     do: [expression, " = ", {:param, value}]
 
+  # Equality and inequality on a tenant/site column of an exact-compare adapter
+  # (MySQL, MariaDB) decide on the stored bytes; every other comparison, and
+  # every other adapter, renders exactly as before.
+  defp comparison_clause(selecto, conf, field, sel, operator, right)
+       when operator in ["=", "!="] do
+    if exact?(selecto, conf, field) do
+      exact = ExactCompare.eq(sel, right, true)
+      if operator == "=", do: [" ", exact, " "], else: [" NOT ", exact, " "]
+    else
+      [" ", sel, " ", operator, " ", right, " "]
+    end
+  end
+
+  defp comparison_clause(_selecto, _conf, _field, sel, operator, right),
+    do: [" ", sel, " ", operator, " ", right, " "]
+
+  # `bytes_fun` builds the subquery selecting its column's utf8mb4 bytes; a
+  # prebuilt subquery (nil) compares its own values as bytes, which matches
+  # utf8mb4 columns and refuses rows of other character sets (fails closed).
+  defp in_subquery_clause(selecto, conf, field, sel, fragment, bytes_fun) do
+    if exact?(selecto, conf, field) do
+      bytes = if bytes_fun, do: bytes_fun.(), else: fragment
+      [" ", ExactCompare.in_subquery(sel, fragment, bytes, true), " "]
+    else
+      [" ", sel, " in ", fragment, " "]
+    end
+  end
+
+  defp exact?(selecto, conf, field) do
+    ExactCompare.enabled?(selecto) and
+      ExactCompare.exact_name?(Map.get(selecto, :domain), column_name(conf, field))
+  end
+
+  defp column_name(conf, field) when is_map(conf),
+    do: conf |> Map.get(:field) |> Kernel.||(extract_database_field(field, conf)) |> to_string()
+
+  defp column_name(_conf, field), do: to_string(field)
+
   defp field_conf(selecto, field) do
     case fast_config_column(selecto, field) do
       nil -> Selecto.field(selecto, field)
@@ -1197,6 +1257,20 @@ defmodule Selecto.Builder.Sql.Where do
 
     sql = rewrite_subquery_root_alias(sql, build_subquery_root_alias(query_selecto))
     Selecto.SQL.Params.rebind_finalized(sql, params, query_selecto.adapter)
+  end
+
+  @doc false
+  # The subquery selecting the utf8mb4 bytes of a single-column Selecto
+  # subquery (Selecto.Builder.ExactCompare.bytes_subquery/2).
+  def exact_subquery_iodata(%Selecto{} = query_selecto) do
+    {sql, _aliases, params} = Selecto.gen_sql(query_selecto, unique_projection_aliases: true)
+    sql = rewrite_subquery_root_alias(sql, build_subquery_root_alias(query_selecto))
+    iodata = Selecto.SQL.Params.rebind_finalized(sql, params, query_selecto.adapter)
+
+    ExactCompare.bytes_subquery(
+      ["(", iodata, ")"],
+      Selecto.Builder.Sql.projection_alias(1)
+    )
   end
 
   defp build_subquery_root_alias(query_selecto) do

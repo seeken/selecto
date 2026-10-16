@@ -1,6 +1,8 @@
 defmodule Selecto.Builder.Association do
   @moduledoc false
 
+  alias Selecto.Builder.ExactCompare
+
   # Association predicates are domain-owned. Keep policy values bound while
   # sharing exactly the same relation boundary for flat joins and collections.
   def predicate(selecto, association, target_alias, source_alias) do
@@ -144,17 +146,23 @@ defmodule Selecto.Builder.Association do
         []
 
       column = Selecto.Tenant.source_tenant_column(selecto, field) ->
-        [column(selecto, target_alias, field), " = ", column(selecto, "selecto_root", column)]
+        ExactCompare.eq(
+          column(selecto, target_alias, field),
+          column(selecto, "selecto_root", column),
+          ExactCompare.column?(selecto, field) or ExactCompare.column?(selecto, column)
+        )
 
       match?({:ok, _}, Selecto.Retarget.origin_column_query(selecto, field)) ->
         {:ok, query} = Selecto.Retarget.origin_column_query(selecto, field)
 
-        [
+        exact? = ExactCompare.column?(selecto, field)
+
+        ExactCompare.in_subquery(
           column(selecto, target_alias, field),
-          " IN (",
-          Selecto.Builder.Sql.Where.subquery_iodata(query),
-          ")"
-        ]
+          ["(", Selecto.Builder.Sql.Where.subquery_iodata(query), ")"],
+          if(exact?, do: Selecto.Builder.Sql.Where.exact_subquery_iodata(query)),
+          exact?
+        )
 
       true ->
         raise Selecto.PolicyViolation,
@@ -192,7 +200,11 @@ defmodule Selecto.Builder.Association do
         [column(selecto, alias_name, field), " IS NULL"]
 
       {field, value} when is_binary(value) or is_number(value) or is_boolean(value) ->
-        [column(selecto, alias_name, field), " = ", {:param, value}]
+        ExactCompare.eq(
+          column(selecto, alias_name, field),
+          {:param, value},
+          ExactCompare.column?(selecto, field)
+        )
 
       _ ->
         raise ArgumentError, "association policy requires scalar equality values"
@@ -202,8 +214,15 @@ defmodule Selecto.Builder.Association do
   defp policies(_selecto, _alias_name, _policy),
     do: raise(ArgumentError, "association where policy must be a map")
 
+  # Tenant/site columns pair exactly on MySQL and MariaDB
+  # (Selecto.Builder.ExactCompare); other columns and adapters as before.
   defp equality(selecto, left_alias, left, right_alias, right),
-    do: [column(selecto, left_alias, left), " = ", column(selecto, right_alias, right)]
+    do:
+      ExactCompare.eq(
+        column(selecto, left_alias, left),
+        column(selecto, right_alias, right),
+        ExactCompare.column?(selecto, left) or ExactCompare.column?(selecto, right)
+      )
 
   defp column(selecto, alias_name, field) when is_atom(field) or is_binary(field),
     do: [to_string(alias_name), ".", selecto.adapter.quote_identifier(to_string(field))]
