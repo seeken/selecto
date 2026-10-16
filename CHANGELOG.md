@@ -3,6 +3,11 @@
 
 ## Unreleased
 
+- `:invalid_session` (a MySQL-family session refused by the adapter's
+  per-call check) survives driver-error normalization, so hosts can tell it
+  from other database errors.
+
+
 - MySQL and MariaDB compare tenant and site columns exactly (adapters
   declaring `:exact_tenant_compare`). Under their default case-insensitive
   collations, and PAD SPACE ones, tenant `'t1'` used to match `'T1'` and
