@@ -59,7 +59,13 @@ defmodule Selecto.Error do
     "40P01" => :deadlock_detected
   }
 
-  @driver_categories [:database_error | Map.values(@sqlstate_categories)]
+  # Adapter categories without a portable SQLSTATE: a value that does not fit
+  # its column, and a lock wait that timed out (MySQL family).
+  @driver_categories [
+    :database_error,
+    :data_violation,
+    :lock_timeout | Map.values(@sqlstate_categories)
+  ]
   @recoverable_categories [:unique_violation, :foreign_key_violation, :not_null_violation]
 
   @type t :: %__MODULE__{

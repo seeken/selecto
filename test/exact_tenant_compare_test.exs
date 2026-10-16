@@ -96,4 +96,31 @@ defmodule Selecto.ExactTenantCompareTest do
     refute sqlite_sql =~ "BINARY"
     assert sqlite_params == ["t1", "t1", "t1", "x"]
   end
+
+  test "a rollup without an empty-input total gains it as a UNION ALL branch" do
+    query =
+      domain(:string)
+      |> Selecto.configure(Selecto.Runtime.Context.new(ExactAdapter, :compile_only),
+        validate: false
+      )
+      |> Selecto.select(["name", {:count, "*"}, {:grouping, ["name"]}])
+      |> Selecto.group_by([{:rollup, ["name"]}])
+      |> Selecto.order_by([{"name", :desc}])
+      |> Selecto.limit(2)
+
+    {sql, params} = Selecto.to_sql(query)
+    sql = String.replace(sql, ~r/\s+/, " ")
+
+    assert sql =~ "UNION ALL SELECT"
+
+    assert sql =~
+             "select NULL AS selecto_projection_1, count(*) AS selecto_projection_2, 1 AS selecto_projection_3, count(*) AS selecto_projection_4"
+
+    assert sql =~ "WHERE `selecto_projection_4` = 0) AS `selecto_rollup`"
+
+    assert sql =~
+             "ORDER BY (`selecto_projection_1` IS NULL) DESC, `selecto_projection_1` DESC LIMIT ?"
+
+    assert params == [2]
+  end
 end

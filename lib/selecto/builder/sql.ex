@@ -458,11 +458,21 @@ defmodule Selecto.Builder.Sql do
   defp build_query_iodata_with_joins(selecto, opts) do
     rollup? = Enum.any?(selecto.set.group_by, &match?({:rollup, _}, &1))
 
-    if rollup? and
-         Selecto.AdapterSupport.callback_available?(selecto.adapter, :render_rollup, 2) do
-      selecto.adapter.render_rollup(selecto, opts)
-    else
-      build_standard_query_iodata_with_joins(selecto, opts)
+    cond do
+      rollup? and
+          Selecto.AdapterSupport.callback_available?(selecto.adapter, :render_rollup, 2) ->
+        selecto.adapter.render_rollup(selecto, opts)
+
+      # A native WITH ROLLUP that drops the empty-input grand total gets it
+      # back as a UNION ALL branch (Selecto.Builder.Sql.RollupTotal).
+      rollup? and Selecto.Builder.Sql.RollupTotal.applies?(selecto, opts) ->
+        case Selecto.Builder.Sql.RollupTotal.render(selecto, opts) do
+          :native -> build_standard_query_iodata_with_joins(selecto, opts)
+          rendered -> rendered
+        end
+
+      true ->
+        build_standard_query_iodata_with_joins(selecto, opts)
     end
   end
 

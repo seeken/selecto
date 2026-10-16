@@ -16,6 +16,16 @@
   site column the domain declares and no declaration types it as a non-text
   value. PostgreSQL, SQLite and the other adapters compile byte-identically.
   The bound value is bound twice, in SQL-text order.
+- A native `WITH ROLLUP` returns no row on empty input, where PostgreSQL
+  returns the grand total. Adapters declaring `:rollup_without_empty_total`
+  (MySQL, MariaDB) now get that row from a UNION ALL branch, with dimensions
+  NULL and GROUPING markers all ones. Ordering and LIMIT/OFFSET apply to the
+  union by output position. A rollup whose shape the branch cannot express
+  (expressions over dimensions, windows, subselects, ordering on an unselected
+  value) keeps the native statement.
+- `:data_violation` and `:lock_timeout` are kept as driver error categories.
+
+
 - SQLite now places NULLs as PostgreSQL does: last for an unqualified ASC and
   first for an unqualified DESC. Previously SQLite used its own default, which
   is the reverse. Explicit `:asc_nulls_first`/`:desc_nulls_last` and friends
