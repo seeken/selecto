@@ -264,11 +264,11 @@ defmodule Selecto.Builder.Sql.Where do
          " (",
          build_selector_string(selecto, conf.requires_join, field_name),
          " >= ",
-         {:param, to_field_value(conf, min)},
+         {:param, to_field_value(selecto, conf, min)},
          " and ",
          build_selector_string(selecto, conf.requires_join, field_name),
          " < ",
-         {:param, to_field_value(conf, max)},
+         {:param, to_field_value(selecto, conf, max)},
          ") "
        ], []}
     else
@@ -278,9 +278,9 @@ defmodule Selecto.Builder.Sql.Where do
          " ",
          build_selector_string(selecto, conf.requires_join, field_name),
          " between ",
-         {:param, to_field_value(conf, min)},
+         {:param, to_field_value(selecto, conf, min)},
          " and ",
-         {:param, to_field_value(conf, max)},
+         {:param, to_field_value(selecto, conf, max)},
          " "
        ], []}
     end
@@ -413,8 +413,14 @@ defmodule Selecto.Builder.Sql.Where do
       end
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     comparison_clause(selecto, conf, field, sel, sql_op, {:param, to_field_value(conf, value)}),
-     param}
+     comparison_clause(
+       selecto,
+       conf,
+       field,
+       sel,
+       sql_op,
+       {:param, to_field_value(selecto, conf, value)}
+     ), param}
   end
 
   def build(selecto, {field, {comp, value}}) when comp in ~w[= != < > <= >=] do
@@ -422,8 +428,14 @@ defmodule Selecto.Builder.Sql.Where do
     {sel, join, param} = Select.prep_selector(selecto, field)
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     comparison_clause(selecto, conf, field, sel, comp, {:param, to_field_value(conf, value)}),
-     param}
+     comparison_clause(
+       selecto,
+       conf,
+       field,
+       sel,
+       comp,
+       {:param, to_field_value(selecto, conf, value)}
+     ), param}
   end
 
   # Structured-value path with :in operator.
@@ -437,7 +449,7 @@ defmodule Selecto.Builder.Sql.Where do
       {:regular, _} ->
         conf = field_conf(selecto, field)
         {sel, join, param} = Select.prep_selector(selecto, field)
-        typed_values = Enum.map(list, fn i -> to_field_value(conf, i) end)
+        typed_values = Enum.map(list, fn i -> to_field_value(selecto, conf, i) end)
 
         in_clause =
           build_list_clause(selecto, sel, typed_values, false, exact?(selecto, conf, field))
@@ -450,7 +462,7 @@ defmodule Selecto.Builder.Sql.Where do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
 
-    typed_values = Enum.map(list, fn i -> to_field_value(conf, i) end)
+    typed_values = Enum.map(list, fn i -> to_field_value(selecto, conf, i) end)
     in_clause = build_list_clause(selecto, sel, typed_values, false, exact?(selecto, conf, field))
 
     {List.wrap(conf.requires_join) ++ List.wrap(join), in_clause, param}
@@ -460,7 +472,7 @@ defmodule Selecto.Builder.Sql.Where do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
 
-    typed_values = Enum.map(list, fn i -> to_field_value(conf, i) end)
+    typed_values = Enum.map(list, fn i -> to_field_value(selecto, conf, i) end)
 
     not_in_clause =
       build_list_clause(selecto, sel, typed_values, true, exact?(selecto, conf, field))
@@ -472,7 +484,7 @@ defmodule Selecto.Builder.Sql.Where do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
 
-    typed_values = Enum.map(list, fn i -> to_field_value(conf, i) end)
+    typed_values = Enum.map(list, fn i -> to_field_value(selecto, conf, i) end)
     in_clause = build_list_clause(selecto, sel, typed_values, false, exact?(selecto, conf, field))
 
     {List.wrap(conf.requires_join) ++ List.wrap(join), in_clause, param}
@@ -651,8 +663,14 @@ defmodule Selecto.Builder.Sql.Where do
         {sel, join, param} = Select.prep_selector(selecto, field)
 
         {List.wrap(conf.requires_join) ++ List.wrap(join),
-         comparison_clause(selecto, conf, field, sel, "=", {:param, to_field_value(conf, value)}),
-         param}
+         comparison_clause(
+           selecto,
+           conf,
+           field,
+           sel,
+           "=",
+           {:param, to_field_value(selecto, conf, value)}
+         ), param}
     end
   end
 
@@ -661,8 +679,14 @@ defmodule Selecto.Builder.Sql.Where do
     {sel, join, param} = Select.prep_selector(selecto, field)
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     comparison_clause(selecto, conf, field, sel, "=", {:param, to_field_value(conf, value)}),
-     param}
+     comparison_clause(
+       selecto,
+       conf,
+       field,
+       sel,
+       "=",
+       {:param, to_field_value(selecto, conf, value)}
+     ), param}
   end
 
   def build(_sel, other) do
@@ -846,8 +870,14 @@ defmodule Selecto.Builder.Sql.Where do
       end
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     comparison_clause(selecto, conf, field, sel, sql_op, {:param, to_field_value(conf, value)}),
-     param}
+     comparison_clause(
+       selecto,
+       conf,
+       field,
+       sel,
+       sql_op,
+       {:param, to_field_value(selecto, conf, value)}
+     ), param}
   end
 
   defp get_root_alias(selecto) do
@@ -926,11 +956,11 @@ defmodule Selecto.Builder.Sql.Where do
          " (",
          build_selector_string(selecto, conf.requires_join, field_name),
          " >= ",
-         {:param, to_field_value(conf, min)},
+         {:param, to_field_value(selecto, conf, min)},
          " and ",
          build_selector_string(selecto, conf.requires_join, field_name),
          " < ",
-         {:param, to_field_value(conf, max)},
+         {:param, to_field_value(selecto, conf, max)},
          ") "
        ], []}
     else
@@ -940,9 +970,9 @@ defmodule Selecto.Builder.Sql.Where do
          " ",
          build_selector_string(selecto, conf.requires_join, field_name),
          " between ",
-         {:param, to_field_value(conf, min)},
+         {:param, to_field_value(selecto, conf, min)},
          " and ",
-         {:param, to_field_value(conf, max)},
+         {:param, to_field_value(selecto, conf, max)},
          " "
        ], []}
     end
@@ -978,13 +1008,23 @@ defmodule Selecto.Builder.Sql.Where do
     val
   end
 
-  defp to_field_value(conf, value) do
+  defp to_field_value(selecto, conf, value) do
     if Selecto.Temporal.epoch_storage(conf) && date_like_type(conf) do
       Selecto.Temporal.coerce_filter_value(conf, value)
     else
-      conf
-      |> Selecto.Temporal.coerce_sql_param_value(value)
-      |> then(&to_type(Map.get(conf, :type), &1))
+      value = Selecto.Temporal.coerce_sql_param_value(conf, value)
+      type = Map.get(conf, :type)
+
+      # Adapters that store UUIDs as text (MySQL and MariaDB map :uuid and
+      # :binary_id to CHAR(36)) bind the string form; the others bind the
+      # 16-byte binary.
+      if type in [:uuid, :binary_id] and is_binary(value) and
+           Selecto.AdapterSupport.supports_feature?(
+             Map.get(selecto, :adapter),
+             :uuid_text_storage
+           ),
+         do: value,
+         else: to_type(type, value)
     end
   end
 
