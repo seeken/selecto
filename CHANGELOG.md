@@ -3,6 +3,21 @@
 
 ## Unreleased
 
+- Retarget onto a relation confined by scope keys now identifies each target
+  row by its primary key and the last hop's target-side scope keys. This
+  covers authored direct or through scope keys on a target that declares no
+  tenant_field. Before, the context selected only the primary key and the
+  outer query correlated on the key alone. When ids repeat across scopes,
+  tenant t7 read t8's rows through `retarget`, for both strategies, one hop
+  or several, on every backend. The context now selects `pk` plus the scope
+  keys. `:in` matches the whole tuple (`(pk, key) in (select ... from
+  (context))`), and `:exists` correlates on every column. The context's own
+  joins pair the earlier hops. On MySQL and MariaDB each text key also
+  compares its stored bytes. Retargets without scope keys compile exactly as
+  before, so PostgreSQL and SQLite SQL changes only for scope-key-confined
+  retargets.
+
+
 - MySQL and MariaDB: scope-key pairs that decide tenant identity now compare
   exactly when either column may hold text, by each column's own declared
   type. This covers direct scope keys, the tenant pair, and the root -> bridge
