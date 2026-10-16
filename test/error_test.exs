@@ -70,4 +70,11 @@ defmodule Selecto.ErrorTest do
     assert "Output format transformation error: bad output" ==
              Error.to_display_message(Error.transformation_error("bad output"))
   end
+
+  test "adapter categories without a SQLSTATE survive driver normalization" do
+    for category <- [:invalid_session, :data_violation, :lock_timeout] do
+      normalized = Selecto.Error.connection_error("refused", %{category: category})
+      assert Selecto.Error.from_driver(:refused, normalized).details.category == category
+    end
+  end
 end
