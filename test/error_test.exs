@@ -72,7 +72,7 @@ defmodule Selecto.ErrorTest do
   end
 
   test "adapter categories without a SQLSTATE survive driver normalization" do
-    for category <- [:invalid_session, :data_violation, :lock_timeout] do
+    for category <- [:invalid_session, :data_violation, :lock_timeout, :datetime_field_overflow] do
       normalized = Selecto.Error.connection_error("refused", %{category: category})
       assert Selecto.Error.from_driver(:refused, normalized).details.category == category
     end
