@@ -3,6 +3,19 @@
 
 ## Unreleased
 
+- MySQL and MariaDB: a host-installed predicate decides tenant identity even
+  on a domain without tenant_field, so it compares exactly. Every column
+  named in a top-level eq/IN conjunct of the domain or query required
+  filters, the trusted context's required filters or the query's filters
+  takes the exact form, judged by its declared type. Before, a host scope
+  `org_key = 't1'` (or a required site pin beside an integer tenant) read
+  `'T1'` and, on MariaDB, `'t1 '`. Caller filters land in the same list;
+  comparing them exactly matches PostgreSQL.
+- `with_tenant/2` with a map whose `required_filters` come without a
+  `tenant_id` now applies those filters. They were silently ignored and the
+  read returned every row.
+
+
 - Adapters declaring `:uuid_text_storage` (MySQL and MariaDB, which map UUIDs
   to CHAR(36) text or MariaDB's native UUID type) bind a UUID filter value in
   its string form instead of the 16-byte binary. Text-stored UUID tenants were

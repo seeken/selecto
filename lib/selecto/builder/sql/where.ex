@@ -1156,10 +1156,19 @@ defmodule Selecto.Builder.Sql.Where do
 
   # The exact mode of a tenant/site column: by the field's own declared type
   # when it has one, else by the name's declarations across the domain.
+  # A column a host-installed predicate names (required filters, the trusted
+  # context, host filters) decides tenant identity too, even without a
+  # declared tenant_field (Selecto.Builder.ExactCompare.host_names/1).
   defp exact?(selecto, conf, field) do
+    name = column_name(conf, field)
+
     with true <- ExactCompare.enabled?(selecto),
          mode when mode != false <-
-           ExactCompare.exact_name?(Map.get(selecto, :domain), column_name(conf, field)) do
+           ExactCompare.strongest([
+             ExactCompare.exact_name?(Map.get(selecto, :domain), name),
+             ExactCompare.host_mode(selecto, name) ||
+               ExactCompare.host_mode(selecto, to_string(field))
+           ]) do
       case conf do
         %{type: type} when not is_nil(type) -> ExactCompare.type_mode(type)
         _ -> mode

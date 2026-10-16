@@ -61,7 +61,7 @@ defmodule Selecto.ExactTenantCompareTest do
     |> Selecto.configure(Selecto.Runtime.Context.new(adapter, :compile_only), validate: false)
     |> Selecto.with_tenant(tenant)
     |> Selecto.select(["id", "customer.name"])
-    |> Selecto.filter([{"tenant_id", {:in, [tenant, tenant]}}, {"name", "x"}])
+    |> Selecto.filter([{"tenant_id", {:in, [tenant, tenant]}}, {"name", {:>, "x"}}])
     |> Selecto.to_sql()
   end
 
@@ -83,8 +83,8 @@ defmodule Selecto.ExactTenantCompareTest do
                "CAST(CONVERT(selecto_root.tenant_id USING utf8mb4) AS BINARY) IN " <>
                "(CAST(? AS BINARY), CAST(? AS BINARY)))"
 
-    # A non-tenant column keeps the plain comparison.
-    assert sql =~ "selecto_root.name = ?"
+    # A range comparison keeps the plain form.
+    assert sql =~ "selecto_root.name > ?"
     assert params == ["t1", "t1", "t1", "t1", "t1", "t1", "x"]
   end
 
@@ -191,5 +191,55 @@ defmodule Selecto.ExactTenantCompareTest do
 
     # Integer-declared on both sides stays plain.
     refute compile.(:integer) =~ "BINARY"
+  end
+
+  describe "host-installed predicates on a domain without tenant_field" do
+    defp host_domain(required \\ nil) do
+      domain = %{
+        name: "HS",
+        source:
+          relation("hs", [id: :integer, org_key: :string, name: :string], %{}, nil)
+          |> Map.delete(:tenant_field),
+        schemas: %{},
+        joins: %{}
+      }
+
+      if required, do: Map.put(domain, :required_filters, required), else: domain
+    end
+
+    defp host_sql(domain, adapter, fun) do
+      domain
+      |> Selecto.configure(Selecto.Runtime.Context.new(adapter, :compile_only), validate: false)
+      |> fun.()
+      |> Selecto.select(["id"])
+      |> Selecto.to_sql()
+      |> elem(0)
+    end
+
+    test "every mechanism compares the scope column by its bytes" do
+      exact =
+        "(selecto_root.org_key = ? AND CAST(CONVERT(selecto_root.org_key USING utf8mb4) AS BINARY) = CAST(? AS BINARY))"
+
+      for {domain, fun} <- [
+            {host_domain([{"org_key", "t1"}]), & &1},
+            {host_domain(), &Selecto.Tenant.require_tenant_filter(&1, "org_key", "t1")},
+            {host_domain(), &Selecto.filter(&1, [{"org_key", "t1"}])},
+            {host_domain(), &Selecto.with_tenant(&1, %{required_filters: [{"org_key", "t1"}]})}
+          ] do
+        assert host_sql(domain, ExactAdapter, fun) =~ exact
+        refute host_sql(domain, SelectoDBSQLite.Adapter, fun) =~ "BINARY"
+      end
+    end
+
+    test "a trusted context's required filters apply without a tenant_id" do
+      sql =
+        host_sql(
+          host_domain(),
+          SelectoDBSQLite.Adapter,
+          &Selecto.with_tenant(&1, %{required_filters: [{"org_key", "t1"}]})
+        )
+
+      assert sql =~ "org_key"
+    end
   end
 end

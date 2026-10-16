@@ -69,6 +69,64 @@ defmodule Selecto.Builder.ExactCompare do
   def exact_name?(_domain, _name), do: false
 
   @doc false
+  # Columns that host-installed predicates name in a top-level eq/IN conjunct:
+  # the domain's and the query's required filters, the trusted tenant
+  # context's required filters, the engine tenant binding and the query's
+  # filters. Such a predicate decides tenant identity even on a domain that
+  # declares no tenant_field (a host scope org_key = 't1', a site pin), so its
+  # column compares exactly, judged by declared type. Caller filters land in
+  # the same list; comparing them exactly matches PostgreSQL.
+  def host_names(selecto) do
+    set = Map.get(selecto, :set) || %{}
+    domain = Map.get(selecto, :domain) || %{}
+    context = Map.get(selecto, :tenant) || %{}
+
+    (List.wrap(get(domain, :required_filters)) ++
+       List.wrap(Map.get(set, :required_filters)) ++
+       List.wrap(get(context, :required_filters)) ++
+       Selecto.Tenant.engine_filters(selecto) ++ List.wrap(Map.get(set, :filtered)))
+    |> Enum.flat_map(&conjunct_names/1)
+    |> Enum.uniq()
+  end
+
+  defp conjunct_names({:and, filters}) when is_list(filters),
+    do: Enum.flat_map(filters, &conjunct_names/1)
+
+  defp conjunct_names({field, value})
+       when is_binary(field) or (is_atom(field) and not is_nil(field)) do
+    if equality_value?(value), do: field_names(field), else: []
+  end
+
+  defp conjunct_names({field, op, value})
+       when (is_binary(field) or is_atom(field)) and op in [:in, "in"] and is_list(value),
+       do: field_names(field)
+
+  defp conjunct_names(_filter), do: []
+
+  defp equality_value?({op, _value}) when op in [:eq, :=, "=", "eq", :in, "in"], do: true
+
+  defp equality_value?(value) when is_binary(value) or is_number(value) or is_list(value),
+    do: true
+
+  defp equality_value?(_value), do: false
+
+  defp field_names(field) do
+    field = to_string(field)
+    Enum.uniq([field, field |> String.split(".") |> List.last()])
+  end
+
+  @doc false
+  # The mode of a column named `name` that a host predicate names, by its
+  # declared types (an undeclared name is text).
+  def host_mode(selecto, name) when is_binary(name) do
+    if name in host_names(selecto),
+      do: name_mode(Map.get(selecto, :domain) || %{}, name),
+      else: false
+  end
+
+  def host_mode(_selecto, _name), do: false
+
+  @doc false
   # The strongest of several modes: converting beats bytes beats plain.
   def strongest(modes) do
     cond do
