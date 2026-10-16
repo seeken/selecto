@@ -78,6 +78,7 @@ defmodule Selecto.Tenant do
     context = normalize_domain_context(selecto, tenant_context)
     stored = tenant(selecto)
     ensure_context_compatible!(stored, context, :tenant)
+    ensure_context_filters_agree!(selecto, context)
     selecto = attach_context(selecto, merge_contexts(stored, context))
 
     # Required filters the trusted context carries bound the query at once,
@@ -87,6 +88,30 @@ defmodule Selecto.Tenant do
     |> List.wrap()
     |> Enum.reduce(selecto, &require_tenant_filter(&2, &1))
   end
+
+  # A trusted context whose tenant_id its own required filters exclude on the
+  # tenant field is a typed tenant mismatch, refused when it is attached.
+  defp ensure_context_filters_agree!(selecto, context) when is_map(context) do
+    tenant_id = Map.get(context, :tenant_id)
+    field = Map.get(context, :tenant_field) || domain_tenant_field(selecto)
+
+    if defined_scalar?(tenant_id) and not is_nil(field) and
+         Enum.any?(
+           required_tenant_values(
+             List.wrap(Map.get(context, :required_filters)),
+             to_string(field)
+           ),
+           fn values -> not Enum.any?(values, &(to_string(&1) == to_string(tenant_id))) end
+         ) do
+      raise Selecto.PolicyViolation,
+        type: :tenant_scope_mismatch,
+        message: "the trusted tenant conflicts with the context's required filters"
+    end
+
+    :ok
+  end
+
+  defp ensure_context_filters_agree!(_selecto, _context), do: :ok
 
   defp normalize_domain_context(selecto, context) when is_map(context) do
     if Map.has_key?(context, :tenant_field) or Map.has_key?(context, "tenant_field"),

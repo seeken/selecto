@@ -725,7 +725,7 @@ defmodule Selecto.Builder.Sql.Where do
   # A tenant/site column on an exact-compare adapter (MySQL, MariaDB) matches
   # its stored bytes, not its collation (Selecto.Builder.ExactCompare).
   defp build_list_clause(_selecto, selector, typed_values, negate?, mode)
-       when mode in [true, :bytes] do
+       when mode in [true, :bytes, :server] do
     placeholders = Enum.map(typed_values, fn value -> {:param, value} end)
     clause = ExactCompare.in_list(selector, placeholders, mode)
 
@@ -1156,22 +1156,21 @@ defmodule Selecto.Builder.Sql.Where do
 
   # The exact mode of a tenant/site column: by the field's own declared type
   # when it has one, else by the name's declarations across the domain.
-  # A column a host-installed predicate names (required filters, the trusted
-  # context, host filters) decides tenant identity too, even without a
-  # declared tenant_field (Selecto.Builder.ExactCompare.host_names/1).
+  # A tenant/site column, or a field a host-installed predicate compares
+  # (Selecto.Builder.ExactCompare.host_names/1, matched on the field as
+  # written, so "person.name" never makes the root "name" exact), compares
+  # exactly; the mode comes from the field's own declared type.
   defp exact?(selecto, conf, field) do
-    name = column_name(conf, field)
-
     with true <- ExactCompare.enabled?(selecto),
-         mode when mode != false <-
-           ExactCompare.strongest([
-             ExactCompare.exact_name?(Map.get(selecto, :domain), name),
-             ExactCompare.host_mode(selecto, name) ||
-               ExactCompare.host_mode(selecto, to_string(field))
-           ]) do
+         true <-
+           ExactCompare.exact_name?(Map.get(selecto, :domain), column_name(conf, field)) != false or
+             ExactCompare.host_mode(selecto, to_string(field)) do
       case conf do
-        %{type: type} when not is_nil(type) -> ExactCompare.type_mode(type)
-        _ -> mode
+        %{type: type} ->
+          ExactCompare.type_mode(type)
+
+        _ ->
+          ExactCompare.exact_name?(Map.get(selecto, :domain), column_name(conf, field)) || :server
       end
     end
   end

@@ -3,14 +3,41 @@
 
 ## Unreleased
 
-- MySQL and MariaDB: a host-installed predicate decides tenant identity even
-  on a domain without tenant_field, so it compares exactly. Every column
-  named in a top-level eq/IN conjunct of the domain or query required
-  filters, the trusted context's required filters or the query's filters
-  takes the exact form, judged by its declared type. Before, a host scope
-  `org_key = 't1'` (or a required site pin beside an integer tenant) read
-  `'T1'` and, on MariaDB, `'t1 '`. Caller filters land in the same list;
-  comparing them exactly matches PostgreSQL.
+- MySQL and MariaDB: host-installed predicates compare exactly at any depth.
+  This covers the domain and query required filters, the trusted context's
+  required filters and the engine tenant binding. Every `=`, `<>`/`!=`,
+  `IN` and `NOT IN` anywhere in their AND/OR/NOT tree takes the exact form,
+  even on a domain without tenant_field, and `<>`/`NOT IN` become NOT of the
+  exact equality, as on PostgreSQL. A field is matched as written, so
+  `person.name` never makes the root `name` exact, and is judged by its own
+  declared type. The caller's own filters are not host scope.
+- Column types are classified three ways, after normalising the type name
+  (lowercase; strip any `(...)` suffix and any charset or collate clause;
+  Ecto parameterized types and Ecto.Enum are recognised).
+  - Known text compares by converted bytes: string, text, char, varchar,
+    character varying, citext, enum and anything containing "char" or
+    "text".
+  - Known non-text compares plainly: numeric, boolean, temporal, json/map
+    and binary types.
+  - Everything else is guarded, and the server decides: undeclared columns,
+    uuid, and custom or unrecognised types. The form is
+    `(col = ? AND (COLLATION(col) = 'binary' OR <bytes>))`, and column pairs
+    are plain only when both sides have a binary collation.
+  - Before this, temporal columns compared by their text form, so
+    `TIME(6) = '10:00:00'` matched nothing and a host `<>` on `TIMESTAMP(3)`
+    admitted every row.
+- A through association whose source or target scope key is not a declared
+  field of its relation is refused at configure. A retarget no longer falls
+  back to the target's key alone, which read other scopes' rows on every
+  backend.
+- A trusted context whose `tenant_id` its own required filters exclude now
+  raises a typed `Selecto.PolicyViolation` (`:tenant_scope_mismatch`), not a
+  RuntimeError at execution.
+- An unbound retarget onto a scope-key-confined relation no longer returns
+  target rows whose scope key is NULL. This matches the join, which never
+  pairs a NULL scope.
+
+
 - `with_tenant/2` with a map whose `required_filters` come without a
   `tenant_id` now applies those filters. They were silently ignored and the
   read returned every row.
