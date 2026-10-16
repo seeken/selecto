@@ -3,6 +3,24 @@
 
 ## Unreleased
 
+- MySQL and MariaDB: host scope recorded at intake compares exactly.
+  `Selecto.Tenant.require_read_boundary/2` records the filters the query
+  holds when it accepts the boundary (`set.host_filtered`), so a host's
+  `Selecto.filter` scope read through the API, a co-domain lookup's `:scope`
+  (`Selecto.Tenant.host_filter/2`) and a canned page's dataset filters
+  (result, total and facet queries) compare exactly; request filters applied
+  afterwards stay plain. `Selecto.Tenant.mark_host_scope/1` records a
+  host-assigned query's filters (SelectoComponents uses it). Column-vs-column
+  comparisons and join key pairs beside a tenant column decide from both
+  sides' declared types.
+- Known limitation: on direct engine use a bare `Selecto.filter/2` still
+  counts as host scope for permission decisions (tenant boundary, carried
+  tenants, retarget scope) but compiles plain on a column that is not a
+  declared tenant column. Hosts that need exact site pins or tenantless
+  scopes on MySQL/MariaDB use required filters, `require_tenant_filter`,
+  `with_tenant`, `require_read_boundary`, `host_filter` or
+  `mark_host_scope`.
+
 - MySQL and MariaDB: host-installed predicates compare exactly at any depth.
   This covers the domain and query required filters, the trusted context's
   required filters and the engine tenant binding. Every `=`, `<>`/`!=`,

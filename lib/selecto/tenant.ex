@@ -678,7 +678,14 @@ defmodule Selecto.Tenant do
   # MariaDB) compare those fields exactly
   # (Selecto.Builder.ExactCompare.host_names/1); filters applied afterwards
   # (request filters) stay the caller's.
-  defp mark_host_scope(selecto) do
+  @doc """
+  Record every filter `selecto` holds now as host scope, so an exact-compare
+  adapter (MySQL, MariaDB) compares their fields exactly. Call it on a
+  host-assigned query before any user or request filters are applied
+  (`require_read_boundary/2` does this when it accepts the boundary).
+  """
+  @spec mark_host_scope(Selecto.Types.t()) :: Selecto.Types.t()
+  def mark_host_scope(selecto) do
     set = Map.get(selecto, :set) || %{}
     record_host_filters(selecto, List.wrap(Map.get(set, :filtered, [])))
   end

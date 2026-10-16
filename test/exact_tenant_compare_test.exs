@@ -281,6 +281,31 @@ defmodule Selecto.ExactTenantCompareTest do
       refute host_sql(host_domain(), SelectoDBSQLite.Adapter, bounded) =~ "BINARY"
     end
 
+    test "a canned page's dataset filters are host scope in its result, total and facets" do
+      exact = "CAST(CONVERT(selecto_root.org_key USING utf8mb4) AS BINARY)"
+
+      for adapter <- [ExactAdapter, SelectoDBSQLite.Adapter] do
+        base =
+          Selecto.configure(host_domain(), Selecto.Runtime.Context.new(adapter, :compile_only),
+            validate: false
+          )
+
+        page =
+          Selecto.CannedPage.new!(Selecto.filter(base, [{"org_key", "t1"}]),
+            id: "hs",
+            views: [%{id: "detail", kind: :detail, query: Selecto.select(base, ["id", "name"])}],
+            controls: [%{id: "name", kind: :facet, field: "name"}]
+          )
+
+        {:ok, plan} = Selecto.CannedPage.plan(page, base, %{})
+
+        for query <- [plan.query, plan.total_query, plan.facets["name"].options] do
+          {sql, _params} = Selecto.to_sql(query)
+          assert sql =~ exact == (adapter == ExactAdapter), sql
+        end
+      end
+    end
+
     test "a trusted context's required filters apply without a tenant_id" do
       sql =
         host_sql(
