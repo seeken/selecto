@@ -3,6 +3,12 @@
 
 ## Unreleased
 
+- Adapters declaring `:uuid_text_storage` (MySQL and MariaDB, which map UUIDs
+  to CHAR(36) text or MariaDB's native UUID type) bind a UUID filter value in
+  its string form instead of the 16-byte binary. Text-stored UUID tenants were
+  unreadable before.
+
+
 - Retarget onto a relation confined by scope keys now identifies each target
   row by its primary key and the last hop's target-side scope keys. This
   covers authored direct or through scope keys on a target that declares no
