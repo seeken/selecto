@@ -25,7 +25,9 @@
   returns the grand total. Adapters declaring `:rollup_without_empty_total`
   (MySQL, MariaDB) now get that row from a UNION ALL branch, with dimensions
   NULL and GROUPING markers all ones. Ordering and LIMIT/OFFSET apply to the
-  union by output position. A rollup whose shape the branch cannot express
+  union by output position. The union is ordered as PostgreSQL orders a
+  rollup: an explicit ASC puts NULL keys last, DESC puts them first, and a
+  bare term puts them first. A rollup whose shape the branch cannot express
   (expressions over dimensions, windows, subselects, ordering on an unselected
   value) keeps the native statement.
 - `:data_violation` and `:lock_timeout` are kept as driver error categories.
