@@ -259,6 +259,28 @@ defmodule Selecto.ExactTenantCompareTest do
       refute host_sql(domain, ExactAdapter, & &1) =~ "BINARY"
     end
 
+    test "filters the query holds when its read boundary is accepted are host scope" do
+      exact =
+        "(selecto_root.org_key = ? AND CAST(CONVERT(selecto_root.org_key USING utf8mb4) AS BINARY) = CAST(? AS BINARY))"
+
+      bounded = fn selecto ->
+        {:ok, selecto} =
+          selecto
+          |> Selecto.filter([{"org_key", "t1"}])
+          |> Selecto.Tenant.require_read_boundary()
+
+        # A request filter applied after the boundary stays the caller's.
+        Selecto.filter(selecto, [{"name", "a"}])
+      end
+
+      sql = host_sql(host_domain(), ExactAdapter, bounded)
+      assert sql =~ exact
+      assert sql =~ "selecto_root.name = ?"
+      refute sql =~ "CONVERT(selecto_root.name"
+
+      refute host_sql(host_domain(), SelectoDBSQLite.Adapter, bounded) =~ "BINARY"
+    end
+
     test "a trusted context's required filters apply without a tenant_id" do
       sql =
         host_sql(
@@ -331,6 +353,87 @@ defmodule Selecto.ExactTenantCompareTest do
       end
 
     assert error.type == :tenant_scope_mismatch
+  end
+
+  describe "column pairs decide from both sides" do
+    defp pair_domain(n_type, s_type, required) do
+      %{
+        name: "PR",
+        source:
+          relation("pr", [id: :integer, n: n_type, s: s_type, name: :string], %{}, nil)
+          |> Map.delete(:tenant_field),
+        schemas: %{},
+        joins: %{},
+        required_filters: required
+      }
+    end
+
+    defp pair_sql(domain, adapter) do
+      domain
+      |> Selecto.configure(Selecto.Runtime.Context.new(adapter, :compile_only), validate: false)
+      |> Selecto.select(["id"])
+      |> Selecto.to_sql()
+      |> elem(0)
+    end
+
+    test "a host column-vs-column comparison is exact when either side may be text" do
+      for {n_type, s_type} <- [{:integer, :string}, {:integer, nil}, {nil, :string}, {nil, nil}],
+          filter <- [
+            {"n", {:=, {:ref, "s"}}},
+            {"s", {:=, {:ref, "n"}}},
+            {:not, {"n", {:!=, {:ref, "s"}}}}
+          ] do
+        sql = pair_sql(pair_domain(n_type, s_type, [filter]), ExactAdapter)
+        assert sql =~ "BINARY", inspect({n_type, s_type, filter})
+
+        refute pair_sql(pair_domain(n_type, s_type, [filter]), SelectoDBSQLite.Adapter) =~
+                 "BINARY"
+      end
+
+      # Both sides declared non-text keep the plain comparison.
+      refute pair_sql(pair_domain(:integer, :integer, [{"n", {:=, {:ref, "s"}}}]), ExactAdapter) =~
+               "BINARY"
+    end
+
+    test "a join key pair with a tenant column decides from both declared types" do
+      # An INT tenant column keyed to a VARCHAR column: numerically '07' = 7.
+      domain = %{
+        name: "Orders",
+        source:
+          relation(
+            "orders",
+            [id: :integer, tenant_id: :integer, name: :string],
+            %{
+              owner: %{
+                queryable: :owners,
+                field: :owner,
+                owner_key: :tenant_id,
+                related_key: :code,
+                cardinality: :one
+              }
+            },
+            :tenant_id
+          ),
+        schemas: %{
+          owners: relation("owners", [id: :integer, code: :string], %{}, nil)
+        },
+        joins: %{owner: %{type: :left, name: "owner"}}
+      }
+
+      sql = fn adapter ->
+        domain
+        |> Selecto.configure(Selecto.Runtime.Context.new(adapter, :compile_only),
+          validate: false
+        )
+        |> Selecto.with_tenant(1)
+        |> Selecto.select(["id", "owner.code"])
+        |> Selecto.to_sql()
+        |> elem(0)
+      end
+
+      assert sql.(ExactAdapter) =~ "CAST(CONVERT(owner.code USING utf8mb4) AS BINARY)"
+      refute sql.(SelectoDBSQLite.Adapter) =~ "BINARY"
+    end
   end
 
   test "type names classify three ways after normalising" do

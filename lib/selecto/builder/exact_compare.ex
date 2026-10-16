@@ -80,11 +80,35 @@ defmodule Selecto.Builder.ExactCompare do
   def exact_name?(_domain, _name), do: false
 
   @doc false
+  # Whether `name` is a tenant or site column the domain declares, whatever
+  # its type.
+  def tenant_name?(domain, name) when is_map(domain) and (is_binary(name) or is_atom(name)),
+    do: to_string(name) in tenant_names(domain)
+
+  def tenant_name?(_domain, _name), do: false
+
+  @doc false
+  # The mode of a column pair (a join key pair) when either column is a
+  # tenant/site column: the strongest of both columns' own modes by their
+  # declared types across the domain, so an INT tenant paired with a VARCHAR
+  # key compares by bytes rather than numerically (ADDENDUM 6). false when
+  # neither is a tenant/site column or both compare exactly already.
+  def identity_pair(selecto, left, right) do
+    domain = Map.get(selecto, :domain)
+
+    enabled?(selecto) and is_map(domain) and
+      (tenant_name?(domain, left) or tenant_name?(domain, right)) and
+      strongest([name_mode(domain, to_string(left)), name_mode(domain, to_string(right))])
+  end
+
+  @doc false
   # Fields (as written: "org_key", "a.label") that host-installed predicates
   # compare with =, <>, !=, IN or NOT IN anywhere in their tree (through
   # AND/OR/NOT at any depth): the domain's and the query's required filters,
-  # the trusted tenant context's required filters and the engine tenant
-  # binding. Such a predicate decides tenant identity even on a domain that
+  # the trusted tenant context's required filters, the engine tenant
+  # binding, and the filters the query held when its read boundary was
+  # accepted (Selecto.Tenant.require_read_boundary/2 records them as
+  # `set.host_filtered` before any request input is applied). Such a predicate decides tenant identity even on a domain that
   # declares no tenant_field (a host scope org_key = 't1', a site pin), so the
   # field compares exactly (<> as NOT of the exact equality), judged by its
   # owning relation's declared type, which reproduces PostgreSQL. The caller's
@@ -96,7 +120,8 @@ defmodule Selecto.Builder.ExactCompare do
 
     (List.wrap(get(domain, :required_filters)) ++
        List.wrap(Map.get(set, :required_filters)) ++
-       List.wrap(get(context, :required_filters)) ++ Selecto.Tenant.engine_filters(selecto))
+       List.wrap(get(context, :required_filters)) ++
+       List.wrap(Map.get(set, :host_filtered)) ++ Selecto.Tenant.engine_filters(selecto))
     |> Enum.flat_map(&comparison_fields/1)
     |> Enum.uniq()
   end

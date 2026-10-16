@@ -362,7 +362,8 @@ defmodule Selecto.Builder.Sql.Where do
       end
 
     {List.wrap(conf.requires_join) ++ List.wrap(join) ++ List.wrap(ref_join),
-     comparison_clause(selecto, conf, field, sel, sql_op, ref_sel), param ++ ref_params}
+     ref_comparison_clause(selecto, {conf, field, sel}, sql_op, {ref_field, ref_sel}),
+     param ++ ref_params}
   end
 
   def build(selecto, {field, {comp, {:ref, ref_field}}}) when comp in ~w[= != < > <= >=] do
@@ -371,7 +372,8 @@ defmodule Selecto.Builder.Sql.Where do
     {ref_sel, ref_join, ref_params} = Select.prep_selector(selecto, {:ref, ref_field})
 
     {List.wrap(conf.requires_join) ++ List.wrap(join) ++ List.wrap(ref_join),
-     comparison_clause(selecto, conf, field, sel, comp, ref_sel), param ++ ref_params}
+     ref_comparison_clause(selecto, {conf, field, sel}, comp, {ref_field, ref_sel}),
+     param ++ ref_params}
   end
 
   def build(selecto, {field, {:not_like, value}}) do
@@ -513,7 +515,8 @@ defmodule Selecto.Builder.Sql.Where do
     {ref_sel, ref_join, ref_params} = Select.prep_selector(selecto, {:ref, ref_field})
 
     {List.wrap(conf.requires_join) ++ List.wrap(join) ++ List.wrap(ref_join),
-     comparison_clause(selecto, conf, field, sel, "=", ref_sel), param ++ ref_params}
+     ref_comparison_clause(selecto, {conf, field, sel}, "=", {ref_field, ref_sel}),
+     param ++ ref_params}
   end
 
   # Handle array filter specifications (must come before generic {field, value})
@@ -1141,6 +1144,53 @@ defmodule Selecto.Builder.Sql.Where do
 
   defp comparison_clause(_selecto, _conf, _field, sel, operator, right),
     do: [" ", sel, " ", operator, " ", right, " "]
+
+  # A column-vs-column equality or inequality compares exactly when either
+  # side is a tenant/site column or the predicate is host-installed, and its
+  # mode is the strongest of BOTH sides' modes (ADDENDUM 6): an INT column
+  # declared :integer against a VARCHAR column compares by bytes, never
+  # numerically ('07', '7 ', '7e0' never equal 7). Other operators and
+  # adapters render as before.
+  defp ref_comparison_clause(selecto, {conf, field, sel}, operator, {ref_field, ref_sel})
+       when operator in ["=", "!="] do
+    ref_conf = safe_field_conf(selecto, ref_field)
+    domain = Map.get(selecto, :domain)
+
+    mode =
+      ExactCompare.enabled?(selecto) and
+        (ExactCompare.tenant_name?(domain, column_name(conf, field)) or
+           ExactCompare.tenant_name?(domain, column_name(ref_conf, ref_field)) or
+           ExactCompare.host_mode(selecto, to_string(field))) and
+        ExactCompare.strongest([
+          side_mode(domain, conf, field),
+          side_mode(domain, ref_conf, ref_field)
+        ])
+
+    if mode do
+      exact = ExactCompare.eq(sel, ref_sel, mode)
+      if operator == "=", do: [" ", exact, " "], else: [" NOT ", exact, " "]
+    else
+      [" ", sel, " ", operator, " ", ref_sel, " "]
+    end
+  end
+
+  defp ref_comparison_clause(_selecto, {_conf, _field, sel}, operator, {_ref_field, ref_sel}),
+    do: [" ", sel, " ", operator, " ", ref_sel, " "]
+
+  # One side's mode: its own declared type, else the name's declarations
+  # across the domain, else guarded (:server).
+  defp side_mode(_domain, %{type: type}, _field), do: ExactCompare.type_mode(type)
+
+  defp side_mode(domain, conf, field),
+    do: ExactCompare.exact_name?(domain, column_name(conf, field)) || :server
+
+  defp safe_field_conf(selecto, field) when is_binary(field) or is_atom(field) do
+    field_conf(selecto, to_string(field))
+  rescue
+    _ -> nil
+  end
+
+  defp safe_field_conf(_selecto, _field), do: nil
 
   # `bytes_fun` builds the subquery selecting its column's utf8mb4 bytes; a
   # prebuilt subquery (nil) compares its own values as bytes, which matches

@@ -664,10 +664,43 @@ defmodule Selecto.Tenant do
           {:ok, Selecto.Types.t()} | {:error, Selecto.Error.t()}
   def require_read_boundary(selecto, opts \\ []) do
     case tenant_boundary(selecto, Keyword.put(opts, :access, :read)) do
-      {:ok, {:tenant, _tenant_id}} -> {:ok, apply_tenant_scope(selecto)}
-      {:ok, _boundary} -> {:ok, selecto}
+      {:ok, {:tenant, _tenant_id}} -> {:ok, selecto |> mark_host_scope() |> apply_tenant_scope()}
+      {:ok, _boundary} -> {:ok, mark_host_scope(selecto)}
       {:error, _error} = error -> error
     end
+  end
+
+  # The boundary is accepted on the host's query before any request input is
+  # applied (EngineHandler, generated APIs, co-domain lookups), so every filter
+  # the query holds now is host scope: a host that scopes with
+  # `Selecto.filter([{"org_key", "t1"}])` on a tenantless domain, or pins a
+  # site, installed it. Recording them lets an exact-compare adapter (MySQL,
+  # MariaDB) compare those fields exactly
+  # (Selecto.Builder.ExactCompare.host_names/1); filters applied afterwards
+  # (request filters) stay the caller's.
+  defp mark_host_scope(selecto) do
+    set = Map.get(selecto, :set) || %{}
+    record_host_filters(selecto, List.wrap(Map.get(set, :filtered, [])))
+  end
+
+  @doc false
+  # Apply `filters` as host scope: filtered like `Selecto.filter/2` (same
+  # place in the query) and recorded as host-installed, so an exact-compare
+  # adapter compares their fields exactly. For a host-supplied scope such as
+  # a co-domain lookup's `:scope`.
+  @spec host_filter(Selecto.Types.t(), Selecto.Types.filter() | [Selecto.Types.filter()]) ::
+          Selecto.Types.t()
+  def host_filter(selecto, filters) do
+    filters = List.wrap(filters)
+    selecto |> Selecto.filter(filters) |> record_host_filters(Selecto.Expr.normalize(filters))
+  end
+
+  defp record_host_filters(selecto, []), do: selecto
+
+  defp record_host_filters(selecto, filters) do
+    set = Map.get(selecto, :set) || %{}
+    host = uniq_filters(List.wrap(Map.get(set, :host_filtered, [])) ++ filters)
+    Map.put(selecto, :set, Map.put(set, :host_filtered, host))
   end
 
   @doc """

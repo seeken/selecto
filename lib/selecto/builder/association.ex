@@ -183,7 +183,8 @@ defmodule Selecto.Builder.Association do
           column(selecto, "selecto_root", column),
           ExactCompare.strongest([
             ExactCompare.column?(selecto, field),
-            ExactCompare.column?(selecto, column)
+            ExactCompare.column?(selecto, column),
+            ExactCompare.identity_pair(selecto, field, column)
           ])
         )
 
@@ -266,7 +267,8 @@ defmodule Selecto.Builder.Association do
         column(selecto, right_alias, right),
         ExactCompare.strongest([
           ExactCompare.column?(selecto, left),
-          ExactCompare.column?(selecto, right)
+          ExactCompare.column?(selecto, right),
+          ExactCompare.identity_pair(selecto, left, right)
         ])
       )
 
