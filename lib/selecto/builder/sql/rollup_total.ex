@@ -248,8 +248,10 @@ defmodule Selecto.Builder.Sql.RollupTotal do
   defp unalias({:field, expression, _}), do: expression
   defp unalias(expression), do: expression
 
-  # Both servers sort NULL first ascending and last descending.
-  defp order_clause(column, :asc), do: [column, " ASC"]
+  # PostgreSQL's placement: an explicit ASC puts NULLs last and DESC first; a
+  # bare rollup term is ASC NULLS FIRST (Selecto's rollup default). Both
+  # servers sort NULL first ascending and last descending.
+  defp order_clause(column, :asc), do: ["(", column, " IS NULL) ASC, ", column, " ASC"]
   defp order_clause(column, :asc_nulls_first), do: [column, " ASC"]
   defp order_clause(column, :desc), do: ["(", column, " IS NULL) DESC, ", column, " DESC"]
 
