@@ -96,7 +96,10 @@ defmodule Selecto.CoDomain do
     query =
       case Keyword.get(opts, :scope) do
         nil -> query
-        scope -> Selecto.filter(query, scope)
+        # The host scope is a host-installed predicate (a tenant, a site
+        # pin), not a caller filter: an exact-compare adapter (MySQL,
+        # MariaDB) compares it exactly. It keeps its place among the filters.
+        scope -> Selecto.Tenant.host_filter(query, scope)
       end
 
     query =

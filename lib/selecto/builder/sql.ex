@@ -1298,7 +1298,8 @@ defmodule Selecto.Builder.Sql do
             owner_sql,
             ExactCompare.strongest([
               ExactCompare.column?(selecto, config.my_key),
-              ExactCompare.column?(selecto, config.owner_key)
+              ExactCompare.column?(selecto, config.owner_key),
+              ExactCompare.identity_pair(selecto, config.my_key, config.owner_key)
             ])
           )
       end
