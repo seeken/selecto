@@ -3,6 +3,19 @@
 
 ## Unreleased
 
+- MySQL and MariaDB compare tenant and site columns exactly (adapters
+  declaring `:exact_tenant_compare`). Under their default case-insensitive
+  collations, and PAD SPACE ones, tenant `'t1'` used to match `'T1'` and
+  `'t1 '` rows. Every such comparison now also compares the utf8mb4 bytes:
+  `(col = ? AND CAST(CONVERT(col USING utf8mb4) AS BINARY) = CAST(? AS BINARY))`,
+  with the column-vs-column and IN-list forms alike. That covers root and
+  required tenant predicates, IN lists, `!=`, references, carried tenants
+  across shared hops (including retarget origin subqueries), association
+  tenant pairs and scope keys, join keys, join filters, association policies
+  and subselect filters. A column takes the form when its name is a tenant or
+  site column the domain declares and no declaration types it as a non-text
+  value. PostgreSQL, SQLite and the other adapters compile byte-identically.
+  The bound value is bound twice, in SQL-text order.
 - SQLite now places NULLs as PostgreSQL does: last for an unqualified ASC and
   first for an unqualified DESC. Previously SQLite used its own default, which
   is the reverse. Explicit `:asc_nulls_first`/`:desc_nulls_last` and friends

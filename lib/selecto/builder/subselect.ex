@@ -1561,7 +1561,12 @@ defmodule Selecto.Builder.Subselect do
         {field, value} ->
           field_name = adapter_quote_identifier(selecto, to_string(field))
           value_param = {:param, value}
-          [target_alias, ".", field_name, " = ", value_param]
+
+          Selecto.Builder.ExactCompare.eq(
+            [target_alias, ".", field_name],
+            value_param,
+            Selecto.Builder.ExactCompare.column?(selecto, to_string(field))
+          )
       end)
 
     condition_sql =

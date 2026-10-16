@@ -24,6 +24,7 @@ defmodule Selecto.Builder.Sql do
   import Selecto.Builder.Sql.Helpers
   # import Selecto.Types - removed to avoid circular dependency
 
+  alias Selecto.Builder.ExactCompare
   alias Selecto.AdapterSQL
   alias Selecto.SQL.Params
   alias Selecto.Builder.CteSql, as: Cte
@@ -1279,11 +1280,14 @@ defmodule Selecto.Builder.Sql do
               do: values_owner_case(owner_sql, config),
               else: owner_sql
 
-          [
+          # A join keyed on tenant/site columns pairs them exactly on MySQL
+          # and MariaDB (Selecto.Builder.ExactCompare).
+          ExactCompare.eq(
             build_selector_string(selecto, join, config.my_key),
-            " = ",
-            owner_sql
-          ]
+            owner_sql,
+            ExactCompare.column?(selecto, config.my_key) or
+              ExactCompare.column?(selecto, config.owner_key)
+          )
       end
 
     append_association_scope_to_on_clause(selecto, join, base_on, config)
@@ -1328,9 +1332,12 @@ defmodule Selecto.Builder.Sql do
         [
           base_on,
           " and ",
-          build_selector_string(selecto, config.requires_join, source_tenant),
-          " = ",
-          build_selector_string(selecto, join, target_tenant)
+          ExactCompare.eq(
+            build_selector_string(selecto, config.requires_join, source_tenant),
+            build_selector_string(selecto, join, target_tenant),
+            ExactCompare.column?(selecto, source_tenant) or
+              ExactCompare.column?(selecto, target_tenant)
+          )
         ]
     end
   end
@@ -1345,9 +1352,12 @@ defmodule Selecto.Builder.Sql do
         [
           base_on,
           " and ",
-          build_selector_string(selecto, config.requires_join, source_scope_key),
-          " = ",
-          build_selector_string(selecto, join, target_scope_key)
+          ExactCompare.eq(
+            build_selector_string(selecto, config.requires_join, source_scope_key),
+            build_selector_string(selecto, join, target_scope_key),
+            ExactCompare.column?(selecto, source_scope_key) or
+              ExactCompare.column?(selecto, target_scope_key)
+          )
         ]
 
       _ ->
@@ -1426,17 +1436,21 @@ defmodule Selecto.Builder.Sql do
     if values == [] do
       "1 = 0"
     else
-      [
-        build_selector_string(selecto, join, field),
-        " in (",
-        Enum.intersperse(Enum.map(values, fn value -> {:param, value} end), ", "),
-        ")"
-      ]
+      selector = build_selector_string(selecto, join, field)
+      placeholders = Enum.map(values, fn value -> {:param, value} end)
+
+      if ExactCompare.column?(selecto, field),
+        do: ExactCompare.in_list(selector, placeholders, true),
+        else: [selector, " in (", Enum.intersperse(placeholders, ", "), ")"]
     end
   end
 
   defp build_param_filter_clause(selecto, join, field, value) do
-    [build_selector_string(selecto, join, field), " = ", {:param, value}]
+    ExactCompare.eq(
+      build_selector_string(selecto, join, field),
+      {:param, value},
+      ExactCompare.column?(selecto, field)
+    )
   end
 
   defp resolve_on_side(selecto, default_join, field_ref) when is_binary(field_ref) do
