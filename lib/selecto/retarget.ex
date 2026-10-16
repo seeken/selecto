@@ -86,6 +86,7 @@ defmodule Selecto.Retarget do
       join: plan.join,
       target_schema: plan.target_schema,
       primary_key: plan.primary_key,
+      scope_keys: plan.scope_keys,
       strategy: strategy,
       origin: selecto
     })
@@ -122,11 +123,16 @@ defmodule Selecto.Retarget do
   """
   @spec context(Types.t()) :: Types.t()
   def context(selecto) do
-    %{origin: origin, join: join, primary_key: primary_key} = get_retarget_config(selecto)
+    %{origin: origin, join: join, primary_key: primary_key} =
+      config = get_retarget_config(selecto)
+
+    # A target confined by scope keys repeats its primary key across scopes,
+    # so the context also selects the scope keys that identify the row.
+    selected = Enum.map([primary_key | scope_keys(config)], &"#{join}.#{&1}")
 
     set =
       origin.set
-      |> Map.merge(%{selected: ["#{join}.#{primary_key}"], order_by: [], group_by: []})
+      |> Map.merge(%{selected: selected, order_by: [], group_by: []})
       |> Map.drop([
         :limit,
         :offset,
@@ -149,6 +155,9 @@ defmodule Selecto.Retarget do
       nil ->
         nil
 
+      %{scope_keys: [_ | _]} = config ->
+        scoped_context_filter(selecto, config)
+
       %{strategy: :in, primary_key: primary_key} ->
         {to_string(primary_key), {:subquery, :in, context(selecto)}}
 
@@ -166,6 +175,77 @@ defmodule Selecto.Retarget do
         {:exists, correlated, params}
     end
   end
+
+  defp scope_keys(config), do: Map.get(config, :scope_keys) || []
+
+  # A target reached through scope keys (lesson 41: authored scope keys or a
+  # tenant pair confine the association, the target declares no tenant_field)
+  # is identified by its primary key AND those keys: the same id can belong to
+  # several scopes. The outer query matches the whole tuple, at the context's
+  # last hop; the context's own joins already pair every earlier hop. On
+  # exact-compare adapters (MySQL, MariaDB) each text key also compares its
+  # utf8mb4 bytes (Selecto.Builder.ExactCompare).
+  defp scoped_context_filter(selecto, %{strategy: strategy, primary_key: primary_key} = config) do
+    keys = [primary_key | scope_keys(config)]
+    relation = Map.get(selecto.domain, :source)
+    quote_id = &Selecto.Builder.Sql.Helpers.quote_identifier(selecto, &1)
+    context_alias = quote_id.(@context_alias)
+
+    {sql, _aliases, params} =
+      Selecto.gen_sql(context(selecto), unique_projection_aliases: true)
+
+    columns =
+      keys
+      |> Enum.with_index(1)
+      |> Enum.map(fn {key, index} ->
+        mode =
+          if key == primary_key,
+            do: false,
+            else: Selecto.Builder.ExactCompare.pair?(selecto, {relation, key}, {relation, key})
+
+        {"selecto_root.#{quote_id.(to_string(key))}",
+         "#{context_alias}.#{quote_id.(Selecto.Builder.Sql.projection_alias(index))}", mode}
+      end)
+
+    case strategy do
+      :exists ->
+        conditions =
+          Enum.map(columns, fn {outer, inner, mode} ->
+            Selecto.Builder.ExactCompare.eq(inner, outer, mode)
+          end)
+
+        correlated =
+          IO.iodata_to_binary([
+            "select 1 from (#{sql}) #{context_alias} where ",
+            Enum.intersperse(conditions, " and ")
+          ])
+
+        {:exists, correlated, params}
+
+      :in ->
+        outer = Enum.flat_map(columns, &tuple_terms(elem(&1, 0), elem(&1, 2)))
+        inner = Enum.flat_map(columns, &tuple_terms(elem(&1, 1), elem(&1, 2)))
+        rebound = Selecto.SQL.Params.rebind_finalized(sql, params, selecto.adapter)
+
+        {:raw_sql_filter,
+         [
+           "(",
+           Enum.intersperse(outer, ", "),
+           ") in (select ",
+           Enum.intersperse(inner, ", "),
+           " from (",
+           rebound,
+           ") ",
+           context_alias,
+           ")"
+         ]}
+    end
+  end
+
+  defp tuple_terms(column, false), do: [column]
+
+  defp tuple_terms(column, mode),
+    do: [column, Selecto.Builder.ExactCompare.bytes(column, mode)]
 
   @doc """
   The domain's declared retarget targets, keyed by join path, or `nil` when
@@ -261,6 +341,7 @@ defmodule Selecto.Retarget do
       join: join,
       target_schema: target_schema,
       primary_key: primary_key,
+      scope_keys: target_scope_keys(List.last(hops), primary_key),
       relation: relation,
       domain: target_domain(domain, relation, join_subtree(domain, path))
     }
@@ -397,7 +478,10 @@ defmodule Selecto.Retarget do
           {:halt, {:error, :unknown_association, "join #{join} names no domain schema"}}
 
         true ->
-          {:cont, {:ok, target, hops ++ [%{join: join, schema_key: queryable, relation: target}]}}
+          {:cont,
+           {:ok, target,
+            hops ++
+              [%{join: join, schema_key: queryable, relation: target, association: association}]}}
       end
     end)
     |> case do
@@ -406,6 +490,20 @@ defmodule Selecto.Retarget do
       {:error, _code, _message} = error -> error
     end
   end
+
+  # The target-side scope keys of the association that reaches the target
+  # (authored direct or through scope keys) that the target exposes.
+  defp target_scope_keys(%{association: association, relation: relation}, primary_key) do
+    through = association |> Map.get(:through) |> then(&if(is_map(&1), do: &1, else: %{}))
+    fields = relation |> Map.get(:fields, []) |> List.wrap() |> Enum.map(&to_string/1)
+
+    [Map.get(association, :target_scope_key), Map.get(through, :target_scope_key)]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq_by(&to_string/1)
+    |> Enum.filter(&(to_string(&1) in fields and to_string(&1) != to_string(primary_key)))
+  end
+
+  defp target_scope_keys(_hop, _primary_key), do: []
 
   defp join_subtree(domain, path) do
     Enum.reduce(path, %{joins: Map.get(domain, :joins, %{})}, fn join, node ->
