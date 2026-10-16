@@ -40,8 +40,13 @@ defmodule Selecto.Builder.ExactCompare do
   # known text compares by converted bytes, known non-text keeps the plain
   # comparison, and everything else (undeclared, uuid, custom names) is
   # guarded: the server decides by the column's collation.
-  @text_types ~w(string text citext char character varchar character_varying nvarchar nchar
-                 tinytext mediumtext longtext clob enum set bpchar)
+  # Known text names, normalised (spaces become underscores). Only these are
+  # exact: a custom name that merely contains "char" or "text" (charge_amount,
+  # context_ts) is guarded, since it may name a numeric or temporal column.
+  @text_types ~w(string text tinytext mediumtext longtext char character nchar
+                 national_char national_character varchar char_varying character_varying
+                 nvarchar national_varchar national_char_varying national_character_varying
+                 nchar_varying citext clob enum set bpchar)
   @non_text_types ~w(id integer bigint smallint tinyint mediumint serial bigserial int
                      float double real decimal numeric money boolean bool date time time_usec
                      datetime naive_datetime naive_datetime_usec utc_datetime
@@ -444,7 +449,7 @@ defmodule Selecto.Builder.ExactCompare do
     name = normalize_type_name(type)
 
     cond do
-      name in @text_types or String.contains?(name, "char") or String.contains?(name, "text") ->
+      name in @text_types ->
         :text
 
       name in @non_text_types ->
