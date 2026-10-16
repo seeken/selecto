@@ -78,7 +78,14 @@ defmodule Selecto.Tenant do
     context = normalize_domain_context(selecto, tenant_context)
     stored = tenant(selecto)
     ensure_context_compatible!(stored, context, :tenant)
-    attach_context(selecto, merge_contexts(stored, context))
+    selecto = attach_context(selecto, merge_contexts(stored, context))
+
+    # Required filters the trusted context carries bound the query at once,
+    # with or without a tenant_id; they are never left unapplied.
+    (context || %{})
+    |> Map.get(:required_filters, [])
+    |> List.wrap()
+    |> Enum.reduce(selecto, &require_tenant_filter(&2, &1))
   end
 
   defp normalize_domain_context(selecto, context) when is_map(context) do
