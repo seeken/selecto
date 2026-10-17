@@ -165,11 +165,21 @@ defmodule Selecto.Schema.Column do
           case Map.get(computed, :kind, Map.get(computed, "kind")) do
             kind when kind in [:predicate, "predicate"] ->
               expression = Map.get(computed, :expression, Map.get(computed, "expression"))
-              Map.put(base_col, :select, {:computed_predicate, expression})
+
+              Map.put(
+                base_col,
+                :select,
+                {:computed_predicate, qualify_predicate(expression, join_prefix(join))}
+              )
 
             kind when kind in [:expression, "expression"] ->
               expression = Map.get(computed, :expression, Map.get(computed, "expression"))
-              Map.put(base_col, :select, {:computed_value, expression})
+
+              Map.put(
+                base_col,
+                :select,
+                {:computed_value, qualify_value(expression, join_prefix(join))}
+              )
 
             _ ->
               base_col
@@ -246,4 +256,87 @@ defmodule Selecto.Schema.Column do
       _ -> humanize(fallback)
     end
   end
+
+  # A computed column of a joined schema names its own relation's fields
+  # (`site`, `is_s1`); its column is registered as "<join>.<field>", so its
+  # expression is qualified to the join the same way. Already-qualified
+  # paths are kept. The root's expressions are unchanged.
+  defp join_prefix(:selecto_root), do: nil
+  defp join_prefix(nil), do: nil
+  defp join_prefix(join) when is_atom(join), do: Atom.to_string(join) <> "."
+  defp join_prefix(join) when is_binary(join), do: join <> "."
+
+  defp qualify_field(field, nil), do: field
+
+  defp qualify_field(field, prefix)
+       when is_atom(field) and not is_nil(field) and not is_boolean(field),
+       do: qualify_field(Atom.to_string(field), prefix)
+
+  defp qualify_field(field, prefix) when is_binary(field) do
+    if String.contains?(field, "."), do: field, else: prefix <> field
+  end
+
+  defp qualify_field(field, _prefix), do: field
+
+  @doc false
+  # The computed predicate AST with every field reference qualified by `prefix`.
+  def qualify_predicate(expression, nil), do: expression
+
+  def qualify_predicate([op, operands], prefix)
+      when op in [:and, :or, "and", "or"] and is_list(operands),
+      do: [op, Enum.map(operands, &qualify_predicate(&1, prefix))]
+
+  def qualify_predicate([op, operand], prefix) when op in [:not, "not"],
+    do: [op, qualify_predicate(operand, prefix)]
+
+  def qualify_predicate([op, field], prefix)
+      when op in [:is_null, "is_null", :not_null, "not_null"],
+      do: [op, qualify_field(field, prefix)]
+
+  def qualify_predicate([op, field | values], prefix) when is_atom(op) or is_binary(op),
+    do: [op, qualify_field(field, prefix) | Enum.map(values, &qualify_operand(&1, prefix))]
+
+  def qualify_predicate(expression, _prefix), do: expression
+
+  defp qualify_operand([tag, field], prefix) when tag in [:field, "field"],
+    do: [tag, qualify_field(field, prefix)]
+
+  defp qualify_operand(value, _prefix), do: value
+
+  @doc false
+  # The computed value AST with every field path qualified by `prefix`
+  # (CASE conditions are predicates).
+  def qualify_value(expression, nil), do: expression
+
+  def qualify_value([tag, path], prefix) when tag in [:field, "field"],
+    do: [tag, qualify_field(path, prefix)]
+
+  def qualify_value([tag | _] = literal, _prefix) when tag in [:literal, "literal"], do: literal
+
+  def qualify_value([tag, path, segments], prefix) when tag in [:json_text, "json_text"],
+    do: [tag, qualify_field(path, prefix), segments]
+
+  def qualify_value([tag, value, type], prefix) when tag in [:cast, "cast"],
+    do: [tag, qualify_value(value, prefix), type]
+
+  def qualify_value([tag | branches], prefix) when tag in [:case, "case"] do
+    [
+      tag
+      | Enum.map(branches, fn
+          [else_tag, value] when else_tag in [:else, "else"] ->
+            [else_tag, qualify_value(value, prefix)]
+
+          [condition, value] ->
+            [qualify_predicate(condition, prefix), qualify_value(value, prefix)]
+
+          other ->
+            other
+        end)
+    ]
+  end
+
+  def qualify_value([op | arguments], prefix) when is_atom(op) or is_binary(op),
+    do: [op | Enum.map(arguments, &qualify_value(&1, prefix))]
+
+  def qualify_value(expression, _prefix), do: expression
 end

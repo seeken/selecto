@@ -16,6 +16,25 @@ defmodule Selecto.HostComputedPolicyExactTest do
     def supports?(feature), do: feature in [:exact_tenant_compare]
     def quote_identifier(identifier), do: "`#{String.replace(identifier, "`", "``")}`"
     def placeholder(_index), do: "?"
+    def dialect, do: Selecto.HostComputedPolicyExactTest.ExactDialect
+  end
+
+  defmodule PlainAdapter do
+    @moduledoc false
+    def name, do: :plain_test
+    def supports?(_feature), do: false
+    def quote_identifier(identifier), do: "\"#{identifier}\""
+    def placeholder(_index), do: "?"
+    def dialect, do: Selecto.HostComputedPolicyExactTest.ExactDialect
+  end
+
+  defmodule ExactDialect do
+    @moduledoc false
+    # Computed-value casts render as the bare expression.
+    def render_computed_value(%{operation: :cast, expression: expression}, _selecto),
+      do: {:ok, expression}
+
+    def render_computed_value(_fragment, _selecto), do: {:error, :unsupported}
   end
 
   @exact_org "(selecto_root.org_key = ? AND CAST(CONVERT(selecto_root.org_key USING utf8mb4) AS BINARY) = CAST(? AS BINARY))"
@@ -119,6 +138,144 @@ defmodule Selecto.HostComputedPolicyExactTest do
 
       assert sql =~ "CAST(CONVERT(selecto_root.name USING utf8mb4) AS BINARY)"
       refute sql =~ "CONVERT(selecto_root.org_key"
+    end
+  end
+
+  describe "computed values and joined computed columns in host predicates" do
+    defp value_domain(required) do
+      %{
+        name: "CB",
+        source: %{
+          source_table: "cb_root",
+          primary_key: :id,
+          fields: [:id, :org_key, :acc_id, :name, :is_t1, :flag, :flag_in, :flag_nested, :label],
+          redact_fields: [],
+          columns: %{
+            id: %{type: :integer},
+            org_key: %{type: :string},
+            acc_id: %{type: :integer},
+            name: %{type: :string},
+            is_t1: %{
+              type: :boolean,
+              computed: %{kind: :predicate, expression: ["eq", "org_key", "t1"]}
+            },
+            flag: %{
+              type: :string,
+              computed: %{
+                kind: :expression,
+                expression: [
+                  "case",
+                  [["eq", "org_key", "t1"], ["literal", "y"]],
+                  ["else", ["literal", "n"]]
+                ]
+              }
+            },
+            flag_in: %{
+              type: :string,
+              computed: %{
+                kind: :expression,
+                expression: [
+                  "case",
+                  [["in", "org_key", ["t1", "q"]], ["literal", "y"]],
+                  ["else", ["literal", "n"]]
+                ]
+              }
+            },
+            flag_nested: %{
+              type: :string,
+              computed: %{
+                kind: :expression,
+                expression: [
+                  "coalesce",
+                  ["case", [["eq", "is_t1", true], ["literal", "y"]], ["else", ["literal", "n"]]],
+                  ["literal", "n"]
+                ]
+              }
+            },
+            label: %{
+              type: :string,
+              computed: %{kind: :expression, expression: ["upper", ["field", "name"]]}
+            }
+          },
+          associations: %{
+            a: %{
+              queryable: :acc,
+              field: :a,
+              owner_key: :acc_id,
+              related_key: :id,
+              cardinality: :one
+            }
+          }
+        },
+        schemas: %{
+          acc: %{
+            source_table: "cb_acc",
+            primary_key: :id,
+            fields: [:id, :site, :label, :is_s1],
+            redact_fields: [],
+            columns: %{
+              id: %{type: :integer},
+              site: %{type: :string},
+              label: %{type: :string},
+              is_s1: %{
+                type: :boolean,
+                computed: %{kind: :predicate, expression: ["eq", "site", "s1"]}
+              }
+            },
+            associations: %{}
+          }
+        },
+        joins: %{a: %{type: :left, name: "a"}}
+      }
+      |> then(&if(required, do: Map.put(&1, :required_filters, required), else: &1))
+    end
+
+    test "a host predicate on a computed value compares its CASE conditions exactly" do
+      for field <- ["flag", "flag_in", "flag_nested"],
+          {domain, fun} <- [
+            {value_domain([{field, "y"}]), &Selecto.select(&1, ["id"])},
+            {value_domain(nil),
+             &(&1 |> Selecto.Tenant.require_tenant_filter({field, "y"}) |> Selecto.select(["id"]))}
+          ] do
+        {sql, params} = compile(domain, ExactAdapter, fun)
+
+        assert sql =~ "WHEN (selecto_root.org_key = ? AND CAST(CONVERT(selecto_root.org_key" or
+                 sql =~
+                   "WHEN (selecto_root.org_key IN (?, ?) AND CAST(CONVERT(selecto_root.org_key" or
+                 sql =~ "WHEN ( (selecto_root.org_key = ? AND CAST(CONVERT(selecto_root.org_key" or
+                 sql =~
+                   "WHEN ( (selecto_root.org_key IN (?, ?) AND CAST(CONVERT(selecto_root.org_key",
+               "#{field}: #{sql}"
+
+        assert markers(sql) == length(params), field
+
+        {plain, _} = compile(domain, PlainAdapter, fun)
+        refute plain =~ "BINARY", field
+      end
+    end
+
+    test "a caller filter on a computed value stays plain" do
+      {sql, _params} =
+        compile(value_domain(nil), ExactAdapter, fn s ->
+          s |> Selecto.filter([{"flag", "y"}]) |> Selecto.select(["id"])
+        end)
+
+      refute sql =~ "CONVERT(selecto_root.org_key"
+    end
+
+    test "a joined schema's computed predicate resolves against its join and stays host-exact" do
+      fun = &Selecto.select(&1, ["id", "a.label"])
+      {sql, params} = compile(value_domain([{"a.is_s1", true}]), ExactAdapter, fun)
+
+      assert sql =~
+               ~r/\(a\.`?site`? = \? AND CAST\(CONVERT\(a\.`?site`? USING utf8mb4\) AS BINARY\) = CAST\(\? AS BINARY\)\)/,
+             sql
+
+      assert markers(sql) == length(params)
+
+      {plain, _} = compile(value_domain([{"a.is_s1", true}]), SelectoDBSQLite.Adapter, fun)
+      refute plain =~ "BINARY"
+      assert plain =~ ~r/a\."?site"? = \?/
     end
   end
 
