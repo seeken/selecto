@@ -128,14 +128,17 @@ defmodule Selecto.Builder.ExactCompare do
     |> Enum.uniq()
   end
 
-  # A computed predicate column (computed.kind: :predicate) that a host
-  # predicate names, with any operator ({"is_t1", true} included), is host
-  # scope over its body: the body's =, <>, IN and NOT IN leaves decide tenant
-  # identity just as if the host had written them (ADDENDUM 7a). Their fields
+  # A computed column that a host predicate names, with any operator
+  # ({"is_t1", true} included), is host scope over its expression
+  # (ADDENDUM 7a): the =, <>, IN and NOT IN leaves of a computed predicate's
+  # body, and of every CASE WHEN condition of a computed value, decide which
+  # rows the host admits just as if the host had written them. Their fields
   # join the host names, so each leaf compares exactly by its own declared
-  # type. Nested computed predicates are followed (cycles are refused at
-  # validation; the visited set only bounds the walk). Caller filters on the
-  # computed column add nothing.
+  # type. Computed columns the expression reads are followed (cycles are
+  # refused at validation; the visited set only bounds the walk). A joined
+  # schema's computed expression is qualified to its join at configure
+  # (Selecto.Schema.Column), so "a.is_s1" widens "a.site". Caller filters on
+  # a computed column add nothing.
   defp computed_body_fields(selecto, filters) do
     columns =
       case Map.get(selecto, :config) do
@@ -160,22 +163,30 @@ defmodule Selecto.Builder.ExactCompare do
     else
       visited = MapSet.put(visited, name)
 
-      case computed_predicate_body(columns, name) do
+      case computed_body(columns, name) do
         nil ->
           expand_computed(rest, columns, visited, acc)
 
-        body ->
+        {:predicate, body} ->
           expand_computed(
             referenced_fields(body) ++ rest,
             columns,
             visited,
             acc ++ comparison_fields(body)
           )
+
+        {:value, conditions, fields} ->
+          expand_computed(
+            Enum.flat_map(conditions, &referenced_fields/1) ++ fields ++ rest,
+            columns,
+            visited,
+            acc ++ Enum.flat_map(conditions, &comparison_fields/1)
+          )
       end
     end
   end
 
-  defp computed_predicate_body(columns, name) do
+  defp computed_body(columns, name) do
     conf =
       Map.get(columns, name) ||
         try do
@@ -186,12 +197,61 @@ defmodule Selecto.Builder.ExactCompare do
 
     case conf do
       %{select: {:computed_predicate, expression}} ->
-        Selecto.Domain.Contract.ComputedPredicates.to_filter(expression)
+        {:predicate, Selecto.Domain.Contract.ComputedPredicates.to_filter(expression)}
+
+      %{select: {:computed_value, expression}} ->
+        expression =
+          case Selecto.Domain.Contract.ComputedValues.normalize(expression) do
+            {:ok, normalized} -> normalized
+            _ -> expression
+          end
+
+        {conditions, fields} = value_parts(expression)
+        {:value, conditions, fields}
 
       _ ->
         nil
     end
   end
+
+  # A computed value's comparison conditions (CASE WHEN filters, at any
+  # depth) and the fields it reads (other computed columns among them).
+  # The comparisons the WHEN conditions hold decide which value a row takes,
+  # so under a host predicate they are host scope too (ADDENDUM 7a).
+  defp value_parts([tag | branches]) when tag in [:case, "case"] do
+    Enum.reduce(branches, {[], []}, fn
+      [else_tag, value], {conditions, fields} when else_tag in [:else, "else"] ->
+        {c, f} = value_parts(value)
+        {conditions ++ c, fields ++ f}
+
+      [condition, value], {conditions, fields} ->
+        {c, f} = value_parts(value)
+
+        {conditions ++
+           [Selecto.Domain.Contract.ComputedPredicates.to_filter(condition)] ++ c, fields ++ f}
+
+      _other, acc ->
+        acc
+    end)
+  end
+
+  defp value_parts([tag, path])
+       when tag in [:field, "field"] and (is_binary(path) or is_atom(path)),
+       do: {[], [to_string(path)]}
+
+  defp value_parts([tag | _]) when tag in [:literal, "literal"], do: {[], []}
+
+  defp value_parts([tag, path, _segments]) when tag in [:json_text, "json_text"],
+    do: {[], [to_string(path)]}
+
+  defp value_parts([op | arguments]) when is_atom(op) or is_binary(op) do
+    Enum.reduce(arguments, {[], []}, fn argument, {conditions, fields} ->
+      {c, f} = value_parts(argument)
+      {conditions ++ c, fields ++ f}
+    end)
+  end
+
+  defp value_parts(_expression), do: {[], []}
 
   # Every field a filter tree names, whatever the operator.
   defp referenced_fields({conj, filters}) when conj in [:and, :or] and is_list(filters),

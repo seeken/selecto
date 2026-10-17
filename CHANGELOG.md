@@ -3,6 +3,16 @@
 
 ## Unreleased
 
+- MySQL and MariaDB: a computed value column named by a host predicate is
+  host scope over its CASE WHEN conditions (at any depth, through the
+  computed columns it reads): their `=`, `<>`, `IN` and `NOT IN` leaves
+  compare exactly by declared type, so `flag = 'y'` over
+  `CASE WHEN org_key = 't1' ...` no longer admits 'T1' or 't1 '. Caller
+  filters stay plain.
+- A computed column of a joined schema (`a.is_s1`) resolves its expression
+  against its join: field references are qualified to the join at
+  configure. Before, it raised "Field 'site' not found" on every adapter.
+
 - Retarget onto an association confined by a `where` policy re-applies the
   policy to the target rows, on every adapter (PostgreSQL and SQLite
   included). The context correlates on the target key alone, so with keys
