@@ -118,13 +118,106 @@ defmodule Selecto.Builder.ExactCompare do
     domain = Map.get(selecto, :domain) || %{}
     context = Map.get(selecto, :tenant) || %{}
 
-    (List.wrap(get(domain, :required_filters)) ++
-       List.wrap(Map.get(set, :required_filters)) ++
-       List.wrap(get(context, :required_filters)) ++
-       List.wrap(Map.get(set, :host_filtered)) ++ Selecto.Tenant.engine_filters(selecto))
-    |> Enum.flat_map(&comparison_fields/1)
+    filters =
+      List.wrap(get(domain, :required_filters)) ++
+        List.wrap(Map.get(set, :required_filters)) ++
+        List.wrap(get(context, :required_filters)) ++
+        List.wrap(Map.get(set, :host_filtered)) ++ Selecto.Tenant.engine_filters(selecto)
+
+    (Enum.flat_map(filters, &comparison_fields/1) ++ computed_body_fields(selecto, filters))
     |> Enum.uniq()
   end
+
+  # A computed predicate column (computed.kind: :predicate) that a host
+  # predicate names, with any operator ({"is_t1", true} included), is host
+  # scope over its body: the body's =, <>, IN and NOT IN leaves decide tenant
+  # identity just as if the host had written them (ADDENDUM 7a). Their fields
+  # join the host names, so each leaf compares exactly by its own declared
+  # type. Nested computed predicates are followed (cycles are refused at
+  # validation; the visited set only bounds the walk). Caller filters on the
+  # computed column add nothing.
+  defp computed_body_fields(selecto, filters) do
+    columns =
+      case Map.get(selecto, :config) do
+        %{columns: columns} when is_map(columns) -> columns
+        _ -> %{}
+      end
+
+    if columns == %{} do
+      []
+    else
+      filters
+      |> Enum.flat_map(&referenced_fields/1)
+      |> expand_computed(columns, MapSet.new(), [])
+    end
+  end
+
+  defp expand_computed([], _columns, _visited, acc), do: acc
+
+  defp expand_computed([name | rest], columns, visited, acc) do
+    if MapSet.member?(visited, name) do
+      expand_computed(rest, columns, visited, acc)
+    else
+      visited = MapSet.put(visited, name)
+
+      case computed_predicate_body(columns, name) do
+        nil ->
+          expand_computed(rest, columns, visited, acc)
+
+        body ->
+          expand_computed(
+            referenced_fields(body) ++ rest,
+            columns,
+            visited,
+            acc ++ comparison_fields(body)
+          )
+      end
+    end
+  end
+
+  defp computed_predicate_body(columns, name) do
+    conf =
+      Map.get(columns, name) ||
+        try do
+          Map.get(columns, String.to_existing_atom(name))
+        rescue
+          ArgumentError -> nil
+        end
+
+    case conf do
+      %{select: {:computed_predicate, expression}} ->
+        Selecto.Domain.Contract.ComputedPredicates.to_filter(expression)
+
+      _ ->
+        nil
+    end
+  end
+
+  # Every field a filter tree names, whatever the operator.
+  defp referenced_fields({conj, filters}) when conj in [:and, :or] and is_list(filters),
+    do: Enum.flat_map(filters, &referenced_fields/1)
+
+  defp referenced_fields({:not, filter}), do: referenced_fields(filter)
+
+  defp referenced_fields({field}) when is_binary(field) or (is_atom(field) and not is_nil(field)),
+    do: [to_string(field)]
+
+  defp referenced_fields({field, value})
+       when is_binary(field) or (is_atom(field) and not is_nil(field) and field not in [:exists]),
+       do: [to_string(field) | ref_field(value)]
+
+  defp referenced_fields({field, _op, _value})
+       when is_binary(field) or (is_atom(field) and not is_nil(field) and field not in [:exists]),
+       do: [to_string(field)]
+
+  defp referenced_fields(_filter), do: []
+
+  defp ref_field({:ref, field}) when is_binary(field) or is_atom(field), do: [to_string(field)]
+
+  defp ref_field({_op, {:ref, field}}) when is_binary(field) or is_atom(field),
+    do: [to_string(field)]
+
+  defp ref_field(_value), do: []
 
   @doc false
   # The fields an equality-family comparison (=, <>, !=, IN, NOT IN) names
@@ -340,6 +433,17 @@ defmodule Selecto.Builder.ExactCompare do
         type_mode(declared_type(left_relation, left_field)),
         type_mode(declared_type(right_relation, right_field))
       ])
+  end
+
+  @doc false
+  # The mode of one column of `relation` compared with a bound value in a
+  # domain-authored host predicate (an association `where` policy): by the
+  # column's own declared type under the three-way classification, guarded
+  # (:server) when the relation or column is undeclared, and at least the
+  # mode a tenant/site column of that name takes. false on other adapters.
+  def field_mode(selecto, relation, field) when is_atom(field) or is_binary(field) do
+    enabled?(selecto) and
+      strongest([type_mode(declared_type(relation, field)), column?(selecto, field)])
   end
 
   @doc false

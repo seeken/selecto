@@ -3,6 +3,23 @@
 
 ## Unreleased
 
+- Retarget onto an association confined by a `where` policy re-applies the
+  policy to the target rows, on every adapter (PostgreSQL and SQLite
+  included). The context correlates on the target key alone, so with keys
+  repeating across the policy's scopes a retarget returned rows the join
+  excludes. Only retargets whose last hop declares `where` change.
+- MySQL and MariaDB: association `where` policies (joins, collections,
+  through bridges, retarget targets) are host scope. Each policy equality
+  compares by its column's declared type in the confined relation: known
+  text by utf8mb4 bytes, known non-text plainly, undeclared or unrecognised
+  types (and undeclared bridge tables) guarded by the column's collation.
+  Before, only declared tenant/site column names compared exactly.
+- MySQL and MariaDB: a computed predicate column named by a host predicate
+  (required filters, trusted context, engine binding, host scope recorded at
+  intake) is host scope over its body: the body's `=`, `<>`, `IN` and
+  `NOT IN` leaves compare exactly by their declared types, through nested
+  computed predicates. A caller filter on the computed column stays plain.
+
 - MySQL and MariaDB: host scope recorded at intake compares exactly.
   `Selecto.Tenant.require_read_boundary/2` records the filters the query
   holds when it accepts the boundary (`set.host_filtered`), so a host's

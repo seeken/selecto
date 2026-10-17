@@ -43,6 +43,10 @@ defmodule Selecto.Retarget do
   scoped root whose tenant condition cannot be carried to a tenant-scoped
   target fails closed with `:missing_tenant_scope`.
 
+  The `where` policy of the association that reaches the target is
+  re-applied to the target rows, so a key that repeats across the policy's
+  scopes never brings back rows the join excludes.
+
   ## Options
 
     * `:strategy` - `:in` (default) or `:exists`. Both return the same rows.
@@ -87,6 +91,7 @@ defmodule Selecto.Retarget do
       target_schema: plan.target_schema,
       primary_key: plan.primary_key,
       scope_keys: plan.scope_keys,
+      policy: plan.policy,
       strategy: strategy,
       origin: selecto
     })
@@ -155,6 +160,40 @@ defmodule Selecto.Retarget do
       nil ->
         nil
 
+      config ->
+        case policy_filter(selecto, config) do
+          nil -> key_context_filter(selecto, config)
+          policy -> {:and, [key_context_filter(selecto, config), policy]}
+        end
+    end
+  end
+
+  # The association `where` policy of the last hop confines the target rows
+  # the join reaches (ADDENDUM 8). The context correlates on the target's key
+  # (and scope keys) alone, and a key can repeat across the policy's scopes,
+  # so the policy is re-applied to the outer target rows: with host
+  # exactness on MySQL and MariaDB by each column's declared type, plainly
+  # elsewhere (Selecto.Builder.Association.policy_conditions/4).
+  defp policy_filter(selecto, config) do
+    case Map.get(config, :policy) do
+      policy when is_map(policy) and map_size(policy) > 0 ->
+        conditions =
+          Selecto.Builder.Association.policy_conditions(
+            selecto,
+            "selecto_root",
+            policy,
+            Map.get(selecto.domain, :source)
+          )
+
+        {:raw_sql_filter, ["(", Enum.intersperse(conditions, " AND "), ")"]}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp key_context_filter(selecto, config) do
+    case config do
       %{scope_keys: [_ | _]} = config ->
         scoped_context_filter(selecto, config)
 
@@ -342,6 +381,7 @@ defmodule Selecto.Retarget do
       target_schema: target_schema,
       primary_key: primary_key,
       scope_keys: target_scope_keys(List.last(hops), primary_key),
+      policy: target_policy(List.last(hops)),
       relation: relation,
       domain: target_domain(domain, relation, join_subtree(domain, path))
     }
@@ -519,6 +559,17 @@ defmodule Selecto.Retarget do
   end
 
   defp target_scope_keys(_hop, _primary_key), do: []
+
+  # The association `where` policy that confines the target (the through
+  # bridge's own policy is applied inside the context).
+  defp target_policy(%{association: association}) do
+    case Map.get(association, :where) || Map.get(association, "where") do
+      policy when is_map(policy) -> policy
+      _ -> %{}
+    end
+  end
+
+  defp target_policy(_hop), do: %{}
 
   defp join_subtree(domain, path) do
     Enum.reduce(path, %{joins: Map.get(domain, :joins, %{})}, fn join, node ->
