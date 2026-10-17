@@ -52,7 +52,9 @@ defmodule Selecto.CannedPage.Definition do
 
   @doc false
   def plain!(base) do
-    allowed = ~w(selected filtered required_filters post_retarget_filters order_by group_by)a
+    allowed =
+      ~w(selected filtered required_filters engine_tenant_filters post_retarget_filters order_by group_by)a
+
     ensure!(Map.keys(base.set) -- allowed == [], "page base must be a plain query")
 
     ensure!(
@@ -71,7 +73,7 @@ defmodule Selecto.CannedPage.Definition do
 
     ensure!(
       Map.keys(query.set) --
-        ~w(selected filtered required_filters post_retarget_filters order_by group_by subselected)a ==
+        ~w(selected filtered required_filters engine_tenant_filters post_retarget_filters order_by group_by subselected)a ==
         [],
       "unsupported view query"
     )

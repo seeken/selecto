@@ -3,6 +3,12 @@
 
 ## Unreleased
 
+- Host predicate inspection with `include_engine_tenant: false` also omits
+  predicates materialized by applying engine tenant context. Explicit domain
+  or host required predicates remain independent authority; normal read and
+  write confinement is unchanged. This prevents a scalar tenant attachment
+  from implicitly opting a public API into tenant writes.
+
 - MySQL and MariaDB: scope-key pairs that decide tenant identity now compare
   exactly when either column may hold text, by each column's own declared
   type. This covers direct scope keys, the tenant pair, and the root -> bridge

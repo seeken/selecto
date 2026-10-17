@@ -199,7 +199,25 @@ defmodule Selecto.Tenant do
         if is_nil(tenant_id) do
           selecto
         else
-          require_tenant_filter(selecto, tenant_field, tenant_id)
+          filter = {tenant_field, tenant_id}
+          introduced? = filter not in Selecto.required_filters(selecto)
+          selecto = append_required_filter(selecto, filter)
+
+          if introduced? do
+            generated = Map.get(selecto.set, :engine_tenant_filters, [])
+
+            %{
+              selecto
+              | set:
+                  Map.put(
+                    selecto.set,
+                    :engine_tenant_filters,
+                    uniq_filters(generated ++ [filter])
+                  )
+            }
+          else
+            selecto
+          end
         end
     end
   end
@@ -210,6 +228,24 @@ defmodule Selecto.Tenant do
   @spec require_tenant_filter(Selecto.Types.t(), Selecto.Types.filter()) :: Selecto.Types.t()
   def require_tenant_filter(selecto, filter) do
     :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :require_tenant_filter)
+    # An explicit host call is independent authority, even if the same
+    # predicate was previously materialized by apply_tenant_scope/2.
+    set = Map.get(selecto, :set, %{})
+
+    set =
+      if Map.has_key?(set, :engine_tenant_filters),
+        do:
+          Map.update!(
+            set,
+            :engine_tenant_filters,
+            &Enum.reject(&1, fn generated -> generated === filter end)
+          ),
+        else: set
+
+    append_required_filter(%{selecto | set: set}, filter)
+  end
+
+  defp append_required_filter(selecto, filter) do
     set = Map.get(selecto, :set, %{})
     current = Map.get(set, :required_filters, [])
     updated = uniq_filters(current ++ [filter])

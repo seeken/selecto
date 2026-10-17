@@ -117,6 +117,37 @@ defmodule Selecto.TenantTest do
     assert {"tenant_id", "acme"} in Selecto.query_filters(required, include_engine_tenant: false)
   end
 
+  test "materialized scalar tenant context never becomes independent host authority" do
+    for bind <- [
+          &Selecto.with_tenant(&1, "acme"),
+          fn query ->
+            query |> Selecto.with_tenant(tenant_id: "acme") |> Selecto.apply_tenant_scope()
+          end
+        ] do
+      bound = domain() |> selecto() |> bind.()
+      assert {"tenant_id", "acme"} in Selecto.required_filters(bound)
+      assert {"tenant_id", "acme"} in Selecto.query_filters(bound)
+      assert Selecto.query_filters(bound, include_engine_tenant: false) == [{"active", true}]
+      reapplied = Selecto.apply_tenant_scope(bound)
+      assert Selecto.query_filters(reapplied, include_engine_tenant: false) == [{"active", true}]
+      authored = Selecto.require_tenant_filter(bound, "tenant_id", "acme")
+
+      assert {"tenant_id", "acme"} in Selecto.query_filters(authored,
+               include_engine_tenant: false
+             )
+    end
+
+    authored =
+      domain()
+      |> Map.put(:required_filters, [{"tenant_id", "acme"}])
+      |> selecto()
+      |> Selecto.with_tenant("acme")
+
+    assert Selecto.query_filters(authored, include_engine_tenant: false) == [
+             {"tenant_id", "acme"}
+           ]
+  end
+
   test "apply_tenant_scope adds tenant filter as required filter" do
     query =
       domain()

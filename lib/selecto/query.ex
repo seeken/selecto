@@ -190,7 +190,8 @@ defmodule Selecto.Query do
     keeps its target filters in `set.filtered`.
   - `:include_engine_tenant` - defaults to true. Trusted integrations inspecting
     separately authored host predicates may omit the implicit engine predicate;
-    required filters remain present, and the engine binding is unchanged.
+    independently authored required filters remain present, while materialized
+    engine predicates are omitted and the execution binding is unchanged.
 
   A retargeted query is refused: its filters describe the target rows, and
   its context restriction is not a filter list, so they cannot scope writes
@@ -230,10 +231,20 @@ defmodule Selecto.Query do
         []
       end
 
+    required = required_filters(selecto)
+
+    required =
+      if Keyword.get(opts, :include_engine_tenant, true),
+        do: required,
+        else:
+          Enum.reject(required, fn filter ->
+            filter in Map.get(selecto.set, :engine_tenant_filters, [])
+          end)
+
     # The trusted engine tenant is bound onto every read and so onto every
     # query-scoped write built from these filters (lesson 43).
     [
-      required_filters(selecto),
+      required,
       if(Keyword.get(opts, :include_engine_tenant, true),
         do: Selecto.Tenant.engine_filters(selecto),
         else: []
