@@ -19,6 +19,9 @@ defmodule Selecto.Domain.Examples do
       source: %{
         source_table: "work_items",
         primary_key: :id,
+        # The root tenant boundary. Selecto pairs it with owners.tenant_id in
+        # the join, so a tenant's work items never show another tenant's owner.
+        tenant_field: :tenant_id,
         fields: [
           :id,
           :title,

@@ -7,6 +7,10 @@ defmodule Selecto.DomainExamplesWriteTenancyTest do
     assert Examples.work_items().schemas.owners.tenant_field == :tenant_id
   end
 
+  test "work_items declares its root tenant field, so the owners join is tenant-paired" do
+    assert Examples.work_items().source.tenant_field == :tenant_id
+  end
+
   test "camp_registrations declares cabins as a shared reference" do
     {:ok, contract} = WriteContract.compile(Examples.camp_registrations())
 
