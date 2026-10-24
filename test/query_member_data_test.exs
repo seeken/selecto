@@ -216,6 +216,32 @@ defmodule Selecto.QueryMemberDataTest do
     assert_raise Selecto.DomainValidator.ValidationError, fn -> spec.source.(invalid_parent) end
   end
 
+  test "an aliased plain field selection is a typed refusal, not a CondClauseError" do
+    # w3exrev15 LOW: %{"as" => .., "field" => ..} without :value or :aggregate.
+    bad = %{
+      laterals: %{
+        aliased: %{
+          source: "order",
+          query: %{"select" => [%{"as" => "k", "field" => "total"}]},
+          correlations: %{person_id: "id"},
+          join_type: "left"
+        }
+      }
+    }
+
+    assert {:error, _} = Selecto.Domain.validate(domain(bad))
+
+    assert_raise Selecto.Advanced.LateralJoin.CorrelationError,
+                 ~r/selection needs :value or a supported :aggregate/,
+                 fn ->
+                   domain(bad)
+                   |> Selecto.configure(:compile_only, validate: false)
+                   |> Selecto.with_lateral(:aliased)
+                   |> Selecto.select(["name", "aliased.k"])
+                   |> sql()
+                 end
+  end
+
   test "previous outside a recursive step is rejected" do
     bad = %{
       ctes: %{

@@ -3,6 +3,11 @@
 
 ## Unreleased
 
+- Fixed: a query member selection with `"as"` and `"field"` but neither
+  `"value"` nor `"aggregate"` raised a CondClauseError when the domain was
+  configured without validation; it is now the same refusal validation
+  gives ("selection needs :value or a supported :aggregate").
+
 - MySQL and MariaDB: a query member's GROUP BY also groups every text or
   unknown key by its utf8mb4 bytes (an aliased or expression key included),
   so a member CTE no longer merges 't1', 'T1' and 't1 ' (1 -> 11 -> 111).
