@@ -3,6 +3,15 @@
 
 ## Unreleased
 
+- MySQL and MariaDB: a query member's GROUP BY also groups every text or
+  unknown key by its utf8mb4 bytes (an aliased or expression key included),
+  so a member CTE no longer merges 't1', 'T1' and 't1 ' (1 -> 11 -> 111).
+  Lateral member correlations are host identity pairs (exact by bytes when
+  either side may hold text), and a join whose owner-side key a host
+  predicate reads pairs exactly.
+- PostgreSQL: a query-member lateral keeps its declared output aliases
+  (`lat.s` resolved to nothing and the query failed).
+
 - `Selecto.DB.WriteAdapter` gains the optional `column_catalog/2` callback:
   a table's catalog column types for SelectoUpdato's verified candidate
   check (query_enforced_scalar v2).

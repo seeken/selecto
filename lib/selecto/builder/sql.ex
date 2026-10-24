@@ -1299,12 +1299,36 @@ defmodule Selecto.Builder.Sql do
             ExactCompare.strongest([
               ExactCompare.column?(selecto, config.my_key),
               ExactCompare.column?(selecto, config.owner_key),
-              ExactCompare.identity_pair(selecto, config.my_key, config.owner_key)
+              ExactCompare.identity_pair(selecto, config.my_key, config.owner_key),
+              host_read_pair(selecto, config)
             ])
           )
       end
 
     append_association_scope_to_on_clause(selecto, join, base_on, config)
+  end
+
+  # A join whose owner-side key a host predicate reads (a required filter on
+  # the root's org_key that a member CTE joins on) pairs as an identity:
+  # exact on MySQL and MariaDB when either side may hold text, judged by both
+  # sides' declared types (ADDENDUM 6), so a host-scoped key never joins the
+  # collation-equal rows of other scopes.
+  defp host_read_pair(selecto, config) do
+    owner = to_string(config.owner_key)
+
+    written =
+      case Map.get(config, :requires_join, :selecto_root) do
+        :selecto_root -> owner
+        join -> "#{join}.#{owner}"
+      end
+
+    domain = Map.get(selecto, :domain)
+
+    ExactCompare.enabled?(selecto) and ExactCompare.host_mode(selecto, written) and
+      ExactCompare.strongest([
+        ExactCompare.text_column?(domain, config.my_key),
+        ExactCompare.text_column?(domain, config.owner_key)
+      ])
   end
 
   @doc false

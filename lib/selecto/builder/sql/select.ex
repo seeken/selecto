@@ -999,6 +999,23 @@ defmodule Selecto.Builder.Sql.Select do
     {["(", iodata, ")"], joins, params}
   end
 
+  # The utf8mb4 byte image of a host-exact key (a member GROUP BY on its
+  # join, correlation or scope key; Selecto.QueryMembers.Data), by the
+  # field's declared type: known non-text keeps the plain value.
+  def prep_selector(selecto, {:host_exact_bytes, field}, retarget_aliases) do
+    {sel, join, params} = prep_selector(selecto, field, retarget_aliases)
+
+    mode =
+      case host_exact_field(selecto, field) do
+        %{type: type} -> Selecto.Builder.ExactCompare.type_mode(type)
+        _ -> :server
+      end
+
+    if mode,
+      do: {Selecto.Builder.ExactCompare.bytes(sel, mode), join, params},
+      else: {sel, join, params}
+  end
+
   def prep_selector(selecto, {:computed_predicate, expression}, _retarget_aliases) do
     filter = Selecto.Domain.Contract.ComputedPredicates.to_filter(expression)
     {joins, predicate, params} = Selecto.Builder.Sql.Where.build(selecto, filter)
@@ -2036,4 +2053,12 @@ defmodule Selecto.Builder.Sql.Select do
       _ -> nil
     end
   end
+
+  defp host_exact_field(selecto, field) when is_binary(field) or is_atom(field) do
+    Selecto.field(selecto, to_string(field))
+  rescue
+    _ -> nil
+  end
+
+  defp host_exact_field(_selecto, _field), do: nil
 end
