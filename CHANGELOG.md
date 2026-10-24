@@ -3,6 +3,10 @@
 
 ## Unreleased
 
+- Graph materializer: a delete-missing cleanup command carries its node's
+  `bound_scope` marker, so adapters apply the bound-scope delete contract to
+  it (w3exrev17).
+
 - Fixed: a query member selection with `"as"` and `"field"` but neither
   `"value"` nor `"aggregate"` raised a CondClauseError when the domain was
   configured without validation; it is now the same refusal validation
