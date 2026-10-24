@@ -293,7 +293,7 @@
       }
     },
     "computed": {
-      "description": "A predicate-computed boolean field: SQL-backed row eligibility expressed with the portable filter AST.",
+      "description": "A predicate-computed boolean field: SQL-backed row eligibility expressed with the portable filter AST. The expression may not read a field its relation redacts (the relation's `redact_fields`, and for `source` the root `redact_fields`) or a column marked `hidden` or `internal`: a selected boolean per row would reveal it. Loaders refuse such a domain (\"computed expression reads a redacted or hidden field <f>\").",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -306,7 +306,7 @@
           "const": "predicate"
         },
         "expression": {
-          "description": "Predicate AST evaluated per row.",
+          "description": "Predicate AST evaluated per row. No string operand may name a redacted, hidden or internal field of the relation.",
           "$ref": "#/$defs/predicate"
         }
       }
