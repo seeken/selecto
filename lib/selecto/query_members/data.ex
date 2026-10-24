@@ -344,6 +344,11 @@ defmodule Selecto.QueryMembers.Data do
       to_string(get(entry, :aggregate)) in @aggregates ->
         fun = String.to_existing_atom(to_string(get(entry, :aggregate)))
         X.as(apply(X, fun, [to_string(get(entry, :field))]), as)
+
+      # The same refusal validation gives (check_query!/2), also when a
+      # domain is configured without validation.
+      true ->
+        raise ArgumentError, "selection needs :value or a supported :aggregate"
     end
   end
 
