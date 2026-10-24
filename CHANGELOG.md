@@ -3,6 +3,10 @@
 
 ## Unreleased
 
+- `Selecto.DB.WriteAdapter` gains the optional `column_catalog/2` callback:
+  a table's catalog column types for SelectoUpdato's verified candidate
+  check (query_enforced_scalar v2).
+
 - MySQL and MariaDB: a computed value column named by a host predicate is
   host scope over its CASE WHEN conditions (at any depth, through the
   computed columns it reads): their `=`, `<>`, `IN` and `NOT IN` leaves
