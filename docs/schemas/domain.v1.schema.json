@@ -1,0 +1,1386 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selecto.dev/schemas/domain.v1.schema.json",
+  "title": "Selecto canonical domain, schema version 1 (JSON interchange)",
+  "description": "String-keyed JSON interchange form of a Selecto schema-v1 authored domain, as specified in selecto/docs/domain_schema_v1.md. 'A Selecto domain is a declarative, versioned description of the data, relationships, query surfaces, write permissions, actions, governed imports, choices, capability names, and event contracts that an application elects to expose.' This schema checks the documented shapes only; referential checks (fields resolving to columns, joins naming associations, capability and choice-source references, cycles) remain the job of Selecto.Domain.validate/1 and Selecto.DomainValidator.validate_domain/1. Atom-valued Elixir terms appear as strings; Elixir tuples appear as JSON arrays. Function captures, modules and regexes (query-member builders, published-view queries, hooks, extensions) have no portable JSON form. Sections the specification calls open consumer contracts are typed as objects without closing them. The top level is closed over the documented vocabulary: the specification classifies any other key as unknown and reports it, so a conforming interchange document should not contain one. A host loading this JSON for runtime use MUST translate only the documented finite key and enum set and MUST NOT create atoms from arbitrary strings; see published-domain-json.v1.schema.json for the strict subset served by selecto_mcp.",
+  "type": "object",
+  "required": ["source", "schemas"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "description": "Canonical (diagnostic category). 'The machine compatibility version for the canonical Selecto domain schema, and should remain a positive integer.' When missing, normalization infers 1 with a :schema_version_inferred warning; newer integers receive :unsupported_schema_version. This schema describes version 1, so only 1 is accepted.",
+      "const": 1
+    },
+    "domain_version": {
+      "description": "Canonical. Optional authored-domain metadata: 'an opaque non-empty atom, string, or integer that a host can use for semantic versions, date-based releases, or generated build ids'.",
+      "anyOf": [
+        {"$ref": "#/$defs/nonEmptyString"},
+        {"type": "integer"}
+      ]
+    },
+    "domain_fingerprint": {
+      "description": "Canonical. Optional identity metadata: 'an opaque non-empty string, usually a content hash or stable generated-artifact fingerprint'. Core preserves it but never computes it.",
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "name": {
+      "description": "Canonical. Human-readable domain name.",
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "fts5_index": {
+      "description": "Documented root key (not in the Sections vocabulary). Declares 'a host-maintained SQLite external-content FTS5 index. This closed map accepts only table and key identifiers; key must be the root's single public stored integer primary key.' It carries configuration and does not create an index or authorize a lookup.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["table", "key"],
+      "properties": {
+        "table": {"description": "FTS5 virtual table name.", "$ref": "#/$defs/identifier"},
+        "key": {"description": "The root's single public stored integer primary key field.", "$ref": "#/$defs/identifier"}
+      }
+    },
+    "tenant_required": {
+      "description": "Runtime tenant policy flag read by Selecto.Tenant.tenant_required?/2 and accepted by the selecto_mcp published-JSON loader. It is not part of the Selecto.Domain.Sections vocabulary, so normalization reports it under the `unknown` category; it is listed here so that every strict published domain is also valid against this schema.",
+      "type": "boolean"
+    },
+    "source": {
+      "description": "Canonical, required. The root relation map ('source and schemas must be present in the authored domain').",
+      "$ref": "#/$defs/relation"
+    },
+    "schemas": {
+      "description": "Canonical, required. Registry of joinable relation maps keyed by schema id; every queryable association must point at a schema available here unless it explicitly targets `source`.",
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/identifier"},
+      "additionalProperties": {"$ref": "#/$defs/relation"}
+    },
+    "joins": {
+      "description": "Canonical. 'joins must be a map when present. Each join key must be declared as a queryable association on its parent relation.'",
+      "$ref": "#/$defs/joinRegistry"
+    },
+    "default_selected": {
+      "description": "Canonical query field list. 'Each section must be a list when present. Direct atom/string field references must refer to known fields from the root source, joined schemas using \"schema.field\" paths, or custom_columns.' UDF references use the JSON form of {:udf, function_id, args}.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/selector"}
+    },
+    "required_selected": {
+      "description": "Canonical query field list of fields every query must select; same entry forms as default_selected.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/selector"}
+    },
+    "required_order_by": {
+      "description": "Canonical query field list. 'Order entries may use a direct field, {field, direction}, or {direction, field}' (JSON two-element arrays).",
+      "type": "array",
+      "items": {"$ref": "#/$defs/orderEntry"}
+    },
+    "required_group_by": {
+      "description": "Canonical query field list. 'Group entries may use direct fields or wrapper tuples such as {:rollup, fields} and {:grouping_set, fields}. Tuple/map expressions that are not direct field references are left permissive.'",
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {"$ref": "#/$defs/selector"},
+          {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "prefixItems": [
+              {"enum": ["rollup", "grouping_set", "cube"]},
+              {"type": "array"}
+            ]
+          },
+          {"type": "object"}
+        ]
+      }
+    },
+    "required_filters": {
+      "description": "Canonical. Server-owned filter expressions merged into every query; they must refer to known fields from source, \"schema.field\" paths, or custom_columns. JSON form of tuples such as {field, value} or {field, {comparator, value}}.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/filterExpression"}
+    },
+    "filters": {
+      "description": "Canonical. 'filters must be a map. Each filter id must be a non-empty atom or string, and each filter config must be a map.'",
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/nonEmptyString"},
+      "additionalProperties": {"$ref": "#/$defs/filter"}
+    },
+    "functions": {
+      "description": "Canonical. UDF registry: 'functions must be a map when present. Each function id must be a non-empty atom or string, and each function spec must be a map.'",
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/nonEmptyString"},
+      "additionalProperties": {"$ref": "#/$defs/function"}
+    },
+    "query_members": {
+      "description": "Canonical. Named member groups ctes, values, subqueries, laterals and unnests; 'Each group must be a map of non-empty atom or string ids to member specs.' Builder functions (query, query_builder, base_query, recursive_query) are Elixir function captures and have no portable JSON form.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ctes": {"description": "CTE members. Each requires `query` or `query_builder` (arity 0 or 1), or for recursive CTEs `base_query` and `recursive_query`; optional `join` metadata.", "$ref": "#/$defs/memberGroup"},
+        "values": {"description": "VALUES members. Each requires `rows` or `data` as a list; optional `columns` list, alias (`as`/`alias`/`alias_name`) and `join` metadata.", "$ref": "#/$defs/memberGroup"},
+        "subqueries": {"description": "Subquery members. Each requires `query` or `query_builder`; optional `kind` (join), `on` list, `type` (left|inner|right|full) and `join_id`.", "$ref": "#/$defs/memberGroup"},
+        "laterals": {"description": "LATERAL members. Each requires `query`, `source` or `lateral_source`; optional `join_type`/`type` (left|inner|right|full), alias and `options`.", "$ref": "#/$defs/memberGroup"},
+        "unnests": {"description": "UNNEST members. Each requires `array_field` or `field`; optional `ordinality`, alias and `options`.", "$ref": "#/$defs/memberGroup"}
+      }
+    },
+    "query_library": {
+      "description": "Canonical. 'The portable registry of reusable application-query intent' with four registries: segments, projections, orderings and views. Referenced fields, associations and definitions must resolve, and segment/projection graphs must be acyclic (checked by Selecto). See docs/query_library.md.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "segments": {
+          "description": "Named row-membership predicates.",
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/nonEmptyString"},
+          "additionalProperties": {"$ref": "#/$defs/querySegment"}
+        },
+        "projections": {
+          "description": "Named result shapes.",
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/nonEmptyString"},
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "fields": {"description": "Ordered result fields; duplicates are removed on merge.", "type": "array", "items": {"$ref": "#/$defs/selector"}},
+              "associations": {"description": "Association branches; branches with the same path merge recursively.", "type": ["object", "array"]},
+              "projections": {"description": "Named projections recursively included.", "type": "array", "items": {"$ref": "#/$defs/nonEmptyString"}}
+            }
+          }
+        },
+        "orderings": {
+          "description": "Named deterministic orderings.",
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/nonEmptyString"},
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "order_by": {"description": "Order entries (field, [field, direction] or [direction, field]).", "type": "array", "items": {"$ref": "#/$defs/orderEntry"}}
+            }
+          }
+        },
+        "views": {
+          "description": "Composed query entrypoints.",
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/nonEmptyString"},
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "segments": {"description": "Segment ids applied by the view.", "type": "array", "items": {"$ref": "#/$defs/nonEmptyString"}},
+              "projection": {"description": "Projection id.", "$ref": "#/$defs/nonEmptyString"},
+              "ordering": {"description": "Ordering id.", "$ref": "#/$defs/nonEmptyString"}
+            }
+          }
+        }
+      }
+    },
+    "rules": {
+      "description": "Canonical. Portable validation and normalization under the independently versioned selecto.data_rules.v1 schema: versioned `definitions`, versioned `normalizers`, and `bindings` attaching them to a semantic subject. The rule-test AST is owned by that schema and left open here.",
+      "type": "object",
+      "properties": {
+        "schema": {"description": "Rules schema identifier.", "const": "selecto.data_rules.v1"},
+        "definitions": {
+          "description": "Versioned rule definitions keyed by rule id.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["version", "test"],
+            "properties": {
+              "version": {"description": "Positive rule version.", "$ref": "#/$defs/positiveVersion"},
+              "test": {"description": "Rule test, e.g. {\"op\": \"number.gt\", \"bound\": \"0\"}.", "type": "object", "required": ["op"]}
+            }
+          }
+        },
+        "normalizers": {
+          "description": "Versioned normalizers keyed by id; `steps` is an ordered list of {op, profile} steps.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["version", "steps"],
+            "properties": {
+              "version": {"description": "Positive normalizer version.", "$ref": "#/$defs/positiveVersion"},
+              "steps": {"description": "Ordered normalization steps.", "type": "array", "items": {"type": "object", "required": ["op"]}}
+            }
+          }
+        },
+        "bindings": {
+          "description": "Bindings attaching a rule (and optional normalizers and condition) to a subject.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["subject", "rule"],
+            "properties": {
+              "subject": {
+                "description": "Semantic subject, e.g. {\"scope\": \"candidate\", \"path\": [\"quantity\"]} or {\"scope\": \"action_input\", \"action\": ..., \"path\": [...]}.",
+                "type": "object",
+                "required": ["scope", "path"],
+                "properties": {
+                  "scope": {"description": "Subject scope such as candidate or action_input.", "$ref": "#/$defs/nonEmptyString"},
+                  "action": {"description": "Action id for action_input subjects.", "$ref": "#/$defs/nonEmptyString"},
+                  "path": {"description": "Semantic path segments.", "type": "array", "items": {"$ref": "#/$defs/nonEmptyString"}}
+                }
+              },
+              "operations": {"description": "Write operations the binding applies to.", "type": "array", "items": {"$ref": "#/$defs/writeOperationId"}},
+              "rule": {
+                "description": "Rule reference {id, version}.",
+                "type": "object",
+                "required": ["id", "version"],
+                "properties": {
+                  "id": {"description": "Rule definition id.", "$ref": "#/$defs/nonEmptyString"},
+                  "version": {"description": "Rule definition version.", "$ref": "#/$defs/positiveVersion"}
+                }
+              },
+              "normalizers": {"description": "Normalizer references run before the condition and rule test.", "type": "array"},
+              "condition": {"description": "Optional condition such as {\"op\": \"path.test\", \"path\": [...], \"test\": ...}; a failed condition makes the binding inapplicable.", "type": "object"}
+            }
+          }
+        }
+      }
+    },
+    "domain_dependencies": {
+      "description": "Canonical. 'The canonical consumer-side registry for requirements against named provider contracts. It MUST be a list of maps.' Unknown dependency or `uses` keys fail validation.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["provider", "contract"],
+        "properties": {
+          "provider": {"description": "Provider domain identifier.", "$ref": "#/$defs/nonEmptyString"},
+          "contract": {"description": "Provider published-surface contract identifier.", "$ref": "#/$defs/nonEmptyString"},
+          "accepts": {"description": "Non-empty version requirement string.", "$ref": "#/$defs/nonEmptyString"},
+          "expected_fingerprint": {"description": "Non-empty provider or surface fingerprint.", "$ref": "#/$defs/nonEmptyString"},
+          "uses": {
+            "description": "Lists of provider fields, filters and query members the consumer uses.",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "fields": {"description": "Used provider fields.", "$ref": "#/$defs/idList"},
+              "filters": {"description": "Used provider filters.", "$ref": "#/$defs/idList"},
+              "query_members": {"description": "Used provider query members.", "$ref": "#/$defs/idList"}
+            }
+          },
+          "satisfies": {"description": "Provider-required filters supplied by trusted consumer context.", "$ref": "#/$defs/idList"}
+        }
+      }
+    },
+    "operations": {
+      "description": "Canonical. Application-operation registry (distinct from writes.operations). 'Registry ids MUST be non-empty atoms or strings, and every registry entry MUST be a map.' Open consumer contract: the defining consumer owns the deeper schema.",
+      "$ref": "#/$defs/openRegistry"
+    },
+    "experiences": {
+      "description": "Canonical. Consumer-experience registry; same envelope as `operations`. Open consumer contract.",
+      "$ref": "#/$defs/openRegistry"
+    },
+    "published_views": {
+      "description": "Canonical. Database view / materialized view descriptions keyed by non-empty id; shape-only validation, no DDL generation.",
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/nonEmptyString"},
+      "additionalProperties": {"$ref": "#/$defs/publishedView"}
+    },
+    "detail_actions": {
+      "description": "Canonical. Detail-row action metadata keyed by non-empty id; does not render, resolve components or execute links.",
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/nonEmptyString"},
+      "additionalProperties": {"$ref": "#/$defs/detailAction"}
+    },
+    "editors": {
+      "description": "Canonical. Declarative governed record-editing surfaces. Every editor requires an enabled writes.operations.update policy and every listed field must be a public root field with updatable: true in writes.fields. Grants no authorization.",
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/nonEmptyString"},
+      "additionalProperties": {"$ref": "#/$defs/editor"}
+    },
+    "components": {
+      "description": "Canonical component-facing UI metadata, included only in the :ui projection. Open consumer contract: core preserves it but does not validate a narrower subschema.",
+      "type": "object",
+      "properties": {
+        "query_params": {"description": "Absent or true permits UI consumers to expose editable explorer state in URL query parameters; false keeps that state out of generated URLs and ignores inbound URL state.", "type": "boolean"}
+      }
+    },
+    "imports": {
+      "description": "Canonical. Governed bulk-import policy under selecto.imports.v1. It narrows the authority already published by writes and actions and MUST NOT grant authority on its own.",
+      "$ref": "#/$defs/imports"
+    },
+    "domain_data": {
+      "description": "Canonical. 'Opaque host metadata preserved in the normalized envelope and runtime configuration. Portable consumers MUST NOT infer query, write, or authorization rights from it.' Any JSON value."
+    },
+    "extensions": {
+      "description": "Canonical. 'An ordered list of extension specifications resolved through Selecto.Extensions'; extension callbacks are trusted host code. Entries are module references or {module, options} specs with no portable JSON semantics.",
+      "type": "array"
+    },
+    "co_domains": {
+      "description": "Canonical. Bounded governed lookups owned by another domain. 'Unknown keys, raw SQL, invalid identifiers, and ambiguous shapes fail closed.' See docs/governed-lookups.md.",
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/identifier"},
+      "additionalProperties": {"$ref": "#/$defs/coDomain"}
+    },
+    "columns": {
+      "description": "Projection. 'Overlay-style root column customizations; Selecto.Config.Overlay.merge/2 deep-merges them into source.columns.'",
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/identifier"},
+      "additionalProperties": {"$ref": "#/$defs/column"}
+    },
+    "custom_columns": {
+      "description": "Projection. 'Domain-declared computed or expression-backed query fields. Their ids join the known-field index.' Open consumer contract.",
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/nonEmptyString"},
+      "additionalProperties": {"type": "object"}
+    },
+    "json_schemas": {
+      "description": "Projection. 'Typed schemas for structured JSON columns.' Open consumer contract.",
+      "type": "object"
+    },
+    "subfilters": {
+      "description": "Projection. 'Named advanced subfilter metadata consumed by supporting query paths.' Open consumer contract.",
+      "type": "object"
+    },
+    "window_functions": {
+      "description": "Projection. 'Named window-function metadata for supporting consumers.' Open consumer contract.",
+      "type": "object"
+    },
+    "pagination": {
+      "description": "Projection. 'Domain pagination metadata.' Open consumer contract.",
+      "type": "object"
+    },
+    "retarget": {
+      "description": "Projection. 'Retarget governance: targets (join path -> label, default_selected) is an allow-list for Selecto.retarget/3, and default_target must be one of them.'",
+      "type": "object",
+      "properties": {
+        "targets": {
+          "description": "Allow-list keyed by join path.",
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/fieldPath"},
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "label": {"description": "Display label for the retarget option.", "$ref": "#/$defs/nonEmptyString"},
+              "default_selected": {"description": "Fields selected after retargeting.", "type": "array", "items": {"$ref": "#/$defs/selector"}}
+            }
+          }
+        },
+        "default_target": {"description": "Must be one of the `targets` keys.", "$ref": "#/$defs/fieldPath"}
+      }
+    },
+    "redact_fields": {
+      "description": "Projection. 'Projection redaction declarations; composition unions them and runtime overlay merging also unions them into source.redact_fields.'",
+      "type": "array",
+      "items": {"$ref": "#/$defs/fieldPath"}
+    },
+    "writes": {
+      "description": "Proposed (diagnostic category name; implemented in 0.5). 'The only portable write authority granted by a domain.' An executable contract requires a non-empty `operations` registry, and every operation except delete also requires a non-empty `fields` registry.",
+      "$ref": "#/$defs/writes"
+    },
+    "actions": {
+      "description": "Proposed (implemented). Named business commands keyed by action id: direct transition actions and event-stream actions.",
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/nonEmptyString"},
+      "additionalProperties": {"$ref": "#/$defs/action"}
+    },
+    "events": {
+      "description": "Proposed (implemented). 'The immutable business facts that a host aggregate may emit. Each event has an explicit positive schema version and a payload field contract.'",
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/nonEmptyString"},
+      "additionalProperties": {"$ref": "#/$defs/event"}
+    },
+    "capabilities": {
+      "description": "Proposed (implemented). 'Declares the stable capability names a domain can reference. It does not decide which actors have those capabilities.' Capability ids are arbitrary non-empty strings such as \"order.view\".",
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/nonEmptyString"},
+      "additionalProperties": {"$ref": "#/$defs/capability"}
+    },
+    "source_relationships": {
+      "description": "Proposed (implemented). 'The compact working-domain to source-domain binding shape', used by choice_sources.",
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/nonEmptyString"},
+      "additionalProperties": {"$ref": "#/$defs/sourceRelationship"}
+    },
+    "choice_sources": {
+      "description": "Proposed (implemented). Context-safe option providers keyed by choice source id.",
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/nonEmptyString"},
+      "additionalProperties": {"$ref": "#/$defs/choiceSource"}
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "description": "Plain identifier [A-Za-z_][A-Za-z0-9_]*. Used for relation, field, column, association and join ids, which are combined into dotted \"schema.field\" paths and so cannot themselves contain dots.",
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "fieldPath": {
+      "description": "Field reference: a plain field id or a dotted path such as \"customer.name\" through a declared schema or relationship. 'They MUST be non-empty and MUST NOT start or end with ., or contain ..'",
+      "type": "string",
+      "pattern": "^[^.]+(\\.[^.]+)*$"
+    },
+    "nonEmptyString": {
+      "description": "A non-empty string (the JSON form of a non-empty atom or string).",
+      "type": "string",
+      "minLength": 1
+    },
+    "idList": {
+      "description": "A list of non-empty identifiers.",
+      "type": "array",
+      "items": {"$ref": "#/$defs/nonEmptyString"}
+    },
+    "scalar": {
+      "description": "A JSON scalar (string, number or boolean).",
+      "type": ["string", "number", "boolean"]
+    },
+    "positiveVersion": {
+      "description": "A positive integer, or a positive decimal digit string without sign, whitespace or redundant leading zeroes (parsed exactly).",
+      "anyOf": [
+        {"type": "integer", "minimum": 1},
+        {"type": "string", "pattern": "^[1-9][0-9]*$", "maxLength": 4096}
+      ]
+    },
+    "openRegistry": {
+      "description": "Map of non-empty ids to map entries whose deeper schema is owned by a consumer (open consumer contract).",
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/nonEmptyString"},
+      "additionalProperties": {"type": "object"}
+    },
+    "orderDirection": {
+      "description": "Supported order directions.",
+      "enum": ["asc", "desc", "asc_nulls_first", "asc_nulls_last", "desc_nulls_first", "desc_nulls_last"]
+    },
+    "udfRef": {
+      "description": "JSON form of {:udf, function_id, args}: [\"udf\", function_id, args]. The function id must exist in `functions`.",
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "prefixItems": [
+        {"const": "udf"},
+        {"$ref": "#/$defs/nonEmptyString"},
+        {"type": "array"}
+      ]
+    },
+    "selector": {
+      "description": "A query-list selector: a direct field reference, a UDF reference, or an aliased selector [\"field\", selector, alias].",
+      "anyOf": [
+        {"$ref": "#/$defs/fieldPath"},
+        {"$ref": "#/$defs/udfRef"},
+        {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "prefixItems": [
+            {"const": "field"},
+            {"anyOf": [{"$ref": "#/$defs/fieldPath"}, {"$ref": "#/$defs/udfRef"}]},
+            {"$ref": "#/$defs/nonEmptyString"}
+          ]
+        }
+      ]
+    },
+    "orderEntry": {
+      "description": "An order entry: a selector, [field, direction], or [direction, field].",
+      "anyOf": [
+        {"$ref": "#/$defs/selector"},
+        {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "prefixItems": [{"$ref": "#/$defs/selector"}, {"$ref": "#/$defs/orderDirection"}]
+        },
+        {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "prefixItems": [{"$ref": "#/$defs/orderDirection"}, {"$ref": "#/$defs/selector"}]
+        }
+      ]
+    },
+    "filterExpression": {
+      "description": "JSON-safe filter expression: [field, value], [comparator, field, value...], a logical [\"and\"|\"or\", [expressions]] / [\"not\", expression], or a map form. The full runtime filter grammar is wider than the portable subset; this schema checks only that an expression is a non-empty array whose head is a string, or an object.",
+      "anyOf": [
+        {
+          "type": "array",
+          "minItems": 2,
+          "prefixItems": [{"$ref": "#/$defs/nonEmptyString"}]
+        },
+        {"type": "object"}
+      ]
+    },
+    "relation": {
+      "description": "A relation map (source or a schemas entry). Unknown relation keys are not reported by the specification, so the map is left open beyond the documented keys.",
+      "type": "object",
+      "required": ["source_table", "primary_key", "fields", "columns"],
+      "properties": {
+        "source_table": {"description": "'source_table must be an atom or string': the physical table, view or materialized view name.", "$ref": "#/$defs/nonEmptyString"},
+        "primary_key": {
+          "description": "'An atom/string field reference or a non-empty list of distinct field references for a composite identity. Every member must appear in fields.'",
+          "anyOf": [
+            {"$ref": "#/$defs/identifier"},
+            {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/identifier"}}
+          ]
+        },
+        "fields": {"description": "'fields must be a list.' Every listed field must have a matching column definition.", "type": "array", "items": {"$ref": "#/$defs/identifier"}},
+        "columns": {
+          "description": "'columns must be a map.' Column definitions keyed by field id.",
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/identifier"},
+          "additionalProperties": {"$ref": "#/$defs/column"}
+        },
+        "associations": {
+          "description": "Associations keyed by association id.",
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/identifier"},
+          "additionalProperties": {"$ref": "#/$defs/association"}
+        },
+        "source_kind": {"description": "'Optional source_kind is :table, :view, or :materialized_view'; describes the source but does not grant or revoke write authority.", "enum": ["table", "view", "materialized_view"]},
+        "readonly": {"description": "'Optional readonly is boolean.' Descriptive only; only the explicit writes contract grants write authority.", "type": "boolean"},
+        "tenant_field": {"description": "Tenant field of the relation. Used for tenant-aware joins and to derive foreign-key tenant guards (see writes.constraints.foreign_keys).", "$ref": "#/$defs/identifier"},
+        "redact_fields": {"description": "Fields of this relation redacted from results; overlays union into it.", "type": "array", "items": {"$ref": "#/$defs/identifier"}}
+      }
+    },
+    "column": {
+      "description": "A column definition. 'Column definitions are open metadata maps.' Consumers MUST ignore unknown display metadata and MUST NOT derive SQL identifiers or write permission from arbitrary values.",
+      "type": "object",
+      "properties": {
+        "type": {"description": "Portable column type, e.g. integer, string, text, boolean, decimal, float, date, time, utc_datetime, naive_datetime, uuid, enum. Open set.", "$ref": "#/$defs/nonEmptyString"},
+        "label": {"description": "Display label.", "type": "string"},
+        "format": {"description": "Display format hint.", "type": "string"},
+        "unit": {"description": "Semantic unit of a numeric column's stored value.", "$ref": "#/$defs/unit"},
+        "behavior": {"description": "Analytical behavior of a numeric column.", "enum": ["flow", "stock", "ratio", "rate"]},
+        "storage": {"description": "Only on a non-computed utc_datetime column: the database column is a time-zone-less timestamp holding UTC wall time. 'naive_utc is the only value.'", "const": "naive_utc"},
+        "internal": {"description": "'Marks presentation-only data for consumers that honor the hint; it is not a permission or secrecy boundary.'", "type": "boolean"},
+        "computed": {"description": "Query-computed value; the portable form is a predicate-computed boolean.", "$ref": "#/$defs/computedPredicate"},
+        "capability": {"description": "Capability id reference; must exist in `capabilities`.", "$ref": "#/$defs/nonEmptyString"},
+        "choice_source": {
+          "description": "Compact field binding to a declared choice source id, or the authoring shorthand map that normalization expands into choice_sources and source_relationships.",
+          "anyOf": [{"$ref": "#/$defs/nonEmptyString"}, {"type": "object"}]
+        },
+        "reference": {
+          "description": "Richer field binding. 'reference, when present, must be a map.'",
+          "type": "object",
+          "properties": {
+            "choice_source": {"description": "Must reference a declared choice source.", "$ref": "#/$defs/nonEmptyString"},
+            "value_source": {"description": "Value source path.", "$ref": "#/$defs/nonEmptyString"},
+            "caption_source": {"description": "Caption source path.", "$ref": "#/$defs/nonEmptyString"},
+            "caption_field": {"description": "Must refer to a known working-domain field.", "$ref": "#/$defs/fieldPath"}
+          }
+        },
+        "write": {"description": "Colocated write authoring shorthand normalized into writes.fields. Only source columns grant shorthand write policy.", "$ref": "#/$defs/writeField"},
+        "detail_selectable": {"description": "Whether detail selection may expose the field (default true).", "type": "boolean"},
+        "filterable": {"description": "Whether predicates may use the field.", "type": "boolean"},
+        "sortable": {"description": "Whether ordering may use the field (defaults by portable type).", "type": "boolean"},
+        "groupable": {"description": "Whether grouping may use the field (defaults by portable type).", "type": "boolean"},
+        "aggregatable": {"description": "Whether numeric aggregation may use the field.", "type": "boolean"},
+        "comparators": {"description": "Exact comparator ids permitted for this field.", "$ref": "#/$defs/idList"},
+        "operators": {"description": "Input spelling of `comparators`.", "$ref": "#/$defs/idList"},
+        "aggregate_functions": {"description": "Exact aggregate ids permitted for this field.", "$ref": "#/$defs/idList"},
+        "aggregates": {"description": "Input spelling of `aggregate_functions`.", "$ref": "#/$defs/idList"},
+        "default_grouping": {"description": "Optional authored analytic grouping default."},
+        "default_aggregate": {"description": "Optional authored analytic aggregate default."}
+      },
+      "allOf": [
+        {
+          "if": {"required": ["storage"]},
+          "then": {"properties": {"type": {"enum": ["utc_datetime", "utc_datetime_usec"]}}, "not": {"required": ["computed"]}}
+        }
+      ]
+    },
+    "unit": {
+      "description": "'The unit describes the stored value, not a chart's formatting or axis.' currency requires a three-letter code; distance, duration and mass require an identifier code; percentage MAY declare scale.",
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {"description": "Unit kind.", "enum": ["count", "currency", "distance", "duration", "mass", "percentage", "ratio", "scalar"]},
+        "code": {"description": "Currency code or unit identifier.", "type": "string"},
+        "scale": {"description": "Percentage scale (default fraction).", "enum": ["fraction", "whole"]}
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "currency"}}}, "then": {"required": ["code"], "properties": {"code": {"pattern": "^[A-Za-z]{3}$"}}}},
+        {"if": {"properties": {"kind": {"enum": ["distance", "duration", "mass"]}}}, "then": {"required": ["code"], "properties": {"code": {"$ref": "#/$defs/identifier"}}}},
+        {"if": {"not": {"properties": {"kind": {"const": "percentage"}}}}, "then": {"not": {"required": ["scale"]}}}
+      ]
+    },
+    "computedPredicate": {
+      "description": "Predicate-computed boolean: 'Fields must be governed root columns, the declared column type must be boolean, and dependencies between computed predicates must be acyclic.'",
+      "type": "object",
+      "required": ["kind", "expression"],
+      "properties": {
+        "kind": {"description": "Computed kind.", "const": "predicate"},
+        "expression": {"description": "Portable filter AST.", "$ref": "#/$defs/predicate"}
+      }
+    },
+    "predicate": {
+      "description": "Portable predicate AST. 'Predicate expressions support and, or, not, eq, ne, gt, gte, lt, lte, in, between, is_null, and not_null. Values are bound literals; [\"field\", field_id] is the explicit field-reference form.'",
+      "type": "array",
+      "minItems": 2,
+      "prefixItems": [
+        {"enum": ["and", "or", "not", "eq", "ne", "gt", "gte", "lt", "lte", "in", "between", "is_null", "not_null"]}
+      ],
+      "allOf": [
+        {"if": {"prefixItems": [{"enum": ["and", "or"]}]}, "then": {"maxItems": 2, "prefixItems": [true, {"type": "array", "items": {"$ref": "#/$defs/predicate"}}]}},
+        {"if": {"prefixItems": [{"const": "not"}]}, "then": {"maxItems": 2, "prefixItems": [true, {"$ref": "#/$defs/predicate"}]}},
+        {"if": {"prefixItems": [{"enum": ["eq", "ne", "gt", "gte", "lt", "lte"]}]}, "then": {"minItems": 3, "maxItems": 3, "prefixItems": [true, {"$ref": "#/$defs/predicateOperand"}, {"$ref": "#/$defs/predicateOperand"}]}},
+        {"if": {"prefixItems": [{"const": "in"}]}, "then": {"minItems": 3, "maxItems": 3, "prefixItems": [true, {"$ref": "#/$defs/predicateOperand"}, {"type": "array", "items": {"$ref": "#/$defs/predicateOperand"}}]}},
+        {"if": {"prefixItems": [{"const": "between"}]}, "then": {"minItems": 4, "maxItems": 4, "prefixItems": [true, {"$ref": "#/$defs/predicateOperand"}, {"$ref": "#/$defs/predicateOperand"}, {"$ref": "#/$defs/predicateOperand"}]}},
+        {"if": {"prefixItems": [{"enum": ["is_null", "not_null"]}]}, "then": {"maxItems": 2, "prefixItems": [true, {"$ref": "#/$defs/predicateOperand"}]}}
+      ]
+    },
+    "predicateOperand": {
+      "description": "A field id or bound scalar literal, or the explicit field reference [\"field\", field_id].",
+      "anyOf": [
+        {"$ref": "#/$defs/scalar"},
+        {"type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{"const": "field"}, {"$ref": "#/$defs/fieldPath"}]}
+      ]
+    },
+    "association": {
+      "description": "'An association MUST be a map.' A queryable association declares `queryable` and normally `field`, `owner_key` and `related_key`. A write-only association omits `queryable` and MUST declare `write.domain` as a complete child domain and MUST NOT set write.writable to false. 'An association that declares neither a valid queryable nor a complete enabled write.domain is invalid.' Open beyond the documented keys.",
+      "type": "object",
+      "properties": {
+        "queryable": {"description": "Target schema id in `schemas`, or \"source\" to target the root explicitly.", "$ref": "#/$defs/identifier"},
+        "field": {"description": "Association field name used by the join compiler.", "$ref": "#/$defs/identifier"},
+        "owner_key": {"description": "Key on the owning relation.", "$ref": "#/$defs/identifier"},
+        "related_key": {"description": "Key on the target relation.", "$ref": "#/$defs/identifier"},
+        "cardinality": {"description": "Runtime query cardinality; also becomes the shorthand relationship cardinality.", "enum": ["one", "many"]},
+        "where": {
+          "description": "Association policy: a non-empty equality map of target field id to a bound scalar, ANDed into the join (runtime association policy accepted by the selecto_mcp loader).",
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {"$ref": "#/$defs/identifier"},
+          "additionalProperties": {"$ref": "#/$defs/scalar"}
+        },
+        "through": {"description": "Association path for a through association.", "type": "array", "items": {"$ref": "#/$defs/identifier"}},
+        "source_scope_key": {"description": "Owning-side scope key; a complete pair with target_scope_key is ANDed into the join. 'A partial pair is invalid.'", "$ref": "#/$defs/identifier"},
+        "target_scope_key": {"description": "Target-side scope key paired with source_scope_key.", "$ref": "#/$defs/identifier"},
+        "write": {"description": "Colocated nested-write relationship policy normalized into writes.relationships; owner_key and related_key become parent_key and child_key unless declared here.", "$ref": "#/$defs/writeRelationship"}
+      },
+      "dependentRequired": {
+        "source_scope_key": ["target_scope_key"],
+        "target_scope_key": ["source_scope_key"]
+      },
+      "anyOf": [
+        {"required": ["queryable"]},
+        {
+          "required": ["write"],
+          "properties": {
+            "write": {
+              "description": "Write-only form: write.domain is required and write.writable must not be false.",
+              "required": ["domain"],
+              "properties": {"writable": {"description": "MUST NOT be false for a write-only association.", "not": {"const": false}}, "domain": {"description": "Complete child Selecto domain.", "type": "object"}}
+            }
+          }
+        }
+      ]
+    },
+    "joinRegistry": {
+      "description": "Map keyed by association id; nested joins are resolved against the target relation.",
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/identifier"},
+      "additionalProperties": {"$ref": "#/$defs/join"}
+    },
+    "join": {
+      "description": "A join entry. 'Join type, display fields, cardinality, and advanced dimension or hierarchy options are runtime query configuration; they do not confer write or authorization rights.' Open beyond the documented keys because advanced join kinds carry their own options.",
+      "type": "object",
+      "properties": {
+        "type": {"description": "Join type, e.g. left, inner, right, full, or an advanced kind such as hierarchical, tagging or dimension.", "$ref": "#/$defs/nonEmptyString"},
+        "name": {"description": "Display name.", "type": "string"},
+        "joins": {"description": "Nested joins.", "$ref": "#/$defs/joinRegistry"}
+      }
+    },
+    "filter": {
+      "description": "A registered filter. 'Virtual filters may omit field. When present, field must be a non-empty atom or dotted string path and type must be a non-empty atom or string.' Open beyond the documented keys.",
+      "type": "object",
+      "properties": {
+        "field": {"description": "Field reference.", "$ref": "#/$defs/fieldPath"},
+        "type": {"description": "Filter type.", "$ref": "#/$defs/nonEmptyString"},
+        "name": {"description": "Display name.", "type": "string"},
+        "label": {"description": "Display label.", "type": "string"},
+        "capability": {"description": "Capability id; must exist in `capabilities`.", "$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "function": {
+      "description": "A UDF spec.",
+      "type": "object",
+      "required": ["kind", "sql_name"],
+      "properties": {
+        "kind": {"description": "Function kind.", "enum": ["scalar", "predicate", "table"]},
+        "sql_name": {"description": "Safe SQL function identifier such as \"lower\" or \"public.similarity\".", "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?$"},
+        "allowed_in": {"description": "Supported call sites.", "$ref": "#/$defs/idList"},
+        "args": {"description": "Argument specs.", "type": "array", "items": {"$ref": "#/$defs/functionArg"}},
+        "returns": {"description": "Return type: boolean for predicates, {\"columns\": {...}} for table functions, a type or [\"array\", type] for scalars."},
+        "overloads": {
+          "description": "Non-empty list of signature maps; each declares its own args and returns and may override sql_name.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "properties": {
+              "args": {"description": "Overload arguments.", "type": "array", "items": {"$ref": "#/$defs/functionArg"}},
+              "returns": {"description": "Overload return type."},
+              "sql_name": {"description": "Overload implementation name.", "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?$"}
+            }
+          }
+        },
+        "database": {
+          "description": "Optional verification metadata; the adapter-neutral request forwards only adapters, requires, volatility and minimum_version.",
+          "type": "object"
+        },
+        "capability": {"description": "Capability id; must exist in `capabilities`.", "$ref": "#/$defs/nonEmptyString"}
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "predicate"}}, "required": ["kind", "returns"]}, "then": {"properties": {"returns": {"const": "boolean"}}}},
+        {"if": {"properties": {"kind": {"const": "table"}}, "required": ["kind"]}, "then": {"required": ["returns"], "properties": {"returns": {"type": "object", "required": ["columns"], "properties": {"columns": {"type": "object"}}}}}}
+      ]
+    },
+    "functionArg": {
+      "description": "Function argument: non-empty name, declared type, and source.",
+      "type": "object",
+      "required": ["name", "type", "source"],
+      "properties": {
+        "name": {"description": "Argument name.", "$ref": "#/$defs/nonEmptyString"},
+        "type": {"description": "Declared argument type."},
+        "source": {"description": "selector arguments get static field-reference validation; value and literal are checked at runtime.", "enum": ["selector", "value", "literal"]}
+      }
+    },
+    "memberGroup": {
+      "description": "Map of non-empty ids to member spec maps (metadata shape only).",
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/nonEmptyString"},
+      "additionalProperties": {"type": "object"}
+    },
+    "querySegment": {
+      "description": "A named segment.",
+      "type": "object",
+      "properties": {
+        "filters": {"description": "Filter expressions; may refer to parameters as [\"param\", parameter_id].", "type": "array", "items": {"$ref": "#/$defs/filterExpression"}},
+        "parameters": {
+          "description": "Parameters keyed by id. Each MUST declare a type; without a default or required: false the parameter is required.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {"description": "Parameter type.", "$ref": "#/$defs/nonEmptyString"},
+              "default": {"description": "Default value."},
+              "required": {"description": "false makes a missing value resolve to null.", "type": "boolean"}
+            }
+          }
+        },
+        "segments": {"description": "Included segment ids.", "$ref": "#/$defs/idList"},
+        "segment_groups": {
+          "description": "Boolean composition groups. 'not MUST reference exactly one segment and xor MUST reference exactly two distinct segments. Other groups MUST contain a non-empty segment list.'",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["operator", "segments"],
+            "properties": {
+              "operator": {"description": "Boolean operator.", "enum": ["and", "or", "not", "nor", "xor"]},
+              "segments": {"description": "Segment ids.", "type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmptyString"}}
+            },
+            "allOf": [
+              {"if": {"properties": {"operator": {"const": "not"}}}, "then": {"properties": {"segments": {"maxItems": 1}}}},
+              {"if": {"properties": {"operator": {"const": "xor"}}}, "then": {"properties": {"segments": {"minItems": 2, "maxItems": 2, "uniqueItems": true}}}}
+            ]
+          }
+        }
+      }
+    },
+    "coDomain": {
+      "description": "A governed lookup. 'Each entry requires exactly one of view or projection. A view cannot be combined with segments or ordering.' The search and result maps are required.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "search", "result"],
+      "properties": {
+        "domain": {"description": "Target domain id resolved by the host.", "$ref": "#/$defs/identifier"},
+        "view": {"description": "Target query_library view id.", "$ref": "#/$defs/identifier"},
+        "projection": {"description": "Target query_library projection id.", "$ref": "#/$defs/identifier"},
+        "segments": {"description": "Segment ids (projection form only).", "type": "array", "items": {"$ref": "#/$defs/identifier"}},
+        "ordering": {"description": "Ordering id (projection form only).", "$ref": "#/$defs/identifier"},
+        "parameters": {"description": "Segment parameter data.", "type": "object"},
+        "search": {
+          "description": "Text-search configuration.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["fields"],
+          "properties": {
+            "fields": {"description": "Non-empty governed field paths.", "type": "array", "minItems": 1, "items": {"$ref": "#/$defs/fieldPath"}},
+            "mode": {"description": "Search mode (default plain).", "enum": ["plain", "phrase", "websearch", "prefix"]},
+            "rank": {"description": "Whether to rank results.", "type": "boolean"},
+            "configuration": {"description": "Text-search configuration name (default \"simple\").", "$ref": "#/$defs/nonEmptyString"}
+          }
+        },
+        "result": {
+          "description": "Result mapping.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["value_field", "label_field"],
+          "properties": {
+            "value_field": {"description": "Value field.", "$ref": "#/$defs/fieldPath"},
+            "label_field": {"description": "Label field.", "$ref": "#/$defs/fieldPath"},
+            "description_fields": {"description": "Optional description fields.", "type": "array", "items": {"$ref": "#/$defs/fieldPath"}}
+          }
+        }
+      },
+      "oneOf": [
+        {"required": ["view"], "not": {"anyOf": [{"required": ["projection"]}, {"required": ["segments"]}, {"required": ["ordering"]}]}},
+        {"required": ["projection"], "not": {"required": ["view"]}}
+      ]
+    },
+    "publishedView": {
+      "description": "A published database view spec. `query` is an Elixir function of arity 1 and has no portable JSON form, so it is not required here.",
+      "type": "object",
+      "required": ["database_name", "kind", "columns"],
+      "properties": {
+        "database_name": {"description": "Database object name.", "$ref": "#/$defs/nonEmptyString"},
+        "kind": {"description": "View kind.", "enum": ["view", "materialized_view"]},
+        "query": {"description": "Function with arity 1 (not representable in JSON)."},
+        "columns": {
+          "description": "Non-empty map of column ids to column spec maps.",
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {"$ref": "#/$defs/nonEmptyString"},
+          "additionalProperties": {"type": "object"}
+        },
+        "indexes": {
+          "description": "Index specs.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["columns"],
+            "properties": {
+              "columns": {"description": "Non-empty list of column names.", "type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmptyString"}},
+              "unique": {"description": "Unique index flag.", "type": "boolean"},
+              "concurrently": {"description": "Build concurrently flag.", "type": "boolean"}
+            }
+          }
+        },
+        "refresh": {"description": "Refresh metadata.", "type": "object"},
+        "capability": {"description": "Capability id; must exist in `capabilities`.", "$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "detailAction": {
+      "description": "A detail-row action.",
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": {"description": "Action name.", "$ref": "#/$defs/nonEmptyString"},
+        "type": {"description": "Action type.", "enum": ["modal", "iframe_modal", "external_link", "live_component", "record_editor"]},
+        "payload": {"description": "Type-specific payload.", "type": "object"},
+        "required_fields": {"description": "Known source, schema or custom fields the action needs.", "type": "array", "items": {"$ref": "#/$defs/fieldPath"}},
+        "capability": {"description": "Capability id; must exist in `capabilities`.", "$ref": "#/$defs/nonEmptyString"}
+      },
+      "allOf": [
+        {"if": {"properties": {"type": {"enum": ["external_link", "iframe_modal"]}}}, "then": {"required": ["payload"], "properties": {"payload": {"required": ["url_template"], "properties": {"url_template": {"$ref": "#/$defs/nonEmptyString"}}}}}},
+        {"if": {"properties": {"type": {"const": "live_component"}}}, "then": {"required": ["payload"], "properties": {"payload": {"required": ["module"], "properties": {"module": {"$ref": "#/$defs/nonEmptyString"}}}}}},
+        {"if": {"properties": {"type": {"const": "record_editor"}}}, "then": {"required": ["payload"], "properties": {"payload": {"required": ["editor"], "properties": {"editor": {"$ref": "#/$defs/nonEmptyString"}, "target_field": {"$ref": "#/$defs/fieldPath"}, "title": {"type": "string"}, "size": {"type": "string"}, "navigation_enabled": {"type": "boolean"}}}}}}
+      ]
+    },
+    "editor": {
+      "description": "A governed record editor.",
+      "type": "object",
+      "required": ["fields"],
+      "properties": {
+        "fields": {
+          "description": "Non-empty ordered list of field ids or field maps.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "anyOf": [
+              {"$ref": "#/$defs/identifier"},
+              {
+                "type": "object",
+                "required": ["field"],
+                "properties": {
+                  "field": {"description": "Root source field id.", "$ref": "#/$defs/identifier"},
+                  "label": {"description": "Field label.", "type": "string"},
+                  "placeholder": {"description": "Placeholder text.", "type": "string"},
+                  "required": {"description": "Required flag.", "type": "boolean"},
+                  "nullable": {"description": "Nullable flag.", "type": "boolean"},
+                  "rows": {"description": "Textarea rows, 2 through 20.", "type": "integer", "minimum": 2, "maximum": 20},
+                  "options": {
+                    "description": "Select options.",
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["value", "label"],
+                      "properties": {
+                        "value": {"description": "Scalar option value.", "$ref": "#/$defs/scalar"},
+                        "label": {"description": "Non-empty option label.", "$ref": "#/$defs/nonEmptyString"}
+                      }
+                    }
+                  },
+                  "control": {"description": "Portable control.", "enum": ["text", "textarea", "number", "date", "datetime-local", "checkbox", "select"]}
+                }
+              }
+            ]
+          }
+        },
+        "label": {"description": "Editor label.", "$ref": "#/$defs/nonEmptyString"},
+        "description": {"description": "Editor description.", "$ref": "#/$defs/nonEmptyString"},
+        "submit_label": {"description": "Submit button label.", "$ref": "#/$defs/nonEmptyString"},
+        "actions": {"description": "Published action ids that accept row targets.", "$ref": "#/$defs/idList"}
+      }
+    },
+    "importSourceList": {
+      "description": "Non-empty unique subset of import sources.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"enum": ["column", "static", "parameter", "trusted"]}
+    },
+    "importField": {
+      "description": "An import field or action-input declaration.",
+      "type": "object",
+      "required": ["sources"],
+      "properties": {
+        "sources": {"description": "Allowed value sources.", "$ref": "#/$defs/importSourceList"},
+        "trusted_provider": {"description": "Stable symbolic trusted provider; required when sources contains trusted.", "$ref": "#/$defs/nonEmptyString"},
+        "header_aliases": {"description": "Non-empty header aliases.", "type": "array", "items": {"$ref": "#/$defs/nonEmptyString"}},
+        "transforms": {"description": "Unique subset of transforms.", "type": "array", "uniqueItems": true, "items": {"enum": ["trim", "uppercase", "lowercase", "normalize_whitespace", "empty_to_null"]}},
+        "blank_policy": {"description": "Blank-value policy.", "enum": ["omit", "empty", "null", "error"]},
+        "match_only": {"description": "Identifies a target but cannot be assigned.", "type": "boolean"}
+      },
+      "if": {"properties": {"sources": {"contains": {"const": "trusted"}}}},
+      "then": {"required": ["trusted_provider"]}
+    },
+    "imports": {
+      "description": "Governed-import contract selecto.imports.v1.",
+      "type": "object",
+      "required": ["contract_version", "enabled", "field_policy", "fields", "key_sets"],
+      "properties": {
+        "contract_version": {"description": "MUST be 1.", "const": 1},
+        "enabled": {"description": "MUST be true.", "const": true},
+        "field_policy": {"description": "MUST be declared_only.", "const": "declared_only"},
+        "fields": {
+          "description": "Non-empty map keyed by direct root-domain field ids.",
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {"$ref": "#/$defs/identifier"},
+          "additionalProperties": {"$ref": "#/$defs/importField"}
+        },
+        "actions": {
+          "description": "Map keyed by published action id; inputs keyed by declared action input.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "inputs": {"description": "Import declarations for action inputs.", "type": "object", "additionalProperties": {"$ref": "#/$defs/importField"}}
+            }
+          }
+        },
+        "key_sets": {
+          "description": "Non-empty list with unique ids and non-empty field lists.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["id", "fields"],
+            "properties": {
+              "id": {"description": "Key set id.", "$ref": "#/$defs/nonEmptyString"},
+              "label": {"description": "Key set label.", "type": "string"},
+              "fields": {"description": "Key fields declared in imports.fields.", "type": "array", "minItems": 1, "items": {"$ref": "#/$defs/identifier"}},
+              "cardinality": {"description": "Version 1 supports only zero_or_one.", "const": "zero_or_one"},
+              "allowed_on_match": {"description": "Allowed match decisions.", "type": "array", "uniqueItems": true, "items": {"enum": ["update", "skip", "error"]}},
+              "allowed_on_missing": {"description": "Allowed missing decisions.", "type": "array", "uniqueItems": true, "items": {"enum": ["insert", "skip", "error"]}},
+              "default_on_match": {"description": "Default match decision; must occur in allowed_on_match.", "enum": ["update", "skip", "error"]},
+              "default_on_missing": {"description": "Default missing decision; must occur in allowed_on_missing.", "enum": ["insert", "skip", "error"]}
+            }
+          }
+        },
+        "idempotency": {
+          "description": "Whether the host can provide source-row idempotency.",
+          "type": "object",
+          "properties": {"supported": {"description": "Idempotency support flag.", "type": "boolean"}}
+        }
+      }
+    },
+    "writeOperationId": {
+      "description": "Write operation id.",
+      "enum": ["insert", "update", "delete", "upsert"]
+    },
+    "writeCardinality": {
+      "description": "Operation cardinality: \"many\", [\"exactly\", positive], [\"at_most\", n>=0], [\"at_least\", n>=0], or [\"between\", min, max] with 0 <= min <= max.",
+      "anyOf": [
+        {"const": "many"},
+        {"type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{"const": "exactly"}, {"type": "integer", "minimum": 1}]},
+        {"type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{"enum": ["at_most", "at_least"]}, {"type": "integer", "minimum": 0}]},
+        {"type": "array", "minItems": 3, "maxItems": 3, "prefixItems": [{"const": "between"}, {"type": "integer", "minimum": 0}, {"type": "integer", "minimum": 0}]}
+      ]
+    },
+    "writeField": {
+      "description": "Field-level write grant. Missing or false flags do not grant permission; immutable, write_once and server_managed only narrow grants. A server_managed field MUST NOT also be insertable or updatable.",
+      "type": "object",
+      "properties": {
+        "insertable": {"description": "Grants the field to insert/upsert.", "type": "boolean"},
+        "updatable": {"description": "Grants the field to update.", "type": "boolean"},
+        "immutable": {"description": "Set at insert and never changed.", "type": "boolean"},
+        "write_once": {"description": "An update may set the field only while it is NULL.", "type": "boolean"},
+        "server_managed": {"description": "Supplied by the database or server; never written by a caller.", "type": "boolean"},
+        "required_on": {"description": "Operations on which the field is required (consumer-executed).", "type": "array", "items": {"$ref": "#/$defs/writeOperationId"}},
+        "forbidden_on": {"description": "Operations on which the field is forbidden (consumer-executed).", "type": "array", "items": {"$ref": "#/$defs/writeOperationId"}}
+      },
+      "if": {"properties": {"server_managed": {"const": true}}, "required": ["server_managed"]},
+      "then": {"properties": {"insertable": {"not": {"const": true}}, "updatable": {"not": {"const": true}}}}
+    },
+    "writeRelationship": {
+      "description": "A nested-write relationship policy. A writable/enabled relationship MUST declare cardinality and ownership.",
+      "type": "object",
+      "properties": {
+        "enabled": {"description": "Whether the relationship is writable.", "type": "boolean"},
+        "writable": {"description": "Whether the relationship is writable.", "type": "boolean"},
+        "cardinality": {"description": "Relationship cardinality.", "enum": ["one", "many"]},
+        "ownership": {"description": "Ownership; owned, shared_reference and join_only are input aliases of composition, shared_association and join_association.", "enum": ["composition", "shared_association", "join_association", "derived", "deferred", "owned", "shared_reference", "join_only"]},
+        "path_id": {"description": "Stable non-empty path id.", "$ref": "#/$defs/nonEmptyString"},
+        "target": {"description": "Target relation.", "$ref": "#/$defs/nonEmptyString"},
+        "parent_key": {"description": "Parent key (provenance only).", "$ref": "#/$defs/fieldPath"},
+        "child_key": {"description": "Child key (provenance only).", "$ref": "#/$defs/fieldPath"},
+        "foreign_key": {"description": "Foreign key (provenance only).", "$ref": "#/$defs/fieldPath"},
+        "physical_provenance": {"description": "Physical provenance metadata."},
+        "identity_fields": {"description": "Non-empty stable identity fields.", "type": "array", "minItems": 1, "items": {"$ref": "#/$defs/fieldPath"}},
+        "child_identity": {"description": "Child identity metadata."},
+        "client_identity": {"description": "Client identity metadata."},
+        "domain": {"description": "Nested child domain; MUST be a map.", "type": "object"},
+        "relationships": {"description": "Child relationships.", "type": "object", "additionalProperties": {"$ref": "#/$defs/writeRelationship"}},
+        "read": {
+          "description": "Read bounds. read.allowed: true requires max_depth and max_rows.",
+          "type": "object",
+          "properties": {
+            "allowed": {"description": "Read allowed.", "type": "boolean"},
+            "default_depth": {"description": "Non-negative default depth.", "type": "integer", "minimum": 0},
+            "max_depth": {"description": "Positive max depth.", "type": "integer", "minimum": 1},
+            "max_rows": {"description": "Positive max rows.", "type": "integer", "minimum": 1},
+            "max_bytes": {"description": "Positive max bytes.", "type": "integer", "minimum": 1},
+            "max_complexity": {"description": "Positive max complexity.", "type": "integer", "minimum": 1}
+          },
+          "if": {"properties": {"allowed": {"const": true}}, "required": ["allowed"]},
+          "then": {"required": ["max_depth", "max_rows"]}
+        },
+        "write": {
+          "description": "Mutation representation and bounds.",
+          "type": "object",
+          "properties": {
+            "modes": {"description": "Non-empty list of mutation representations.", "type": "array", "minItems": 1, "items": {"enum": ["append_only", "delta", "full_set", "replace_one", "link_delta"]}},
+            "create": {"description": "Create flag.", "type": "boolean"},
+            "update": {"description": "Update flag.", "type": "boolean"},
+            "delete": {"description": "Delete flag.", "type": "boolean"},
+            "reorder": {"description": "Reorder flag.", "type": "boolean"},
+            "link": {"description": "Link flag.", "type": "boolean"},
+            "unlink": {"description": "Unlink flag.", "type": "boolean"},
+            "omission": {"description": "Omission policy.", "enum": ["unchanged", "delete_missing", "reject_missing", "retain_missing"]},
+            "min_items": {"description": "Non-negative minimum items.", "type": "integer", "minimum": 0},
+            "max_items": {"description": "Positive maximum items (>= min_items).", "type": "integer", "minimum": 1},
+            "max_mutations": {"description": "Positive maximum mutations.", "type": "integer", "minimum": 1}
+          }
+        },
+        "tenant_scope": {
+          "description": "Tenant scope mode or {mode}.",
+          "anyOf": [
+            {"enum": ["recursive", "membership", "explicit", "none"]},
+            {"type": "object", "required": ["mode"], "properties": {"mode": {"description": "Tenant scope mode.", "enum": ["recursive", "membership", "explicit", "none"]}}}
+          ]
+        },
+        "capabilities": {"description": "Operation id to non-empty capability id.", "type": "object", "additionalProperties": {"$ref": "#/$defs/nonEmptyString"}},
+        "ordering": {"description": "Ordering policy map.", "type": "object"},
+        "conflict": {"description": "Stale-write policy, e.g. child_field or child_fields.", "type": "object"},
+        "idempotency": {"description": "Idempotency policy map.", "type": "object"},
+        "offline": {"description": "Offline policy; an offline writable relationship MUST declare conflict and idempotency.", "type": "object"},
+        "validation": {"description": "Validation policy map.", "type": "object"},
+        "assurance": {"description": "Assurance policy map.", "type": "object"},
+        "output": {"description": "Output policy map.", "type": "object"},
+        "allowed_ops": {"description": "Flat shorthand using the four writes.operations ids.", "type": "array", "items": {"$ref": "#/$defs/writeOperationId"}},
+        "strategy": {"description": "Flat shorthand strategy.", "const": "sync"},
+        "delete_missing": {"description": "Flat shorthand delete-missing flag.", "type": "boolean"},
+        "min_items": {"description": "Flat shorthand minimum items.", "type": "integer", "minimum": 0},
+        "max_items": {"description": "Flat shorthand maximum items.", "type": "integer", "minimum": 1}
+      },
+      "allOf": [
+        {"if": {"anyOf": [{"properties": {"enabled": {"const": true}}, "required": ["enabled"]}, {"properties": {"writable": {"const": true}}, "required": ["writable"]}]}, "then": {"required": ["cardinality", "ownership"]}},
+        {"if": {"properties": {"offline": {"type": "object"}}, "required": ["offline"]}, "then": {"required": ["conflict", "idempotency"]}}
+      ]
+    },
+    "writes": {
+      "description": "The write contract. Its canonical sections are operations, fields, scope, relationships, validations, constraints, transitions and hooks.",
+      "type": "object",
+      "properties": {
+        "operations": {
+          "description": "Operation policies keyed by insert, update, delete or upsert. Only operations with enabled: true execute.",
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/writeOperationId"},
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "enabled": {"description": "Whether the operation executes.", "type": "boolean"},
+              "bulk": {"description": "Bulk flag.", "type": "boolean"},
+              "require_filter": {"description": "Require a filter.", "type": "boolean"},
+              "fields": {"description": "Known fields the operation may touch.", "type": "array", "items": {"$ref": "#/$defs/fieldPath"}},
+              "cardinality": {"description": "Affected-row cardinality.", "$ref": "#/$defs/writeCardinality"},
+              "returning": {"description": "Preserved for write consumers."},
+              "conflict_targets": {"description": "Preserved for write consumers."}
+            }
+          }
+        },
+        "fields": {
+          "description": "Field-level grants keyed by known source, schema or custom field.",
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/fieldPath"},
+          "additionalProperties": {"$ref": "#/$defs/writeField"}
+        },
+        "scope": {"description": "Server-owned scope requirements.", "$ref": "#/$defs/writeScope"},
+        "scopes": {"description": "Compatibility spelling of `scope`.", "$ref": "#/$defs/writeScope"},
+        "relationships": {
+          "description": "Nested-write relationship policies.",
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/nonEmptyString"},
+          "additionalProperties": {"$ref": "#/$defs/writeRelationship"}
+        },
+        "validations": {"description": "Ordered list of portable or host-interpreted validation rules.", "type": "array"},
+        "constraints": {
+          "description": "Write constraints (list or map), including optimistic_lock and foreign_keys.",
+          "anyOf": [
+            {"type": "array"},
+            {
+              "type": "object",
+              "properties": {
+                "optimistic_lock": {"description": "Identifies a known version field.", "type": "object", "required": ["field"], "properties": {"field": {"description": "Known version field.", "$ref": "#/$defs/fieldPath"}}},
+                "foreign_keys": {
+                  "description": "Keyed by known local field.",
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "required": ["source", "references"],
+                    "properties": {
+                      "source": {
+                        "description": "\"input\", [\"context\", key], or the equivalent map form.",
+                        "anyOf": [
+                          {"const": "input"},
+                          {"type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{"const": "context"}, {"$ref": "#/$defs/nonEmptyString"}]},
+                          {"type": "object"}
+                        ]
+                      },
+                      "references": {
+                        "description": "Referenced physical relation and field.",
+                        "type": "object",
+                        "required": ["relation", "field"],
+                        "properties": {
+                          "relation": {"description": "Referenced physical table.", "$ref": "#/$defs/nonEmptyString"},
+                          "field": {"description": "Referenced field.", "$ref": "#/$defs/nonEmptyString"},
+                          "tenant_field": {"description": "Tenant field of the referenced relation, or false/null for a shared relation.", "anyOf": [{"$ref": "#/$defs/nonEmptyString"}, {"const": false}, {"type": "null"}]}
+                        }
+                      },
+                      "required": {"description": "Required flag.", "type": "boolean"}
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "transitions": {
+          "description": "State graphs keyed by known field: source state -> list of target states.",
+          "type": "object",
+          "propertyNames": {"$ref": "#/$defs/fieldPath"},
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {"type": "array", "items": {"type": "string"}}
+          }
+        },
+        "hooks": {"description": "Named host-owned hook references (module/function terms with no portable JSON form).", "type": "object"}
+      }
+    },
+    "writeScope": {
+      "description": "Write scope map; `tenant` is server-owned policy that clients MUST NOT replace.",
+      "type": "object",
+      "properties": {
+        "tenant": {
+          "description": "Tenant scope.",
+          "type": "object",
+          "required": ["field"],
+          "properties": {
+            "required": {"description": "Whether tenant scope is required.", "type": "boolean"},
+            "field": {"description": "Known domain field.", "$ref": "#/$defs/fieldPath"},
+            "satisfied_by": {"description": "Consumer-facing sources such as trusted context or a database prefix."}
+          }
+        }
+      }
+    },
+    "precondition": {
+      "description": "Portable filter predicate: [field, value], [comparator, field, value], or {field, comparator, value}.",
+      "anyOf": [
+        {"type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{"$ref": "#/$defs/fieldPath"}, true]},
+        {"type": "array", "minItems": 3, "maxItems": 3, "prefixItems": [{"$ref": "#/$defs/actionComparator"}, {"$ref": "#/$defs/fieldPath"}, true]},
+        {
+          "type": "object",
+          "required": ["field", "comparator", "value"],
+          "properties": {
+            "field": {"description": "Declared domain field.", "$ref": "#/$defs/fieldPath"},
+            "comparator": {"description": "Comparator.", "$ref": "#/$defs/actionComparator"},
+            "value": {"description": "Value (non-empty array for in)."}
+          }
+        }
+      ]
+    },
+    "actionComparator": {
+      "description": "Supported precondition comparators.",
+      "enum": ["eq", "neq", "gt", "gte", "lt", "lte", "in"]
+    },
+    "action": {
+      "description": "A named business command.",
+      "type": "object",
+      "properties": {
+        "target": {"description": "Action target.", "$ref": "#/$defs/nonEmptyString"},
+        "scope": {"description": "Action scope, e.g. row.", "$ref": "#/$defs/nonEmptyString"},
+        "type": {"description": "Action type; transition requires `transition`.", "$ref": "#/$defs/nonEmptyString"},
+        "capability": {"description": "Must exist in `capabilities`.", "$ref": "#/$defs/nonEmptyString"},
+        "preconditions": {"description": "Server-owned predicates combined with AND.", "type": "array", "items": {"$ref": "#/$defs/precondition"}},
+        "transition": {
+          "description": "Direct transition edge; must exist in writes.transitions.",
+          "type": "object",
+          "required": ["field", "from", "to"],
+          "properties": {
+            "field": {"description": "Transition field.", "$ref": "#/$defs/fieldPath"},
+            "from": {"description": "Source state.", "type": "string"},
+            "to": {"description": "Target state.", "type": "string"}
+          }
+        },
+        "inputs": {
+          "description": "Inputs keyed by stable input id.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "type": {"description": "Input type.", "$ref": "#/$defs/nonEmptyString"},
+              "required": {"description": "Required flag.", "type": "boolean"}
+            }
+          }
+        },
+        "execution": {
+          "description": "updato (direct update) or event_stream execution.",
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": {"description": "Execution kind.", "enum": ["updato", "event_stream"]},
+            "operation": {"description": "Direct Updato operation.", "$ref": "#/$defs/writeOperationId"},
+            "set": {"description": "Field assignments; must set the transition field to the target state.", "type": "object"},
+            "aggregate": {"description": "Event-stream aggregate.", "$ref": "#/$defs/nonEmptyString"},
+            "bounded_context": {"description": "Bounded context.", "$ref": "#/$defs/nonEmptyString"},
+            "stream_id": {"description": "Stream id or [\"target\"|\"input\"|\"context\", field] reference."},
+            "consistency": {"description": "Expected-version consistency.", "const": "expected_version"},
+            "possible_events": {"description": "Non-empty list of declared events.", "type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmptyString"}}
+          },
+          "allOf": [
+            {"if": {"properties": {"kind": {"const": "event_stream"}}}, "then": {"required": ["aggregate", "consistency", "possible_events"], "not": {"anyOf": [{"required": ["operation"]}, {"required": ["set"]}]}}}
+          ]
+        },
+        "selection": {
+          "description": "Selection presentation metadata (not mutation authorization).",
+          "type": "object",
+          "properties": {
+            "mode": {"description": "Selection mode (default rows).", "enum": ["rows", "groups"]},
+            "min_rows": {"description": "1 through 1000.", "type": "integer", "minimum": 1, "maximum": 1000},
+            "max_rows": {"description": "1 through 1000; not less than min_rows.", "type": "integer", "minimum": 1, "maximum": 1000},
+            "presentation": {"description": "row_dialog and row_inline require row mode and max_rows: 1.", "enum": ["toolbar", "row_dialog", "row_inline"]},
+            "eligibility_field": {"description": "Direct boolean source field.", "$ref": "#/$defs/identifier"}
+          },
+          "if": {"properties": {"presentation": {"enum": ["row_dialog", "row_inline"]}}, "required": ["presentation"]},
+          "then": {"required": ["max_rows"], "properties": {"mode": {"const": "rows"}, "max_rows": {"const": 1}}}
+        }
+      },
+      "if": {"properties": {"type": {"const": "transition"}}, "required": ["type"]},
+      "then": {"required": ["transition"]}
+    },
+    "event": {
+      "description": "An event contract.",
+      "type": "object",
+      "required": ["schema_version"],
+      "properties": {
+        "schema_version": {"description": "Positive event schema version.", "type": "integer", "minimum": 1},
+        "additional_fields": {"description": "Whether undeclared payload fields are allowed.", "type": "boolean"},
+        "data": {
+          "description": "Payload field contract.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {"description": "Event field type.", "enum": ["any", "boolean", "enum", "integer", "list", "map", "number", "string", "uuid"]},
+              "values": {"description": "Enum values.", "type": "array"},
+              "required": {"description": "Required flag.", "type": "boolean"},
+              "nullable": {"description": "Nullable flag.", "type": "boolean"}
+            },
+            "if": {"properties": {"type": {"const": "enum"}}},
+            "then": {"required": ["values"]}
+          }
+        }
+      }
+    },
+    "capability": {
+      "description": "A capability declaration. Open beyond the documented keys.",
+      "type": "object",
+      "required": ["operations"],
+      "properties": {
+        "operations": {"description": "Non-empty list of operations.", "type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmptyString"}},
+        "label": {"description": "Display label.", "type": "string"},
+        "target": {"description": "Capability target.", "$ref": "#/$defs/nonEmptyString"},
+        "action": {"description": "Related action id.", "$ref": "#/$defs/nonEmptyString"},
+        "sensitivity": {"description": "Sensitivity label.", "$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "sourceRelationship": {
+      "description": "A working-domain to source-domain binding.",
+      "type": "object",
+      "required": ["target_domain", "source_field", "target_field"],
+      "properties": {
+        "target_domain": {"description": "Target domain id.", "$ref": "#/$defs/nonEmptyString"},
+        "source_field": {"description": "Working-domain field.", "$ref": "#/$defs/fieldPath"},
+        "target_field": {"description": "Target-domain field.", "$ref": "#/$defs/nonEmptyString"},
+        "source_path": {"description": "Non-empty dotted path.", "$ref": "#/$defs/fieldPath"},
+        "virtual_join": {
+          "description": "Virtual join bindings.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["working_field", "source_field"],
+            "properties": {
+              "working_field": {"description": "Working-domain field.", "$ref": "#/$defs/fieldPath"},
+              "source_field": {"description": "Source-domain path.", "$ref": "#/$defs/fieldPath"},
+              "required": {"description": "Required flag.", "type": "boolean"}
+            }
+          }
+        },
+        "filters": {"description": "Static filter expressions.", "type": "array", "items": {"$ref": "#/$defs/filterExpression"}},
+        "capability": {"description": "Declared capability id.", "$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "choiceSource": {
+      "description": "A choice source.",
+      "type": "object",
+      "required": ["domain", "value_field", "label_field"],
+      "properties": {
+        "domain": {"description": "Source domain id.", "$ref": "#/$defs/nonEmptyString"},
+        "value_field": {"description": "Value field.", "$ref": "#/$defs/nonEmptyString"},
+        "label_field": {"description": "Label field.", "$ref": "#/$defs/nonEmptyString"},
+        "source_relationship": {"description": "Declared source relationship id.", "$ref": "#/$defs/nonEmptyString"},
+        "capability": {"description": "Declared capability id.", "$ref": "#/$defs/nonEmptyString"},
+        "source_path": {"description": "Dotted path.", "$ref": "#/$defs/fieldPath"},
+        "value_source": {"description": "Dotted path.", "$ref": "#/$defs/fieldPath"},
+        "caption_source": {"description": "Dotted path.", "$ref": "#/$defs/fieldPath"},
+        "description_source": {"description": "Dotted path.", "$ref": "#/$defs/fieldPath"},
+        "filters": {"description": "Static filter expressions.", "type": "array", "items": {"$ref": "#/$defs/filterExpression"}},
+        "order_by": {
+          "description": "Paths or [path, asc|desc].",
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {"$ref": "#/$defs/fieldPath"},
+              {"type": "array", "minItems": 2, "maxItems": 2, "prefixItems": [{"$ref": "#/$defs/fieldPath"}, {"enum": ["asc", "desc"]}]}
+            ]
+          }
+        },
+        "presentation": {
+          "description": "Presentation hints.",
+          "type": "object",
+          "properties": {
+            "control": {"description": "Control.", "enum": ["select", "autocomplete", "table_picker"]},
+            "mode": {"description": "Mode.", "enum": ["static", "searchable", "async", "inline"]},
+            "cardinality": {"description": "Cardinality.", "enum": ["one", "many"]}
+          }
+        },
+        "constraint_policy": {
+          "description": "Resolver-facing constraint policy (default best_effort).",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "source_relationship": {"description": "Policy.", "enum": ["best_effort", "fail_closed"]},
+            "choice_source": {"description": "Policy.", "enum": ["best_effort", "fail_closed"]},
+            "domain_of_interest": {"description": "Policy.", "enum": ["best_effort", "fail_closed"]}
+          }
+        }
+      }
+    }
+  }
+}
