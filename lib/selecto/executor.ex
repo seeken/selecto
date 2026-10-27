@@ -959,7 +959,7 @@ defmodule Selecto.Executor do
         query,
         params,
         aliases,
-        adapter_opts
+        Keyword.put(adapter_opts, :selecto_read, true)
       )
     end)
   end
@@ -971,7 +971,7 @@ defmodule Selecto.Executor do
       query,
       params,
       aliases,
-      opts
+      Keyword.put(opts, :selecto_read, true)
     )
   end
 
