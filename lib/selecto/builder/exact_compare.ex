@@ -288,6 +288,9 @@ defmodule Selecto.Builder.ExactCompare do
 
   defp mysql_kind(column_types) do
     cond do
+      # A view's temporal column the adapter could not prove is a base
+      # column taken as is (R40).
+      "selecto_unproven_temporal" in column_types -> :unresolved
       Enum.all?(column_types, &(&1 == "timestamp")) -> :timestamp
       Enum.all?(column_types, &(&1 in @mysql_text_types)) -> :mysql_text
       Enum.any?(column_types, &(&1 == "timestamp" or &1 in @mysql_text_types)) -> :unresolved
