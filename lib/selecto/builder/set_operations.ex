@@ -34,7 +34,8 @@ defmodule Selecto.Builder.SetOperations do
     :storage_column_types,
     :zone_independent_timestamps,
     :identity_text_bytes,
-    :qualified_relations
+    :qualified_relations,
+    :pg_operator_types
   ]
 
   @doc false

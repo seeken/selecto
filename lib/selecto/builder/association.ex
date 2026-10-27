@@ -67,7 +67,11 @@ defmodule Selecto.Builder.Association do
           source_alias,
           value(association, :owner_key)
         ),
-        [column(selecto, bridge_alias, value(through, :related_key)), " = ", target_key]
+        ExactCompare.eq(
+          column(selecto, bridge_alias, value(through, :related_key)),
+          target_key,
+          false
+        )
       ] ++
         bridge_scope(
           selecto,

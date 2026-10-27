@@ -13,6 +13,7 @@ defmodule Selecto.Builder.Sql.Where do
   alias Selecto.AdapterSQL
   alias Selecto.AdapterSupport
   alias Selecto.Builder.ExactCompare
+  alias Selecto.Builder.TypedOperator
   alias Selecto.Builder.Sql.Select
   alias Selecto.Dialect.DateTime.Operation, as: DateTimeOperation
   alias Selecto.Dialect.Text.Normalization, as: TextNormalization
@@ -180,7 +181,15 @@ defmodule Selecto.Builder.Sql.Where do
     operator = subquery_operator!(comp)
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     [" ", sel, " ", operator, " ", to_string(agg), " (", query_iodata, ") "], param}
+     TypedOperator.subquery(
+       selecto,
+       TypedOperator.field_type(selecto, conf, field),
+       sel,
+       operator,
+       to_string(agg),
+       ["(", query_iodata, ")"],
+       [" ", sel, " ", operator, " ", to_string(agg), " (", query_iodata, ") "]
+     ), param}
   end
 
   def build(selecto, {field, comp, {:subquery, agg, query, params}}) when agg in [:any, :all] do
@@ -190,7 +199,15 @@ defmodule Selecto.Builder.Sql.Where do
     operator = subquery_operator!(comp)
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     [" ", sel, " ", operator, " ", to_string(agg), " (", query_iodata, ") "], param ++ params}
+     TypedOperator.subquery(
+       selecto,
+       TypedOperator.field_type(selecto, conf, field),
+       sel,
+       operator,
+       to_string(agg),
+       ["(", query_iodata, ")"],
+       [" ", sel, " ", operator, " ", to_string(agg), " (", query_iodata, ") "]
+     ), param ++ params}
   end
 
   def build(selecto, {field, comp, {:subquery, agg, query}}) when agg in [:any, :all] do
@@ -199,7 +216,15 @@ defmodule Selecto.Builder.Sql.Where do
     operator = subquery_operator!(comp)
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     [" ", sel, " ", operator, " ", to_string(agg), " (", query, ") "], param}
+     TypedOperator.subquery(
+       selecto,
+       TypedOperator.field_type(selecto, conf, field),
+       sel,
+       operator,
+       to_string(agg),
+       ["(", query, ")"],
+       [" ", sel, " ", operator, " ", to_string(agg), " (", query, ") "]
+     ), param}
   end
 
   def build(_selecto, {:exists, %Selecto{} = query_selecto}) do
@@ -295,7 +320,7 @@ defmodule Selecto.Builder.Sql.Where do
     {rendered, dialect_params} = render_text_normalization!(selecto, fragment)
 
     {List.wrap(conf.requires_join) ++ List.wrap(joins),
-     [" ", expression_predicate_sql(rendered, predicate), " "], params ++ dialect_params}
+     [" ", expression_predicate_sql(selecto, rendered, predicate), " "], params ++ dialect_params}
   end
 
   # Handle :between with list format [{min, max}]
@@ -311,30 +336,39 @@ defmodule Selecto.Builder.Sql.Where do
       {conf.requires_join, identity, []}
     else
       if date_like_type(conf) do
+        sel = build_selector_string(selecto, conf.requires_join, field_name)
+        type = TypedOperator.field_type(selecto, conf, field)
+
         {conf.requires_join,
          [
            " (",
-           build_selector_string(selecto, conf.requires_join, field_name),
-           " >= ",
-           {:param, to_field_value(selecto, conf, min)},
+           TypedOperator.compare(
+             selecto,
+             type,
+             sel,
+             ">=",
+             {:param, to_field_value(selecto, conf, min)}
+           ),
            " and ",
-           build_selector_string(selecto, conf.requires_join, field_name),
-           " < ",
-           {:param, to_field_value(selecto, conf, max)},
+           TypedOperator.compare(
+             selecto,
+             type,
+             sel,
+             "<",
+             {:param, to_field_value(selecto, conf, max)}
+           ),
            ") "
          ], []}
       else
         # Use standard BETWEEN for non-datetime types
         {conf.requires_join,
-         [
-           " ",
+         TypedOperator.between(
+           selecto,
+           TypedOperator.field_type(selecto, conf, field),
            build_selector_string(selecto, conf.requires_join, field_name),
-           " between ",
            {:param, to_field_value(selecto, conf, min)},
-           " and ",
-           {:param, to_field_value(selecto, conf, max)},
-           " "
-         ], []}
+           {:param, to_field_value(selecto, conf, max)}
+         ), []}
       end
     end
   end
@@ -395,10 +429,18 @@ defmodule Selecto.Builder.Sql.Where do
         do: :case_insensitive_not_like,
         else: :case_insensitive_like
 
-    fragment = %Comparison{operation: operation, left: sel, right: {:param, value}}
+    if TypedOperator.enabled?(selecto) do
+      operator = if operation == :case_insensitive_not_like, do: "NOT ILIKE", else: "ILIKE"
+      type = TypedOperator.field_type(selecto, safe_field_conf(selecto, field), field)
 
-    rendered = render_comparison!(selecto, fragment)
-    {List.wrap(join), [" ", rendered, " "], params}
+      {List.wrap(join), TypedOperator.compare(selecto, type, sel, operator, {:param, value}),
+       params}
+    else
+      fragment = %Comparison{operation: operation, left: sel, right: {:param, value}}
+
+      rendered = render_comparison!(selecto, fragment)
+      {List.wrap(join), [" ", rendered, " "], params}
+    end
   end
 
   def build(selecto, {field, {comp, {:ref, ref_field}}})
@@ -512,7 +554,14 @@ defmodule Selecto.Builder.Sql.Where do
 
         in_clause =
           identity_list(selecto, conf, field, sel, typed_values, false) ||
-            build_list_clause(selecto, sel, typed_values, false, exact?(selecto, conf, field))
+            build_list_clause(
+              selecto,
+              sel,
+              typed_values,
+              false,
+              exact?(selecto, conf, field),
+              TypedOperator.field_type(selecto, conf, field)
+            )
 
         {List.wrap(conf.requires_join) ++ List.wrap(join), in_clause, param}
     end
@@ -526,7 +575,14 @@ defmodule Selecto.Builder.Sql.Where do
 
     in_clause =
       identity_list(selecto, conf, field, sel, typed_values, false) ||
-        build_list_clause(selecto, sel, typed_values, false, exact?(selecto, conf, field))
+        build_list_clause(
+          selecto,
+          sel,
+          typed_values,
+          false,
+          exact?(selecto, conf, field),
+          TypedOperator.field_type(selecto, conf, field)
+        )
 
     {List.wrap(conf.requires_join) ++ List.wrap(join), in_clause, param}
   end
@@ -539,7 +595,14 @@ defmodule Selecto.Builder.Sql.Where do
 
     not_in_clause =
       identity_list(selecto, conf, field, sel, typed_values, true) ||
-        build_list_clause(selecto, sel, typed_values, true, exact?(selecto, conf, field))
+        build_list_clause(
+          selecto,
+          sel,
+          typed_values,
+          true,
+          exact?(selecto, conf, field),
+          TypedOperator.field_type(selecto, conf, field)
+        )
 
     {List.wrap(conf.requires_join) ++ List.wrap(join), not_in_clause, param}
   end
@@ -552,7 +615,14 @@ defmodule Selecto.Builder.Sql.Where do
 
     in_clause =
       identity_list(selecto, conf, field, sel, typed_values, false) ||
-        build_list_clause(selecto, sel, typed_values, false, exact?(selecto, conf, field))
+        build_list_clause(
+          selecto,
+          sel,
+          typed_values,
+          false,
+          exact?(selecto, conf, field),
+          TypedOperator.field_type(selecto, conf, field)
+        )
 
     {List.wrap(conf.requires_join) ++ List.wrap(join), in_clause, param}
   end
@@ -792,7 +862,7 @@ defmodule Selecto.Builder.Sql.Where do
 
   # A tenant/site column on an exact-compare adapter (MySQL, MariaDB) matches
   # its stored bytes, not its collation (Selecto.Builder.ExactCompare).
-  defp build_list_clause(_selecto, selector, typed_values, negate?, mode)
+  defp build_list_clause(_selecto, selector, typed_values, negate?, mode, _type)
        when mode in [true, :bytes, :server] do
     placeholders = Enum.map(typed_values, fn value -> {:param, value} end)
     clause = ExactCompare.in_list(selector, placeholders, mode)
@@ -800,22 +870,17 @@ defmodule Selecto.Builder.Sql.Where do
     if negate?, do: [" NOT ", clause, " "], else: [" ", clause, " "]
   end
 
-  defp build_list_clause(selecto, selector, typed_values, negate?, _exact?) do
+  defp build_list_clause(selecto, selector, typed_values, negate?, _exact?, type) do
     if AdapterSQL.array_any_comparison?(selecto) do
-      if negate? do
-        [" NOT (", selector, " = ANY(", {:param, typed_values}, ")) "]
-      else
-        [" ", selector, " = ANY(", {:param, typed_values}, ") "]
-      end
+      TypedOperator.any_array(selecto, type, selector, {:param, typed_values}, negate?)
     else
-      operator = if negate?, do: " NOT IN (", else: " IN ("
-
-      placeholders =
-        typed_values
-        |> Enum.map(fn value -> {:param, value} end)
-        |> Enum.intersperse(", ")
-
-      [" ", selector, operator, placeholders, ") "]
+      TypedOperator.in_list(
+        selecto,
+        type,
+        selector,
+        Enum.map(typed_values, fn value -> {:param, value} end),
+        negate?
+      )
     end
   end
 
@@ -1027,31 +1092,40 @@ defmodule Selecto.Builder.Sql.Where do
   end
 
   defp plain_regular_between(selecto, conf, field_name, min, max) do
+    sel = build_selector_string(selecto, conf.requires_join, field_name)
+    type = TypedOperator.field_type(selecto, conf, field_name)
+
     if date_like_type(conf) do
       {conf.requires_join,
        [
          " (",
-         build_selector_string(selecto, conf.requires_join, field_name),
-         " >= ",
-         {:param, to_field_value(selecto, conf, min)},
+         TypedOperator.compare(
+           selecto,
+           type,
+           sel,
+           ">=",
+           {:param, to_field_value(selecto, conf, min)}
+         ),
          " and ",
-         build_selector_string(selecto, conf.requires_join, field_name),
-         " < ",
-         {:param, to_field_value(selecto, conf, max)},
+         TypedOperator.compare(
+           selecto,
+           type,
+           sel,
+           "<",
+           {:param, to_field_value(selecto, conf, max)}
+         ),
          ") "
        ], []}
     else
       # Use standard BETWEEN for non-datetime types
       {conf.requires_join,
-       [
-         " ",
-         build_selector_string(selecto, conf.requires_join, field_name),
-         " between ",
+       TypedOperator.between(
+         selecto,
+         type,
+         sel,
          {:param, to_field_value(selecto, conf, min)},
-         " and ",
-         {:param, to_field_value(selecto, conf, max)},
-         " "
-       ], []}
+         {:param, to_field_value(selecto, conf, max)}
+       ), []}
     end
   end
 
@@ -1142,7 +1216,7 @@ defmodule Selecto.Builder.Sql.Where do
     {rendered, dialect_params} = render_datetime_fragment!(selecto, fragment)
 
     {List.wrap(conf.requires_join) ++ List.wrap(joins),
-     [" ", expression_predicate_sql(rendered, predicate), " "], params ++ dialect_params}
+     [" ", expression_predicate_sql(selecto, rendered, predicate), " "], params ++ dialect_params}
   end
 
   defp normalize_datetime_part!(nil), do: nil
@@ -1202,29 +1276,24 @@ defmodule Selecto.Builder.Sql.Where do
     end
   end
 
-  defp expression_predicate_sql(expression, {:in, values})
+  defp expression_predicate_sql(selecto, expression, {:in, values})
        when is_list(values) and values != [] do
-    [
-      expression,
-      " IN (",
-      values |> Enum.map(&{:param, &1}) |> Enum.intersperse(", "),
-      ")"
-    ]
+    TypedOperator.in_list(selecto, nil, expression, Enum.map(values, &{:param, &1}), false)
   end
 
-  defp expression_predicate_sql(expression, {operator, value})
+  defp expression_predicate_sql(selecto, expression, {operator, value})
        when operator in [:=, :!=, :<, :>, :<=, :>=] do
-    [expression, " ", Atom.to_string(operator), " ", {:param, value}]
+    TypedOperator.compare(selecto, nil, expression, Atom.to_string(operator), {:param, value})
   end
 
-  defp expression_predicate_sql(expression, {operator, value})
+  defp expression_predicate_sql(selecto, expression, {operator, value})
        when operator in [:like, :not_like] do
     sql_operator = if operator == :like, do: "LIKE", else: "NOT LIKE"
-    [expression, " ", sql_operator, " ", {:param, value}]
+    TypedOperator.compare(selecto, nil, expression, sql_operator, {:param, value})
   end
 
-  defp expression_predicate_sql(expression, value),
-    do: [expression, " = ", {:param, value}]
+  defp expression_predicate_sql(selecto, expression, value),
+    do: TypedOperator.compare(selecto, nil, expression, "=", {:param, value})
 
   # Equality and inequality on a tenant/site column of an exact-compare adapter
   # (MySQL, MariaDB) decide on the stored bytes; every other comparison, and
@@ -1419,7 +1488,14 @@ defmodule Selecto.Builder.Sql.Where do
         unresolved!()
 
       _plain ->
-        [" ", sel, " ", operator, " ", {:param, pattern}, escape, " "]
+        TypedOperator.compare(
+          selecto,
+          TypedOperator.field_type(selecto, safe_field_conf(selecto, field), field),
+          sel,
+          operator,
+          {:param, pattern},
+          if(escape == "", do: [], else: [escape: "!"])
+        )
     end
   end
 
@@ -1477,12 +1553,25 @@ defmodule Selecto.Builder.Sql.Where do
       exact = ExactCompare.eq(sel, right, mode)
       if operator == "=", do: [" ", exact, " "], else: [" NOT ", exact, " "]
     else
-      [" ", sel, " ", operator, " ", right, " "]
+      TypedOperator.compare(
+        selecto,
+        TypedOperator.field_type(selecto, conf, field),
+        sel,
+        operator,
+        right
+      )
     end
   end
 
-  defp plain_comparison_clause(_selecto, _conf, _field, sel, operator, right),
-    do: [" ", sel, " ", operator, " ", right, " "]
+  defp plain_comparison_clause(selecto, conf, field, sel, operator, right),
+    do:
+      TypedOperator.compare(
+        selecto,
+        TypedOperator.field_type(selecto, conf, field),
+        sel,
+        operator,
+        right
+      )
 
   # A column-vs-column equality or inequality compares exactly when either
   # side is a tenant/site column or the predicate is host-installed, and its
@@ -1509,12 +1598,27 @@ defmodule Selecto.Builder.Sql.Where do
       exact = ExactCompare.eq(sel, ref_sel, mode)
       if operator == "=", do: [" ", exact, " "], else: [" NOT ", exact, " "]
     else
-      [" ", sel, " ", operator, " ", ref_sel, " "]
+      TypedOperator.compare_columns(
+        selecto,
+        TypedOperator.field_type(selecto, conf, field),
+        sel,
+        operator,
+        TypedOperator.field_type(selecto, ref_conf, ref_field),
+        ref_sel
+      )
     end
   end
 
-  defp ref_comparison_clause(_selecto, {_conf, _field, sel}, operator, {_ref_field, ref_sel}),
-    do: [" ", sel, " ", operator, " ", ref_sel, " "]
+  defp ref_comparison_clause(selecto, {conf, field, sel}, operator, {ref_field, ref_sel}),
+    do:
+      TypedOperator.compare_columns(
+        selecto,
+        TypedOperator.field_type(selecto, conf, field),
+        sel,
+        operator,
+        TypedOperator.field_type(selecto, safe_field_conf(selecto, ref_field), ref_field),
+        ref_sel
+      )
 
   # One side's mode: its own declared type, else the name's declarations
   # across the domain, else guarded (:server).
@@ -1539,7 +1643,15 @@ defmodule Selecto.Builder.Sql.Where do
       bytes = if bytes_fun, do: bytes_fun.(mode), else: fragment
       [" ", ExactCompare.in_subquery(sel, fragment, bytes, mode), " "]
     else
-      [" ", sel, " in ", fragment, " "]
+      TypedOperator.subquery(
+        selecto,
+        TypedOperator.field_type(selecto, conf, field),
+        sel,
+        "=",
+        "ANY",
+        fragment,
+        [" ", sel, " in ", fragment, " "]
+      )
     end
   end
 

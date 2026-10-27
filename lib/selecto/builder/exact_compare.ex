@@ -111,12 +111,12 @@ defmodule Selecto.Builder.ExactCompare do
     end
   end
 
-  defp storage_set(selecto) do
+  @doc false
+  # The read's own storage keys, over those of the compile's context
+  # (nested compiles: members, set operands).
+  def storage_set(selecto) do
     set = Map.get(selecto, :set) || %{}
-
-    if Map.has_key?(set, :storage_column_types),
-      do: set,
-      else: Map.merge(set, Process.get(@storage_context) || %{})
+    Map.merge(Process.get(@storage_context) || %{}, set)
   end
 
   @doc false
@@ -896,7 +896,13 @@ defmodule Selecto.Builder.ExactCompare do
   def eq(left, right, mode) when mode in [true, :bytes],
     do: ["(", left, " = ", right, " AND ", bytes(left, mode), " = ", bytes(right, mode), ")"]
 
-  def eq(left, right, _exact?), do: [left, " = ", right]
+  # Plain: on PostgreSQL with loaded operator types, pg_catalog's operator
+  # named explicitly (R46 FINAL-2; the compile's storage context).
+  def eq(left, right, _exact?) do
+    if Selecto.Builder.TypedOperator.enabled?(nil),
+      do: Selecto.Builder.TypedOperator.compare_columns(nil, nil, left, "=", nil, right),
+      else: [left, " = ", right]
+  end
 
   # A bound value takes the column's comparison; a column pair is plain only
   # when both sides have a 'binary' collation.
@@ -934,7 +940,11 @@ defmodule Selecto.Builder.ExactCompare do
     ["(", left, " IN (", plain, ") AND ", bytes(left, mode), " IN (", cast, "))"]
   end
 
-  def in_list(left, values, _exact?), do: [left, " IN (", Enum.intersperse(values, ", "), ")"]
+  def in_list(left, values, _exact?) do
+    if Selecto.Builder.TypedOperator.enabled?(nil),
+      do: Selecto.Builder.TypedOperator.in_list(nil, nil, left, values, false),
+      else: [left, " IN (", Enum.intersperse(values, ", "), ")"]
+  end
 
   @doc false
   # `left IN <subquery>` (fragments include their parentheses), exact when
@@ -960,7 +970,16 @@ defmodule Selecto.Builder.ExactCompare do
   def in_subquery(left, plain, bytes_subquery, mode) when mode in [true, :bytes],
     do: ["(", left, " IN ", plain, " AND ", bytes(left, mode), " IN ", bytes_subquery, ")"]
 
-  def in_subquery(left, plain, _bytes_subquery, _exact?), do: [left, " IN ", plain]
+  def in_subquery(left, plain, _bytes_subquery, _exact?) do
+    if Selecto.Builder.TypedOperator.enabled?(nil),
+      do:
+        Selecto.Builder.TypedOperator.subquery(nil, nil, left, "=", "ANY", plain, [
+          left,
+          " IN ",
+          plain
+        ]),
+      else: [left, " IN ", plain]
+  end
 
   @doc false
   # A subquery fragment selecting the utf8mb4 bytes of `column` of the derived
