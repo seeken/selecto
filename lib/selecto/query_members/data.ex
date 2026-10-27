@@ -180,13 +180,10 @@ defmodule Selecto.QueryMembers.Data do
       # The correlations are host scope on exact-compare adapters (where
       # they decide identity); elsewhere they compile as before.
       member =
-        if Selecto.Builder.ExactCompare.enabled?(member),
-          do:
-            put_in(
-              member.set[:host_filtered],
-              List.wrap(member.set[:host_filtered]) ++ correlation_filters
-            ),
-          else: member
+        put_in(
+          member.set[:host_filtered],
+          List.wrap(member.set[:host_filtered]) ++ correlation_filters
+        )
 
       # The declared output names are the lateral's columns (`lat.s`).
       member =
@@ -318,12 +315,20 @@ defmodule Selecto.QueryMembers.Data do
   defp apply_query(selecto, query, previous) do
     selecto
     |> Selecto.select(Enum.map(get(query, :select), &selection(&1, previous)))
-    |> maybe(get(query, :filter), &Selecto.filter(&1, filter(&2)))
+    |> maybe(get(query, :filter), &member_filter(&1, filter(&2)))
     |> maybe(get(query, :group_by), &Selecto.group_by(&1, &2))
     |> maybe(get(query, :order_by), fn acc, orders ->
       Selecto.order_by(acc, Enum.map(orders, &order/1))
     end)
     |> maybe(get(query, :limit), &Selecto.limit(&1, &2))
+  end
+
+  # An authored member filter is host scope (brief item 12, R24): it is
+  # recorded as host evidence so it compiles under every scope rule.
+  defp member_filter(selecto, filter) do
+    selecto = Selecto.filter(selecto, filter)
+    filters = List.wrap(Map.get(selecto.set, :filtered)) -- List.wrap(selecto.set[:host_filtered])
+    put_in(selecto.set[:host_filtered], List.wrap(selecto.set[:host_filtered]) ++ filters)
   end
 
   defp maybe(selecto, nil, _fun), do: selecto

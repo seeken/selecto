@@ -61,44 +61,88 @@ defmodule Selecto.Executor do
     end
   end
 
-  @read_marker {__MODULE__, :selecto_read}
-
+  @doc false
   # Every statement Selecto's executor runs (execute, count, projection sum,
-  # stream) runs with this process marked, only for the duration of the
-  # adapter call, so an adapter can guard Selecto's own reads (the
-  # PostgreSQL session checks, items 56 and 61; MySQL-family temporary
-  # shadows) without guarding SQL the host runs through the same adapter.
-  defp as_selecto_read(fun) do
-    previous = Process.put(@read_marker, true)
+  # stream) reaches the adapter with `selecto_read: true`, so an adapter can
+  # guard Selecto's own reads (the PostgreSQL session checks, items 56 and
+  # 61; MySQL-family temporary shadows) without guarding SQL the host runs
+  # through the same adapter.
+  def selecto_read?(opts) when is_list(opts), do: Keyword.get(opts, :selecto_read) == true
+  def selecto_read?(_opts), do: false
 
-    try do
-      fun.()
-    after
-      if previous, do: Process.put(@read_marker, previous), else: Process.delete(@read_marker)
+  # The adapter options of a Selecto read: the read mark, and the
+  # schema-qualified relation names an adapter resolved in prepare_read/2
+  # (PostgreSQL, ruling R23b).
+  defp read_opts(selecto, opts) do
+    opts = Keyword.put(opts, :selecto_read, true)
+
+    case selecto |> Map.get(:set) |> Kernel.||(%{}) |> Map.get(:qualified_relations) do
+      relations when is_map(relations) and map_size(relations) > 0 ->
+        Keyword.put(opts, :selecto_qualified_relations, relations)
+
+      _ ->
+        opts
     end
   end
 
   @doc false
-  # Whether the calling process is inside a Selecto read's adapter call.
-  def selecto_read?, do: Process.get(@read_marker) == true
+  # Every relation a read's domain (and its set operands' domains) names:
+  # source and schema tables, association bridges.
+  def domain_relations(selecto) do
+    [selecto | set_operands(selecto)]
+    |> Enum.map(&Map.get(&1, :domain))
+    |> Enum.reduce([], &collect_relations/2)
+    |> Enum.uniq()
+  end
+
+  defp collect_relations(map, acc) when is_map(map) and not is_struct(map) do
+    Enum.reduce(map, acc, fn
+      {key, value}, acc
+      when key in [:source_table, "source_table"] and
+             (is_binary(value) or (is_atom(value) and not is_nil(value))) ->
+        [to_string(value) | acc]
+
+      {key, %{} = through}, acc when key in [:through, "through"] ->
+        table = Map.get(through, :table) || Map.get(through, "table")
+        acc = if is_binary(table), do: [table | acc], else: acc
+        collect_relations(through, acc)
+
+      {_key, value}, acc ->
+        collect_relations(value, acc)
+    end)
+  end
+
+  defp collect_relations(list, acc) when is_list(list),
+    do: Enum.reduce(list, acc, &collect_relations/2)
+
+  defp collect_relations(_value, acc), do: acc
 
   @doc false
-  # Every operand of the query's set operations, recursively.
+  # Every query compiled into this one: set operation operands and a
+  # retarget origin, recursively.
   def set_operands(selecto) do
-    selecto
-    |> Map.get(:set)
-    |> Kernel.||(%{})
-    |> Map.get(:set_operations, [])
-    |> Enum.flat_map(fn operation ->
-      [operation.left_query, operation.right_query]
-      |> Enum.flat_map(&[&1 | set_operands(&1)])
-    end)
+    set = Map.get(selecto, :set) || %{}
+
+    operands =
+      set
+      |> Map.get(:set_operations, [])
+      |> Enum.flat_map(&[&1.left_query, &1.right_query])
+
+    # A retargeted query compiles its origin (the scope it narrows from)
+    # into the same statement.
+    origin =
+      case Map.get(set, :retarget_state) do
+        %{origin: %{} = origin} -> [origin]
+        _ -> []
+      end
+
+    Enum.flat_map(operands ++ origin, &[&1 | set_operands(&1)])
   end
 
   # An adapter may load what compiling a read needs from the database first
   # (`prepare_read/2`): MySQL and MariaDB load the storage types of the
   # domain's relations so TIMESTAMP scope comparisons compile
-  # zone-independently (Selecto.Builder.ExactCompare.zone_column?/3).
+  # zone-independently (Selecto.Builder.ExactCompare.storage_kind/4).
   @doc false
   def prepare_read(selecto) do
     adapter = runtime_adapter(selecto)
@@ -875,9 +919,7 @@ defmodule Selecto.Executor do
       execution_port =
         if function_exported?(adapter, :execute_query, 4), do: :execute_query, else: :execute
 
-      case as_selecto_read(fn ->
-             apply(adapter, execution_port, [connection, query, params, opts])
-           end) do
+      case apply(adapter, execution_port, [connection, query, params, opts]) do
         {:ok, result} ->
           case Selecto.AdapterSupport.normalize_result(adapter, result) do
             {:ok, normalized} ->
@@ -1030,7 +1072,7 @@ defmodule Selecto.Executor do
         query,
         params,
         aliases,
-        adapter_opts
+        read_opts(selecto, adapter_opts)
       )
     end)
   end
@@ -1042,7 +1084,7 @@ defmodule Selecto.Executor do
       query,
       params,
       aliases,
-      opts
+      read_opts(selecto, opts)
     )
   end
 
@@ -1069,7 +1111,7 @@ defmodule Selecto.Executor do
 
       true ->
         try do
-          case as_selecto_read(fn -> adapter.stream(connection, query, params, opts) end) do
+          case adapter.stream(connection, query, params, opts) do
             {:ok, stream, columns} ->
               {:ok, Stream.map(stream, &{&1, List.wrap(columns), aliases})}
 

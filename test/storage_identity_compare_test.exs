@@ -67,7 +67,7 @@ defmodule Selecto.StorageIdentityCompareTest do
     }
   end
 
-  defp compile(domain, set, filters) do
+  defp compile(domain, set, filters, adapter \\ TestAdapter) do
     selecto =
       domain
       |> Selecto.configure(Selecto.Runtime.Context.new(TestAdapter, :compile_only),
@@ -86,17 +86,32 @@ defmodule Selecto.StorageIdentityCompareTest do
     {String.replace(sql, ~r/\s+/, " "), params}
   end
 
+  # Storage types are keyed by relation, then column (H1, R18).
+  @events_types %{
+    "id" => MapSet.new(["int"]),
+    "org_key" => MapSet.new(["varchar"]),
+    "ts" => MapSet.new(["timestamp"]),
+    "note" => MapSet.new(["varchar"]),
+    "site_id" => MapSet.new(["int"])
+  }
+
+  @sites_types %{
+    "id" => MapSet.new(["int"]),
+    "opened" => MapSet.new(["timestamp"]),
+    "name" => MapSet.new(["varchar"])
+  }
+
   @timestamps %{
-    storage_column_types: %{
-      "id" => MapSet.new(["int"]),
-      "org_key" => MapSet.new(["varchar"]),
-      "ts" => MapSet.new(["timestamp"]),
-      "opened" => MapSet.new(["timestamp"]),
-      "note" => MapSet.new(["varchar"]),
-      "site_id" => MapSet.new(["int"]),
-      "name" => MapSet.new(["varchar"])
-    },
+    storage_column_types: %{"events" => @events_types, "sites" => @sites_types},
     zone_independent_timestamps: true
+  }
+
+  @duck %{
+    storage_column_types: %{
+      "events" => Map.put(@events_types, "ts", MapSet.new(["timestamp"])),
+      "sites" => @sites_types
+    },
+    identity_text_bytes: true
   }
 
   test "TIMESTAMP scope comparisons and pins compare epochs" do
@@ -140,13 +155,15 @@ defmodule Selecto.StorageIdentityCompareTest do
     refute sql =~ "UNIX_TIMESTAMP"
     assert sql =~ "selecto_root.ts < ?"
 
-    datetime = put_in(@timestamps, [:storage_column_types, "ts"], MapSet.new(["datetime"]))
+    datetime =
+      put_in(@timestamps, [:storage_column_types, "events", "ts"], MapSet.new(["datetime"]))
+
     {sql, _params} = compile(domain([{"ts", {:lt, "2024-01-01 00:00:00"}}]), datetime, [])
     refute sql =~ "UNIX_TIMESTAMP(selecto_root.ts)"
   end
 
   test "a declared temporal scope column the lookup did not resolve is refused" do
-    unresolved = update_in(@timestamps, [:storage_column_types], &Map.delete(&1, "ts"))
+    unresolved = update_in(@timestamps, [:storage_column_types, "events"], &Map.delete(&1, "ts"))
 
     assert_raise Selecto.Builder.ScopeRefusal, ~r/did not resolve/, fn ->
       compile(domain([{"ts", {:lt, "2024-01-01 00:00:00"}}]), unresolved, [])
@@ -168,7 +185,11 @@ defmodule Selecto.StorageIdentityCompareTest do
 
   test "a name stored as TIMESTAMP and another type is not rewritten blindly (R5)" do
     mixed =
-      put_in(@timestamps, [:storage_column_types, "ts"], MapSet.new(["timestamp", "datetime"]))
+      put_in(
+        @timestamps,
+        [:storage_column_types, "events", "ts"],
+        MapSet.new(["timestamp", "datetime"])
+      )
 
     assert_raise Selecto.Builder.ScopeRefusal, fn ->
       compile(domain([{"ts", {:lt, "2024-01-01 00:00:00"}}]), mixed, [])
@@ -204,24 +225,37 @@ defmodule Selecto.StorageIdentityCompareTest do
     end
   end
 
-  test "DuckDB identity prefixes use prefix(); other patterns refuse (R3)" do
-    bytes = %{
-      storage_column_types: Map.delete(@timestamps.storage_column_types, "ts"),
-      identity_text_bytes: true
-    }
-
+  test "DuckDB VARCHAR scope patterns run under COLLATE posix (R3, M2)" do
     {sql, _params} =
       compile(
-        domain([{"org_key", {:starts_with, "t1"}}, {"org_key", {:between, "a", "z"}}]),
-        bytes,
+        domain([
+          {"org_key", {:starts_with, "t1"}},
+          {"org_key", {:between, "a", "z"}},
+          {"note", {:text_contains, "b"}},
+          {"note", {:like, "a%"}}
+        ]),
+        @duck,
         []
       )
 
-    assert sql =~ "prefix(selecto_root.org_key, ?)"
+    assert sql =~ "(selecto_root.org_key COLLATE posix) LIKE ? ESCAPE '!'"
     assert sql =~ "encode(selecto_root.org_key) <= encode(CAST(? AS VARCHAR))"
+    assert sql =~ "(selecto_root.note COLLATE posix) LIKE ? ESCAPE '!'"
+    assert sql =~ "(selecto_root.note COLLATE posix) LIKE ?"
+  end
 
-    assert %Selecto.Builder.ScopeRefusal{reason: :identity_pattern} =
-             catch_error(compile(domain([{"org_key", {:like, "t1%"}}]), bytes, []))
+  test "DuckDB scope filters on non-VARCHAR columns keep native comparisons (M2)" do
+    {sql, _params} =
+      compile(
+        domain([{"site_id", {:gt, 1}}, {"ts", {:gte, "2024-01-01 00:00:00"}}]),
+        @duck,
+        []
+      )
+
+    assert sql =~ "selecto_root.site_id > ?"
+    assert sql =~ "selecto_root.ts >= ?"
+    refute sql =~ "encode(selecto_root.site_id)"
+    refute sql =~ "encode(selecto_root.ts)"
   end
 
   test "a scope refusal is a typed error" do
@@ -244,22 +278,89 @@ defmodule Selecto.StorageIdentityCompareTest do
   end
 
   test "VARCHAR identity comparisons compare bytes when the adapter asks for it" do
-    bytes = %{
-      storage_column_types: Map.delete(@timestamps.storage_column_types, "ts"),
-      identity_text_bytes: true
-    }
-
     {sql, _params} =
       compile(
         domain([{"org_key", {:gte, "t1"}}], %{name: "S1"}),
-        bytes,
+        @duck,
         [{"note", {:gte, "a"}}]
       )
 
     assert sql =~ "encode(selecto_root.org_key) >= encode(CAST(? AS VARCHAR))"
     assert sql =~ "encode(selecto_root.org_key) = encode(CAST(? AS VARCHAR))"
     assert sql =~ ~s|encode(site."name") = encode(CAST(? AS VARCHAR))|
-    # A caller range on a non-identity column keeps the backend's collation.
+    # A caller range keeps the backend's collation.
     assert sql =~ "selecto_root.note >= ?"
+  end
+
+  test "storage types are keyed by relation: a same-named column elsewhere does not leak (H1)" do
+    # sites has a TIMESTAMP named "ts" and an INT named "note"; events'
+    # own types decide its columns.
+    types =
+      @timestamps
+      |> put_in([:storage_column_types, "events", "ts"], MapSet.new(["datetime"]))
+      |> put_in([:storage_column_types, "sites", "ts"], MapSet.new(["timestamp"]))
+      |> put_in([:storage_column_types, "sites", "note"], MapSet.new(["int"]))
+
+    {sql, _params} =
+      compile(domain([{"ts", {:lt, "2024-01-01 00:00:00"}}, {"note", {:gte, "a"}}]), types, [])
+
+    refute sql =~ "UNIX_TIMESTAMP(selecto_root.ts)"
+    assert sql =~ "selecto_root.ts < ?"
+    assert sql =~ "CAST(CONVERT(selecto_root.note USING utf8mb4) AS BINARY) >= CAST(? AS BINARY)"
+
+    # And a joined relation's column is read from that relation.
+    types = put_in(@timestamps, [:storage_column_types, "events", "opened"], MapSet.new(["int"]))
+    {sql, _params} = compile(domain([], %{opened: "2023-06-01 00:00:00"}), types, [])
+    assert sql =~ ~s|ELSE UNIX_TIMESTAMP(site."opened") = ? END|
+  end
+
+  test "an integer-declared scope column stored as VARCHAR compares bytes on MySQL (R26)" do
+    types =
+      put_in(@timestamps, [:storage_column_types, "events", "site_id"], MapSet.new(["varchar"]))
+
+    {sql, params} = compile(domain([{"site_id", 1}, {"site_id", {:gte, 1}}]), types, [])
+
+    assert sql =~
+             "CAST(CONVERT(selecto_root.site_id USING utf8mb4) AS BINARY) = CAST(? AS BINARY)"
+
+    assert sql =~
+             "CAST(CONVERT(selecto_root.site_id USING utf8mb4) AS BINARY) >= CAST(? AS BINARY)"
+
+    assert 1 in params
+  end
+
+  test "a caller filter on a scope column keeps native semantics (R12, R25)" do
+    {sql, _params} =
+      compile(domain([{"org_key", {:gte, "t1"}}]), @timestamps, [{"org_key", {:lte, "z"}}])
+
+    assert sql =~
+             "CAST(CONVERT(selecto_root.org_key USING utf8mb4) AS BINARY) >= CAST(? AS BINARY)"
+
+    assert sql =~ "selecto_root.org_key <= ?"
+
+    refute sql =~
+             "CAST(CONVERT(selecto_root.org_key USING utf8mb4) AS BINARY) <= CAST(? AS BINARY)"
+  end
+
+  test "a non-comparison form over a scope TIMESTAMP is refused (R15)" do
+    # (A computed value over a TIMESTAMP is covered live by the MySQL and
+    # MariaDB adapter suites, which have a dialect to render it.)
+    for {domain, label} <- [
+          {domain([{"ts", {:case_insensitive_like, "2024%"}}]), :ilike},
+          {domain([{"ts", {:datetime_part, :year, {:eq, 2024}}}]), :part}
+        ] do
+      assert %Selecto.Builder.ScopeRefusal{reason: reason} =
+               catch_error(compile(domain, @timestamps, [])),
+             inspect(label)
+
+      assert reason == :timestamp_operator, inspect(label)
+    end
+  end
+
+  test "an invalid datetime_part is a typed refusal" do
+    assert %Selecto.Builder.ScopeRefusal{reason: :datetime_part} =
+             catch_error(
+               compile(domain([{"ts", {:datetime_part, :fortnight, {:eq, 1}}}]), %{}, [])
+             )
   end
 end

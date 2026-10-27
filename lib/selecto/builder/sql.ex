@@ -54,6 +54,14 @@ defmodule Selecto.Builder.Sql do
   @doc false
   # Adapter compositions preserve parameter markers and the resolved joins.
   def build_iodata_with_joins(selecto, opts) do
+    # Storage types loaded for the read reach every nested compile (query
+    # members, set operands) through the compile's storage context.
+    Selecto.Builder.ExactCompare.with_storage_context(selecto, fn ->
+      build_iodata_with_joins_in_context(selecto, opts)
+    end)
+  end
+
+  defp build_iodata_with_joins_in_context(selecto, opts) do
     # Check for Set Operations first as they completely override query structure
     cond do
       Selecto.Builder.SetOperations.has_set_operations?(selecto) ->
@@ -814,10 +822,25 @@ defmodule Selecto.Builder.Sql do
     set_required_filters = Map.get(selecto.set, :required_filters, [])
 
     # A trusted engine tenant is bound onto the root of every read (lesson 43).
+    # Scope filters (required, trusted, engine tenant, and caller filters the
+    # read boundary recorded as host evidence or a query member authored)
+    # are marked by provenance, so their comparisons compile exactly on the
+    # adapter's storage while the caller's own keep native semantics
+    # (R12, R18, R24, R25).
+    host_filtered = List.wrap(Map.get(selecto.set, :host_filtered))
+    scope = &{:selecto_scope, &1}
+
+    scoped =
+      domain_required_filters ++ set_required_filters ++ Selecto.Tenant.engine_filters(selecto)
+
+    # Duplicates collapse on the filter itself (a caller filter equal to a
+    # scope filter is the scope filter), keeping the first position.
     regular_filters =
-      (domain_required_filters ++
-         set_required_filters ++ Selecto.Tenant.engine_filters(selecto) ++ set_filters)
+      (scoped ++ set_filters)
       |> Enum.uniq()
+      |> Enum.map(fn filter ->
+        if filter in scoped or filter in host_filtered, do: scope.(filter), else: filter
+      end)
 
     # Add JSON filters if they exist
     json_filters =

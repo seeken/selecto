@@ -30,7 +30,12 @@ defmodule Selecto.Builder.SetOperations do
 
   # Storage types an adapter loaded for the read (Selecto.Executor.prepare_read/1)
   # reach every operand, so its scope comparisons compile the same way.
-  @storage_keys [:storage_column_types, :zone_independent_timestamps, :identity_text_bytes]
+  @storage_keys [
+    :storage_column_types,
+    :zone_independent_timestamps,
+    :identity_text_bytes,
+    :qualified_relations
+  ]
 
   @doc false
   def storage_keys, do: @storage_keys

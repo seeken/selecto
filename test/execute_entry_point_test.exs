@@ -45,7 +45,6 @@ defmodule Selecto.ExecuteEntryPointTest do
   @doc false
   def respond(connection, opts) do
     send(connection.test, {:adapter_execute, self(), opts})
-    send(connection.test, {:selecto_read, Selecto.Executor.selecto_read?()})
 
     case connection do
       # A driver whose own timer fires on the deadline's millisecond tick and
@@ -143,23 +142,13 @@ defmodule Selecto.ExecuteEntryPointTest do
     |> Selecto.filter({"id", {:gt, 0}})
   end
 
-  # Every Selecto read reaches the adapter with the calling process marked
-  # (Selecto.Executor.selecto_read?/0), so an adapter can guard Selecto's own
-  # reads (the PostgreSQL session checks) without changing their options or
-  # guarding the host's SQL; the mark ends with the call.
-  test "the adapter sees a Selecto read marked, and only during the call" do
-    for adapter <- @adapters do
-      refute Selecto.Executor.selecto_read?()
-      assert {:ok, _result} = Selecto.execute(query(adapter))
-      assert_received {:selecto_read, true}
-      refute Selecto.Executor.selecto_read?()
-    end
-  end
-
   describe "where the query runs" do
+    # Every Selecto read reaches the adapter with `selecto_read: true`, so
+    # an adapter can guard Selecto's own reads without guarding the host's
+    # SQL (Selecto.Executor.selecto_read?/1).
     test "in a task, unless the adapter enforces the timeout itself" do
       assert {:ok, _result} = Selecto.execute(query(TaskAdapter))
-      assert_received {:adapter_execute, task_pid, []}
+      assert_received {:adapter_execute, task_pid, [selecto_read: true]}
       refute task_pid == self()
 
       assert {:ok, _result} = Selecto.execute(query(CallerAdapter), timeout: 1_000)
@@ -173,7 +162,7 @@ defmodule Selecto.ExecuteEntryPointTest do
       on_exit(fn -> Hooks.unregister(:before_execution) end)
 
       assert {:ok, _result} = Selecto.execute(query(CallerAdapter))
-      assert_received {:adapter_execute, hooked_pid, []}
+      assert_received {:adapter_execute, hooked_pid, [selecto_read: true]}
       refute hooked_pid == self()
 
       Hooks.unregister(:before_execution)
@@ -183,7 +172,7 @@ defmodule Selecto.ExecuteEntryPointTest do
       assert {:ok, _result} =
                Selecto.execute(query(CallerAdapter), cache: true, cache_namespace: namespace)
 
-      assert_received {:adapter_execute, cached_pid, []}
+      assert_received {:adapter_execute, cached_pid, [selecto_read: true]}
       refute cached_pid == self()
     end
   end

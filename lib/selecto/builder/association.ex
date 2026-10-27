@@ -77,7 +77,12 @@ defmodule Selecto.Builder.Association do
           source_alias,
           Map.put(relations, :bridge, ExactCompare.relation_for_table(selecto, table))
         ) ++
-        policies(selecto, bridge_alias, value(through, :where, %{}), relations[:bridge])
+        policies(
+          selecto,
+          bridge_alias,
+          value(through, :where, %{}),
+          relations[:bridge] || %{source_table: table}
+        )
 
     [
       "EXISTS (SELECT 1 FROM ",
@@ -271,18 +276,31 @@ defmodule Selecto.Builder.Association do
         [column(selecto, alias_name, field), " IS NULL"]
 
       {field, value} when is_binary(value) or is_number(value) or is_boolean(value) ->
-        # A pin on a VARCHAR identity column compares bytes on DuckDB
-        # (ExactCompare.bytes_identity?/2, items 38, 53); one on a column
-        # stored as TIMESTAMP compares zone-independently on MySQL-family
-        # (ExactCompare.zone_column?/3, item 62a).
-        cond do
-          ExactCompare.bytes_identity?(selecto, field) ->
+        # A pin compiles by its own relation's storage
+        # (ExactCompare.storage_kind/4): DuckDB VARCHAR by bytes, MySQL-family
+        # character data by utf8mb4 bytes, TIMESTAMP by epoch.
+        case ExactCompare.storage_kind(
+               selecto,
+               ExactCompare.relation_table(relation),
+               field,
+               ExactCompare.declared_type_of(relation, field)
+             ) do
+          :duck_text ->
             ExactCompare.bytes_compare(column(selecto, alias_name, field), "=", value)
 
-          ExactCompare.zone_column?(selecto, field) == true ->
+          :mysql_text ->
+            ExactCompare.binary_compare(column(selecto, alias_name, field), "=", value)
+
+          :timestamp ->
             ExactCompare.unix_compare(column(selecto, alias_name, field), "=", value)
 
-          true ->
+          :unresolved ->
+            ExactCompare.refuse(
+              :column_unresolved,
+              "an association pin names a column the catalog lookup did not resolve"
+            )
+
+          _plain ->
             ExactCompare.eq(
               column(selecto, alias_name, field),
               {:param, value},
