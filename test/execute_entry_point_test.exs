@@ -143,9 +143,12 @@ defmodule Selecto.ExecuteEntryPointTest do
   end
 
   describe "where the query runs" do
+    # Every Selecto read is marked `selecto_read: true`, so an adapter can
+    # guard it (the PostgreSQL adapter's session checks, items 56 and 61)
+    # without guarding the host's own SQL run through the same adapter.
     test "in a task, unless the adapter enforces the timeout itself" do
       assert {:ok, _result} = Selecto.execute(query(TaskAdapter))
-      assert_received {:adapter_execute, task_pid, []}
+      assert_received {:adapter_execute, task_pid, [selecto_read: true]}
       refute task_pid == self()
 
       assert {:ok, _result} = Selecto.execute(query(CallerAdapter), timeout: 1_000)
@@ -159,7 +162,7 @@ defmodule Selecto.ExecuteEntryPointTest do
       on_exit(fn -> Hooks.unregister(:before_execution) end)
 
       assert {:ok, _result} = Selecto.execute(query(CallerAdapter))
-      assert_received {:adapter_execute, hooked_pid, []}
+      assert_received {:adapter_execute, hooked_pid, [selecto_read: true]}
       refute hooked_pid == self()
 
       Hooks.unregister(:before_execution)
@@ -169,7 +172,7 @@ defmodule Selecto.ExecuteEntryPointTest do
       assert {:ok, _result} =
                Selecto.execute(query(CallerAdapter), cache: true, cache_namespace: namespace)
 
-      assert_received {:adapter_execute, cached_pid, []}
+      assert_received {:adapter_execute, cached_pid, [selecto_read: true]}
       refute cached_pid == self()
     end
   end
