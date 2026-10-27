@@ -363,4 +363,51 @@ defmodule Selecto.StorageIdentityCompareTest do
                compile(domain([{"ts", {:datetime_part, :fortnight, {:eq, 1}}}]), %{}, [])
              )
   end
+
+  test "native scope compares on non-text storage bind only exact literals (R3 clarification 2)" do
+    # Declared as text, stored as INTEGER / DECIMAL(10,2): the literal is
+    # bound as written and the native cast would round it.
+    coded = fn filters ->
+      filters
+      |> domain()
+      |> update_in([:source, :fields], &(&1 ++ [:code]))
+      |> put_in([:source, :columns, :code], %{type: :string})
+    end
+
+    for base <- [@timestamps, @duck] do
+      types =
+        base
+        |> put_in([:storage_column_types, "events", "code"], MapSet.new(["integer"]))
+        |> put_in([:storage_column_types, "events", "note"], MapSet.new(["decimal(10,2)"]))
+
+      for {filter, ok?} <- [
+            {{"code", 1}, true},
+            {{"code", {:gte, "12"}}, true},
+            {{"code", {:between, 1, 9}}, true},
+            {{"code", {:in, [1, 2]}}, true},
+            {{"code", "1.4"}, false},
+            {{"code", "1e0"}, false},
+            {{"code", {:gte, 1.0}}, false},
+            {{"code", {:between, "1", "1.5"}}, false},
+            {{"note", "1.25"}, true},
+            {{"note", Decimal.new("1.20")}, true},
+            {{"note", "1.005"}, false},
+            {{"note", {:in, ["1.5", "1.005"]}}, false},
+            {{"note", 1.25}, false}
+          ] do
+        result =
+          try do
+            compile(coded.([filter]), types, [])
+            :ok
+          rescue
+            error in Selecto.Builder.ScopeRefusal -> error.reason
+          end
+
+        assert result == if(ok?, do: :ok, else: :identity_value), inspect({filter, base})
+      end
+
+      # The caller's own filters keep native semantics.
+      assert {_sql, _params} = compile(coded.([]), types, [{"code", "1.4"}])
+    end
+  end
 end

@@ -182,6 +182,99 @@ defmodule Selecto.Builder.ExactCompare do
     end
   end
 
+  @doc false
+  # R3 clarification 2: refuses a literal a scope comparison binds against
+  # a non-text storage type that cannot represent it exactly (the native
+  # cast would round it). Integer families take integers and canonical
+  # integer strings; DECIMAL(p,s) takes integers, Decimals and decimal
+  # strings with at most s fractional digits. Floats against either are
+  # refused. Other types, and compiles without loaded types, are unchanged.
+  def exact_literals!(selecto, table, column, values) do
+    case storage_types(selecto, table, column) do
+      {:ok, types} ->
+        Enum.each(types, fn type ->
+          case numeric_kind(type) do
+            nil ->
+              :ok
+
+            kind ->
+              Enum.each(List.wrap(values), fn value ->
+                unless exact_literal?(kind, value),
+                  do:
+                    refuse(
+                      :identity_value,
+                      "a scope literal is not exactly representable in the column's #{type} storage"
+                    )
+              end)
+          end
+        end)
+
+      :error ->
+        :ok
+    end
+  end
+
+  defp storage_types(selecto, table, column) when is_map(selecto) and not is_nil(table) do
+    with %{storage_column_types: types} = set when is_map(types) <- storage_set(selecto),
+         true <-
+           Map.get(set, :identity_text_bytes) == true or
+             Map.get(set, :zone_independent_timestamps) == true,
+         {:ok, columns} <- Map.fetch(types, to_string(table)),
+         {:ok, column_types} <- Map.fetch(columns, storage_key(column)) do
+      {:ok, column_types}
+    else
+      _ -> :error
+    end
+  end
+
+  defp storage_types(_selecto, _table, _column), do: :error
+
+  @integer_type ~r/\A(u?(tiny|small|medium|big|huge)?int(eger)?\d*|int\d+|serial|bigserial)( unsigned)?\z/
+  @decimal_type ~r/\A(decimal|numeric)(\((\d+)\s*,\s*(\d+)\))?( unsigned)?\z/
+
+  defp numeric_kind(type) do
+    cond do
+      Regex.match?(@integer_type, type) ->
+        :integer
+
+      match = Regex.run(@decimal_type, type) ->
+        case match do
+          [_, _, _, _precision, scale | _] -> {:decimal, String.to_integer(scale)}
+          # DECIMAL without a scale: MySQL's is 0, DuckDB's 3; the smaller
+          # one fails closed.
+          _ -> {:decimal, 0}
+        end
+
+      true ->
+        nil
+    end
+  end
+
+  defp exact_literal?(_kind, nil), do: true
+  defp exact_literal?(_kind, value) when is_integer(value), do: true
+  defp exact_literal?(:integer, value) when is_boolean(value), do: true
+
+  defp exact_literal?(:integer, %Decimal{} = value),
+    do: Decimal.integer?(value)
+
+  defp exact_literal?(:integer, value) when is_binary(value),
+    do: Regex.match?(~r/\A-?(0|[1-9][0-9]*)\z/, value)
+
+  defp exact_literal?({:decimal, scale}, value) when is_binary(value) do
+    case Regex.run(~r/\A-?(0|[1-9][0-9]*)(?:\.([0-9]+))?\z/, value) do
+      [_, _] -> true
+      [_, _, fraction] -> byte_size(fraction) <= scale
+      nil -> false
+    end
+  end
+
+  defp exact_literal?({:decimal, scale}, %Decimal{} = value) do
+    Decimal.inf?(value) == false and Decimal.nan?(value) == false and
+      -Decimal.normalize(value).exp <= scale
+  end
+
+  defp exact_literal?(_kind, _value), do: false
+
   @mysql_text_types ~w(char varchar tinytext text mediumtext longtext enum set)
 
   defp mysql_kind(column_types) do
