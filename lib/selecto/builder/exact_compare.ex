@@ -53,6 +53,181 @@ defmodule Selecto.Builder.ExactCompare do
                      utc_datetime_usec timestamp timestamptz epoch_datetime json jsonb map
                      binary bytes blob bytea varbinary)
 
+  # Zone-independent TIMESTAMP identity (brief item 62a). MySQL stores a
+  # TIMESTAMP as UTC but compares it in the session's time_zone, and a stored
+  # function a view calls can switch time_zone mid-statement and back, so a
+  # host `ts < '2024-01-01 00:00:00'` would admit an out-of-scope row while
+  # the session looks unchanged before and after. An adapter that loads the
+  # storage types of the domain's relations before a read
+  # (`prepare_read/2`, MySQL and MariaDB) puts them in
+  # `selecto.set.storage_column_types` (lower-cased column name => data
+  # types); a host, trusted, required or tenant comparison, or an association
+  # `where` pin, on a column stored as TIMESTAMP then compiles as
+  # `UNIX_TIMESTAMP(col) <op> <epoch computed here>` (UTC, which the session
+  # check requires before every statement). A declared temporal column the
+  # lookup did not resolve is refused. Without loaded types (compile-only
+  # contexts, other adapters) nothing changes.
+
+  @temporal_types ~w(date datetime naive_datetime naive_datetime_usec utc_datetime
+                     utc_datetime_usec timestamp timestamptz epoch_datetime)
+
+  @doc false
+  # true when the column is stored as TIMESTAMP, false when it is not or no
+  # storage types were loaded, :unresolved when a declared temporal column is
+  # missing from the loaded types.
+  def zone_column?(selecto, name, declared_type \\ nil)
+
+  def zone_column?(
+        %{set: %{storage_column_types: types, zone_independent_timestamps: true}},
+        name,
+        declared_type
+      )
+      when is_map(types) and (is_binary(name) or is_atom(name)) do
+    key = name |> to_string() |> String.split(".") |> List.last() |> String.downcase()
+
+    case Map.fetch(types, key) do
+      {:ok, column_types} ->
+        "timestamp" in column_types
+
+      :error ->
+        if zone_type_name(declared_type) in @temporal_types, do: :unresolved, else: false
+    end
+  end
+
+  def zone_column?(_selecto, _name, _declared_type), do: false
+
+  @doc false
+  # Whether a host, trusted, required or engine predicate names `field`
+  # under ANY operator (ranges included): the comparisons that must not move
+  # with the session's time_zone.
+  def host_scope_field?(selecto, field) when is_binary(field),
+    do: field in host_scope_fields(selecto)
+
+  def host_scope_field?(_selecto, _field), do: false
+
+  @doc false
+  # Every field a host, trusted, required or engine predicate names, under
+  # any operator.
+  def host_scope_fields(selecto),
+    do: selecto |> host_scope_filters() |> Enum.flat_map(&scope_fields/1)
+
+  @doc false
+  # The host, trusted, required and engine predicates of a query.
+  def host_scope_filters(selecto) do
+    set = Map.get(selecto, :set) || %{}
+    domain = Map.get(selecto, :domain) || %{}
+    context = Map.get(selecto, :tenant) || %{}
+
+    List.wrap(get(domain, :required_filters)) ++
+      List.wrap(Map.get(set, :required_filters)) ++
+      List.wrap(get(context, :required_filters)) ++
+      List.wrap(Map.get(set, :host_filtered)) ++ Selecto.Tenant.engine_filters(selecto)
+  end
+
+  @doc false
+  # DuckDB identity text (items 38, 49a, 53): an adapter that loaded the
+  # storage types of the domain's relations and refused every identity
+  # column of another type (`prepare_read/2`, DuckDB) sets
+  # `set.identity_text_bytes`; a host, trusted, required or tenant
+  # comparison, or an association `where` pin, on a VARCHAR column then
+  # compares the UTF-8 bytes (`encode(col) <op> encode(CAST(? AS VARCHAR))`),
+  # whatever the column's or the session's collation, for every operator.
+  def bytes_identity?(%{set: %{identity_text_bytes: true, storage_column_types: types}}, name)
+      when is_map(types) and (is_binary(name) or is_atom(name)) do
+    key = name |> to_string() |> String.split(".") |> List.last() |> String.downcase()
+
+    case Map.fetch(types, key) do
+      {:ok, column_types} -> Enum.any?(column_types, &String.starts_with?(&1, "varchar"))
+      :error -> false
+    end
+  end
+
+  def bytes_identity?(_selecto, _name), do: false
+
+  @doc false
+  def bytes_compare(column, operator, value),
+    do: [
+      " encode(",
+      column,
+      ") ",
+      operator,
+      " encode(CAST(",
+      {:param, value},
+      " AS VARCHAR)) "
+    ]
+
+  defp scope_fields({conj, filters}) when conj in [:and, :or] and is_list(filters),
+    do: Enum.flat_map(filters, &scope_fields/1)
+
+  defp scope_fields({:not, filter}), do: scope_fields(filter)
+
+  defp scope_fields({field, _value})
+       when is_binary(field) or (is_atom(field) and not is_nil(field)),
+       do: [to_string(field)]
+
+  defp scope_fields({field, _op, _value})
+       when is_binary(field) or (is_atom(field) and not is_nil(field)),
+       do: [to_string(field)]
+
+  defp scope_fields(_filter), do: []
+
+  @doc false
+  # `UNIX_TIMESTAMP(<column>) <operator> <epoch>`, the epoch computed from the
+  # bound value as UTC.
+  def unix_compare(column, operator, value) do
+    case epoch(value) do
+      {:ok, epoch} ->
+        [" UNIX_TIMESTAMP(", column, ") ", operator, " ", {:param, epoch}, " "]
+
+      :error ->
+        raise ArgumentError,
+              "a scope comparison on a TIMESTAMP column needs a date or time value"
+    end
+  end
+
+  @doc false
+  # The UNIX epoch of a temporal value read as UTC: an integer for whole
+  # seconds, else a Decimal with microseconds.
+  def epoch(%DateTime{} = value), do: {:ok, micro_epoch(DateTime.to_unix(value, :microsecond))}
+
+  def epoch(%NaiveDateTime{} = value), do: value |> DateTime.from_naive!("Etc/UTC") |> epoch()
+
+  def epoch(%Date{} = value), do: value |> NaiveDateTime.new!(~T[00:00:00]) |> epoch()
+
+  def epoch(value) when is_binary(value) do
+    text = String.trim(value)
+
+    with {:error, _} <- datetime(text),
+         {:error, _} <- NaiveDateTime.from_iso8601(text),
+         {:error, _} <- Date.from_iso8601(text) do
+      :error
+    else
+      {:ok, parsed} -> epoch(parsed)
+    end
+  end
+
+  def epoch(_value), do: :error
+
+  defp datetime(text) do
+    case DateTime.from_iso8601(text) do
+      {:ok, parsed, _offset} -> {:ok, parsed}
+      error -> error
+    end
+  end
+
+  defp micro_epoch(microseconds) do
+    if rem(microseconds, 1_000_000) == 0,
+      do: div(microseconds, 1_000_000),
+      else: Decimal.div(Decimal.new(microseconds), Decimal.new(1_000_000))
+  end
+
+  defp zone_type_name(nil), do: nil
+
+  defp zone_type_name(type) when is_atom(type) or is_binary(type),
+    do: type |> to_string() |> String.downcase() |> String.trim()
+
+  defp zone_type_name(_type), do: nil
+
   @doc false
   def enabled?(%{adapter: adapter}) when is_atom(adapter) and not is_nil(adapter),
     do: AdapterSupport.supports_feature?(adapter, @feature)

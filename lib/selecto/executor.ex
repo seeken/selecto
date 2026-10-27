@@ -48,11 +48,33 @@ defmodule Selecto.Executor do
     start_time = System.monotonic_time(:millisecond)
     query_id = query_id()
 
-    with :ok <- Selecto.Tenant.validate_scope(selecto, opts) do
+    with :ok <- Selecto.Tenant.validate_scope(selecto, opts),
+         {:ok, selecto} <- prepare_read(selecto) do
       execute_safe(selecto, opts, query_id, start_time)
     else
       {:error, %Selecto.Error{} = error} ->
         {:error, error}
+    end
+  end
+
+  # An adapter may load what compiling a read needs from the database first
+  # (`prepare_read/2`): MySQL and MariaDB load the storage types of the
+  # domain's relations so TIMESTAMP scope comparisons compile
+  # zone-independently (Selecto.Builder.ExactCompare.zone_column?/3).
+  @doc false
+  def prepare_read(selecto) do
+    adapter = runtime_adapter(selecto)
+
+    if is_atom(adapter) and not is_nil(adapter) and Code.ensure_loaded?(adapter) and
+         function_exported?(adapter, :prepare_read, 2) do
+      case adapter.prepare_read(selecto, runtime_connection(selecto)) do
+        {:ok, %Selecto{} = prepared} -> {:ok, prepared}
+        {:ok, prepared} when is_map(prepared) -> {:ok, prepared}
+        {:error, %Selecto.Error{}} = error -> error
+        {:error, reason} -> {:error, Selecto.Error.from_reason(reason)}
+      end
+    else
+      {:ok, selecto}
     end
   end
 
@@ -430,7 +452,8 @@ defmodule Selecto.Executor do
   end
 
   defp do_execute_with_metadata(selecto, opts) do
-    with :ok <- Selecto.Tenant.validate_scope(selecto, opts) do
+    with :ok <- Selecto.Tenant.validate_scope(selecto, opts),
+         {:ok, selecto} <- prepare_read(selecto) do
       guarded(selecto, opts, fn -> execute_with_metadata_work(selecto, opts) end)
     else
       {:error, %Selecto.Error{} = error} ->
@@ -566,7 +589,8 @@ defmodule Selecto.Executor do
   defp execute_projection_sum_query(selecto, adapter, column, opts) do
     start_time = System.monotonic_time(:millisecond)
 
-    with :ok <- Selecto.Tenant.validate_scope(selecto, opts) do
+    with :ok <- Selecto.Tenant.validate_scope(selecto, opts),
+         {:ok, selecto} <- prepare_read(selecto) do
       guarded(selecto, opts, fn ->
         try do
           {query, aliases, params} = derived_source_sql(selecto, opts)
@@ -653,7 +677,8 @@ defmodule Selecto.Executor do
   defp do_execute_count_with_metadata(selecto, opts) do
     start_time = System.monotonic_time(:millisecond)
 
-    with :ok <- Selecto.Tenant.validate_scope(selecto, opts) do
+    with :ok <- Selecto.Tenant.validate_scope(selecto, opts),
+         {:ok, selecto} <- prepare_read(selecto) do
       guarded(selecto, opts, fn ->
         try do
           {query, _aliases, params} = derived_source_sql(selecto, opts)
@@ -715,6 +740,7 @@ defmodule Selecto.Executor do
   # adapters bound row delivery (for example `:receive_timeout`).
   defp do_execute_stream(selecto, opts) do
     with :ok <- Selecto.Tenant.validate_scope(selecto, opts),
+         {:ok, selecto} <- prepare_read(selecto),
          :ok <- check_query_complexity(selecto, opts, query_id()) do
       try do
         stream_sql_opts =
