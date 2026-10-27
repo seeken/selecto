@@ -107,8 +107,12 @@ defmodule Selecto.StorageIdentityCompareTest do
         [{"note", "x"}]
       )
 
-    assert sql =~ "UNIX_TIMESTAMP(selecto_root.ts) < ?"
-    assert sql =~ ~s|UNIX_TIMESTAMP(site."opened") = ?|
+    # Exact on its own: a zero date keeps the native comparison (R5).
+    assert sql =~
+             "(CASE WHEN selecto_root.ts = 0 THEN selecto_root.ts < ? " <>
+               "ELSE UNIX_TIMESTAMP(selecto_root.ts) < ? END)"
+
+    assert sql =~ ~s|ELSE UNIX_TIMESTAMP(site."opened") = ? END|
     assert 1_704_067_200 in params
     assert 1_685_577_600 in params
     # The caller's own filter on another column is unchanged.
@@ -144,9 +148,89 @@ defmodule Selecto.StorageIdentityCompareTest do
   test "a declared temporal scope column the lookup did not resolve is refused" do
     unresolved = update_in(@timestamps, [:storage_column_types], &Map.delete(&1, "ts"))
 
-    assert_raise ArgumentError, ~r/did not resolve/, fn ->
+    assert_raise Selecto.Builder.ScopeRefusal, ~r/did not resolve/, fn ->
       compile(domain([{"ts", {:lt, "2024-01-01 00:00:00"}}]), unresolved, [])
     end
+  end
+
+  test "a host-named computed predicate's TIMESTAMP body compares epochs (R7)" do
+    domain =
+      domain([{"early", false}])
+      |> update_in([:source, :fields], &(&1 ++ [:early]))
+      |> put_in([:source, :columns, :early], %{
+        type: :boolean,
+        computed: %{kind: :predicate, expression: ["lt", "ts", "2024-01-01 00:00:00"]}
+      })
+
+    {sql, _params} = compile(domain, @timestamps, [])
+    assert sql =~ "ELSE UNIX_TIMESTAMP(selecto_root.ts) < ? END"
+  end
+
+  test "a name stored as TIMESTAMP and another type is not rewritten blindly (R5)" do
+    mixed =
+      put_in(@timestamps, [:storage_column_types, "ts"], MapSet.new(["timestamp", "datetime"]))
+
+    assert_raise Selecto.Builder.ScopeRefusal, fn ->
+      compile(domain([{"ts", {:lt, "2024-01-01 00:00:00"}}]), mixed, [])
+    end
+  end
+
+  test "MySQL-family identity text ranges and patterns compare bytes; TIMESTAMP patterns refuse" do
+    {sql, _params} =
+      compile(
+        domain([
+          {"org_key", {:between, "t1", "t1"}},
+          {"org_key", {:starts_with, "t1"}},
+          {"note", {:gte, "a"}}
+        ]),
+        @timestamps,
+        [{"site.name", {:gte, "z"}}]
+      )
+
+    assert sql =~
+             "CAST(CONVERT(selecto_root.org_key USING utf8mb4) AS BINARY) >= CAST(? AS BINARY)"
+
+    assert sql =~
+             "CAST(CONVERT(selecto_root.org_key USING utf8mb4) AS BINARY) LIKE CAST(? AS BINARY) ESCAPE '!'"
+
+    assert sql =~ "CAST(CONVERT(selecto_root.note USING utf8mb4) AS BINARY) >= CAST(? AS BINARY)"
+
+    for filter <- [
+          {"ts", {:starts_with, "2023"}},
+          {"ts", {:like, "2023%"}}
+        ] do
+      assert %Selecto.Builder.ScopeRefusal{reason: :timestamp_operator} =
+               catch_error(compile(domain([filter]), @timestamps, []))
+    end
+  end
+
+  test "DuckDB identity prefixes use prefix(); other patterns refuse (R3)" do
+    bytes = %{
+      storage_column_types: Map.delete(@timestamps.storage_column_types, "ts"),
+      identity_text_bytes: true
+    }
+
+    {sql, _params} =
+      compile(
+        domain([{"org_key", {:starts_with, "t1"}}, {"org_key", {:between, "a", "z"}}]),
+        bytes,
+        []
+      )
+
+    assert sql =~ "prefix(selecto_root.org_key, ?)"
+    assert sql =~ "encode(selecto_root.org_key) <= encode(CAST(? AS VARCHAR))"
+
+    assert %Selecto.Builder.ScopeRefusal{reason: :identity_pattern} =
+             catch_error(compile(domain([{"org_key", {:like, "t1%"}}]), bytes, []))
+  end
+
+  test "a scope refusal is a typed error" do
+    error = Selecto.Error.from_reason(%Selecto.Builder.ScopeRefusal{message: "m", reason: :r})
+
+    assert %Selecto.Error{
+             type: :query_enforcement,
+             details: %{code: :query_rule_not_evaluable, reason: :r}
+           } = error
   end
 
   test "epochs are exact, read as UTC" do

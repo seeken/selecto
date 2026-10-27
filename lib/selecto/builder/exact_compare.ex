@@ -87,7 +87,13 @@ defmodule Selecto.Builder.ExactCompare do
 
     case Map.fetch(types, key) do
       {:ok, column_types} ->
-        "timestamp" in column_types
+        cond do
+          "timestamp" not in column_types -> false
+          # Only TIMESTAMP is rewritten (R5): a name that is TIMESTAMP in one
+          # relation and another type in another cannot be told apart.
+          Enum.all?(column_types, &(&1 == "timestamp")) -> true
+          true -> :unresolved
+        end
 
       :error ->
         if zone_type_name(declared_type) in @temporal_types, do: :unresolved, else: false
@@ -108,8 +114,14 @@ defmodule Selecto.Builder.ExactCompare do
   @doc false
   # Every field a host, trusted, required or engine predicate names, under
   # any operator.
-  def host_scope_fields(selecto),
-    do: selecto |> host_scope_filters() |> Enum.flat_map(&scope_fields/1)
+  # The columns a host-named computed column reads count too: its predicate
+  # body and CASE conditions decide which rows the host admits (R7).
+  def host_scope_fields(selecto) do
+    filters = host_scope_filters(selecto)
+
+    Enum.flat_map(filters, &scope_fields/1) ++
+      computed_body_fields(selecto, filters, &scope_fields/1)
+  end
 
   @doc false
   # The host, trusted, required and engine predicates of a query.
@@ -172,18 +184,96 @@ defmodule Selecto.Builder.ExactCompare do
   defp scope_fields(_filter), do: []
 
   @doc false
-  # `UNIX_TIMESTAMP(<column>) <operator> <epoch>`, the epoch computed from the
-  # bound value as UTC.
+  # An exact, zone-independent comparison of a TIMESTAMP column (item 62a,
+  # R5 revised):
+  #
+  #     CASE WHEN <col> = 0 THEN <col> <op> ? ELSE UNIX_TIMESTAMP(<col>) <op> <epoch> END
+  #
+  # A stored TIMESTAMP is UTC, so its epoch does not move with the session's
+  # time_zone; the epoch of the bound value is computed here as UTC (the
+  # session check requires UTC before every statement). A zero date
+  # ('0000-00-00 00:00:00' is 0 in every zone) keeps the server's native
+  # comparison, and NULL stays NULL. The expression is exact on its own, so
+  # it stays exact under NOT, CASE ... ELSE, coalesce, <> and `= false`
+  # (R7): no polarity needs tracking.
   def unix_compare(column, operator, value) do
     case epoch(value) do
       {:ok, epoch} ->
-        [" UNIX_TIMESTAMP(", column, ") ", operator, " ", {:param, epoch}, " "]
+        [
+          " (CASE WHEN ",
+          column,
+          " = 0 THEN ",
+          column,
+          " ",
+          operator,
+          " ",
+          {:param, value},
+          " ELSE UNIX_TIMESTAMP(",
+          column,
+          ") ",
+          operator,
+          " ",
+          {:param, epoch},
+          " END) "
+        ]
 
       :error ->
-        raise ArgumentError,
-              "a scope comparison on a TIMESTAMP column needs a date or time value"
+        refuse(
+          :timestamp_value,
+          "a scope comparison on a TIMESTAMP column needs a date or time value"
+        )
     end
   end
+
+  @doc false
+  def refuse(reason, message),
+    do: raise(Selecto.Builder.ScopeRefusal, message: message, reason: reason)
+
+  @mysql_text_types ~w(char varchar tinytext text mediumtext longtext enum set)
+
+  @doc false
+  # MySQL-family (R3): a scope column stored as character data, whose ranges
+  # and LIKE patterns must compare its utf8mb4 bytes.
+  def mysql_text_identity?(
+        %{set: %{storage_column_types: types, zone_independent_timestamps: true}},
+        name
+      )
+      when is_map(types) and (is_binary(name) or is_atom(name)) do
+    key = name |> to_string() |> String.split(".") |> List.last() |> String.downcase()
+
+    case Map.fetch(types, key) do
+      {:ok, column_types} -> Enum.any?(column_types, &(&1 in @mysql_text_types))
+      :error -> false
+    end
+  end
+
+  def mysql_text_identity?(_selecto, _name), do: false
+
+  @doc false
+  def binary_compare(column, operator, value),
+    do: [
+      " CAST(CONVERT(",
+      column,
+      " USING utf8mb4) AS BINARY) ",
+      operator,
+      " CAST(",
+      {:param, value},
+      " AS BINARY) "
+    ]
+
+  @doc false
+  def binary_like(column, operator, pattern, escape),
+    do: [
+      " CAST(CONVERT(",
+      column,
+      " USING utf8mb4) AS BINARY) ",
+      operator,
+      " CAST(",
+      {:param, pattern},
+      " AS BINARY)",
+      escape,
+      " "
+    ]
 
   @doc false
   # The UNIX epoch of a temporal value read as UTC: an integer for whole
@@ -314,7 +404,7 @@ defmodule Selecto.Builder.ExactCompare do
   # schema's computed expression is qualified to its join at configure
   # (Selecto.Schema.Column), so "a.is_s1" widens "a.site". Caller filters on
   # a computed column add nothing.
-  defp computed_body_fields(selecto, filters) do
+  defp computed_body_fields(selecto, filters, collect \\ &comparison_fields/1) do
     columns =
       case Map.get(selecto, :config) do
         %{columns: columns} when is_map(columns) -> columns
@@ -326,28 +416,29 @@ defmodule Selecto.Builder.ExactCompare do
     else
       filters
       |> Enum.flat_map(&referenced_fields/1)
-      |> expand_computed(columns, MapSet.new(), [])
+      |> expand_computed(columns, MapSet.new(), [], collect)
     end
   end
 
-  defp expand_computed([], _columns, _visited, acc), do: acc
+  defp expand_computed([], _columns, _visited, acc, _collect), do: acc
 
-  defp expand_computed([name | rest], columns, visited, acc) do
+  defp expand_computed([name | rest], columns, visited, acc, collect) do
     if MapSet.member?(visited, name) do
-      expand_computed(rest, columns, visited, acc)
+      expand_computed(rest, columns, visited, acc, collect)
     else
       visited = MapSet.put(visited, name)
 
       case computed_body(columns, name) do
         nil ->
-          expand_computed(rest, columns, visited, acc)
+          expand_computed(rest, columns, visited, acc, collect)
 
         {:predicate, body} ->
           expand_computed(
             referenced_fields(body) ++ rest,
             columns,
             visited,
-            acc ++ comparison_fields(body)
+            acc ++ collect.(body),
+            collect
           )
 
         {:value, conditions, fields} ->
@@ -355,7 +446,8 @@ defmodule Selecto.Builder.ExactCompare do
             Enum.flat_map(conditions, &referenced_fields/1) ++ fields ++ rest,
             columns,
             visited,
-            acc ++ Enum.flat_map(conditions, &comparison_fields/1)
+            acc ++ Enum.flat_map(conditions, collect),
+            collect
           )
       end
     end

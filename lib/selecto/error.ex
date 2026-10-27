@@ -233,6 +233,14 @@ defmodule Selecto.Error do
     connection_error("Database connection failed", exit_details(reason))
   end
 
+  def from_reason(%Selecto.Builder.ScopeRefusal{message: message, reason: reason}) do
+    %__MODULE__{
+      type: :query_enforcement,
+      message: message,
+      details: %{code: :query_rule_not_evaluable, reason: reason}
+    }
+  end
+
   def from_reason(%{__exception__: true, message: message} = exception) do
     if driver_exception?(exception),
       do: from_driver(exception),

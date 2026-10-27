@@ -299,31 +299,10 @@ defmodule Selecto.Builder.Sql.Where do
     # Extract actual field name, not display name
     field_name = extract_database_field(field, conf)
 
-    zone? = zone_comparison?(selecto, conf, field)
+    selector = build_selector_string(selecto, conf.requires_join, field_name)
 
-    if zone? == :unresolved,
-      do:
-        raise(
-          ArgumentError,
-          "a scope comparison names a temporal column the catalog lookup did not resolve"
-        )
-
-    # Use half-open interval for datetime types to avoid precision issues
-    if zone? == true do
-      selector = build_selector_string(selecto, conf.requires_join, field_name)
-
-      {conf.requires_join,
-       [
-         " (",
-         ExactCompare.unix_compare(selector, ">=", to_field_value(selecto, conf, min)),
-         " and ",
-         ExactCompare.unix_compare(
-           selector,
-           if(date_like_type(conf), do: "<", else: "<="),
-           to_field_value(selecto, conf, max)
-         ),
-         ") "
-       ], []}
+    if identity = identity_between(selecto, conf, field, selector, min, max) do
+      {conf.requires_join, identity, []}
     else
       if date_like_type(conf) do
         {conf.requires_join,
@@ -376,25 +355,31 @@ defmodule Selecto.Builder.Sql.Where do
   def build(selecto, {field, {:starts_with, value}}) when is_binary(value) do
     pattern = escape_like_literal(value) <> "%"
     {sel, join, param} = Select.prep_selector(selecto, field)
-    {List.wrap(join), [" ", sel, " LIKE ", {:param, pattern}, " ESCAPE '!' "], param}
+
+    {List.wrap(join),
+     like_clause(selecto, field, sel, "LIKE", pattern, " ESCAPE '!'", {:prefix, value}), param}
   end
 
   def build(selecto, {field, {:text_contains, value}}) when is_binary(value) do
     pattern = "%" <> escape_like_literal(value) <> "%"
     {sel, join, param} = Select.prep_selector(selecto, field)
-    {List.wrap(join), [" ", sel, " LIKE ", {:param, pattern}, " ESCAPE '!' "], param}
+
+    {List.wrap(join),
+     like_clause(selecto, field, sel, "LIKE", pattern, " ESCAPE '!'", {:contains, value}), param}
   end
 
   def build(selecto, {field, {:ends_with, value}}) when is_binary(value) do
     pattern = "%" <> escape_like_literal(value)
     {sel, join, param} = Select.prep_selector(selecto, field)
-    {List.wrap(join), [" ", sel, " LIKE ", {:param, pattern}, " ESCAPE '!' "], param}
+
+    {List.wrap(join),
+     like_clause(selecto, field, sel, "LIKE", pattern, " ESCAPE '!'", {:suffix, value}), param}
   end
 
   def build(selecto, {field, {:like, value}}) do
     # ### Value must have a % in it to work!
     {sel, join, param} = Select.prep_selector(selecto, field)
-    {List.wrap(join), [" ", sel, " LIKE ", {:param, value}, " "], param}
+    {List.wrap(join), like_clause(selecto, field, sel, "LIKE", value, "", :pattern), param}
   end
 
   def build(selecto, {field, {comp, value}})
@@ -447,7 +432,7 @@ defmodule Selecto.Builder.Sql.Where do
   def build(selecto, {field, {:not_like, value}}) do
     # NOT LIKE filter - value should already have % wildcards
     {sel, join, param} = Select.prep_selector(selecto, field)
-    {List.wrap(join), [" ", sel, " NOT LIKE ", {:param, value}, " "], param}
+    {List.wrap(join), like_clause(selecto, field, sel, "NOT LIKE", value, "", :pattern), param}
   end
 
   # Structured-value path with comparison operators.
@@ -522,7 +507,8 @@ defmodule Selecto.Builder.Sql.Where do
         typed_values = Enum.map(list, fn i -> to_field_value(selecto, conf, i) end)
 
         in_clause =
-          build_list_clause(selecto, sel, typed_values, false, exact?(selecto, conf, field))
+          identity_list(selecto, conf, field, sel, typed_values, false) ||
+            build_list_clause(selecto, sel, typed_values, false, exact?(selecto, conf, field))
 
         {List.wrap(conf.requires_join) ++ List.wrap(join), in_clause, param}
     end
@@ -533,7 +519,10 @@ defmodule Selecto.Builder.Sql.Where do
     {sel, join, param} = Select.prep_selector(selecto, field)
 
     typed_values = Enum.map(list, fn i -> to_field_value(selecto, conf, i) end)
-    in_clause = build_list_clause(selecto, sel, typed_values, false, exact?(selecto, conf, field))
+
+    in_clause =
+      identity_list(selecto, conf, field, sel, typed_values, false) ||
+        build_list_clause(selecto, sel, typed_values, false, exact?(selecto, conf, field))
 
     {List.wrap(conf.requires_join) ++ List.wrap(join), in_clause, param}
   end
@@ -545,7 +534,8 @@ defmodule Selecto.Builder.Sql.Where do
     typed_values = Enum.map(list, fn i -> to_field_value(selecto, conf, i) end)
 
     not_in_clause =
-      build_list_clause(selecto, sel, typed_values, true, exact?(selecto, conf, field))
+      identity_list(selecto, conf, field, sel, typed_values, true) ||
+        build_list_clause(selecto, sel, typed_values, true, exact?(selecto, conf, field))
 
     {List.wrap(conf.requires_join) ++ List.wrap(join), not_in_clause, param}
   end
@@ -555,7 +545,10 @@ defmodule Selecto.Builder.Sql.Where do
     {sel, join, param} = Select.prep_selector(selecto, field)
 
     typed_values = Enum.map(list, fn i -> to_field_value(selecto, conf, i) end)
-    in_clause = build_list_clause(selecto, sel, typed_values, false, exact?(selecto, conf, field))
+
+    in_clause =
+      identity_list(selecto, conf, field, sel, typed_values, false) ||
+        build_list_clause(selecto, sel, typed_values, false, exact?(selecto, conf, field))
 
     {List.wrap(conf.requires_join) ++ List.wrap(join), in_clause, param}
   end
@@ -1019,8 +1012,17 @@ defmodule Selecto.Builder.Sql.Where do
     conf = field_conf(selecto, field)
     # Extract actual field name, not display name
     field_name = extract_database_field(field, conf)
+    selector = build_selector_string(selecto, conf.requires_join, field_name)
 
     # Use half-open interval for datetime types to avoid precision issues
+    if identity = identity_between(selecto, conf, field, selector, min, max) do
+      {conf.requires_join, identity, []}
+    else
+      plain_regular_between(selecto, conf, field_name, min, max)
+    end
+  end
+
+  defp plain_regular_between(selecto, conf, field_name, min, max) do
     if date_like_type(conf) do
       {conf.requires_join,
        [
@@ -1204,23 +1206,167 @@ defmodule Selecto.Builder.Sql.Where do
   # TIMESTAMP compiles zone-independently (ExactCompare.zone_column?/3,
   # item 62a); every other comparison renders as before.
   defp comparison_clause(selecto, conf, field, sel, operator, {:param, value} = right) do
-    cond do
-      host_comparison?(selecto, conf, field) and
-          ExactCompare.bytes_identity?(selecto, column_name(conf, field)) ->
+    case identity_kind(selecto, conf, field) do
+      :duck_text ->
         ExactCompare.bytes_compare(sel, operator, value)
 
-      true ->
-        case zone_comparison?(selecto, conf, field) do
-          true ->
-            ExactCompare.unix_compare(sel, operator, value)
+      :timestamp ->
+        ExactCompare.unix_compare(sel, operator, value)
 
-          :unresolved ->
-            raise ArgumentError,
-                  "a scope comparison names a temporal column the catalog lookup did not resolve"
+      :mysql_text when operator in ["<", "<=", ">", ">="] ->
+        ExactCompare.binary_compare(sel, operator, value)
 
-          false ->
-            plain_comparison_clause(selecto, conf, field, sel, operator, right)
+      :unresolved ->
+        unresolved!()
+
+      _plain ->
+        plain_comparison_clause(selecto, conf, field, sel, operator, right)
+    end
+  end
+
+  # How a host, trusted, required or tenant comparison on `field` must be
+  # compiled on the adapter's storage (types loaded by prepare_read/2):
+  # - :duck_text, a DuckDB VARCHAR identity column (bytes, every operator);
+  # - :timestamp, a MySQL-family TIMESTAMP column (epoch, item 62a);
+  # - :mysql_text, a MySQL-family character column (ranges and patterns by
+  #   utf8mb4 bytes, R3; equality already compares exactly);
+  # - :unresolved, a declared temporal column the lookup did not resolve;
+  # - nil, anything else (and every caller-only comparison).
+  defp identity_kind(selecto, conf, field) do
+    conf = if is_map(conf), do: conf, else: %{}
+
+    if host_comparison?(selecto, conf, field) do
+      column = column_name(conf, field)
+
+      cond do
+        ExactCompare.bytes_identity?(selecto, column) ->
+          :duck_text
+
+        true ->
+          case ExactCompare.zone_column?(selecto, column, Map.get(conf, :type)) do
+            true -> :timestamp
+            :unresolved -> :unresolved
+            false -> if ExactCompare.mysql_text_identity?(selecto, column), do: :mysql_text
+          end
+      end
+    end
+  end
+
+  defp unresolved!,
+    do:
+      ExactCompare.refuse(
+        :column_unresolved,
+        "a scope comparison names a temporal column the catalog lookup did not resolve"
+      )
+
+  # BETWEEN on an identity column, compiled exactly (or nil).
+  defp identity_between(selecto, conf, field, selector, min, max) do
+    min = to_field_value(selecto, conf, min)
+    max = to_field_value(selecto, conf, max)
+
+    case identity_kind(selecto, conf, field) do
+      :duck_text ->
+        [
+          " (",
+          ExactCompare.bytes_compare(selector, ">=", min),
+          " and ",
+          ExactCompare.bytes_compare(selector, "<=", max),
+          ") "
+        ]
+
+      :mysql_text ->
+        [
+          " (",
+          ExactCompare.binary_compare(selector, ">=", min),
+          " and ",
+          ExactCompare.binary_compare(selector, "<=", max),
+          ") "
+        ]
+
+      :timestamp ->
+        upper = if date_like_type(conf), do: "<", else: "<="
+
+        [
+          " (",
+          ExactCompare.unix_compare(selector, ">=", min),
+          " and ",
+          ExactCompare.unix_compare(selector, upper, max),
+          ") "
+        ]
+
+      :unresolved ->
+        unresolved!()
+
+      _plain ->
+        nil
+    end
+  end
+
+  # LIKE-family operators (R3, R4): on a MySQL-family character identity
+  # column they compare utf8mb4 bytes; on a DuckDB VARCHAR identity column a
+  # prefix or suffix uses DuckDB's exact prefix()/suffix() (LIKE follows the
+  # column's collation there) and any other pattern is refused; on a
+  # TIMESTAMP scope column they are zone-dependent and refused.
+  defp like_clause(selecto, field, sel, operator, pattern, escape, shape) do
+    case identity_kind(selecto, safe_field_conf(selecto, field), field) do
+      :mysql_text ->
+        ExactCompare.binary_like(sel, operator, pattern, escape)
+
+      :duck_text ->
+        case {operator, shape} do
+          {"LIKE", {:prefix, value}} ->
+            [" prefix(", sel, ", ", {:param, value}, ") "]
+
+          {"LIKE", {:suffix, value}} ->
+            [" suffix(", sel, ", ", {:param, value}, ") "]
+
+          _other ->
+            ExactCompare.refuse(
+              :identity_pattern,
+              "a scope pattern on a DuckDB identity column cannot be compared exactly"
+            )
         end
+
+      :timestamp ->
+        ExactCompare.refuse(
+          :timestamp_operator,
+          "a scope pattern on a TIMESTAMP column depends on the session time zone"
+        )
+
+      :unresolved ->
+        unresolved!()
+
+      _plain ->
+        [" ", sel, " ", operator, " ", {:param, pattern}, escape, " "]
+    end
+  end
+
+  # IN lists on identity columns: DuckDB VARCHAR by bytes; a TIMESTAMP
+  # scope list as exact epoch equalities (item 62a); nil otherwise.
+  defp identity_list(selecto, conf, field, sel, values, negate?) do
+    case identity_kind(selecto, conf, field) do
+      :duck_text ->
+        placeholders =
+          values
+          |> Enum.map(&["encode(CAST(", {:param, &1}, " AS VARCHAR))"])
+          |> Enum.intersperse(", ")
+
+        [" ", if(negate?, do: "NOT ", else: ""), "encode(", sel, ") IN (", placeholders, ") "]
+
+      :timestamp ->
+        # One exact epoch equality per value (they stay exact under NOT).
+        equalities =
+          values
+          |> Enum.map(&ExactCompare.unix_compare(sel, "=", &1))
+          |> Enum.intersperse(" OR ")
+
+        [" ", if(negate?, do: "NOT ", else: ""), "(", equalities, ") "]
+
+      :unresolved ->
+        unresolved!()
+
+      _plain ->
+        nil
     end
   end
 
@@ -1228,13 +1374,6 @@ defmodule Selecto.Builder.Sql.Where do
     do:
       ExactCompare.host_scope_field?(selecto, to_string(field)) or
         ExactCompare.tenant_name?(Map.get(selecto, :domain), column_name(conf, field))
-
-  defp zone_comparison?(selecto, conf, field) do
-    if host_comparison?(selecto, conf, field),
-      do:
-        ExactCompare.zone_column?(selecto, column_name(conf, field), Map.get(conf || %{}, :type)),
-      else: false
-  end
 
   defp plain_comparison_clause(selecto, conf, field, sel, operator, right)
        when operator in ["=", "!="] do
