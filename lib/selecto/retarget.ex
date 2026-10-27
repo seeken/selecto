@@ -246,6 +246,15 @@ defmodule Selecto.Retarget do
          "#{context_alias}.#{quote_id.(Selecto.Builder.Sql.projection_alias(index))}", mode}
       end)
 
+    # R46 FINAL-2: a row-constructor IN compares by operator lookup; with
+    # explicit operators the membership is the EXISTS form, whose equalities
+    # name pg_catalog's operator.
+    explicit? =
+      Selecto.Builder.TypedOperator.enabled?(selecto) or
+        Selecto.Builder.TypedOperator.enabled?(nil)
+
+    strategy = if explicit?, do: :exists, else: strategy
+
     case strategy do
       :exists ->
         conditions =
