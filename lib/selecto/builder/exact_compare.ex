@@ -260,16 +260,21 @@ defmodule Selecto.Builder.ExactCompare do
   defp exact_literal?(:integer, value) when is_binary(value),
     do: Regex.match?(~r/\A(0|-?[1-9][0-9]*)\z/, value)
 
-  # Text must be the type's canonical rendering of its exact value (R3c2):
-  # DECIMAL(p,s) renders exactly s fractional digits ('1.01' for
-  # DECIMAL(10,2); '1.1', '1' and '1.010' are not canonical), no exponent,
-  # no '-0'.
-  defp exact_literal?({:decimal, 0}, value) when is_binary(value),
-    do: exact_literal?(:integer, value)
-
+  # Text must be plain decimal notation of an exact value (R3c2): no
+  # exponent ('1e0', '1.01e0'), no leading zeros, no '-0', at most s
+  # fractional digits for DECIMAL(p,s) ('1.005' refuses for DECIMAL(10,2);
+  # '10' and '1.01' are exact and accepted).
   defp exact_literal?({:decimal, scale}, value) when is_binary(value) do
-    Regex.match?(~r/\A-?(0|[1-9][0-9]*)\.[0-9]{#{scale}}\z/, value) and
-      not Regex.match?(~r/\A-0\.0+\z/, value)
+    case Regex.run(~r/\A-?(0|[1-9][0-9]*)(?:\.([0-9]+))?\z/, value) do
+      [_, _] ->
+        not String.starts_with?(value, "-0")
+
+      [_, _, fraction] ->
+        byte_size(fraction) <= scale and not Regex.match?(~r/\A-0(\.0+)?\z/, value)
+
+      nil ->
+        false
+    end
   end
 
   defp exact_literal?({:decimal, scale}, %Decimal{} = value) do
