@@ -50,7 +50,11 @@ defmodule Selecto.Executor do
 
     with :ok <- Selecto.Tenant.validate_scope(selecto, opts),
          {:ok, selecto} <- prepare_read(selecto) do
-      execute_safe(selecto, opts, query_id, start_time)
+      try do
+        execute_safe(selecto, opts, query_id, start_time)
+      rescue
+        refusal in Selecto.Builder.ScopeRefusal -> {:error, Selecto.Error.from_reason(refusal)}
+      end
     else
       {:error, %Selecto.Error{} = error} ->
         {:error, error}
@@ -215,6 +219,11 @@ defmodule Selecto.Executor do
           with :ok <- complexity_outcome(analysis, query_id, compiled.sql) do
             {:ok, compiled}
           end
+
+        {:raised, %Selecto.Builder.ScopeRefusal{} = refusal, _stacktrace} ->
+          # A scope comparison the adapter's storage cannot make exact is a
+          # typed refusal, never a raise.
+          {:error, Selecto.Error.from_reason(refusal)}
 
         {:raised, exception, stacktrace} ->
           # A query the check rejects is rejected even when it cannot compile,
