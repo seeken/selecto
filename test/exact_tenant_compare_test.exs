@@ -78,14 +78,12 @@ defmodule Selecto.ExactTenantCompareTest do
              "(selecto_root.tenant_id = ? AND " <>
                "CAST(CONVERT(selecto_root.tenant_id USING utf8mb4) AS BINARY) = CAST(? AS BINARY))"
 
-    assert sql =~
-             "(selecto_root.tenant_id IN (?, ?) AND " <>
-               "CAST(CONVERT(selecto_root.tenant_id USING utf8mb4) AS BINARY) IN " <>
-               "(CAST(? AS BINARY), CAST(? AS BINARY)))"
-
-    # The caller's own filter on a non-tenant column keeps the plain form.
+    # The caller's own filters keep native semantics, on the tenant column
+    # too (R12, item 55): the engine tenant above is what scopes the read.
+    assert sql =~ "( selecto_root.tenant_id IN (?, ?) )"
+    refute sql =~ "BINARY) IN"
     assert sql =~ "selecto_root.name = ?"
-    assert params == ["t1", "t1", "t1", "t1", "t1", "t1", "x"]
+    assert params == ["t1", "t1", "t1", "t1", "x"]
   end
 
   test "integer tenant columns and other adapters compile exactly as before" do

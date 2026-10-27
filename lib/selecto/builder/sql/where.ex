@@ -1086,6 +1086,10 @@ defmodule Selecto.Builder.Sql.Where do
   end
 
   defp to_field_value(selecto, conf, value) do
+    # R3c2 FINAL: a scope literal is checked as written, before the declared
+    # type parses it (" 1", "+1" and "-0" would otherwise become 1 and 0).
+    raw_literal!(selecto, conf, value)
+
     if Selecto.Temporal.epoch_storage(conf) && date_like_type(conf) do
       Selecto.Temporal.coerce_filter_value(conf, value)
     else
@@ -1106,6 +1110,21 @@ defmodule Selecto.Builder.Sql.Where do
   end
 
   defp date_like_type(conf), do: Selecto.Temporal.date_like_type(conf)
+
+  defp raw_literal!(selecto, conf, value) when is_binary(value) and is_map(conf) do
+    if ExactCompare.in_scope?() and not computed?(conf) and Map.get(conf, :field) do
+      ExactCompare.exact_literals!(
+        selecto,
+        ExactCompare.field_relation(selecto, conf),
+        to_string(Map.get(conf, :field)),
+        [value]
+      )
+    end
+
+    :ok
+  end
+
+  defp raw_literal!(_selecto, _conf, _value), do: :ok
 
   defp build_datetime_predicate(selecto, field, operation, part, predicate, options \\ %{}) do
     refuse_timestamp_operator(selecto, field, "a date part or format")
@@ -1530,8 +1549,11 @@ defmodule Selecto.Builder.Sql.Where do
   # (Selecto.Builder.ExactCompare.host_names/1, matched on the field as
   # written, so "person.name" never makes the root "name" exact), compares
   # exactly; the mode comes from the field's own declared type.
+  # Exact equality is for scope comparisons only (provenance); the caller's
+  # own =, != and IN keep native semantics like its ranges (R12, item 55).
   defp exact?(selecto, conf, field) do
     with true <- ExactCompare.enabled?(selecto),
+         true <- ExactCompare.in_scope?(),
          true <-
            ExactCompare.exact_name?(Map.get(selecto, :domain), column_name(conf, field)) != false or
              ExactCompare.host_mode(selecto, to_string(field)) do
