@@ -260,17 +260,26 @@ defmodule Selecto.Builder.ExactCompare do
   defp exact_literal?(:integer, value) when is_binary(value),
     do: Regex.match?(~r/\A(0|-?[1-9][0-9]*)\z/, value)
 
-  # Text must be plain decimal notation of an exact value (R3c2): no
-  # exponent ('1e0', '1.01e0'), no leading zeros, no '-0', at most s
-  # fractional digits for DECIMAL(p,s) ('1.005' refuses for DECIMAL(10,2);
-  # '10' and '1.01' are exact and accepted).
+  # R3c2 FINAL: text must be plain notation (optional '-', digits,
+  # optional '.' and digits; no exponent, whitespace, '+' or '-0') whose
+  # value the type represents exactly: at most s non-zero fractional digits
+  # for DECIMAL(p,s) ('1.010' and '10' accepted for DECIMAL(10,2), '1.005'
+  # refused).
   defp exact_literal?({:decimal, scale}, value) when is_binary(value) do
     case Regex.run(~r/\A-?(0|[1-9][0-9]*)(?:\.([0-9]+))?\z/, value) do
       [_, _] ->
         not String.starts_with?(value, "-0")
 
       [_, _, fraction] ->
-        byte_size(fraction) <= scale and not Regex.match?(~r/\A-0(\.0+)?\z/, value)
+        String.trim_trailing(
+          binary_part(
+            fraction,
+            min(scale, byte_size(fraction)),
+            max(byte_size(fraction) - scale, 0)
+          ),
+          "0"
+        ) == "" and
+          not Regex.match?(~r/\A-0(\.0+)?\z/, value)
 
       nil ->
         false
@@ -291,6 +300,7 @@ defmodule Selecto.Builder.ExactCompare do
       # A view's temporal column the adapter could not prove is a base
       # column taken as is (R40).
       "selecto_unproven_temporal" in column_types -> :unresolved
+      "selecto_unproven_view_column" in column_types -> :unresolved
       Enum.all?(column_types, &(&1 == "timestamp")) -> :timestamp
       Enum.all?(column_types, &(&1 in @mysql_text_types)) -> :mysql_text
       Enum.any?(column_types, &(&1 == "timestamp" or &1 in @mysql_text_types)) -> :unresolved
