@@ -24,14 +24,31 @@ defmodule Selecto.Builder.SetOperations do
       operations ->
         # The latest left operand contains the complete preceding chain and
         # any ordering/paging applied before this operation was appended.
-        build_single_set_operation(List.last(operations), opts)
+        build_single_set_operation(List.last(operations), opts, storage(selecto))
     end
   end
 
+  # Storage types an adapter loaded for the read (Selecto.Executor.prepare_read/1)
+  # reach every operand, so its scope comparisons compile the same way.
+  @storage_keys [:storage_column_types, :zone_independent_timestamps, :identity_text_bytes]
+
+  @doc false
+  def storage_keys, do: @storage_keys
+
+  defp storage(selecto), do: Map.take(selecto.set || %{}, @storage_keys)
+
+  defp with_storage(query, storage) when map_size(storage) == 0, do: query
+
+  defp with_storage(query, storage),
+    do: %{query | set: Map.merge(query.set || %{}, storage)}
+
   # Build SQL for a single set operation
-  defp build_single_set_operation(spec, opts) do
-    {left_sql, left_params} = query_to_iodata_with_params(spec.left_query, opts)
-    {right_sql, right_params} = query_to_iodata_with_params(spec.right_query, opts)
+  defp build_single_set_operation(spec, opts, storage) do
+    {left_sql, left_params} =
+      query_to_iodata_with_params(with_storage(spec.left_query, storage), opts)
+
+    {right_sql, right_params} =
+      query_to_iodata_with_params(with_storage(spec.right_query, storage), opts)
 
     operation_sql = build_operation_sql(spec.operation, spec.options.all, spec.left_query.adapter)
 
@@ -288,6 +305,7 @@ defmodule Selecto.Builder.SetOperations do
 
   defp comparable_set(set) do
     set
+    |> Map.drop(@storage_keys)
     |> Map.delete(:set_operations)
     |> Map.put(:order_by, [])
     |> Map.delete(:limit)

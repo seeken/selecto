@@ -115,6 +115,22 @@ defmodule Selecto.StorageIdentityCompareTest do
     assert sql =~ "selecto_root.note = ?"
   end
 
+  test "set operation operands compile with the loaded storage types" do
+    base =
+      domain([{"ts", {:lt, "2024-01-01 00:00:00"}}])
+      |> Selecto.configure(Selecto.Runtime.Context.new(TestAdapter, :compile_only),
+        validate: false
+      )
+      |> Selecto.select(["id"])
+
+    union = Selecto.union(base, base)
+    union = %{union | set: Map.merge(union.set, @timestamps)}
+    {sql, _params} = Selecto.to_sql(union)
+    sql = String.replace(sql, ~r/\s+/, " ")
+
+    assert length(String.split(sql, "UNIX_TIMESTAMP(selecto_root.ts) <")) == 3
+  end
+
   test "without loaded types, or on a DATETIME column, the comparison is plain" do
     {sql, _params} = compile(domain([{"ts", {:lt, "2024-01-01 00:00:00"}}]), %{}, [])
     refute sql =~ "UNIX_TIMESTAMP"

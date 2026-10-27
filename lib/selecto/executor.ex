@@ -57,6 +57,40 @@ defmodule Selecto.Executor do
     end
   end
 
+  @read_marker {__MODULE__, :selecto_read}
+
+  # Every statement Selecto's executor runs (execute, count, projection sum,
+  # stream) runs with this process marked, only for the duration of the
+  # adapter call, so an adapter can guard Selecto's own reads (the
+  # PostgreSQL session checks, items 56 and 61; MySQL-family temporary
+  # shadows) without guarding SQL the host runs through the same adapter.
+  defp as_selecto_read(fun) do
+    previous = Process.put(@read_marker, true)
+
+    try do
+      fun.()
+    after
+      if previous, do: Process.put(@read_marker, previous), else: Process.delete(@read_marker)
+    end
+  end
+
+  @doc false
+  # Whether the calling process is inside a Selecto read's adapter call.
+  def selecto_read?, do: Process.get(@read_marker) == true
+
+  @doc false
+  # Every operand of the query's set operations, recursively.
+  def set_operands(selecto) do
+    selecto
+    |> Map.get(:set)
+    |> Kernel.||(%{})
+    |> Map.get(:set_operations, [])
+    |> Enum.flat_map(fn operation ->
+      [operation.left_query, operation.right_query]
+      |> Enum.flat_map(&[&1 | set_operands(&1)])
+    end)
+  end
+
   # An adapter may load what compiling a read needs from the database first
   # (`prepare_read/2`): MySQL and MariaDB load the storage types of the
   # domain's relations so TIMESTAMP scope comparisons compile
@@ -832,7 +866,9 @@ defmodule Selecto.Executor do
       execution_port =
         if function_exported?(adapter, :execute_query, 4), do: :execute_query, else: :execute
 
-      case apply(adapter, execution_port, [connection, query, params, opts]) do
+      case as_selecto_read(fn ->
+             apply(adapter, execution_port, [connection, query, params, opts])
+           end) do
         {:ok, result} ->
           case Selecto.AdapterSupport.normalize_result(adapter, result) do
             {:ok, normalized} ->
@@ -985,7 +1021,7 @@ defmodule Selecto.Executor do
         query,
         params,
         aliases,
-        Keyword.put(adapter_opts, :selecto_read, true)
+        adapter_opts
       )
     end)
   end
@@ -997,7 +1033,7 @@ defmodule Selecto.Executor do
       query,
       params,
       aliases,
-      Keyword.put(opts, :selecto_read, true)
+      opts
     )
   end
 
@@ -1024,7 +1060,7 @@ defmodule Selecto.Executor do
 
       true ->
         try do
-          case adapter.stream(connection, query, params, opts) do
+          case as_selecto_read(fn -> adapter.stream(connection, query, params, opts) end) do
             {:ok, stream, columns} ->
               {:ok, Stream.map(stream, &{&1, List.wrap(columns), aliases})}
 
