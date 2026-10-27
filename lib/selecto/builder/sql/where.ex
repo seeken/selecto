@@ -1231,8 +1231,28 @@ defmodule Selecto.Builder.Sql.Where do
         unresolved!()
 
       _plain ->
+        exact_literals!(selecto, conf, field, [value])
         plain_comparison_clause(selecto, conf, field, sel, operator, right)
     end
+  end
+
+  # R3 clarification 2: a scope comparison that keeps the native compare on
+  # a non-text storage type binds only literals the type represents
+  # exactly; '1.4' or '1e0' against an INTEGER, or '1.005' against
+  # DECIMAL(10,2), would be rounded by the cast and is refused.
+  defp exact_literals!(selecto, conf, field, values) do
+    conf = if is_map(conf), do: conf, else: %{}
+
+    if host_comparison?(selecto, conf, field) and not computed?(conf) do
+      ExactCompare.exact_literals!(
+        selecto,
+        ExactCompare.field_relation(selecto, conf),
+        column_name(conf, field),
+        values
+      )
+    end
+
+    :ok
   end
 
   # How a host, trusted, required or tenant comparison on `field` must be
@@ -1350,6 +1370,7 @@ defmodule Selecto.Builder.Sql.Where do
         unresolved!()
 
       _plain ->
+        exact_literals!(selecto, conf, field, [min, max])
         nil
     end
   end
@@ -1424,6 +1445,7 @@ defmodule Selecto.Builder.Sql.Where do
         unresolved!()
 
       _plain ->
+        exact_literals!(selecto, conf, field, values)
         nil
     end
   end
