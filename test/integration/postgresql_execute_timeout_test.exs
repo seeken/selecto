@@ -35,7 +35,7 @@ defmodule Selecto.Integration.PostgreSQLExecuteTimeoutTest do
     {:ok, conn} =
       Postgrex.start_link(
         hostname: System.get_env("SELECTO_POSTGRES_HOST", "localhost"),
-        port: String.to_integer(System.get_env("SELECTO_POSTGRES_PORT", "5432")),
+        port: String.to_integer(System.fetch_env!("SELECTO_POSTGRES_PORT")),
         username: System.get_env("SELECTO_POSTGRES_USER", "postgres"),
         password: System.get_env("SELECTO_POSTGRES_PASSWORD", "password"),
         database: System.get_env("SELECTO_POSTGRES_DATABASE", "selecto_test"),
@@ -72,7 +72,7 @@ defmodule Selecto.Integration.PostgreSQLExecuteTimeoutTest do
       {:ok, cleanup} =
         Postgrex.start_link(
           hostname: System.get_env("SELECTO_POSTGRES_HOST", "localhost"),
-          port: String.to_integer(System.get_env("SELECTO_POSTGRES_PORT", "5432")),
+          port: String.to_integer(System.fetch_env!("SELECTO_POSTGRES_PORT")),
           username: System.get_env("SELECTO_POSTGRES_USER", "postgres"),
           password: System.get_env("SELECTO_POSTGRES_PASSWORD", "password"),
           database: System.get_env("SELECTO_POSTGRES_DATABASE", "selecto_test")

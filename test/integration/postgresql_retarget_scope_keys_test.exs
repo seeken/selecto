@@ -141,7 +141,7 @@ defmodule Selecto.Integration.PostgreSQLRetargetScopeKeysTest do
   defp connection_options do
     [
       hostname: System.get_env("SELECTO_POSTGRES_HOST", "localhost"),
-      port: String.to_integer(System.get_env("SELECTO_POSTGRES_PORT", "5432")),
+      port: String.to_integer(System.fetch_env!("SELECTO_POSTGRES_PORT")),
       username: System.get_env("SELECTO_POSTGRES_USER", "postgres"),
       password: System.get_env("SELECTO_POSTGRES_PASSWORD", "password"),
       database: System.get_env("SELECTO_POSTGRES_DATABASE", "selecto_test")
