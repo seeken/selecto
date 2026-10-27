@@ -133,7 +133,7 @@ defmodule Selecto.PropertyDbTest do
   setup_all do
     connection = [
       hostname: System.get_env("SELECTO_POSTGRES_HOST", "localhost"),
-      port: env_integer("SELECTO_POSTGRES_PORT", 5432),
+      port: String.to_integer(System.fetch_env!("SELECTO_POSTGRES_PORT")),
       username: System.get_env("SELECTO_POSTGRES_USER", "postgres"),
       password: System.get_env("SELECTO_POSTGRES_PASSWORD", "password"),
       database: System.get_env("SELECTO_POSTGRES_DATABASE", "selecto_test")
@@ -213,11 +213,4 @@ defmodule Selecto.PropertyDbTest do
 
   defp maybe_offset(selecto, nil), do: selecto
   defp maybe_offset(selecto, offset_value), do: Selecto.offset(selecto, offset_value)
-
-  defp env_integer(name, default) do
-    case System.get_env(name) do
-      nil -> default
-      value -> String.to_integer(value)
-    end
-  end
 end

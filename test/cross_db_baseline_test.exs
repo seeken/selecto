@@ -359,7 +359,7 @@ defmodule Selecto.CrossDBBaselineTest do
   defp postgres_opts do
     [
       hostname: env("SELECTO_POSTGRES_HOST", "localhost"),
-      port: env_int("SELECTO_POSTGRES_PORT", 5432),
+      port: String.to_integer(System.fetch_env!("SELECTO_POSTGRES_PORT")),
       username: env("SELECTO_POSTGRES_USER", "postgres"),
       password: env("SELECTO_POSTGRES_PASSWORD", "postgres"),
       database: env("SELECTO_POSTGRES_DATABASE", "selecto_test")
