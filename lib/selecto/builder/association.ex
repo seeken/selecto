@@ -271,11 +271,24 @@ defmodule Selecto.Builder.Association do
         [column(selecto, alias_name, field), " IS NULL"]
 
       {field, value} when is_binary(value) or is_number(value) or is_boolean(value) ->
-        ExactCompare.eq(
-          column(selecto, alias_name, field),
-          {:param, value},
-          ExactCompare.field_mode(selecto, relation, field)
-        )
+        # A pin on a VARCHAR identity column compares bytes on DuckDB
+        # (ExactCompare.bytes_identity?/2, items 38, 53); one on a column
+        # stored as TIMESTAMP compares zone-independently on MySQL-family
+        # (ExactCompare.zone_column?/3, item 62a).
+        cond do
+          ExactCompare.bytes_identity?(selecto, field) ->
+            ExactCompare.bytes_compare(column(selecto, alias_name, field), "=", value)
+
+          ExactCompare.zone_column?(selecto, field) == true ->
+            ExactCompare.unix_compare(column(selecto, alias_name, field), "=", value)
+
+          true ->
+            ExactCompare.eq(
+              column(selecto, alias_name, field),
+              {:param, value},
+              ExactCompare.field_mode(selecto, relation, field)
+            )
+        end
 
       _ ->
         raise ArgumentError,

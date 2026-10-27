@@ -299,32 +299,58 @@ defmodule Selecto.Builder.Sql.Where do
     # Extract actual field name, not display name
     field_name = extract_database_field(field, conf)
 
+    zone? = zone_comparison?(selecto, conf, field)
+
+    if zone? == :unresolved,
+      do:
+        raise(
+          ArgumentError,
+          "a scope comparison names a temporal column the catalog lookup did not resolve"
+        )
+
     # Use half-open interval for datetime types to avoid precision issues
-    if date_like_type(conf) do
+    if zone? == true do
+      selector = build_selector_string(selecto, conf.requires_join, field_name)
+
       {conf.requires_join,
        [
          " (",
-         build_selector_string(selecto, conf.requires_join, field_name),
-         " >= ",
-         {:param, to_field_value(selecto, conf, min)},
+         ExactCompare.unix_compare(selector, ">=", to_field_value(selecto, conf, min)),
          " and ",
-         build_selector_string(selecto, conf.requires_join, field_name),
-         " < ",
-         {:param, to_field_value(selecto, conf, max)},
+         ExactCompare.unix_compare(
+           selector,
+           if(date_like_type(conf), do: "<", else: "<="),
+           to_field_value(selecto, conf, max)
+         ),
          ") "
        ], []}
     else
-      # Use standard BETWEEN for non-datetime types
-      {conf.requires_join,
-       [
-         " ",
-         build_selector_string(selecto, conf.requires_join, field_name),
-         " between ",
-         {:param, to_field_value(selecto, conf, min)},
-         " and ",
-         {:param, to_field_value(selecto, conf, max)},
-         " "
-       ], []}
+      if date_like_type(conf) do
+        {conf.requires_join,
+         [
+           " (",
+           build_selector_string(selecto, conf.requires_join, field_name),
+           " >= ",
+           {:param, to_field_value(selecto, conf, min)},
+           " and ",
+           build_selector_string(selecto, conf.requires_join, field_name),
+           " < ",
+           {:param, to_field_value(selecto, conf, max)},
+           ") "
+         ], []}
+      else
+        # Use standard BETWEEN for non-datetime types
+        {conf.requires_join,
+         [
+           " ",
+           build_selector_string(selecto, conf.requires_join, field_name),
+           " between ",
+           {:param, to_field_value(selecto, conf, min)},
+           " and ",
+           {:param, to_field_value(selecto, conf, max)},
+           " "
+         ], []}
+      end
     end
   end
 
@@ -1174,7 +1200,43 @@ defmodule Selecto.Builder.Sql.Where do
   # Equality and inequality on a tenant/site column of an exact-compare adapter
   # (MySQL, MariaDB) decide on the stored bytes; every other comparison, and
   # every other adapter, renders exactly as before.
-  defp comparison_clause(selecto, conf, field, sel, operator, right)
+  # A host, trusted, required or tenant comparison on a column stored as
+  # TIMESTAMP compiles zone-independently (ExactCompare.zone_column?/3,
+  # item 62a); every other comparison renders as before.
+  defp comparison_clause(selecto, conf, field, sel, operator, {:param, value} = right) do
+    cond do
+      host_comparison?(selecto, conf, field) and
+          ExactCompare.bytes_identity?(selecto, column_name(conf, field)) ->
+        ExactCompare.bytes_compare(sel, operator, value)
+
+      true ->
+        case zone_comparison?(selecto, conf, field) do
+          true ->
+            ExactCompare.unix_compare(sel, operator, value)
+
+          :unresolved ->
+            raise ArgumentError,
+                  "a scope comparison names a temporal column the catalog lookup did not resolve"
+
+          false ->
+            plain_comparison_clause(selecto, conf, field, sel, operator, right)
+        end
+    end
+  end
+
+  defp host_comparison?(selecto, conf, field),
+    do:
+      ExactCompare.host_scope_field?(selecto, to_string(field)) or
+        ExactCompare.tenant_name?(Map.get(selecto, :domain), column_name(conf, field))
+
+  defp zone_comparison?(selecto, conf, field) do
+    if host_comparison?(selecto, conf, field),
+      do:
+        ExactCompare.zone_column?(selecto, column_name(conf, field), Map.get(conf || %{}, :type)),
+      else: false
+  end
+
+  defp plain_comparison_clause(selecto, conf, field, sel, operator, right)
        when operator in ["=", "!="] do
     if mode = exact?(selecto, conf, field) do
       exact = ExactCompare.eq(sel, right, mode)
@@ -1184,7 +1246,7 @@ defmodule Selecto.Builder.Sql.Where do
     end
   end
 
-  defp comparison_clause(_selecto, _conf, _field, sel, operator, right),
+  defp plain_comparison_clause(_selecto, _conf, _field, sel, operator, right),
     do: [" ", sel, " ", operator, " ", right, " "]
 
   # A column-vs-column equality or inequality compares exactly when either
