@@ -71,36 +71,220 @@ defmodule Selecto.Builder.ExactCompare do
   @temporal_types ~w(date datetime naive_datetime naive_datetime_usec utc_datetime
                      utc_datetime_usec timestamp timestamptz epoch_datetime)
 
+  @scope_key {__MODULE__, :scope}
+  @storage_context {__MODULE__, :storage}
+
   @doc false
-  # true when the column is stored as TIMESTAMP, false when it is not or no
-  # storage types were loaded, :unresolved when a declared temporal column is
-  # missing from the loaded types.
-  def zone_column?(selecto, name, declared_type \\ nil)
+  # Compiles `fun` as scope (a required, trusted, engine, evidence or member
+  # filter, by provenance).
+  def in_scope(fun) do
+    previous = Process.get(@scope_key)
+    Process.put(@scope_key, true)
 
-  def zone_column?(
-        %{set: %{storage_column_types: types, zone_independent_timestamps: true}},
-        name,
-        declared_type
-      )
-      when is_map(types) and (is_binary(name) or is_atom(name)) do
-    key = name |> to_string() |> String.split(".") |> List.last() |> String.downcase()
-
-    case Map.fetch(types, key) do
-      {:ok, column_types} ->
-        cond do
-          "timestamp" not in column_types -> false
-          # Only TIMESTAMP is rewritten (R5): a name that is TIMESTAMP in one
-          # relation and another type in another cannot be told apart.
-          Enum.all?(column_types, &(&1 == "timestamp")) -> true
-          true -> :unresolved
-        end
-
-      :error ->
-        if zone_type_name(declared_type) in @temporal_types, do: :unresolved, else: false
+    try do
+      fun.()
+    after
+      if previous, do: Process.put(@scope_key, previous), else: Process.delete(@scope_key)
     end
   end
 
-  def zone_column?(_selecto, _name, _declared_type), do: false
+  @doc false
+  def in_scope?, do: Process.get(@scope_key) == true
+
+  @doc false
+  # The storage types of the read being compiled, for nested compiles
+  # (query members, set operands) whose own selecto does not carry them.
+  def with_storage_context(selecto, fun) do
+    storage =
+      Map.take(Map.get(selecto, :set) || %{}, Selecto.Builder.SetOperations.storage_keys())
+
+    if map_size(storage) == 0 or Process.get(@storage_context) do
+      fun.()
+    else
+      Process.put(@storage_context, storage)
+
+      try do
+        fun.()
+      after
+        Process.delete(@storage_context)
+      end
+    end
+  end
+
+  defp storage_set(selecto) do
+    set = Map.get(selecto, :set) || %{}
+
+    if Map.has_key?(set, :storage_column_types),
+      do: set,
+      else: Map.merge(set, Process.get(@storage_context) || %{})
+  end
+
+  @doc false
+  # How a scope comparison on `column` of `table` must compile, from the
+  # storage types an adapter loaded before the read (prepare_read/2), keyed
+  # by relation and column (R18): a same-named column of another relation
+  # never decides.
+  #
+  # - nil: no storage types were loaded (compile-only contexts, adapters
+  #   without the hook); everything compiles as before;
+  # - DuckDB (`identity_text_bytes`): :duck_text for a VARCHAR column (its
+  #   UTF-8 bytes, under every operator), else :plain (native);
+  # - MySQL-family (`zone_independent_timestamps`): :timestamp for a column
+  #   stored as TIMESTAMP (epoch compares, item 62a), :mysql_text for one
+  #   stored as character data (utf8mb4 bytes, R3, R16, R26), :plain for any
+  #   other storage. A column the lookup did not resolve is :mysql_text when
+  #   declared text, :plain when declared a known non-temporal type, and
+  #   :unresolved (refused) when declared temporal or of an unknown type.
+  def storage_kind(selecto, table, column, declared_type \\ nil)
+
+  def storage_kind(selecto, table, column, declared_type) when is_map(selecto) do
+    case storage_set(selecto) do
+      %{storage_column_types: types} = set when is_map(types) ->
+        storage_kind_in(set, types, table, column, declared_type)
+
+      _ ->
+        nil
+    end
+  end
+
+  def storage_kind(_selecto, _table, _column, _declared_type), do: nil
+
+  defp storage_kind_in(set, types, table, column, declared_type) do
+    found =
+      with table when not is_nil(table) <- table,
+           {:ok, columns} <- Map.fetch(types, to_string(table)),
+           {:ok, column_types} <- Map.fetch(columns, storage_key(column)) do
+        {:ok, column_types}
+      else
+        _ -> :error
+      end
+
+    cond do
+      Map.get(set, :identity_text_bytes) == true ->
+        case found do
+          {:ok, column_types} ->
+            if Enum.any?(column_types, &String.starts_with?(&1, "varchar")),
+              do: :duck_text,
+              else: :plain
+
+          :error ->
+            :plain
+        end
+
+      Map.get(set, :zone_independent_timestamps) == true ->
+        case found do
+          {:ok, column_types} -> mysql_kind(column_types)
+          :error -> unresolved_kind(declared_type)
+        end
+
+      true ->
+        nil
+    end
+  end
+
+  @mysql_text_types ~w(char varchar tinytext text mediumtext longtext enum set)
+
+  defp mysql_kind(column_types) do
+    cond do
+      Enum.all?(column_types, &(&1 == "timestamp")) -> :timestamp
+      Enum.all?(column_types, &(&1 in @mysql_text_types)) -> :mysql_text
+      Enum.any?(column_types, &(&1 == "timestamp" or &1 in @mysql_text_types)) -> :unresolved
+      true -> :plain
+    end
+  end
+
+  defp unresolved_kind(declared_type) do
+    cond do
+      zone_type_name(declared_type) in @temporal_types -> :unresolved
+      declared_type == nil -> :unresolved
+      type_class(declared_type) == :text -> :mysql_text
+      type_class(declared_type) == :non_text -> :plain
+      true -> :unresolved
+    end
+  end
+
+  @doc false
+  # Whether a computed value reads a TIMESTAMP-stored column as a value
+  # (outside CASE conditions), directly or through other computed columns;
+  # an unresolved column counts (fails closed). R15.
+  def computed_reads_timestamp?(selecto, expression, visited \\ MapSet.new()) do
+    expression =
+      case Selecto.Domain.Contract.ComputedValues.normalize(expression) do
+        {:ok, normalized} -> normalized
+        _ -> expression
+      end
+
+    {_conditions, fields} = value_parts(expression)
+
+    Enum.any?(fields, fn field ->
+      conf =
+        try do
+          Selecto.field(selecto, field)
+        rescue
+          _ -> nil
+        end
+
+      cond do
+        MapSet.member?(visited, field) ->
+          false
+
+        match?(%{select: {:computed_value, _}}, conf) ->
+          {:computed_value, inner} = conf.select
+          computed_reads_timestamp?(selecto, inner, MapSet.put(visited, field))
+
+        is_map(conf) ->
+          storage_kind(
+            selecto,
+            field_relation(selecto, conf),
+            Map.get(conf, :field) || field,
+            Map.get(conf, :type)
+          ) in [:timestamp, :unresolved]
+
+        true ->
+          storage_kind(selecto, nil, field, nil) in [:timestamp, :unresolved]
+      end
+    end)
+  end
+
+  @doc false
+  def declared_type_of(relation, field), do: declared_type(relation, field)
+
+  @doc false
+  # The storage map key of a column name (case-insensitive in every
+  # backend); relations are keyed exactly as the domain names them (R31).
+  def storage_key(name), do: name |> to_string() |> String.downcase()
+
+  @doc false
+  # The relation a field reads: the root's source table, or the source
+  # table of the join it requires.
+  def field_relation(selecto, conf) when is_map(conf) do
+    join = Map.get(conf, :source_join) || Map.get(conf, :requires_join)
+    config = Map.get(selecto, :config) || %{}
+
+    case join do
+      root when root in [nil, :selecto_root] ->
+        get(Map.get(selecto, :domain) || %{}, :source) |> relation_table()
+
+      join ->
+        case config |> Map.get(:joins, %{}) |> Map.get(join) do
+          %{source: source} when is_binary(source) or is_atom(source) -> to_string(source)
+          _ -> nil
+        end
+    end
+  end
+
+  def field_relation(selecto, _conf),
+    do: get(Map.get(selecto, :domain) || %{}, :source) |> relation_table()
+
+  @doc false
+  def relation_table(relation) when is_map(relation) do
+    case get(relation, :source_table) do
+      nil -> nil
+      table -> to_string(table)
+    end
+  end
+
+  def relation_table(_relation), do: nil
 
   @doc false
   # Whether a host, trusted, required or engine predicate names `field`
@@ -135,26 +319,6 @@ defmodule Selecto.Builder.ExactCompare do
       List.wrap(get(context, :required_filters)) ++
       List.wrap(Map.get(set, :host_filtered)) ++ Selecto.Tenant.engine_filters(selecto)
   end
-
-  @doc false
-  # DuckDB identity text (items 38, 49a, 53): an adapter that loaded the
-  # storage types of the domain's relations and refused every identity
-  # column of another type (`prepare_read/2`, DuckDB) sets
-  # `set.identity_text_bytes`; a host, trusted, required or tenant
-  # comparison, or an association `where` pin, on a VARCHAR column then
-  # compares the UTF-8 bytes (`encode(col) <op> encode(CAST(? AS VARCHAR))`),
-  # whatever the column's or the session's collation, for every operator.
-  def bytes_identity?(%{set: %{identity_text_bytes: true, storage_column_types: types}}, name)
-      when is_map(types) and (is_binary(name) or is_atom(name)) do
-    key = name |> to_string() |> String.split(".") |> List.last() |> String.downcase()
-
-    case Map.fetch(types, key) do
-      {:ok, column_types} -> Enum.any?(column_types, &String.starts_with?(&1, "varchar"))
-      :error -> false
-    end
-  end
-
-  def bytes_identity?(_selecto, _name), do: false
 
   @doc false
   def bytes_compare(column, operator, value),
@@ -228,26 +392,6 @@ defmodule Selecto.Builder.ExactCompare do
   @doc false
   def refuse(reason, message),
     do: raise(Selecto.Builder.ScopeRefusal, message: message, reason: reason)
-
-  @mysql_text_types ~w(char varchar tinytext text mediumtext longtext enum set)
-
-  @doc false
-  # MySQL-family (R3): a scope column stored as character data, whose ranges
-  # and LIKE patterns must compare its utf8mb4 bytes.
-  def mysql_text_identity?(
-        %{set: %{storage_column_types: types, zone_independent_timestamps: true}},
-        name
-      )
-      when is_map(types) and (is_binary(name) or is_atom(name)) do
-    key = name |> to_string() |> String.split(".") |> List.last() |> String.downcase()
-
-    case Map.fetch(types, key) do
-      {:ok, column_types} -> Enum.any?(column_types, &(&1 in @mysql_text_types))
-      :error -> false
-    end
-  end
-
-  def mysql_text_identity?(_selecto, _name), do: false
 
   @doc false
   def binary_compare(column, operator, value),
