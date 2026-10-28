@@ -343,9 +343,10 @@ defmodule Selecto.Builder.Association do
   # (Selecto.Builder.ExactCompare); other columns and adapters as before.
   defp equality(selecto, left_alias, left, right_alias, right),
     do:
-      ExactCompare.eq(
-        column(selecto, left_alias, left),
-        column(selecto, right_alias, right),
+      Selecto.Builder.TypedOperator.eq_aliases(
+        selecto,
+        {left_alias, left, column(selecto, left_alias, left)},
+        {right_alias, right, column(selecto, right_alias, right)},
         ExactCompare.strongest([
           ExactCompare.column?(selecto, left),
           ExactCompare.column?(selecto, right),
@@ -362,9 +363,10 @@ defmodule Selecto.Builder.Association do
          {right_alias, right_relation, right}
        ),
        do:
-         ExactCompare.eq(
-           column(selecto, left_alias, left),
-           column(selecto, right_alias, right),
+         Selecto.Builder.TypedOperator.eq_aliases(
+           selecto,
+           {left_alias, left, column(selecto, left_alias, left)},
+           {right_alias, right, column(selecto, right_alias, right)},
            ExactCompare.strongest([
              ExactCompare.column?(selecto, left),
              ExactCompare.column?(selecto, right),

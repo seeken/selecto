@@ -1316,9 +1316,10 @@ defmodule Selecto.Builder.Sql do
 
           # A join keyed on tenant/site columns pairs them exactly on MySQL
           # and MariaDB (Selecto.Builder.ExactCompare).
-          ExactCompare.eq(
-            build_selector_string(selecto, join, config.my_key),
-            owner_sql,
+          Selecto.Builder.TypedOperator.eq_aliases(
+            selecto,
+            {join, config.my_key, build_selector_string(selecto, join, config.my_key)},
+            {config.requires_join, config.owner_key, owner_sql},
             ExactCompare.strongest([
               ExactCompare.column?(selecto, config.my_key),
               ExactCompare.column?(selecto, config.owner_key),
@@ -1393,9 +1394,11 @@ defmodule Selecto.Builder.Sql do
         [
           base_on,
           " and ",
-          ExactCompare.eq(
-            build_selector_string(selecto, config.requires_join, source_tenant),
-            build_selector_string(selecto, join, target_tenant),
+          Selecto.Builder.TypedOperator.eq_aliases(
+            selecto,
+            {config.requires_join, source_tenant,
+             build_selector_string(selecto, config.requires_join, source_tenant)},
+            {join, target_tenant, build_selector_string(selecto, join, target_tenant)},
             scope_pair_exact?(selecto, config, source_tenant, target_tenant)
           )
         ]
@@ -1438,9 +1441,11 @@ defmodule Selecto.Builder.Sql do
         [
           base_on,
           " and ",
-          ExactCompare.eq(
-            build_selector_string(selecto, config.requires_join, source_scope_key),
-            build_selector_string(selecto, join, target_scope_key),
+          Selecto.Builder.TypedOperator.eq_aliases(
+            selecto,
+            {config.requires_join, source_scope_key,
+             build_selector_string(selecto, config.requires_join, source_scope_key)},
+            {join, target_scope_key, build_selector_string(selecto, join, target_scope_key)},
             scope_pair_exact?(selecto, config, source_scope_key, target_scope_key)
           )
         ]
