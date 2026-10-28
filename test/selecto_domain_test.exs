@@ -1204,6 +1204,27 @@ defmodule Selecto.DomainTest do
       end
     end
 
+    test "query contracts retain authored field descriptions across sources and joins" do
+      for key <- [:description, "description"] do
+        domain =
+          query_contract_domain()
+          |> update_in([:source, :columns, :total], &Map.put(&1, key, "Order amount"))
+          |> update_in(
+            [:schemas, :customers, :columns, :name],
+            &Map.put(&1, key, "Customer company")
+          )
+          |> update_in([:custom_columns, "status_label"], &Map.put(&1, key, "Operational label"))
+
+        assert {:ok, contract, _} = Domain.query_contract(domain)
+        fields = Map.new(contract.fields, &{&1.id, &1})
+        assert fields["total"].description == "Order amount"
+        assert fields["customers.name"].description == "Customer company"
+        assert fields["customer.name"].description == "Customer company"
+        assert fields["status_label"].description == "Operational label"
+        refute Map.has_key?(fields["id"], :description)
+      end
+    end
+
     test "projects a constrained query contract for tools and AI" do
       {:ok, normalized, _diagnostics} = Domain.normalize(query_contract_domain())
 

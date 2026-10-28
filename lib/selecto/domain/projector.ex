@@ -396,6 +396,7 @@ defmodule Selecto.Domain.Projector do
         choice_source: query_contract_choice_source(choice_index, id)
       }
       |> Map.merge(query_contract_field_surface(column, id, source_kind, type, filterable_fields))
+      |> query_field_description(column)
     end)
   end
 
@@ -430,10 +431,18 @@ defmodule Selecto.Domain.Projector do
       |> Map.merge(
         query_contract_field_surface(column, id, :custom_column, type, filterable_fields)
       )
+      |> query_field_description(column)
     end)
   end
 
   def query_contract_custom_fields(_custom_columns, _choice_index, _filterable_fields), do: []
+
+  defp query_field_description(field, column) do
+    case MapHelpers.map_value(column, :description) do
+      description when is_binary(description) -> Map.put(field, :description, description)
+      _ -> field
+    end
+  end
 
   def query_contract_joins(normalized) do
     query_contract_join_tree(
