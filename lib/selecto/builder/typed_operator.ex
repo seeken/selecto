@@ -93,6 +93,52 @@ defmodule Selecto.Builder.TypedOperator do
     end
   end
 
+  @doc """
+  The {schema, arg} of `column` read through a compile alias: the root
+  (`selecto_root`) or a join name, mapped to its relation's table.
+  """
+  def alias_type(selecto, alias, column) do
+    table =
+      if to_string(alias) == "selecto_root" do
+        selecto |> Map.get(:domain, %{}) |> Map.get(:source, %{}) |> Map.get(:source_table)
+      else
+        selecto
+        |> Map.get(:config, %{})
+        |> Map.get(:joins, %{})
+        |> Enum.find_value(fn {name, join} ->
+          if to_string(name) == to_string(alias), do: Map.get(join, :source)
+        end)
+      end
+
+    if table, do: column_type(selecto, table, column), else: nil
+  end
+
+  @doc """
+  A key pairing between two aliases (a join, scope key or tenant pair):
+  plain or exact (MySQL) through ExactCompare when `mode` asks for it,
+  else each column's own operator types (both citext: citext's operator;
+  mixed: pg_catalog's, as native resolution would choose).
+  """
+  def eq_aliases(
+        selecto,
+        {left_alias, left_column, left},
+        {right_alias, right_column, right},
+        mode
+      ) do
+    if mode in [false, nil] and enabled?(selecto) do
+      compare_columns(
+        selecto,
+        alias_type(selecto, left_alias, left_column),
+        left,
+        "=",
+        alias_type(selecto, right_alias, right_column),
+        right
+      )
+    else
+      ExactCompare.eq(left, right, mode)
+    end
+  end
+
   @doc "Two typed operands (a join or column-to-column comparison)."
   def compare_columns(selecto, left_type, left, operator, right_type, right) do
     op = normalize(operator)
