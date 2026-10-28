@@ -321,8 +321,17 @@ defmodule Selecto.Builder.Sql.Select do
     {{:param, val}, :selecto_root, [val]}
   end
 
-  def prep_selector(selecto, {:ref, field_ref}, _retarget_aliases) when is_binary(field_ref) do
-    {[normalize_ref_field(selecto, field_ref)], :selecto_root, []}
+  def prep_selector(selecto, {:ref, field_ref}, retarget_aliases) when is_binary(field_ref) do
+    # Unqualified references to declared fields belong to this query's source.
+    # Rendering them as bare SQL identifiers becomes ambiguous as soon as a
+    # joined table has the same column (including RHS refs inside CASE).
+    # Qualified references retain the outer/lateral correlation convention.
+    if not String.contains?(field_ref, ".") and
+         Map.has_key?(Selecto.columns(selecto), field_ref) do
+      prep_selector(selecto, field_ref, retarget_aliases)
+    else
+      {[normalize_ref_field(selecto, field_ref)], :selecto_root, []}
+    end
   end
 
   def prep_selector(_selecto, {:count}, _retarget_aliases) do
