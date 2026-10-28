@@ -151,6 +151,36 @@ defmodule Selecto.ComputedValueColumnsTest do
     assert length(Regex.scan(~r/CASE WHEN/, sql)) == 2
   end
 
+  test "CASE field comparisons qualify local references while retaining outer references" do
+    domain =
+      domain(%{
+        self_parent: %{
+          type: :string,
+          computed: %{
+            kind: :expression,
+            expression: [
+              "case",
+              [["eq", "id", ["field", "person_id"]], ["literal", "self"]],
+              ["else", ["literal", "other"]]
+            ]
+          }
+        }
+      })
+
+    query =
+      domain |> Selecto.configure(:compile_only) |> Selecto.select(["self_parent", "person.name"])
+
+    {sql, params} = sql(query)
+    assert sql =~ ~r/selecto_root\."?id"?\s*=\s*selecto_root\."?person_id"?/
+    assert "self" in params
+    assert "other" in params
+
+    {outer, _, []} =
+      Selecto.Builder.Sql.Select.prep_selector(query, {:ref, "selecto_root.id"}, %{})
+
+    assert IO.iodata_to_binary(outer) == "__selecto_outer__.id"
+  end
+
   defp rejected?(extra) do
     match?({:error, _}, Selecto.Domain.validate(domain(extra)))
   end
