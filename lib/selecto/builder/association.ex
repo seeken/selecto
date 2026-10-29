@@ -252,6 +252,21 @@ defmodule Selecto.Builder.Association do
     policy
     |> Enum.sort_by(fn {field, _value} -> to_string(field) end)
     |> Enum.map(fn
+      {field, {:ne, {:field, other}}} ->
+        Enum.each([field, other], &declared_policy_column!(relation, &1))
+
+        comparison =
+          ExactCompare.eq(
+            column(selecto, alias_name, field),
+            column(selecto, alias_name, other),
+            ExactCompare.strongest([
+              ExactCompare.field_mode(selecto, relation, field),
+              ExactCompare.field_mode(selecto, relation, other)
+            ])
+          )
+
+        ["NOT (", comparison, ")"]
+
       {field, nil} ->
         [column(selecto, alias_name, field), " IS NULL"]
 
@@ -263,12 +278,28 @@ defmodule Selecto.Builder.Association do
         )
 
       _ ->
-        raise ArgumentError, "association policy requires scalar equality values"
+        raise ArgumentError,
+              "association policy requires scalar equality or declared local-field inequality"
     end)
   end
 
   def policy_conditions(_selecto, _alias_name, _policy, _relation),
     do: raise(ArgumentError, "association where policy must be a map")
+
+  defp declared_policy_column!(relation, field) when is_map(relation) do
+    columns = value(relation, :columns, %{})
+    fields = value(relation, :fields, [])
+    entry = Enum.find(columns, fn {name, _} -> to_string(name) == to_string(field) end)
+
+    unless (is_atom(field) or is_binary(field)) and
+             Enum.any?(fields, &(to_string(&1) == to_string(field))) and
+             match?({_, %{}}, entry) and is_nil(value(elem(entry, 1), :computed)) do
+      raise ArgumentError, "association inequality requires declared physical local columns"
+    end
+  end
+
+  defp declared_policy_column!(_, _),
+    do: raise(ArgumentError, "association inequality requires a declared target relation")
 
   defp policies(selecto, alias_name, policy, relation),
     do: policy_conditions(selecto, alias_name, policy, relation)
