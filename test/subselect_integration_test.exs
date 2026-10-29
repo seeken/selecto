@@ -286,12 +286,56 @@ defmodule Selecto.SubselectIntegrationTest do
       {sql, finalized_params} = Params.finalize(clauses)
 
       assert sql =~
-               ~s|FROM (SELECT sub_orders.* FROM orders sub_orders WHERE sub_orders."attendee_id" = selecto_root."attendee_id" ORDER BY sub_orders."order_id" ASC LIMIT 2) sub_orders|
+               ~s|FROM (SELECT sub_orders."order_id", sub_orders."product_name" FROM orders sub_orders WHERE sub_orders."attendee_id" = selecto_root."attendee_id" ORDER BY sub_orders."order_id" ASC LIMIT 2) sub_orders|
 
       assert sql =~
-               ~s|FROM (SELECT sub_orders_items.* FROM order_items sub_orders_items WHERE sub_orders_items."order_id" = sub_orders."order_id" ORDER BY sub_orders_items."order_item_id" DESC LIMIT 1) sub_orders_items|
+               ~s|FROM (SELECT sub_orders_items."order_item_id", sub_orders_items."sku" FROM order_items sub_orders_items WHERE sub_orders_items."order_id" = sub_orders."order_id" ORDER BY sub_orders_items."order_item_id" DESC LIMIT 1) sub_orders_items|
 
       assert params == finalized_params
+    end
+
+    test "bounded rowsets retain unselected child correlation keys only" do
+      domain =
+        put_in(
+          test_domain(),
+          [:schemas, :orders, :associations, :order_items, :owner_key],
+          :quantity
+        )
+
+      query =
+        Selecto.configure(domain, :mock_connection, validate: false)
+        |> Selecto.subselect([
+          %{
+            fields: ["product_name"],
+            target_schema: :orders,
+            format: :json_agg,
+            alias: "orders",
+            join_path: [:orders],
+            order_by: [{:asc, "product_name"}],
+            limit: 2,
+            nested: [
+              %{
+                key: "items",
+                fields: ["sku"],
+                target_schema: :order_items,
+                format: :json_agg,
+                join_path: [:orders, :order_items],
+                order_by: [{:asc, "sku"}],
+                limit: 1
+              }
+            ]
+          }
+        ])
+
+      {clauses, _} = Subselect.build_subselect_clauses(query)
+      {sql, _} = Params.finalize(clauses)
+
+      assert sql =~
+               ~s|SELECT sub_orders."product_name", sub_orders."order_id", sub_orders."quantity" FROM|
+
+      assert sql =~ ~s|sub_orders_items."order_id" = sub_orders."quantity"|
+      refute sql =~ ~s|sub_orders."metadata"|
+      refute sql =~ ".*"
     end
 
     test "per-parent limit requires positive size and explicit ordering" do
