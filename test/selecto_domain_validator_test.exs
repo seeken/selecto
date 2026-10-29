@@ -880,9 +880,9 @@ defmodule Selecto.DomainValidatorTest do
              end)
     end
 
-    test "detects simple join dependency cycle" do
-      # Create a simpler cycle: posts -> comments -> posts
-      cyclic_domain = %{
+    test "finite repeated relationship paths do not create a join dependency cycle" do
+      # Revisiting a schema is a bounded self-join, not an SQL dependency cycle.
+      finite_domain = %{
         source: %{
           source_table: "posts",
           primary_key: :id,
@@ -939,7 +939,7 @@ defmodule Selecto.DomainValidatorTest do
                 type: :left,
                 name: "parent_post",
                 joins: %{
-                  # This creates the cycle: comments -> parent_post -> comments
+                  # A distinct edge that reuses the local comments name.
                   comments: %{type: :left, name: "nested_comments"}
                 }
               }
@@ -949,12 +949,15 @@ defmodule Selecto.DomainValidatorTest do
         name: "TestDomain"
       }
 
-      assert {:error, errors} = DomainValidator.validate_domain(cyclic_domain)
+      assert :ok = DomainValidator.validate_domain(finite_domain)
 
-      assert Enum.any?(errors, fn
-               {:join_cycle_detected, _cycle} -> true
-               _ -> false
-             end)
+      joins = Selecto.Schema.Join.recurse_joins(finite_domain.source, finite_domain)
+      assert map_size(joins) == 3
+      assert Enum.count(joins, fn {_, join} -> join.join_path == [:comments] end) == 1
+
+      assert Enum.count(joins, fn {_, join} ->
+               join.join_path == [:comments, :parent_post, :comments]
+             end) == 1
     end
 
     test "validates dimension join type has required dimension key" do
