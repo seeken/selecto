@@ -321,8 +321,17 @@ defmodule Selecto.Builder.Sql.Select do
     {{:param, val}, :selecto_root, [val]}
   end
 
-  def prep_selector(selecto, {:ref, field_ref}, _retarget_aliases) when is_binary(field_ref) do
-    {[normalize_ref_field(selecto, field_ref)], :selecto_root, []}
+  def prep_selector(selecto, {:ref, field_ref}, retarget_aliases) when is_binary(field_ref) do
+    # Unqualified references to declared fields belong to this query's source.
+    # Rendering them as bare SQL identifiers becomes ambiguous as soon as a
+    # joined table has the same column (including RHS refs inside CASE).
+    # Qualified references retain the outer/lateral correlation convention.
+    if not String.contains?(field_ref, ".") and
+         Map.has_key?(Selecto.columns(selecto), field_ref) do
+      prep_selector(selecto, field_ref, retarget_aliases)
+    else
+      {[normalize_ref_field(selecto, field_ref)], :selecto_root, []}
+    end
   end
 
   def prep_selector(_selecto, {:count}, _retarget_aliases) do
@@ -997,6 +1006,23 @@ defmodule Selecto.Builder.Sql.Select do
     {:ok, normalized} = Selecto.Domain.Contract.ComputedValues.normalize(expression)
     {iodata, joins, params} = compile_value(selecto, normalized, retarget_aliases)
     {["(", iodata, ")"], joins, params}
+  end
+
+  # The utf8mb4 byte image of a host-exact key (a member GROUP BY on its
+  # join, correlation or scope key; Selecto.QueryMembers.Data), by the
+  # field's declared type: known non-text keeps the plain value.
+  def prep_selector(selecto, {:host_exact_bytes, field}, retarget_aliases) do
+    {sel, join, params} = prep_selector(selecto, field, retarget_aliases)
+
+    mode =
+      case host_exact_field(selecto, field) do
+        %{type: type} -> Selecto.Builder.ExactCompare.type_mode(type)
+        _ -> :server
+      end
+
+    if mode,
+      do: {Selecto.Builder.ExactCompare.bytes(sel, mode), join, params},
+      else: {sel, join, params}
   end
 
   def prep_selector(selecto, {:computed_predicate, expression}, _retarget_aliases) do
@@ -2036,4 +2062,12 @@ defmodule Selecto.Builder.Sql.Select do
       _ -> nil
     end
   end
+
+  defp host_exact_field(selecto, field) when is_binary(field) or is_atom(field) do
+    Selecto.field(selecto, to_string(field))
+  rescue
+    _ -> nil
+  end
+
+  defp host_exact_field(_selecto, _field), do: nil
 end

@@ -15,8 +15,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  ELIXIR_VERSION: "1.20.0"
-  OTP_VERSION: "29.0.2"
+  ELIXIR_VERSION: "1.20.4"
+  OTP_VERSION: "29.1.2"
 
 defaults:
   run:

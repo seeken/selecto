@@ -1,0 +1,570 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selecto.dev/schemas/published-domain-json.v1.schema.json",
+  "title": "Selecto published Domain JSON (strict read-side subset), schema version 1",
+  "description": "The closed, string-keyed subset of the canonical Selecto domain v1 format (https://selecto.dev/schemas/domain.v1.schema.json) that SelectoMCP.JSONDomain.load/1 translates into a runtime Domain. It mirrors selecto_mcp/lib/selecto_mcp/json_domain.ex: only the listed structural keys and enum values are accepted, any other key, any null, and any value outside an enum is refused with its JSON path. Field, column, relation, association, join and filter identifiers stay strings. Write contracts and actions are not served: `writes` is accepted only as {\"operations\": {}}. Passing this schema is necessary but not sufficient for publication: SelectoMCP.RuntimeDomainResolver additionally requires the translated domain's JSON-safe snapshot and rebuilt Domain Artifact to equal the publication exactly, and referential checks (fields listed in `columns`, join keys naming associations, and so on) are left to Selecto's domain validators. The root keys schema_version, name, source and schemas are required here because the loader's callers depend on them; the loader itself only refuses unknown or malformed keys.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "name",
+    "source",
+    "schemas"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Canonical Selecto domain schema compatibility version. The loader accepts only the integer 1 (\"schema_version must be 1\").",
+      "const": 1
+    },
+    "domain_version": {
+      "description": "Opaque authored release label (for example a semantic version, a date-based release or a build id). The loader accepts only a non-empty string; the canonical format's integer form is not accepted here.",
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "domain_fingerprint": {
+      "description": "Opaque producer-computed identity value, usually a content hash such as \"sha256:...\". Selecto core preserves it but never computes it. Non-empty string.",
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "name": {
+      "description": "Human-readable domain name. Non-empty string.",
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "source": {
+      "description": "The root relation the domain queries from.",
+      "$ref": "#/$defs/relation"
+    },
+    "schemas": {
+      "description": "Registry of joinable relations keyed by schema identifier. Associations name their target schema with `queryable`.",
+      "$ref": "#/$defs/schemaRegistry"
+    },
+    "joins": {
+      "description": "Registry of enabled joins keyed by association identifier on the parent relation; each entry may nest further joins resolved against the target relation.",
+      "$ref": "#/$defs/joinRegistry"
+    },
+    "default_selected": {
+      "description": "Fields selected when a query names none. Array of non-empty field references (root fields or \"schema.field\" paths).",
+      "$ref": "#/$defs/stringList"
+    },
+    "required_filters": {
+      "description": "Server-owned filters merged into every query's WHERE clause and not user-optional. JSON has no tuples, so each entry is a two-element array [field, value] that the loader turns into the tuple {field, value}; the value must be a string, number or boolean.",
+      "type": "array",
+      "items": {
+        "description": "One required equality filter: [field, scalar].",
+        "type": "array",
+        "prefixItems": [
+          {
+            "description": "Field reference the filter constrains.",
+            "type": "string"
+          },
+          {
+            "description": "Bound scalar value the field must equal.",
+            "$ref": "#/$defs/scalar"
+          }
+        ],
+        "items": false,
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
+    "filters": {
+      "description": "Registry of named filters keyed by filter identifier.",
+      "$ref": "#/$defs/filterRegistry"
+    },
+    "redact_fields": {
+      "description": "Root-level projection redaction declarations (field references whose values are withheld). Array of non-empty strings.",
+      "$ref": "#/$defs/stringList"
+    },
+    "tenant_required": {
+      "description": "Boolean runtime tenant policy flag read by Selecto.Tenant: when true, queries require a trusted tenant scope.",
+      "type": "boolean"
+    },
+    "writes": {
+      "description": "Write contracts are not served from published JSON. A `writes` section is accepted only when it is exactly {\"operations\": {}} (no operations declared).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operations"
+      ],
+      "properties": {
+        "operations": {
+          "description": "Must be the empty object: no write operation may be published through this format.",
+          "type": "object",
+          "maxProperties": 0
+        }
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "description": "Registry identifier: a plain identifier matching [A-Za-z_][A-Za-z0-9_]* (no dots, spaces or leading digit).",
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "nonEmptyString": {
+      "description": "A non-empty string.",
+      "type": "string",
+      "minLength": 1
+    },
+    "stringList": {
+      "description": "An array (possibly empty) of non-empty strings.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/nonEmptyString"
+      }
+    },
+    "scalar": {
+      "description": "A bound JSON scalar: string, number or boolean. Null is never accepted.",
+      "type": [
+        "string",
+        "number",
+        "boolean"
+      ]
+    },
+    "columnType": {
+      "description": "Column or filter type. The loader translates only these values into atoms.",
+      "enum": [
+        "integer",
+        "string",
+        "text",
+        "boolean",
+        "decimal",
+        "float",
+        "date",
+        "time",
+        "utc_datetime",
+        "naive_datetime",
+        "uuid"
+      ]
+    },
+    "relationRegistry": {
+      "description": "Object keyed by relation (schema) identifier; each value is a relation.",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/relation"
+      }
+    },
+    "relation": {
+      "description": "A relation map (the root `source` or a `schemas` entry). Only the listed keys are accepted.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_table",
+        "primary_key",
+        "fields",
+        "columns",
+        "associations"
+      ],
+      "properties": {
+        "source_table": {
+          "description": "Unqualified table or view name backing the relation (identifier only; schema-qualified names are not supported). Names starting with pg_ (system relations, which PostgreSQL resolves through pg_catalog first) are refused.",
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "not": {
+            "pattern": "^[Pp][Gg]_"
+          }
+        },
+        "source_kind": {
+          "description": "Kind of physical source. Describes the source only; it does not grant or revoke write authority.",
+          "enum": [
+            "table",
+            "view",
+            "materialized_view"
+          ]
+        },
+        "readonly": {
+          "description": "Whether the relation source is read-only. Descriptive only; write authority comes solely from an explicit `writes` contract.",
+          "type": "boolean"
+        },
+        "primary_key": {
+          "description": "Primary key: a single non-empty field reference, or an array of non-empty field references for a composite identity. The loader does not itself check that members appear in `fields`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/stringList"
+                },
+                {
+                  "minItems": 1
+                }
+              ]
+            }
+          ]
+        },
+        "tenant_field": {
+          "description": "Field holding the relation's tenant id. When both ends of a direct association declare it, Selecto pairs them in the join ON clause.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "fields": {
+          "description": "Ordered list of the relation's public field names. Every listed field must have a matching `columns` entry (checked by Selecto's validators, not by the loader).",
+          "$ref": "#/$defs/stringList"
+        },
+        "columns": {
+          "description": "Column definitions keyed by field identifier.",
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/identifier"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/column"
+          }
+        },
+        "associations": {
+          "description": "Associations keyed by association identifier.",
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/identifier"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/association"
+          }
+        },
+        "redact_fields": {
+          "description": "Fields of this relation whose values are redacted from results. Array of non-empty strings.",
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "column": {
+      "description": "A column definition. Unlike the canonical format, where column metadata is open, the loader accepts only these keys.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "description": "Column type.",
+          "$ref": "#/$defs/columnType"
+        },
+        "name": {
+          "description": "Display name. Non-empty string.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "label": {
+          "description": "Display label. Non-empty string.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "description": {
+          "description": "Human-readable description. Non-empty string.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "classification": {
+          "description": "Data classification label (for example a sensitivity class). Non-empty string.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "format": {
+          "description": "Display format hint. Non-empty string.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "nullable": {
+          "description": "Whether the column may hold null.",
+          "type": "boolean"
+        },
+        "selectable": {
+          "description": "Whether the field may be selected.",
+          "type": "boolean"
+        },
+        "filterable": {
+          "description": "Whether predicates may use the field.",
+          "type": "boolean"
+        },
+        "sortable": {
+          "description": "Whether ordering may use the field.",
+          "type": "boolean"
+        },
+        "groupable": {
+          "description": "Whether grouping may use the field.",
+          "type": "boolean"
+        },
+        "hidden": {
+          "description": "Presentation hint: hide the field by default.",
+          "type": "boolean"
+        },
+        "internal": {
+          "description": "Marks presentation-only data for consumers that honor the hint; it is not a permission or secrecy boundary.",
+          "type": "boolean"
+        },
+        "computed": {
+          "description": "Query-computed value. Only predicate-computed booleans are accepted.",
+          "$ref": "#/$defs/computed"
+        }
+      }
+    },
+    "computed": {
+      "description": "A predicate-computed boolean field: SQL-backed row eligibility expressed with the portable filter AST. The expression may not read a field its relation redacts (the relation's `redact_fields`, and for `source` the root `redact_fields`) or a column marked `hidden` or `internal`: a selected boolean per row would reveal it. Loaders refuse such a domain (\"computed expression reads a redacted or hidden field <f>\").",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "expression"
+      ],
+      "properties": {
+        "kind": {
+          "description": "Computed kind. Only \"predicate\" is accepted.",
+          "const": "predicate"
+        },
+        "expression": {
+          "description": "Predicate AST evaluated per row. No string operand may name a redacted, hidden or internal field of the relation.",
+          "$ref": "#/$defs/predicate"
+        }
+      }
+    },
+    "predicateOperator": {
+      "description": "Closed set of predicate operators the loader translates into atoms.",
+      "enum": [
+        "and",
+        "or",
+        "not",
+        "eq",
+        "ne",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "in",
+        "between",
+        "is_null",
+        "not_null"
+      ]
+    },
+    "predicate": {
+      "description": "Predicate AST: [operator, ...operands]. `and`/`or` take exactly one operand, an array of predicates; `not` takes exactly one predicate; every other operator takes zero or more operands, each a scalar (a field id or bound literal), or a nested array of such operands (for example the value list of `in`). Arity per operator is not checked by the loader.",
+      "type": "array",
+      "minItems": 1,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/predicateOperator"
+        }
+      ],
+      "allOf": [
+        {
+          "if": {
+            "prefixItems": [
+              {
+                "enum": [
+                  "and",
+                  "or"
+                ]
+              }
+            ]
+          },
+          "then": {
+            "minItems": 2,
+            "maxItems": 2,
+            "prefixItems": [
+              true,
+              {
+                "description": "The list of predicates to combine.",
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/predicate"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "prefixItems": [
+              {
+                "const": "not"
+              }
+            ]
+          },
+          "then": {
+            "minItems": 2,
+            "maxItems": 2,
+            "prefixItems": [
+              true,
+              {
+                "$ref": "#/$defs/predicate"
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "prefixItems": [
+              {
+                "not": {
+                  "enum": [
+                    "and",
+                    "or",
+                    "not"
+                  ]
+                }
+              }
+            ]
+          },
+          "then": {
+            "prefixItems": [
+              true
+            ],
+            "items": {
+              "$ref": "#/$defs/predicateOperand"
+            }
+          }
+        }
+      ]
+    },
+    "predicateOperand": {
+      "description": "A comparison operand: a scalar, or an array (recursively) of scalars, such as a value list. Null and objects are refused.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/scalar"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/predicateOperand"
+          }
+        }
+      ]
+    },
+    "association": {
+      "description": "An association from this relation to a schema. Only the listed keys are accepted; queryable, field, owner_key and related_key are required.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "queryable": {
+          "description": "Target schema identifier (a `schemas` key).",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "field": {
+          "description": "Association field name used by the join compiler.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "owner_key": {
+          "description": "Key on the owning (this) relation.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "related_key": {
+          "description": "Key on the target relation.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "cardinality": {
+          "description": "Association cardinality.",
+          "enum": [
+            "one",
+            "many"
+          ]
+        },
+        "where": {
+          "description": "Association policy: a non-empty equality map of target field identifier to a bound scalar, ANDed into the join.",
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/identifier"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/scalar"
+          }
+        },
+        "source_scope_key": {
+          "description": "Owning-side scope key; with `target_scope_key` it forms a pair ANDed into the join.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "target_scope_key": {
+          "description": "Target-side scope key paired with `source_scope_key`.",
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+      "required": [
+        "queryable",
+        "field",
+        "owner_key",
+        "related_key"
+      ]
+    },
+    "joinRegistry": {
+      "description": "Object keyed by association identifier; each value is a join.",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/join"
+      }
+    },
+    "join": {
+      "description": "A join entry keyed by association id. Advanced join kinds and options are not accepted.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "description": "Join type.",
+          "enum": [
+            "left",
+            "inner"
+          ]
+        },
+        "joins": {
+          "description": "Nested joins resolved against the target relation.",
+          "$ref": "#/$defs/joinRegistry"
+        }
+      }
+    },
+    "filterRegistry": {
+      "description": "Object keyed by filter identifier; each value is a filter.",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/filter"
+      }
+    },
+    "filter": {
+      "description": "A named filter. Only the listed keys are accepted.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "description": "Field reference the filter applies to (a root field or a \"schema.field\" path).",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "type": {
+          "description": "Filter value type.",
+          "$ref": "#/$defs/columnType"
+        },
+        "name": {
+          "description": "Display name. Non-empty string.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "label": {
+          "description": "Display label. Non-empty string.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "description": {
+          "description": "Human-readable description. Non-empty string.",
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "schemaRelation": {
+      "description": "A `schemas` entry: a relation that must also declare `redact_fields` (use [] when nothing is redacted), because Selecto's join compiler reads it directly.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/relation"
+        },
+        {
+          "required": [
+            "redact_fields"
+          ]
+        }
+      ]
+    },
+    "schemaRegistry": {
+      "description": "Object keyed by relation (schema) identifier; each value is a relation.",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/schemaRelation"
+      }
+    }
+  }
+}

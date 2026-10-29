@@ -36,7 +36,7 @@ defmodule Selecto.Builder.Association do
         direct_scope(selecto, association, target_alias, source_alias, relations) ++
         tenant_scope(selecto, association, target_alias, source_alias, relations) ++
         carried(selecto, value(association, :carry_tenant_field), target_alias) ++
-        policies(selecto, target_alias, value(association, :where, %{}))
+        policies(selecto, target_alias, value(association, :where, %{}), relations[:target])
 
     Enum.intersperse(conditions, " AND ")
   end
@@ -77,7 +77,7 @@ defmodule Selecto.Builder.Association do
           source_alias,
           Map.put(relations, :bridge, ExactCompare.relation_for_table(selecto, table))
         ) ++
-        policies(selecto, bridge_alias, value(through, :where, %{}))
+        policies(selecto, bridge_alias, value(through, :where, %{}), relations[:bridge])
 
     [
       "EXISTS (SELECT 1 FROM ",
@@ -183,7 +183,8 @@ defmodule Selecto.Builder.Association do
           column(selecto, "selecto_root", column),
           ExactCompare.strongest([
             ExactCompare.column?(selecto, field),
-            ExactCompare.column?(selecto, column)
+            ExactCompare.column?(selecto, column),
+            ExactCompare.identity_pair(selecto, field, column)
           ])
         )
 
@@ -235,10 +236,37 @@ defmodule Selecto.Builder.Association do
     end
   end
 
-  defp policies(selecto, alias_name, policy) when is_map(policy) do
+  @doc false
+  # The conditions of an association `where` policy on `alias_name`, the
+  # relation the policy confines. A policy is domain-authored scope (a site
+  # pin, say), so each equality is a host predicate: on MySQL and MariaDB it
+  # compares by its column's own declared type in `relation` under the
+  # three-way classification (known text exact, known non-text plain,
+  # undeclared or unrecognised guarded by the column's collation), never by
+  # the column's collation alone (Selecto.Builder.ExactCompare.field_mode/3).
+  # Every other adapter renders as before. Joins, collections, through
+  # bridges and retarget targets share it.
+  def policy_conditions(selecto, alias_name, policy, relation \\ nil)
+
+  def policy_conditions(selecto, alias_name, policy, relation) when is_map(policy) do
     policy
     |> Enum.sort_by(fn {field, _value} -> to_string(field) end)
     |> Enum.map(fn
+      {field, {:ne, {:field, other}}} ->
+        Enum.each([field, other], &declared_policy_column!(relation, &1))
+
+        comparison =
+          ExactCompare.eq(
+            column(selecto, alias_name, field),
+            column(selecto, alias_name, other),
+            ExactCompare.strongest([
+              ExactCompare.field_mode(selecto, relation, field),
+              ExactCompare.field_mode(selecto, relation, other)
+            ])
+          )
+
+        ["NOT (", comparison, ")"]
+
       {field, nil} ->
         [column(selecto, alias_name, field), " IS NULL"]
 
@@ -246,16 +274,35 @@ defmodule Selecto.Builder.Association do
         ExactCompare.eq(
           column(selecto, alias_name, field),
           {:param, value},
-          ExactCompare.column?(selecto, field)
+          ExactCompare.field_mode(selecto, relation, field)
         )
 
       _ ->
-        raise ArgumentError, "association policy requires scalar equality values"
+        raise ArgumentError,
+              "association policy requires scalar equality or declared local-field inequality"
     end)
   end
 
-  defp policies(_selecto, _alias_name, _policy),
+  def policy_conditions(_selecto, _alias_name, _policy, _relation),
     do: raise(ArgumentError, "association where policy must be a map")
+
+  defp declared_policy_column!(relation, field) when is_map(relation) do
+    columns = value(relation, :columns, %{})
+    fields = value(relation, :fields, [])
+    entry = Enum.find(columns, fn {name, _} -> to_string(name) == to_string(field) end)
+
+    unless (is_atom(field) or is_binary(field)) and
+             Enum.any?(fields, &(to_string(&1) == to_string(field))) and
+             match?({_, %{}}, entry) and is_nil(value(elem(entry, 1), :computed)) do
+      raise ArgumentError, "association inequality requires declared physical local columns"
+    end
+  end
+
+  defp declared_policy_column!(_, _),
+    do: raise(ArgumentError, "association inequality requires a declared target relation")
+
+  defp policies(selecto, alias_name, policy, relation),
+    do: policy_conditions(selecto, alias_name, policy, relation)
 
   # Tenant/site columns pair exactly on MySQL and MariaDB
   # (Selecto.Builder.ExactCompare); other columns and adapters as before.
@@ -266,7 +313,8 @@ defmodule Selecto.Builder.Association do
         column(selecto, right_alias, right),
         ExactCompare.strongest([
           ExactCompare.column?(selecto, left),
-          ExactCompare.column?(selecto, right)
+          ExactCompare.column?(selecto, right),
+          ExactCompare.identity_pair(selecto, left, right)
         ])
       )
 

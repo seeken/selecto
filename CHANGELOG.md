@@ -8,6 +8,136 @@
   or host required predicates remain independent authority; normal read and
   write confinement is unchanged. This prevents a scalar tenant attachment
   from implicitly opting a public API into tenant writes.
+- Graph materializer: a delete-missing cleanup command carries its node's
+  `bound_scope` marker, so adapters apply the bound-scope delete contract to
+  it (w3exrev17).
+
+- Fixed: a query member selection with `"as"` and `"field"` but neither
+  `"value"` nor `"aggregate"` raised a CondClauseError when the domain was
+  configured without validation; it is now the same refusal validation
+  gives ("selection needs :value or a supported :aggregate").
+
+- MySQL and MariaDB: a query member's GROUP BY also groups every text or
+  unknown key by its utf8mb4 bytes (an aliased or expression key included),
+  so a member CTE no longer merges 't1', 'T1' and 't1 ' (1 -> 11 -> 111).
+  Lateral member correlations are host identity pairs (exact by bytes when
+  either side may hold text), and a join whose owner-side key a host
+  predicate reads pairs exactly.
+- PostgreSQL: a query-member lateral keeps its declared output aliases
+  (`lat.s` resolved to nothing and the query failed).
+
+- `Selecto.DB.WriteAdapter` gains the optional `column_catalog/2` callback:
+  a table's catalog column types for SelectoUpdato's verified candidate
+  check (query_enforced_scalar v2).
+
+- MySQL and MariaDB: a computed value column named by a host predicate is
+  host scope over its CASE WHEN conditions (at any depth, through the
+  computed columns it reads): their `=`, `<>`, `IN` and `NOT IN` leaves
+  compare exactly by declared type, so `flag = 'y'` over
+  `CASE WHEN org_key = 't1' ...` no longer admits 'T1' or 't1 '. Caller
+  filters stay plain.
+- A computed column of a joined schema (`a.is_s1`) resolves its expression
+  against its join: field references are qualified to the join at
+  configure. Before, it raised "Field 'site' not found" on every adapter.
+
+- Retarget onto an association confined by a `where` policy re-applies the
+  policy to the target rows, on every adapter (PostgreSQL and SQLite
+  included). The context correlates on the target key alone, so with keys
+  repeating across the policy's scopes a retarget returned rows the join
+  excludes. Only retargets whose last hop declares `where` change.
+- MySQL and MariaDB: association `where` policies (joins, collections,
+  through bridges, retarget targets) are host scope. Each policy equality
+  compares by its column's declared type in the confined relation: known
+  text by utf8mb4 bytes, known non-text plainly, undeclared or unrecognised
+  types (and undeclared bridge tables) guarded by the column's collation.
+  Before, only declared tenant/site column names compared exactly.
+- MySQL and MariaDB: a computed predicate column named by a host predicate
+  (required filters, trusted context, engine binding, host scope recorded at
+  intake) is host scope over its body: the body's `=`, `<>`, `IN` and
+  `NOT IN` leaves compare exactly by their declared types, through nested
+  computed predicates. A caller filter on the computed column stays plain.
+
+- MySQL and MariaDB: host scope recorded at intake compares exactly.
+  `Selecto.Tenant.require_read_boundary/2` records the filters the query
+  holds when it accepts the boundary (`set.host_filtered`), so a host's
+  `Selecto.filter` scope read through the API, a co-domain lookup's `:scope`
+  (`Selecto.Tenant.host_filter/2`) and a canned page's dataset filters
+  (result, total and facet queries) compare exactly; request filters applied
+  afterwards stay plain. `Selecto.Tenant.mark_host_scope/1` records a
+  host-assigned query's filters (SelectoComponents uses it). Column-vs-column
+  comparisons and join key pairs beside a tenant column decide from both
+  sides' declared types.
+- Known limitation: on direct engine use a bare `Selecto.filter/2` still
+  counts as host scope for permission decisions (tenant boundary, carried
+  tenants, retarget scope) but compiles plain on a column that is not a
+  declared tenant column. Hosts that need exact site pins or tenantless
+  scopes on MySQL/MariaDB use required filters, `require_tenant_filter`,
+  `with_tenant`, `require_read_boundary`, `host_filter` or
+  `mark_host_scope`.
+
+- MySQL and MariaDB: host-installed predicates compare exactly at any depth.
+  This covers the domain and query required filters, the trusted context's
+  required filters and the engine tenant binding. Every `=`, `<>`/`!=`,
+  `IN` and `NOT IN` anywhere in their AND/OR/NOT tree takes the exact form,
+  even on a domain without tenant_field, and `<>`/`NOT IN` become NOT of the
+  exact equality, as on PostgreSQL. A field is matched as written, so
+  `person.name` never makes the root `name` exact, and is judged by its own
+  declared type. The caller's own filters are not host scope.
+- Column types are classified three ways, after normalising the type name
+  (lowercase; strip any `(...)` suffix and any charset or collate clause;
+  Ecto parameterized types and Ecto.Enum are recognised).
+  - Known text compares by converted bytes. The normalised names are:
+    string; text, tinytext, mediumtext and longtext; char, character,
+    nchar, national char and national character; varchar, char varying,
+    character varying, nvarchar and national varchar; citext; clob; enum;
+    set. A name that merely contains "char" or "text" (`charge_amount`,
+    `context_ts`) is guarded, not text.
+  - Known non-text compares plainly: numeric, boolean, temporal, json/map
+    and binary types.
+  - Everything else is guarded, and the server decides: undeclared columns,
+    uuid, and custom or unrecognised types. The form is
+    `(col = ? AND (COLLATION(col) = 'binary' OR <bytes>))`, and column pairs
+    are plain only when both sides have a binary collation.
+  - Before this, temporal columns compared by their text form, so
+    `TIME(6) = '10:00:00'` matched nothing and a host `<>` on `TIMESTAMP(3)`
+    admitted every row.
+- A through association whose source or target scope key is not a declared
+  field of its relation is refused at configure. A retarget no longer falls
+  back to the target's key alone, which read other scopes' rows on every
+  backend.
+- A trusted context whose `tenant_id` its own required filters exclude now
+  raises a typed `Selecto.PolicyViolation` (`:tenant_scope_mismatch`), not a
+  RuntimeError at execution.
+- An unbound retarget onto a scope-key-confined relation no longer returns
+  target rows whose scope key is NULL. This matches the join, which never
+  pairs a NULL scope.
+
+
+- `with_tenant/2` with a map whose `required_filters` come without a
+  `tenant_id` now applies those filters. They were silently ignored and the
+  read returned every row.
+
+
+- Adapters declaring `:uuid_text_storage` (MySQL and MariaDB, which map UUIDs
+  to CHAR(36) text or MariaDB's native UUID type) bind a UUID filter value in
+  its string form instead of the 16-byte binary. Text-stored UUID tenants were
+  unreadable before.
+
+
+- Retarget onto a relation confined by scope keys now identifies each target
+  row by its primary key and the last hop's target-side scope keys. This
+  covers authored direct or through scope keys on a target that declares no
+  tenant_field. Before, the context selected only the primary key and the
+  outer query correlated on the key alone. When ids repeat across scopes,
+  tenant t7 read t8's rows through `retarget`, for both strategies, one hop
+  or several, on every backend. The context now selects `pk` plus the scope
+  keys. `:in` matches the whole tuple (`(pk, key) in (select ... from
+  (context))`), and `:exists` correlates on every column. The context's own
+  joins pair the earlier hops. On MySQL and MariaDB each text key also
+  compares its stored bytes. Retargets without scope keys compile exactly as
+  before, so PostgreSQL and SQLite SQL changes only for scope-key-confined
+  retargets.
+
 
 - MySQL and MariaDB: scope-key pairs that decide tenant identity now compare
   exactly when either column may hold text, by each column's own declared
@@ -1360,7 +1490,6 @@
 ---
 
 CHANGES (Legacy)
-=======
 
 - refactor configuration system- joins, filters, columns
 
