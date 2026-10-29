@@ -83,6 +83,7 @@ defmodule Selecto.Schema.Join do
 
     normalize_joins(source, joins, :selecto_root, domain)
     |> List.flatten()
+    |> Selecto.Schema.JoinNamespaces.normalize()
     |> Enum.reduce(%{}, fn j, acc -> Map.put(acc, j.id, j) end)
   end
 
@@ -105,7 +106,7 @@ defmodule Selecto.Schema.Join do
             target_schema = get_target_schema_for_non_assoc(config, domain)
 
             if target_schema do
-              acc ++ normalize_joins(target_schema, nested_joins, id, domain)
+              acc ++ normalize_nested_joins(target_schema, nested_joins, id, domain)
             else
               acc
             end
@@ -131,7 +132,7 @@ defmodule Selecto.Schema.Join do
 
             case Map.get(config, :joins) do
               nil -> acc
-              nested -> acc ++ normalize_joins(queryable, nested, id, domain)
+              nested -> acc ++ normalize_nested_joins(queryable, nested, id, domain)
             end
 
           # Handle through associations by expanding the intermediate joins
@@ -148,7 +149,7 @@ defmodule Selecto.Schema.Join do
 
             case Map.get(config, :joins) do
               nil -> acc
-              nested_joins -> acc ++ normalize_joins(queryable, nested_joins, id, domain)
+              nested_joins -> acc ++ normalize_nested_joins(queryable, nested_joins, id, domain)
             end
 
           # Standard association
@@ -170,9 +171,17 @@ defmodule Selecto.Schema.Join do
 
             case Map.get(config, :joins) do
               nil -> acc
-              nested_joins -> acc ++ normalize_joins(queryable, nested_joins, id, domain)
+              nested_joins -> acc ++ normalize_nested_joins(queryable, nested_joins, id, domain)
             end
         end
+    end)
+  end
+
+  defp normalize_nested_joins(source, joins, parent, domain) do
+    source
+    |> normalize_joins(joins, parent, domain)
+    |> Enum.map(fn join ->
+      Map.update(join, :join_path, [parent, join.id], &[parent | &1])
     end)
   end
 
@@ -263,8 +272,11 @@ defmodule Selecto.Schema.Join do
 
             # Handle nested joins if any
             case Map.get(config, :joins) do
-              nil -> acc
-              nested_joins -> acc ++ normalize_joins(final_queryable, nested_joins, id, domain)
+              nil ->
+                acc
+
+              nested_joins ->
+                acc ++ normalize_nested_joins(final_queryable, nested_joins, id, domain)
             end
           else
             # Final association not found, skip

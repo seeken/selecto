@@ -3,6 +3,8 @@
 
 ## Unreleased
 
+- Keep repeated root/nested lookup names in separate execution namespaces;
+  preserve root ownership, complete field paths and unambiguous local aliases.
 - Host predicate inspection with `include_engine_tenant: false` also omits
   predicates materialized by applying engine tenant context. Explicit domain
   or host required predicates remain independent authority; normal read and

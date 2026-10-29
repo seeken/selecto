@@ -380,6 +380,13 @@ naming its target schema and normally also declares `field`, `owner_key`, and
 map keyed by the association id and MAY contain nested `joins`; nested joins are
 resolved against the target relation.
 
+Complete join paths own their field namespace. A child that reuses a root
+lookup name has a distinct execution alias and cannot replace the root's
+lookup. Unambiguous established local aliases remain available alongside full
+paths; bounded self-joins do not create dependency cycles merely by revisiting
+a schema. Generated aliases for repeated names are short and avoid declared
+join IDs, independently of public path lengths.
+
 An association's `where` map applies to both flat joins and correlated
 collections. Values normally declare bound scalar equality. A value
 `{:ne, {:field, :parent_id}}` compares the map key's target-local column with
