@@ -428,8 +428,8 @@ defmodule Selecto.Builder.Subselect do
 
       [
         "(SELECT ",
-        target_alias,
-        ".* FROM ",
+        collection_projection(selecto, config, target_alias),
+        " FROM ",
         table,
         " ",
         target_alias,
@@ -478,8 +478,8 @@ defmodule Selecto.Builder.Subselect do
 
     [
       "(SELECT ",
-      target_alias,
-      ".* FROM ",
+      collection_projection(selecto, config, target_alias),
+      " FROM ",
       table,
       " ",
       target_alias,
@@ -492,6 +492,64 @@ defmodule Selecto.Builder.Subselect do
       ") ",
       target_alias
     ]
+  end
+
+  # The ordered rowset needs only output, ordering and child-correlation
+  # columns. Selecting table.* also requests unrelated, ungranted columns.
+  defp collection_projection(selecto, config, target_alias) do
+    relation = get_target_schema_config(selecto, config.target_schema)
+
+    order_fields =
+      Enum.map(stable_collection_order(selecto, config), fn
+        {_direction, field} -> field
+        field -> field
+      end)
+
+    child_fields =
+      Enum.flat_map(nested_subselects(config), fn child ->
+        path = nested_join_path!(selecto, config, child)
+        {:ok, [edge | _]} = resolve_join_edges(selecto, relation, path, [])
+        association = bridge_join_through!(edge.association_id, edge.association)
+
+        boundary =
+          Selecto.Schema.Join.association_boundary!(
+            edge.association_id,
+            association,
+            relation,
+            edge.target_relation,
+            selecto.domain
+          )
+
+        tenant_source =
+          case boundary[:tenant_scope] do
+            {source, _target} -> source
+            nil -> nil
+          end
+
+        [
+          association.owner_key,
+          boundary[:source_scope_key],
+          tenant_source,
+          get_in(association, [:through, :source_scope_key]),
+          if(Map.get(child, :after), do: relation.primary_key)
+        ]
+      end)
+
+    fields =
+      (config.fields ++ order_fields ++ child_fields)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.map(&to_string/1)
+      |> Enum.uniq()
+
+    case fields do
+      [] ->
+        "1"
+
+      fields ->
+        fields
+        |> Enum.map(&[target_alias, ".", adapter_quote_identifier(selecto, &1)])
+        |> Enum.intersperse(", ")
+    end
   end
 
   defp render_json_object!(selecto, pairs) do
