@@ -35,12 +35,23 @@ defmodule Selecto.Builder.ExactCompare do
 
   @feature :exact_tenant_compare
 
-  @non_text_types ~w(id integer bigint smallint tinyint serial bigserial int
-                     decimal numeric float double real boolean bool
-                     binary bytea date time datetime naive_datetime
-                     utc_datetime utc_datetime_usec naive_datetime_usec timestamp
-                     timestamptz)
-  @byte_types ~w(uuid binary_id)
+  # Three-way type classification (ADDENDUM 6), on the normalised type name
+  # (lowercased, trimmed, without a `(...)` suffix or charset/collate clause):
+  # known text compares by converted bytes, known non-text keeps the plain
+  # comparison, and everything else (undeclared, uuid, custom names) is
+  # guarded: the server decides by the column's collation.
+  # Known text names, normalised (spaces become underscores). Only these are
+  # exact: a custom name that merely contains "char" or "text" (charge_amount,
+  # context_ts) is guarded, since it may name a numeric or temporal column.
+  @text_types ~w(string text tinytext mediumtext longtext char character nchar
+                 national_char national_character varchar char_varying character_varying
+                 nvarchar national_varchar national_char_varying national_character_varying
+                 nchar_varying citext clob enum set bpchar)
+  @non_text_types ~w(id integer bigint smallint tinyint mediumint serial bigserial int
+                     float double real decimal numeric money boolean bool date time time_usec
+                     datetime naive_datetime naive_datetime_usec utc_datetime
+                     utc_datetime_usec timestamp timestamptz epoch_datetime json jsonb map
+                     binary bytes blob bytea varbinary)
 
   @doc false
   def enabled?(%{adapter: adapter}) when is_atom(adapter) and not is_nil(adapter),
@@ -69,10 +80,264 @@ defmodule Selecto.Builder.ExactCompare do
   def exact_name?(_domain, _name), do: false
 
   @doc false
+  # Whether `name` is a tenant or site column the domain declares, whatever
+  # its type.
+  def tenant_name?(domain, name) when is_map(domain) and (is_binary(name) or is_atom(name)),
+    do: to_string(name) in tenant_names(domain)
+
+  def tenant_name?(_domain, _name), do: false
+
+  @doc false
+  # The mode of a column pair (a join key pair) when either column is a
+  # tenant/site column: the strongest of both columns' own modes by their
+  # declared types across the domain, so an INT tenant paired with a VARCHAR
+  # key compares by bytes rather than numerically (ADDENDUM 6). false when
+  # neither is a tenant/site column or both compare exactly already.
+  def identity_pair(selecto, left, right) do
+    domain = Map.get(selecto, :domain)
+
+    enabled?(selecto) and is_map(domain) and
+      (tenant_name?(domain, left) or tenant_name?(domain, right)) and
+      strongest([name_mode(domain, to_string(left)), name_mode(domain, to_string(right))])
+  end
+
+  @doc false
+  # Fields (as written: "org_key", "a.label") that host-installed predicates
+  # compare with =, <>, !=, IN or NOT IN anywhere in their tree (through
+  # AND/OR/NOT at any depth): the domain's and the query's required filters,
+  # the trusted tenant context's required filters, the engine tenant
+  # binding, and the filters the query held when its read boundary was
+  # accepted (Selecto.Tenant.require_read_boundary/2 records them as
+  # `set.host_filtered` before any request input is applied). Such a predicate decides tenant identity even on a domain that
+  # declares no tenant_field (a host scope org_key = 't1', a site pin), so the
+  # field compares exactly (<> as NOT of the exact equality), judged by its
+  # owning relation's declared type, which reproduces PostgreSQL. The caller's
+  # own filters are not host scope.
+  def host_names(selecto) do
+    set = Map.get(selecto, :set) || %{}
+    domain = Map.get(selecto, :domain) || %{}
+    context = Map.get(selecto, :tenant) || %{}
+
+    filters =
+      List.wrap(get(domain, :required_filters)) ++
+        List.wrap(Map.get(set, :required_filters)) ++
+        List.wrap(get(context, :required_filters)) ++
+        List.wrap(Map.get(set, :host_filtered)) ++ Selecto.Tenant.engine_filters(selecto)
+
+    (Enum.flat_map(filters, &comparison_fields/1) ++ computed_body_fields(selecto, filters))
+    |> Enum.uniq()
+  end
+
+  # A computed column that a host predicate names, with any operator
+  # ({"is_t1", true} included), is host scope over its expression
+  # (ADDENDUM 7a): the =, <>, IN and NOT IN leaves of a computed predicate's
+  # body, and of every CASE WHEN condition of a computed value, decide which
+  # rows the host admits just as if the host had written them. Their fields
+  # join the host names, so each leaf compares exactly by its own declared
+  # type. Computed columns the expression reads are followed (cycles are
+  # refused at validation; the visited set only bounds the walk). A joined
+  # schema's computed expression is qualified to its join at configure
+  # (Selecto.Schema.Column), so "a.is_s1" widens "a.site". Caller filters on
+  # a computed column add nothing.
+  defp computed_body_fields(selecto, filters) do
+    columns =
+      case Map.get(selecto, :config) do
+        %{columns: columns} when is_map(columns) -> columns
+        _ -> %{}
+      end
+
+    if columns == %{} do
+      []
+    else
+      filters
+      |> Enum.flat_map(&referenced_fields/1)
+      |> expand_computed(columns, MapSet.new(), [])
+    end
+  end
+
+  defp expand_computed([], _columns, _visited, acc), do: acc
+
+  defp expand_computed([name | rest], columns, visited, acc) do
+    if MapSet.member?(visited, name) do
+      expand_computed(rest, columns, visited, acc)
+    else
+      visited = MapSet.put(visited, name)
+
+      case computed_body(columns, name) do
+        nil ->
+          expand_computed(rest, columns, visited, acc)
+
+        {:predicate, body} ->
+          expand_computed(
+            referenced_fields(body) ++ rest,
+            columns,
+            visited,
+            acc ++ comparison_fields(body)
+          )
+
+        {:value, conditions, fields} ->
+          expand_computed(
+            Enum.flat_map(conditions, &referenced_fields/1) ++ fields ++ rest,
+            columns,
+            visited,
+            acc ++ Enum.flat_map(conditions, &comparison_fields/1)
+          )
+      end
+    end
+  end
+
+  defp computed_body(columns, name) do
+    conf =
+      Map.get(columns, name) ||
+        try do
+          Map.get(columns, String.to_existing_atom(name))
+        rescue
+          ArgumentError -> nil
+        end
+
+    case conf do
+      %{select: {:computed_predicate, expression}} ->
+        {:predicate, Selecto.Domain.Contract.ComputedPredicates.to_filter(expression)}
+
+      %{select: {:computed_value, expression}} ->
+        expression =
+          case Selecto.Domain.Contract.ComputedValues.normalize(expression) do
+            {:ok, normalized} -> normalized
+            _ -> expression
+          end
+
+        {conditions, fields} = value_parts(expression)
+        {:value, conditions, fields}
+
+      _ ->
+        nil
+    end
+  end
+
+  # A computed value's comparison conditions (CASE WHEN filters, at any
+  # depth) and the fields it reads (other computed columns among them).
+  # The comparisons the WHEN conditions hold decide which value a row takes,
+  # so under a host predicate they are host scope too (ADDENDUM 7a).
+  defp value_parts([tag | branches]) when tag in [:case, "case"] do
+    Enum.reduce(branches, {[], []}, fn
+      [else_tag, value], {conditions, fields} when else_tag in [:else, "else"] ->
+        {c, f} = value_parts(value)
+        {conditions ++ c, fields ++ f}
+
+      [condition, value], {conditions, fields} ->
+        {c, f} = value_parts(value)
+
+        {conditions ++
+           [Selecto.Domain.Contract.ComputedPredicates.to_filter(condition)] ++ c, fields ++ f}
+
+      _other, acc ->
+        acc
+    end)
+  end
+
+  defp value_parts([tag, path])
+       when tag in [:field, "field"] and (is_binary(path) or is_atom(path)),
+       do: {[], [to_string(path)]}
+
+  defp value_parts([tag | _]) when tag in [:literal, "literal"], do: {[], []}
+
+  defp value_parts([tag, path, _segments]) when tag in [:json_text, "json_text"],
+    do: {[], [to_string(path)]}
+
+  defp value_parts([op | arguments]) when is_atom(op) or is_binary(op) do
+    Enum.reduce(arguments, {[], []}, fn argument, {conditions, fields} ->
+      {c, f} = value_parts(argument)
+      {conditions ++ c, fields ++ f}
+    end)
+  end
+
+  defp value_parts(_expression), do: {[], []}
+
+  # Every field a filter tree names, whatever the operator.
+  defp referenced_fields({conj, filters}) when conj in [:and, :or] and is_list(filters),
+    do: Enum.flat_map(filters, &referenced_fields/1)
+
+  defp referenced_fields({:not, filter}), do: referenced_fields(filter)
+
+  defp referenced_fields({field}) when is_binary(field) or (is_atom(field) and not is_nil(field)),
+    do: [to_string(field)]
+
+  defp referenced_fields({field, value})
+       when is_binary(field) or (is_atom(field) and not is_nil(field) and field not in [:exists]),
+       do: [to_string(field) | ref_field(value)]
+
+  defp referenced_fields({field, _op, _value})
+       when is_binary(field) or (is_atom(field) and not is_nil(field) and field not in [:exists]),
+       do: [to_string(field)]
+
+  defp referenced_fields(_filter), do: []
+
+  defp ref_field({:ref, field}) when is_binary(field) or is_atom(field), do: [to_string(field)]
+
+  defp ref_field({_op, {:ref, field}}) when is_binary(field) or is_atom(field),
+    do: [to_string(field)]
+
+  defp ref_field(_value), do: []
+
+  @doc false
+  # The fields an equality-family comparison (=, <>, !=, IN, NOT IN) names
+  # anywhere in a Selecto filter tree.
+  def comparison_fields({conj, filters}) when conj in [:and, :or] and is_list(filters),
+    do: Enum.flat_map(filters, &comparison_fields/1)
+
+  def comparison_fields({:not, filter}), do: comparison_fields(filter)
+
+  def comparison_fields({field, value})
+      when is_binary(field) or (is_atom(field) and not is_nil(field)) do
+    if equality_value?(value), do: [to_string(field)], else: []
+  end
+
+  def comparison_fields({field, op, value})
+      when (is_binary(field) or is_atom(field)) and op in [:in, "in", :not_in, "not_in"] and
+             is_list(value),
+      do: [to_string(field)]
+
+  def comparison_fields(_filter), do: []
+
+  @equality_ops [
+    :eq,
+    :=,
+    "=",
+    "eq",
+    :ne,
+    :!=,
+    "!=",
+    "<>",
+    "ne",
+    "neq",
+    :neq,
+    :in,
+    "in",
+    :not_in,
+    "not_in"
+  ]
+
+  defp equality_value?({op, _value}) when op in @equality_ops, do: true
+  defp equality_value?({:ref, _field}), do: true
+
+  defp equality_value?(value) when is_binary(value) or is_number(value) or is_list(value),
+    do: true
+
+  defp equality_value?(_value), do: false
+
+  @doc false
+  # The mode of a column named `name` that a host predicate names, by its
+  # declared types (an undeclared name is text).
+  def host_mode(selecto, name) when is_binary(name), do: name in host_names(selecto)
+
+  def host_mode(_selecto, _name), do: false
+
+  @doc false
   # The strongest of several modes: converting beats bytes beats plain.
   def strongest(modes) do
     cond do
       Enum.any?(modes, &(&1 == true)) -> true
+      Enum.any?(modes, &(&1 == :server)) -> :server
       Enum.any?(modes, &(&1 == :bytes)) -> :bytes
       true -> false
     end
@@ -84,14 +349,59 @@ defmodule Selecto.Builder.ExactCompare do
   # column's own charset bytes, so a utf16, ucs2, utf32 or latin1 tenant column
   # would never equal the utf8mb4 bound value. A bound value (`{:param, _}` or
   # `?`) is already utf8mb4.
+  # `:server` (an undeclared column) lets the server decide: a column whose
+  # collation is 'binary' (numeric, temporal, binary types) compares plainly,
+  # a text column by its utf8mb4 bytes.
+  def eq(left, right, :server),
+    do: [
+      "(",
+      left,
+      " = ",
+      right,
+      " AND (",
+      binary_collation(left, right),
+      " OR ",
+      bytes(left, true),
+      " = ",
+      bytes(right, true),
+      "))"
+    ]
+
   def eq(left, right, mode) when mode in [true, :bytes],
     do: ["(", left, " = ", right, " AND ", bytes(left, mode), " = ", bytes(right, mode), ")"]
 
   def eq(left, right, _exact?), do: [left, " = ", right]
 
+  # A bound value takes the column's comparison; a column pair is plain only
+  # when both sides have a 'binary' collation.
+  defp binary_collation(left, right) when right == "?" or is_tuple(right),
+    do: ["COLLATION(", left, ") = 'binary'"]
+
+  defp binary_collation(left, right),
+    do: ["(COLLATION(", left, ") = 'binary' AND COLLATION(", right, ") = 'binary')"]
+
   @doc false
   # `left IN (values)` for parameter markers or rendered values, exact when
   # `exact?`: `left IN (v, ...) AND <bytes(left)> IN (<bytes(v)>, ...)`.
+  def in_list(left, values, :server) do
+    plain = Enum.intersperse(values, ", ")
+    cast = values |> Enum.map(&bytes(&1, true)) |> Enum.intersperse(", ")
+
+    [
+      "(",
+      left,
+      " IN (",
+      plain,
+      ") AND (COLLATION(",
+      left,
+      ") = 'binary' OR ",
+      bytes(left, true),
+      " IN (",
+      cast,
+      ")))"
+    ]
+  end
+
   def in_list(left, values, mode) when mode in [true, :bytes] do
     plain = Enum.intersperse(values, ", ")
     cast = values |> Enum.map(&bytes(&1, mode)) |> Enum.intersperse(", ")
@@ -106,6 +416,21 @@ defmodule Selecto.Builder.ExactCompare do
   # `bytes_subquery` selects the utf8mb4 bytes of the subquery's single
   # column (see bytes_subquery/2). Both fragments bind their parameter
   # markers in SQL-text order.
+  def in_subquery(left, plain, bytes_subquery, :server),
+    do: [
+      "(",
+      left,
+      " IN ",
+      plain,
+      " AND (COLLATION(",
+      left,
+      ") = 'binary' OR ",
+      bytes(left, true),
+      " IN ",
+      bytes_subquery,
+      "))"
+    ]
+
   def in_subquery(left, plain, bytes_subquery, mode) when mode in [true, :bytes],
     do: ["(", left, " IN ", plain, " AND ", bytes(left, mode), " IN ", bytes_subquery, ")"]
 
@@ -130,6 +455,19 @@ defmodule Selecto.Builder.ExactCompare do
   def bytes({:param, _value} = param, _mode), do: ["CAST(", param, " AS BINARY)"]
   def bytes("?", _mode), do: "CAST(? AS BINARY)"
   def bytes(expression, :bytes), do: ["CAST(", expression, " AS BINARY)"]
+
+  # Column against column of the same relation's type (retarget tuples): the
+  # utf8mb4 bytes of a text column, an empty string for a 'binary'-collation
+  # one, whose plain tuple element already decides.
+  def bytes(expression, :server),
+    do: [
+      "IF(COLLATION(",
+      expression,
+      ") = 'binary', '', CAST(CONVERT(",
+      expression,
+      " USING utf8mb4) AS BINARY))"
+    ]
+
   def bytes(expression, _mode), do: ["CAST(CONVERT(", expression, " USING utf8mb4) AS BINARY)"]
 
   @doc false
@@ -155,6 +493,17 @@ defmodule Selecto.Builder.ExactCompare do
         type_mode(declared_type(left_relation, left_field)),
         type_mode(declared_type(right_relation, right_field))
       ])
+  end
+
+  @doc false
+  # The mode of one column of `relation` compared with a bound value in a
+  # domain-authored host predicate (an association `where` policy): by the
+  # column's own declared type under the three-way classification, guarded
+  # (:server) when the relation or column is undeclared, and at least the
+  # mode a tenant/site column of that name takes. false on other adapters.
+  def field_mode(selecto, relation, field) when is_atom(field) or is_binary(field) do
+    enabled?(selecto) and
+      strongest([type_mode(declared_type(relation, field)), column?(selecto, field)])
   end
 
   @doc false
@@ -235,7 +584,7 @@ defmodule Selecto.Builder.ExactCompare do
         end
       end)
 
-    if types == [], do: true, else: strongest(Enum.map(types, &type_mode/1))
+    if types == [], do: :server, else: strongest(Enum.map(types, &type_mode/1))
   end
 
   defp column_spec(relation, name) when is_map(relation) do
@@ -259,31 +608,60 @@ defmodule Selecto.Builder.ExactCompare do
   # unrecognised types convert (true), UUID types compare stored bytes
   # (:bytes), and integer, decimal, binary, boolean and temporal types
   # compare exactly already (false).
+  def type_mode(nil), do: :server
+
   def type_mode(type) do
-    cond do
-      byte_type?(type) -> :bytes
-      non_text_type?(type) -> false
-      true -> true
+    case type_class(type) do
+      :text -> true
+      :non_text -> false
+      :other -> :server
     end
   end
 
   @doc false
   def text_type?(type), do: type_mode(type) != false
 
-  defp byte_type?(type) when is_atom(type) and not is_nil(type),
-    do: byte_type?(Atom.to_string(type))
+  defp type_class({:array, _type}), do: :non_text
+  defp type_class({:map, _type}), do: :non_text
 
-  defp byte_type?(type) when is_binary(type), do: String.downcase(type) in @byte_types
-  defp byte_type?(_type), do: false
+  defp type_class({:parameterized, {module, _params}}), do: module_class(module)
+  defp type_class({:parameterized, module, _params}), do: module_class(module)
 
-  defp non_text_type?(type) when is_atom(type) and not is_nil(type),
-    do: non_text_type?(Atom.to_string(type))
+  defp type_class(type) when is_atom(type) and not is_nil(type) do
+    case Atom.to_string(type) do
+      "Elixir." <> _ -> module_class(type)
+      name -> type_class(name)
+    end
+  end
 
-  defp non_text_type?(type) when is_binary(type),
-    do: String.downcase(type) in @non_text_types
+  defp type_class(type) when is_binary(type) do
+    name = normalize_type_name(type)
 
-  defp non_text_type?({:array, _}), do: false
-  defp non_text_type?(_type), do: false
+    cond do
+      name in @text_types ->
+        :text
+
+      name in @non_text_types ->
+        :non_text
+
+      true ->
+        :other
+    end
+  end
+
+  defp type_class(_type), do: :other
+
+  defp module_class(Ecto.Enum), do: :text
+  defp module_class(_module), do: :other
+
+  defp normalize_type_name(type) do
+    type
+    |> String.downcase()
+    |> String.replace(~r/\s+(character\s+set|charset|collate)\s+.*$/, "")
+    |> String.replace(~r/\s*\(.*\)\s*$/, "")
+    |> String.trim()
+    |> String.replace(~r/\s+/, "_")
+  end
 
   defp get(map, key) when is_map(map), do: Map.get(map, key, Map.get(map, Atom.to_string(key)))
   defp get(_map, _key), do: nil

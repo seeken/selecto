@@ -78,8 +78,40 @@ defmodule Selecto.Tenant do
     context = normalize_domain_context(selecto, tenant_context)
     stored = tenant(selecto)
     ensure_context_compatible!(stored, context, :tenant)
-    attach_context(selecto, merge_contexts(stored, context))
+    ensure_context_filters_agree!(selecto, context)
+    selecto = attach_context(selecto, merge_contexts(stored, context))
+
+    # Required filters the trusted context carries bound the query at once,
+    # with or without a tenant_id; they are never left unapplied.
+    (context || %{})
+    |> Map.get(:required_filters, [])
+    |> List.wrap()
+    |> Enum.reduce(selecto, &require_tenant_filter(&2, &1))
   end
+
+  # A trusted context whose tenant_id its own required filters exclude on the
+  # tenant field is a typed tenant mismatch, refused when it is attached.
+  defp ensure_context_filters_agree!(selecto, context) when is_map(context) do
+    tenant_id = Map.get(context, :tenant_id)
+    field = Map.get(context, :tenant_field) || domain_tenant_field(selecto)
+
+    if defined_scalar?(tenant_id) and not is_nil(field) and
+         Enum.any?(
+           required_tenant_values(
+             List.wrap(Map.get(context, :required_filters)),
+             to_string(field)
+           ),
+           fn values -> not Enum.any?(values, &(to_string(&1) == to_string(tenant_id))) end
+         ) do
+      raise Selecto.PolicyViolation,
+        type: :tenant_scope_mismatch,
+        message: "the trusted tenant conflicts with the context's required filters"
+    end
+
+    :ok
+  end
+
+  defp ensure_context_filters_agree!(_selecto, _context), do: :ok
 
   defp normalize_domain_context(selecto, context) when is_map(context) do
     if Map.has_key?(context, :tenant_field) or Map.has_key?(context, "tenant_field"),
@@ -668,10 +700,50 @@ defmodule Selecto.Tenant do
           {:ok, Selecto.Types.t()} | {:error, Selecto.Error.t()}
   def require_read_boundary(selecto, opts \\ []) do
     case tenant_boundary(selecto, Keyword.put(opts, :access, :read)) do
-      {:ok, {:tenant, _tenant_id}} -> {:ok, apply_tenant_scope(selecto)}
-      {:ok, _boundary} -> {:ok, selecto}
+      {:ok, {:tenant, _tenant_id}} -> {:ok, selecto |> mark_host_scope() |> apply_tenant_scope()}
+      {:ok, _boundary} -> {:ok, mark_host_scope(selecto)}
       {:error, _error} = error -> error
     end
+  end
+
+  # The boundary is accepted on the host's query before any request input is
+  # applied (EngineHandler, generated APIs, co-domain lookups), so every filter
+  # the query holds now is host scope: a host that scopes with
+  # `Selecto.filter([{"org_key", "t1"}])` on a tenantless domain, or pins a
+  # site, installed it. Recording them lets an exact-compare adapter (MySQL,
+  # MariaDB) compare those fields exactly
+  # (Selecto.Builder.ExactCompare.host_names/1); filters applied afterwards
+  # (request filters) stay the caller's.
+  @doc """
+  Record every filter `selecto` holds now as host scope, so an exact-compare
+  adapter (MySQL, MariaDB) compares their fields exactly. Call it on a
+  host-assigned query before any user or request filters are applied
+  (`require_read_boundary/2` does this when it accepts the boundary).
+  """
+  @spec mark_host_scope(Selecto.Types.t()) :: Selecto.Types.t()
+  def mark_host_scope(selecto) do
+    set = Map.get(selecto, :set) || %{}
+    record_host_filters(selecto, List.wrap(Map.get(set, :filtered, [])))
+  end
+
+  @doc false
+  # Apply `filters` as host scope: filtered like `Selecto.filter/2` (same
+  # place in the query) and recorded as host-installed, so an exact-compare
+  # adapter compares their fields exactly. For a host-supplied scope such as
+  # a co-domain lookup's `:scope`.
+  @spec host_filter(Selecto.Types.t(), Selecto.Types.filter() | [Selecto.Types.filter()]) ::
+          Selecto.Types.t()
+  def host_filter(selecto, filters) do
+    filters = List.wrap(filters)
+    selecto |> Selecto.filter(filters) |> record_host_filters(Selecto.Expr.normalize(filters))
+  end
+
+  defp record_host_filters(selecto, []), do: selecto
+
+  defp record_host_filters(selecto, filters) do
+    set = Map.get(selecto, :set) || %{}
+    host = uniq_filters(List.wrap(Map.get(set, :host_filtered, [])) ++ filters)
+    Map.put(selecto, :set, Map.put(set, :host_filtered, host))
   end
 
   @doc """

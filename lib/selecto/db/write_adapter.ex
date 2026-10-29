@@ -98,8 +98,21 @@ defmodule Selecto.DB.WriteAdapter do
               | {:error, Selecto.Write.Error.t()}
               | {:error, term()}
 
+  @doc """
+  The catalog types of `table`'s columns: `%{column => %{type: declared_type,
+  deterministic: boolean | nil}}`. `declared_type` is the column's complete
+  type as the catalog reports it (length, precision, scale, fractional
+  seconds, and on MySQL/MariaDB ` collate <name>`); `deterministic` is the
+  catalog's collation determinism where the backend has one (nil: the
+  collation name decides). SelectoUpdato's candidate check treats these as
+  verified metadata (query_enforced_scalar v2). Called outside any write
+  transaction.
+  """
+  @callback column_catalog(connection(), String.t()) :: {:ok, map()} | {:error, term()}
+
   @optional_callbacks preview_prepared_write: 3,
                       execute_write_unsafe: 3,
                       execute_prepared_write: 3,
-                      execute_prepared_write_unsafe: 3
+                      execute_prepared_write_unsafe: 3,
+                      column_catalog: 2
 end

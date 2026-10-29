@@ -204,7 +204,12 @@ defmodule Selecto.Builder.LateralJoin do
     # derived-row projection by its output alias, so the outer query can read
     # `matched.order_id` for `X.as("id", "order_id")`. Other adapters keep
     # their native column names (PostgreSQL's `count` for `count(*)`).
-    preserve? = AdapterSupport.supports_feature?(adapter, :lateral_projection_aliases)
+    # A query-member lateral publishes its declared output names (`lat.s`),
+    # so its projection aliases are kept on every adapter.
+    preserve? =
+      AdapterSupport.supports_feature?(adapter, :lateral_projection_aliases) or
+        Map.get(subquery.config || %{}, :preserve_projection_aliases) == true
+
     if preserve?, do: refuse_placeholder_aliases!(subquery)
 
     {subquery_sql, params} = Selecto.to_sql(subquery, preserve_projection_aliases: preserve?)

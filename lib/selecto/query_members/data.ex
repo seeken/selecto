@@ -142,10 +142,18 @@ defmodule Selecto.QueryMembers.Data do
     else
       query = get(spec, :query)
 
+      # The member's join key pairs it with the root host-exactly, so a GROUP
+      # BY on it must not merge rows the pairing keeps apart.
+      join_keys = [get(get(spec, :join) || %{}, :related_key)]
+
       %{
         columns: get(spec, :columns) || output_columns(query),
         join: join,
-        query: fn -> build(selecto, get(spec, :source), query, nil) end
+        query: fn ->
+          selecto
+          |> build(get(spec, :source), query, nil)
+          |> exact_group_keys(join_keys)
+        end
       }
     end
   end
@@ -153,16 +161,39 @@ defmodule Selecto.QueryMembers.Data do
   defp rewrite(selecto, :laterals, _member_name, spec) do
     correlations = get(spec, :correlations)
 
+    # The correlations pair the member's rows with the root row: they are
+    # identity pairs, host-installed (Selecto.Builder.ExactCompare host_names
+    # via set.host_filtered), so on MySQL and MariaDB they compare exactly
+    # (by bytes when either side may hold text), never under the collation.
+    correlation_filters =
+      Enum.map(correlations, fn {child, parent} ->
+        {to_string(child), {:ref, "selecto_root.#{parent}"}}
+      end)
+
     source = fn base_query ->
-      selecto
-      |> member_selecto(get(spec, :source))
-      |> apply_query(get(spec, :query), nil)
-      |> Selecto.filter(
-        Enum.map(correlations, fn {child, parent} ->
-          {to_string(child), {:ref, "selecto_root.#{parent}"}}
-        end)
-      )
-      |> scope_member(base_query)
+      member =
+        selecto
+        |> member_selecto(get(spec, :source))
+        |> apply_query(get(spec, :query), nil)
+        |> Selecto.filter(correlation_filters)
+
+      # The correlations are host scope on exact-compare adapters (where
+      # they decide identity); elsewhere they compile as before.
+      member =
+        if Selecto.Builder.ExactCompare.enabled?(member),
+          do:
+            put_in(
+              member.set[:host_filtered],
+              List.wrap(member.set[:host_filtered]) ++ correlation_filters
+            ),
+          else: member
+
+      # The declared output names are the lateral's columns (`lat.s`).
+      member =
+        %{member | config: Map.put(member.config || %{}, :preserve_projection_aliases, true)}
+        |> exact_group_keys(Enum.map(correlations, fn {child, _parent} -> child end))
+
+      scope_member(member, base_query)
     end
 
     %{
@@ -179,6 +210,47 @@ defmodule Selecto.QueryMembers.Data do
     selecto
     |> previous_fields(source, query, columns)
     |> then(fn types -> Enum.map(columns, &%{name: &1, type: types[atom(&1)].type}) end)
+  end
+
+  @doc false
+  # On an exact-compare adapter (MySQL, MariaDB) a member's GROUP BY also
+  # groups by the utf8mb4 byte image of every group key that may hold text
+  # (declared text, or of unknown type; an expression is guarded by its
+  # collation), so 't1', 'T1' and 't1 ' stay apart as PostgreSQL keeps them.
+  # Every member has identity-paired output (a CTE's join key, a lateral's
+  # correlations), and a key may reach that output aliased or wrapped in an
+  # expression, so no key is exempt by name. The key itself is still
+  # projected. Other adapters compile as before.
+  def exact_group_keys(%Selecto{} = member, _paired_keys) do
+    group_by = List.wrap(member.set[:group_by])
+
+    if Selecto.Builder.ExactCompare.enabled?(member) and group_by != [] do
+      exact =
+        for key <- group_by,
+            not match?({:host_exact_bytes, _}, key),
+            byte_groupable?(member, key),
+            do: {:host_exact_bytes, key}
+
+      if exact == [], do: member, else: put_in(member.set[:group_by], group_by ++ exact)
+    else
+      member
+    end
+  end
+
+  # Known non-text columns group exactly already.
+  defp byte_groupable?(member, key) when is_binary(key) or (is_atom(key) and not is_nil(key)) do
+    case safe_field(member, to_string(key)) do
+      %{type: type} -> Selecto.Builder.ExactCompare.type_mode(type) != false
+      _ -> true
+    end
+  end
+
+  defp byte_groupable?(_member, _key), do: true
+
+  defp safe_field(member, key) do
+    Selecto.field(member, key)
+  rescue
+    _ -> nil
   end
 
   defp build(selecto, source, query, previous) do
@@ -272,6 +344,11 @@ defmodule Selecto.QueryMembers.Data do
       to_string(get(entry, :aggregate)) in @aggregates ->
         fun = String.to_existing_atom(to_string(get(entry, :aggregate)))
         X.as(apply(X, fun, [to_string(get(entry, :field))]), as)
+
+      # The same refusal validation gives (check_query!/2), also when a
+      # domain is configured without validation.
+      true ->
+        raise ArgumentError, "selection needs :value or a supported :aggregate"
     end
   end
 

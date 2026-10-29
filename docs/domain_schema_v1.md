@@ -380,6 +380,15 @@ naming its target schema and normally also declares `field`, `owner_key`, and
 map keyed by the association id and MAY contain nested `joins`; nested joins are
 resolved against the target relation.
 
+An association's `where` map applies to both flat joins and correlated
+collections. Values normally declare bound scalar equality. A value
+`{:ne, {:field, :parent_id}}` compares the map key's target-local column with
+another declared physical column on that same target, using SQL inequality
+semantics (null operands do not qualify). This finite form can exclude a
+self-referencing parent row without caller SQL. Paths, undeclared columns,
+computed operands, and arbitrary predicate tuples are refused. Existing tenant
+pairing, authored scope keys, and other policies still apply conjunctively.
+
 An association MAY omit `queryable` when it is explicitly write-only. A
 write-only association MUST declare `write.domain` as a complete child Selecto
 domain and MUST NOT set `write.writable` to `false`. It participates in domain

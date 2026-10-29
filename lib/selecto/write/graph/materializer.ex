@@ -70,7 +70,14 @@ defmodule Selecto.Write.Graph.Materializer do
         expected_cardinality: :many,
         returning: :none,
         required_capabilities: [:delete],
-        metadata: %{graph_cleanup: true, graph_node: node.id}
+        # A node compiled under a bound scope (engine tenant, trusted pin,
+        # query enforcement) hands that on, so the adapter applies its
+        # bound-scope delete contract to the cleanup too.
+        metadata:
+          Map.merge(
+            %{graph_cleanup: true, graph_node: node.id},
+            Map.take(node.metadata || %{}, [:bound_scope])
+          )
       })
     end
   end

@@ -264,11 +264,11 @@ defmodule Selecto.Builder.Sql.Where do
          " (",
          build_selector_string(selecto, conf.requires_join, field_name),
          " >= ",
-         {:param, to_field_value(conf, min)},
+         {:param, to_field_value(selecto, conf, min)},
          " and ",
          build_selector_string(selecto, conf.requires_join, field_name),
          " < ",
-         {:param, to_field_value(conf, max)},
+         {:param, to_field_value(selecto, conf, max)},
          ") "
        ], []}
     else
@@ -278,9 +278,9 @@ defmodule Selecto.Builder.Sql.Where do
          " ",
          build_selector_string(selecto, conf.requires_join, field_name),
          " between ",
-         {:param, to_field_value(conf, min)},
+         {:param, to_field_value(selecto, conf, min)},
          " and ",
-         {:param, to_field_value(conf, max)},
+         {:param, to_field_value(selecto, conf, max)},
          " "
        ], []}
     end
@@ -362,7 +362,8 @@ defmodule Selecto.Builder.Sql.Where do
       end
 
     {List.wrap(conf.requires_join) ++ List.wrap(join) ++ List.wrap(ref_join),
-     comparison_clause(selecto, conf, field, sel, sql_op, ref_sel), param ++ ref_params}
+     ref_comparison_clause(selecto, {conf, field, sel}, sql_op, {ref_field, ref_sel}),
+     param ++ ref_params}
   end
 
   def build(selecto, {field, {comp, {:ref, ref_field}}}) when comp in ~w[= != < > <= >=] do
@@ -371,7 +372,8 @@ defmodule Selecto.Builder.Sql.Where do
     {ref_sel, ref_join, ref_params} = Select.prep_selector(selecto, {:ref, ref_field})
 
     {List.wrap(conf.requires_join) ++ List.wrap(join) ++ List.wrap(ref_join),
-     comparison_clause(selecto, conf, field, sel, comp, ref_sel), param ++ ref_params}
+     ref_comparison_clause(selecto, {conf, field, sel}, comp, {ref_field, ref_sel}),
+     param ++ ref_params}
   end
 
   def build(selecto, {field, {:not_like, value}}) do
@@ -413,8 +415,14 @@ defmodule Selecto.Builder.Sql.Where do
       end
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     comparison_clause(selecto, conf, field, sel, sql_op, {:param, to_field_value(conf, value)}),
-     param}
+     comparison_clause(
+       selecto,
+       conf,
+       field,
+       sel,
+       sql_op,
+       {:param, to_field_value(selecto, conf, value)}
+     ), param}
   end
 
   def build(selecto, {field, {comp, value}}) when comp in ~w[= != < > <= >=] do
@@ -422,8 +430,14 @@ defmodule Selecto.Builder.Sql.Where do
     {sel, join, param} = Select.prep_selector(selecto, field)
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     comparison_clause(selecto, conf, field, sel, comp, {:param, to_field_value(conf, value)}),
-     param}
+     comparison_clause(
+       selecto,
+       conf,
+       field,
+       sel,
+       comp,
+       {:param, to_field_value(selecto, conf, value)}
+     ), param}
   end
 
   # Structured-value path with :in operator.
@@ -437,7 +451,7 @@ defmodule Selecto.Builder.Sql.Where do
       {:regular, _} ->
         conf = field_conf(selecto, field)
         {sel, join, param} = Select.prep_selector(selecto, field)
-        typed_values = Enum.map(list, fn i -> to_field_value(conf, i) end)
+        typed_values = Enum.map(list, fn i -> to_field_value(selecto, conf, i) end)
 
         in_clause =
           build_list_clause(selecto, sel, typed_values, false, exact?(selecto, conf, field))
@@ -450,7 +464,7 @@ defmodule Selecto.Builder.Sql.Where do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
 
-    typed_values = Enum.map(list, fn i -> to_field_value(conf, i) end)
+    typed_values = Enum.map(list, fn i -> to_field_value(selecto, conf, i) end)
     in_clause = build_list_clause(selecto, sel, typed_values, false, exact?(selecto, conf, field))
 
     {List.wrap(conf.requires_join) ++ List.wrap(join), in_clause, param}
@@ -460,7 +474,7 @@ defmodule Selecto.Builder.Sql.Where do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
 
-    typed_values = Enum.map(list, fn i -> to_field_value(conf, i) end)
+    typed_values = Enum.map(list, fn i -> to_field_value(selecto, conf, i) end)
 
     not_in_clause =
       build_list_clause(selecto, sel, typed_values, true, exact?(selecto, conf, field))
@@ -472,7 +486,7 @@ defmodule Selecto.Builder.Sql.Where do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
 
-    typed_values = Enum.map(list, fn i -> to_field_value(conf, i) end)
+    typed_values = Enum.map(list, fn i -> to_field_value(selecto, conf, i) end)
     in_clause = build_list_clause(selecto, sel, typed_values, false, exact?(selecto, conf, field))
 
     {List.wrap(conf.requires_join) ++ List.wrap(join), in_clause, param}
@@ -501,7 +515,8 @@ defmodule Selecto.Builder.Sql.Where do
     {ref_sel, ref_join, ref_params} = Select.prep_selector(selecto, {:ref, ref_field})
 
     {List.wrap(conf.requires_join) ++ List.wrap(join) ++ List.wrap(ref_join),
-     comparison_clause(selecto, conf, field, sel, "=", ref_sel), param ++ ref_params}
+     ref_comparison_clause(selecto, {conf, field, sel}, "=", {ref_field, ref_sel}),
+     param ++ ref_params}
   end
 
   # Handle array filter specifications (must come before generic {field, value})
@@ -651,8 +666,14 @@ defmodule Selecto.Builder.Sql.Where do
         {sel, join, param} = Select.prep_selector(selecto, field)
 
         {List.wrap(conf.requires_join) ++ List.wrap(join),
-         comparison_clause(selecto, conf, field, sel, "=", {:param, to_field_value(conf, value)}),
-         param}
+         comparison_clause(
+           selecto,
+           conf,
+           field,
+           sel,
+           "=",
+           {:param, to_field_value(selecto, conf, value)}
+         ), param}
     end
   end
 
@@ -661,8 +682,14 @@ defmodule Selecto.Builder.Sql.Where do
     {sel, join, param} = Select.prep_selector(selecto, field)
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     comparison_clause(selecto, conf, field, sel, "=", {:param, to_field_value(conf, value)}),
-     param}
+     comparison_clause(
+       selecto,
+       conf,
+       field,
+       sel,
+       "=",
+       {:param, to_field_value(selecto, conf, value)}
+     ), param}
   end
 
   def build(_sel, other) do
@@ -701,7 +728,7 @@ defmodule Selecto.Builder.Sql.Where do
   # A tenant/site column on an exact-compare adapter (MySQL, MariaDB) matches
   # its stored bytes, not its collation (Selecto.Builder.ExactCompare).
   defp build_list_clause(_selecto, selector, typed_values, negate?, mode)
-       when mode in [true, :bytes] do
+       when mode in [true, :bytes, :server] do
     placeholders = Enum.map(typed_values, fn value -> {:param, value} end)
     clause = ExactCompare.in_list(selector, placeholders, mode)
 
@@ -846,8 +873,14 @@ defmodule Selecto.Builder.Sql.Where do
       end
 
     {List.wrap(conf.requires_join) ++ List.wrap(join),
-     comparison_clause(selecto, conf, field, sel, sql_op, {:param, to_field_value(conf, value)}),
-     param}
+     comparison_clause(
+       selecto,
+       conf,
+       field,
+       sel,
+       sql_op,
+       {:param, to_field_value(selecto, conf, value)}
+     ), param}
   end
 
   defp get_root_alias(selecto) do
@@ -926,11 +959,11 @@ defmodule Selecto.Builder.Sql.Where do
          " (",
          build_selector_string(selecto, conf.requires_join, field_name),
          " >= ",
-         {:param, to_field_value(conf, min)},
+         {:param, to_field_value(selecto, conf, min)},
          " and ",
          build_selector_string(selecto, conf.requires_join, field_name),
          " < ",
-         {:param, to_field_value(conf, max)},
+         {:param, to_field_value(selecto, conf, max)},
          ") "
        ], []}
     else
@@ -940,9 +973,9 @@ defmodule Selecto.Builder.Sql.Where do
          " ",
          build_selector_string(selecto, conf.requires_join, field_name),
          " between ",
-         {:param, to_field_value(conf, min)},
+         {:param, to_field_value(selecto, conf, min)},
          " and ",
-         {:param, to_field_value(conf, max)},
+         {:param, to_field_value(selecto, conf, max)},
          " "
        ], []}
     end
@@ -978,13 +1011,23 @@ defmodule Selecto.Builder.Sql.Where do
     val
   end
 
-  defp to_field_value(conf, value) do
+  defp to_field_value(selecto, conf, value) do
     if Selecto.Temporal.epoch_storage(conf) && date_like_type(conf) do
       Selecto.Temporal.coerce_filter_value(conf, value)
     else
-      conf
-      |> Selecto.Temporal.coerce_sql_param_value(value)
-      |> then(&to_type(Map.get(conf, :type), &1))
+      value = Selecto.Temporal.coerce_sql_param_value(conf, value)
+      type = Map.get(conf, :type)
+
+      # Adapters that store UUIDs as text (MySQL and MariaDB map :uuid and
+      # :binary_id to CHAR(36)) bind the string form; the others bind the
+      # 16-byte binary.
+      if type in [:uuid, :binary_id] and is_binary(value) and
+           Selecto.AdapterSupport.supports_feature?(
+             Map.get(selecto, :adapter),
+             :uuid_text_storage
+           ),
+         do: value,
+         else: to_type(type, value)
     end
   end
 
@@ -1102,6 +1145,53 @@ defmodule Selecto.Builder.Sql.Where do
   defp comparison_clause(_selecto, _conf, _field, sel, operator, right),
     do: [" ", sel, " ", operator, " ", right, " "]
 
+  # A column-vs-column equality or inequality compares exactly when either
+  # side is a tenant/site column or the predicate is host-installed, and its
+  # mode is the strongest of BOTH sides' modes (ADDENDUM 6): an INT column
+  # declared :integer against a VARCHAR column compares by bytes, never
+  # numerically ('07', '7 ', '7e0' never equal 7). Other operators and
+  # adapters render as before.
+  defp ref_comparison_clause(selecto, {conf, field, sel}, operator, {ref_field, ref_sel})
+       when operator in ["=", "!="] do
+    ref_conf = safe_field_conf(selecto, ref_field)
+    domain = Map.get(selecto, :domain)
+
+    mode =
+      ExactCompare.enabled?(selecto) and
+        (ExactCompare.tenant_name?(domain, column_name(conf, field)) or
+           ExactCompare.tenant_name?(domain, column_name(ref_conf, ref_field)) or
+           ExactCompare.host_mode(selecto, to_string(field))) and
+        ExactCompare.strongest([
+          side_mode(domain, conf, field),
+          side_mode(domain, ref_conf, ref_field)
+        ])
+
+    if mode do
+      exact = ExactCompare.eq(sel, ref_sel, mode)
+      if operator == "=", do: [" ", exact, " "], else: [" NOT ", exact, " "]
+    else
+      [" ", sel, " ", operator, " ", ref_sel, " "]
+    end
+  end
+
+  defp ref_comparison_clause(_selecto, {_conf, _field, sel}, operator, {_ref_field, ref_sel}),
+    do: [" ", sel, " ", operator, " ", ref_sel, " "]
+
+  # One side's mode: its own declared type, else the name's declarations
+  # across the domain, else guarded (:server).
+  defp side_mode(_domain, %{type: type}, _field), do: ExactCompare.type_mode(type)
+
+  defp side_mode(domain, conf, field),
+    do: ExactCompare.exact_name?(domain, column_name(conf, field)) || :server
+
+  defp safe_field_conf(selecto, field) when is_binary(field) or is_atom(field) do
+    field_conf(selecto, to_string(field))
+  rescue
+    _ -> nil
+  end
+
+  defp safe_field_conf(_selecto, _field), do: nil
+
   # `bytes_fun` builds the subquery selecting its column's utf8mb4 bytes; a
   # prebuilt subquery (nil) compares its own values as bytes, which matches
   # utf8mb4 columns and refuses rows of other character sets (fails closed).
@@ -1116,13 +1206,21 @@ defmodule Selecto.Builder.Sql.Where do
 
   # The exact mode of a tenant/site column: by the field's own declared type
   # when it has one, else by the name's declarations across the domain.
+  # A tenant/site column, or a field a host-installed predicate compares
+  # (Selecto.Builder.ExactCompare.host_names/1, matched on the field as
+  # written, so "person.name" never makes the root "name" exact), compares
+  # exactly; the mode comes from the field's own declared type.
   defp exact?(selecto, conf, field) do
     with true <- ExactCompare.enabled?(selecto),
-         mode when mode != false <-
-           ExactCompare.exact_name?(Map.get(selecto, :domain), column_name(conf, field)) do
+         true <-
+           ExactCompare.exact_name?(Map.get(selecto, :domain), column_name(conf, field)) != false or
+             ExactCompare.host_mode(selecto, to_string(field)) do
       case conf do
-        %{type: type} when not is_nil(type) -> ExactCompare.type_mode(type)
-        _ -> mode
+        %{type: type} ->
+          ExactCompare.type_mode(type)
+
+        _ ->
+          ExactCompare.exact_name?(Map.get(selecto, :domain), column_name(conf, field)) || :server
       end
     end
   end

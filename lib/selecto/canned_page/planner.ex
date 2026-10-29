@@ -13,7 +13,11 @@ defmodule Selecto.CannedPage.Planner do
     with {:ok, authorized} <-
            Selecto.Tenant.require_read_boundary(authorized, scope: page.dataset_filters),
          {:ok, state} <- State.normalize(page, input) do
-      base = Selecto.filter(authorized, page.dataset_filters)
+      # The dataset filters are server-authored host scope (they may be the
+      # boundary itself, a site pin or a tenantless scope): recorded as such,
+      # an exact-compare adapter (MySQL, MariaDB) compares them exactly in the
+      # result, total and facet queries alike, which all derive from `base`.
+      base = Selecto.Tenant.host_filter(authorized, page.dataset_filters)
       view = Enum.find(page.views, &(&1.id == state["view"]))
       filtered = apply_controls(base, page, state)
       groups = if view.kind == :detail, do: detail_groups(page, view), else: view.groups

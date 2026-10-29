@@ -145,6 +145,28 @@ name is needed. A different typed identity or contradictory required predicate
 refuses. Structured tenant contexts remain available for prefix and advanced
 scope configuration; their existing obligations are retained on later calls.
 
+### Host scope on MySQL and MariaDB
+
+MySQL and MariaDB compare text under the column's collation, so under the
+default collations `'t1'` also matches `'T1'` and `'t1 '`. Selecto compares
+host scope by the stored bytes there, as PostgreSQL and SQLite do. Host scope
+is the declared tenant columns plus filters installed through one of:
+
+- domain or query `required_filters`, or `Selecto.Tenant.require_tenant_filter/2,3`;
+- `Selecto.with_tenant/2` (the tenant and a context's `required_filters`);
+- `Selecto.Tenant.require_read_boundary/2`, which records every filter the
+  query already holds when it accepts the boundary (the API engine handler,
+  generated APIs, co-domain lookups and canned pages call it before applying
+  request input);
+- `Selecto.Tenant.host_filter/2` or `Selecto.Tenant.mark_host_scope/1`.
+
+A bare `Selecto.filter/2` on direct engine use still counts as host scope for
+permission decisions (a tenant boundary, carried tenants across shared hops,
+retarget scope), but on a column that is not a declared tenant column it
+compiles with the server's collated comparison. A host that pins a site or
+scopes a tenantless domain with `Selecto.filter/2` and needs exact matching
+must use one of the mechanisms above.
+
 ## Configuration Providers
 
 A trusted application provider can derive a domain from another configuration
