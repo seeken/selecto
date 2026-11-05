@@ -442,6 +442,50 @@ defmodule Selecto.QueryLibraryTest do
     assert Enum.any?(diagnostics.errors, &(&1.code == :invalid_query_segment_group))
   end
 
+  test "segment and ordering introspection reuse native resolution without host predicates" do
+    authored = put_in(domain(), [:required_order_by], [{:inserted_at, :desc}])
+    query = authored |> Selecto.configure(:mock_connection) |> Selecto.filter(priority: 99)
+
+    for input <- [authored, query],
+        name <- [:active_priority_projects, "active_priority_projects"] do
+      assert Selecto.QueryLibrary.segment_filters(input, [name]) == [
+               {:eq, :status, "active"},
+               {:gte, :priority, {:param, :minimum}}
+             ]
+
+      assert Selecto.QueryLibrary.segment_filters(input, [:active_or_archived_projects]) == [
+               {:or, [{:eq, :status, "active"}, {:eq, :status, "archived"}]}
+             ]
+
+      assert Selecto.QueryLibrary.segment_filters(input, []) == []
+
+      assert Selecto.QueryLibrary.ordering_entries(input, "highest_priority") ==
+               [{:priority, :desc}, {:id, :asc}]
+    end
+
+    assert {"visible", true} in Selecto.query_filters(query, validate_tenant: false)
+    assert {:priority, 99} in Selecto.query_filters(query, validate_tenant: false)
+  end
+
+  test "introspection refuses unknown names and cyclic declarations" do
+    assert_raise ArgumentError, fn ->
+      Selecto.QueryLibrary.segment_filters(domain(), [:missing])
+    end
+
+    assert_raise ArgumentError, fn ->
+      Selecto.QueryLibrary.ordering_entries(domain(), :missing)
+    end
+
+    cyclic =
+      put_in(domain(), [:query_library, :segments, :active_projects, :segments], [
+        :active_projects
+      ])
+
+    assert_raise ArgumentError, fn ->
+      Selecto.QueryLibrary.segment_filters(cyclic, [:active_projects])
+    end
+  end
+
   defp configured do
     Selecto.configure(domain(), :mock_connection)
   end

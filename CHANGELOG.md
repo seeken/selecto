@@ -3,6 +3,10 @@
 
 ## Unreleased
 
+- Expose native composed segment filters and declared ordering entries for host
+  inspection. Parameter placeholders remain intact, and configured query filters
+  and required host policy are kept separate from declaration data.
+
 - Keep repeated root/nested lookup names in separate execution namespaces;
   preserve root ownership, complete field paths and unambiguous local aliases.
 - Host predicate inspection with `include_engine_tenant: false` also omits

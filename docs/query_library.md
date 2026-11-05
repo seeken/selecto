@@ -167,6 +167,19 @@ view_query =
 `Selecto.applied_query_library/1` reports which names have been applied to a
 query.
 
+For a host that needs to inspect a named definition before applying it,
+`Selecto.QueryLibrary.segment_filters(domain_or_query, names)` returns the composed
+native filter AST with parameter placeholders intact. Boolean groups and declared
+composition order are preserved. `Selecto.QueryLibrary.ordering_entries/2`
+returns a named ordering's declared entries. Both use the same native resolution
+as query application and refuse invalid declarations or unknown names.
+
+These inspection functions do not execute a query, substitute parameter values,
+or include the configured query's filters and required host predicates/ordering.
+They are declaration data, not an authorized execution plan. Hosts must retain
+their normal field checks, parameter validation and required policy when applying
+the resulting intent.
+
 Segment parameters accept maps or keyword lists. Built-in portable types are
 `string`, `integer`, `float`, `decimal`, `boolean`, `date`, `datetime`,
 `naive_datetime`, `utc_datetime`, and `uuid`. Values for these types are
