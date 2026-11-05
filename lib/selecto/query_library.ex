@@ -43,6 +43,20 @@ defmodule Selecto.QueryLibrary do
     |> Map.fetch!(kind)
   end
 
+  @doc "Returns the composed segment filters before parameter substitution or host predicates."
+  @spec segment_filters(Selecto.t() | map(), [definition_id()]) :: list()
+  def segment_filters(selecto_or_domain, segment_ids) when is_list(segment_ids) do
+    resolve_segments(selecto_or_domain, segment_ids).filters
+  end
+
+  @doc "Returns a named ordering's declared entries, without required host ordering."
+  @spec ordering_entries(Selecto.t() | map(), definition_id()) :: list()
+  def ordering_entries(selecto_or_domain, ordering_id) do
+    library = checked_library(selecto_or_domain)
+    ordering = fetch_definition!(library.orderings, :ordering, ordering_id)
+    map_value(ordering, :order_by) || []
+  end
+
   @doc "Applies a named segment and its composed segments to a query."
   @spec apply_segment(Selecto.t(), definition_id(), map() | keyword()) :: Selecto.t()
   def apply_segment(%Selecto{} = selecto, segment_id, params \\ %{}) do
@@ -79,10 +93,8 @@ defmodule Selecto.QueryLibrary do
   @doc "Applies a named ordering while preserving required domain ordering."
   @spec apply_ordering(Selecto.t(), definition_id()) :: Selecto.t()
   def apply_ordering(%Selecto{} = selecto, ordering_id) do
-    library = checked_library(selecto)
-    ordering = fetch_definition!(library.orderings, :ordering, ordering_id)
     required = map_value(selecto.domain, :required_order_by) || []
-    order_by = map_value(ordering, :order_by) || []
+    order_by = ordering_entries(selecto, ordering_id)
     combined = Enum.uniq(List.wrap(required) ++ order_by)
     selecto = put_in(selecto.set.order_by, [])
 
@@ -158,13 +170,7 @@ defmodule Selecto.QueryLibrary do
   end
 
   def apply_segments(selecto, segment_ids, params) when is_list(segment_ids) do
-    library = checked_library(selecto)
-
-    resolved =
-      Enum.reduce(segment_ids, %{filters: [], parameters: %{}, ids: []}, fn segment_id, acc ->
-        merge_resolved(acc, resolve_segment!(library, segment_id, []))
-      end)
-
+    resolved = resolve_segments(selecto, segment_ids)
     values = normalize_parameters!(resolved.parameters, params)
     filters = substitute_parameters(resolved.filters, values)
 
@@ -179,6 +185,14 @@ defmodule Selecto.QueryLibrary do
 
   def apply_segments(_selecto, segment_ids, _params) do
     raise ArgumentError, "view segments must be a list, got: #{inspect(segment_ids)}"
+  end
+
+  defp resolve_segments(selecto_or_domain, segment_ids) do
+    library = checked_library(selecto_or_domain)
+
+    Enum.reduce(segment_ids, %{filters: [], parameters: %{}, ids: []}, fn segment_id, acc ->
+      merge_resolved(acc, resolve_segment!(library, segment_id, []))
+    end)
   end
 
   defp resolve_segment!(library, segment_id, stack) do
