@@ -9,6 +9,7 @@ defmodule Selecto.Executor do
   require Logger
 
   @query_execution_event [:selecto, :query, :execution]
+  @max_filter_nodes 50_000
 
   @doc """
   Execute a query and return results with standardized error handling.
@@ -81,6 +82,7 @@ defmodule Selecto.Executor do
       opts
       |> Keyword.put(:selecto_read, true)
       |> put_declared_functions(declared_functions(selecto))
+      |> put_raw_fragments(raw_fragments(selecto))
 
     case selecto |> Map.get(:set) |> Kernel.||(%{}) |> Map.get(:qualified_relations) do
       relations when is_map(relations) and map_size(relations) > 0 ->
@@ -90,6 +92,47 @@ defmodule Selecto.Executor do
         opts
     end
   end
+
+  defp put_raw_fragments(opts, []), do: Keyword.delete(opts, :selecto_raw_fragments)
+
+  defp put_raw_fragments(opts, fragments),
+    do: Keyword.put(opts, :selecto_raw_fragments, fragments)
+
+  # The text a query carries that Selecto did not generate: an adapter that
+  # types statements must see it apart from what it can prove.
+  defp raw_fragments(selecto) do
+    set =
+      selecto
+      |> Map.get(:set)
+      |> Kernel.||(%{})
+      |> Map.drop([:qualified_relations, :pg_operator_types])
+
+    domain_filters = selecto |> Map.get(:domain) |> Kernel.||(%{}) |> Map.get(:required_filters)
+
+    [set, domain_filters] |> collect_raw([]) |> Enum.uniq()
+  end
+
+  defp collect_raw({tag, text}, acc) when tag in [:raw_sql_filter, :raw_sql, :custom_sql],
+    do: [raw_text(text) | acc]
+
+  defp collect_raw({:custom_sql, text, _fields}, acc), do: [raw_text(text) | acc]
+  defp collect_raw(%_{}, acc), do: acc
+  defp collect_raw(term, acc) when is_tuple(term), do: term |> Tuple.to_list() |> collect_raw(acc)
+  defp collect_raw(term, acc) when is_list(term), do: Enum.reduce(term, acc, &collect_raw/2)
+  defp collect_raw(term, acc) when is_map(term), do: term |> Map.values() |> collect_raw(acc)
+  defp collect_raw(_term, acc), do: acc
+
+  defp raw_text(text) when is_binary(text), do: text
+
+  defp raw_text(parts) when is_list(parts),
+    do: parts |> List.flatten() |> Enum.map_join(" ", &raw_part/1)
+
+  defp raw_text(_other), do: ""
+
+  defp raw_part(part) when is_binary(part), do: part
+  defp raw_part(part) when is_integer(part), do: <<part::utf8>>
+  defp raw_part({:param, _value}), do: "$0"
+  defp raw_part(_other), do: ""
 
   defp put_declared_functions(opts, []), do: Keyword.delete(opts, :selecto_declared_functions)
 
@@ -218,6 +261,32 @@ defmodule Selecto.Executor do
   # zone-independently (Selecto.Builder.ExactCompare.storage_kind/4).
   @doc false
   def prepare_read(selecto) do
+    if filter_nodes(selecto) > @max_filter_nodes do
+      {:error,
+       Selecto.Error.validation_error("Filters are beyond the size Selecto will compile", %{
+         reason: :filter_too_large,
+         limit: @max_filter_nodes
+       })}
+    else
+      prepare_adapter_read(selecto)
+    end
+  end
+
+  # M6: every compile walks the filter tree, and an adapter that qualifies
+  # statements costs more than the tree does.
+  defp filter_nodes(selecto) do
+    selecto |> Map.get(:set) |> Kernel.||(%{}) |> Map.get(:filtered, []) |> count_nodes(0)
+  end
+
+  defp count_nodes(term, count) when is_list(term),
+    do: Enum.reduce(term, count + 1, &count_nodes/2)
+
+  defp count_nodes(term, count) when is_tuple(term),
+    do: term |> Tuple.to_list() |> count_nodes(count)
+
+  defp count_nodes(_term, count), do: count + 1
+
+  defp prepare_adapter_read(selecto) do
     adapter = runtime_adapter(selecto)
 
     if is_atom(adapter) and not is_nil(adapter) and Code.ensure_loaded?(adapter) and

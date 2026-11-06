@@ -326,6 +326,27 @@ defmodule Selecto.ExecuteEntryPointTest do
       assert opts[:selecto_declared_functions] == ["lib.my_fn"]
     end
 
+    test "a read names the raw text it carries, for an adapter that types statements" do
+      query = Selecto.filter(query(CallerAdapter), {:raw_sql_filter, ["a = ", {:param, 1}]})
+      assert {:ok, _result} = Selecto.execute(query)
+      assert_received {:adapter_execute, _pid, opts}
+      assert opts[:selecto_raw_fragments] == ["a =  $0"]
+
+      assert {:ok, _result} = Selecto.execute(query(CallerAdapter))
+      assert_received {:adapter_execute, _pid, opts}
+      refute Keyword.has_key?(opts, :selecto_raw_fragments)
+    end
+
+    test "filters beyond the bound refuse typed, before the adapter is called" do
+      filters = for id <- 1..60_000, do: {"no_such", id}
+      query = %{query(CallerAdapter) | set: Map.put(query(CallerAdapter).set, :filtered, filters)}
+
+      assert {:error, %Selecto.Error{details: %{reason: :filter_too_large}}} =
+               Selecto.execute(query)
+
+      refute_received {:adapter_execute, _pid, _opts}
+    end
+
     test "the adapter receives the time remaining, capped at five minutes" do
       assert {:ok, _result} = Selecto.execute(query(CallerAdapter))
       assert_received {:adapter_execute, _pid, opts}
