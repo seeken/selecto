@@ -7,6 +7,7 @@ defmodule Selecto.Builder.LateralJoin do
   """
 
   alias Selecto.Advanced.LateralJoin.Spec
+  alias Selecto.Builder.Provenance
   alias Selecto.AdapterSupport
   alias Selecto.Dialect.Collection.Operation, as: CollectionOperation
   alias Selecto.Dialect.TableFunction.Join, as: TableFunctionJoin
@@ -132,7 +133,9 @@ defmodule Selecto.Builder.LateralJoin do
       true ->
         {function_sql, params} = build_table_function_sql(spec.table_function)
         join_sql = if spec.join_type == :left, do: "LEFT JOIN", else: "INNER JOIN"
-        {[join_sql, " ", function_sql, " AS ", spec.alias, " ON true"], params}
+
+        {[join_sql, " ", function_sql, " AS ", Provenance.reference(spec.alias), " ON true"],
+         params}
     end
   end
 
@@ -163,7 +166,9 @@ defmodule Selecto.Builder.LateralJoin do
       true ->
         {function_sql, params} = build_table_function_sql(spec.table_function)
         join_sql = if spec.join_type == :left, do: "LEFT JOIN", else: "INNER JOIN"
-        {[join_sql, " ", function_sql, " AS ", spec.alias, " ON true"], params}
+
+        {[join_sql, " ", function_sql, " AS ", Provenance.reference(spec.alias), " ON true"],
+         params}
     end
   end
 
@@ -246,7 +251,7 @@ defmodule Selecto.Builder.LateralJoin do
     fragment = %CollectionOperation{
       operation: :unnest,
       clause: :table,
-      column: column_ref,
+      column: Provenance.reference(column_ref),
       order_by: [],
       options: %{}
     }
@@ -265,7 +270,13 @@ defmodule Selecto.Builder.LateralJoin do
   defp build_table_function_sql({:function, func_name, args}) do
     arg_sql = build_function_args(args)
 
-    function_sql = [String.upcase(to_string(func_name)), "(", arg_sql, ")"]
+    function_sql = [
+      func_name |> Provenance.reference() |> to_string() |> String.upcase(),
+      "(",
+      arg_sql,
+      ")"
+    ]
+
     {function_sql, []}
   end
 
@@ -277,7 +288,7 @@ defmodule Selecto.Builder.LateralJoin do
 
     {[
        "JSON_TABLE(",
-       source_ref,
+       Provenance.reference(source_ref),
        ", '",
        escape_sql_literal(path),
        "' COLUMNS (",
@@ -292,8 +303,8 @@ defmodule Selecto.Builder.LateralJoin do
 
     {args, params} =
       case path do
-        nil -> {[source_ref], []}
-        value -> {[source_ref, ", ", {:param, value}], [value]}
+        nil -> {[Provenance.reference(source_ref)], []}
+        value -> {[Provenance.reference(source_ref), ", ", {:param, value}], [value]}
       end
 
     {[function_sql, "(", args, ")"], params}
@@ -317,13 +328,13 @@ defmodule Selecto.Builder.LateralJoin do
   # Build individual function argument
   defp build_function_arg({:ref, field}) do
     # Correlation reference - no parameters
-    field
+    Provenance.reference(field)
   end
 
   defp build_function_arg(value) when is_binary(value) do
     if String.contains?(value, ".") do
       # Column reference
-      value
+      Provenance.reference(value)
     else
       # Literal string value
       {:param, value}
@@ -344,7 +355,7 @@ defmodule Selecto.Builder.LateralJoin do
   end
 
   defp build_json_table_column_sql(%{name: name, for_ordinality: true}) do
-    [to_string(name), " FOR ORDINALITY"]
+    [name |> Provenance.reference() |> to_string(), " FOR ORDINALITY"]
   end
 
   defp build_json_table_column_sql(%{name: name} = column) do
@@ -352,7 +363,7 @@ defmodule Selecto.Builder.LateralJoin do
     type = mysql_json_table_type(Map.get(column, :type, :string))
 
     [
-      to_string(name),
+      name |> Provenance.reference() |> to_string(),
       " ",
       type,
       " PATH '",

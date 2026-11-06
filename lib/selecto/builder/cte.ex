@@ -346,5 +346,5 @@ defmodule Selecto.Builder.CteSql do
 
   defp rewrite_cte_root_alias(other, _cte_name), do: other
 
-  defp cte_root_alias(cte_name), do: "cte_#{cte_name}"
+  defp cte_root_alias(cte_name), do: "cte_#{Selecto.Builder.Provenance.reference(cte_name)}"
 end

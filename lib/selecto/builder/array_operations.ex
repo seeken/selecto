@@ -66,8 +66,16 @@ defmodule Selecto.Builder.ArrayOperations do
       value: spec.value,
       distinct: spec.operation == :array_agg_distinct or spec.distinct,
       order_by: build_order_by(spec.order_by, selecto),
-      options: spec.options || %{}
+      options: options(spec.options)
     }
+  end
+
+  # A value_expression is SQL text the dialect emits as given.
+  defp options(nil), do: %{}
+
+  defp options(options) do
+    if Access.get(options, :value_expression) != nil, do: Selecto.Builder.Provenance.mark()
+    options
   end
 
   defp clause(operation)
@@ -118,7 +126,8 @@ defmodule Selecto.Builder.ArrayOperations do
     end
   end
 
-  defp build_column_reference(column, _selecto), do: to_string(column)
+  defp build_column_reference(column, _selecto),
+    do: column |> Selecto.Builder.Provenance.reference() |> to_string()
 
   defp build_order_by(nil, _selecto), do: []
 

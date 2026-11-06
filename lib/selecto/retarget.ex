@@ -185,7 +185,9 @@ defmodule Selecto.Retarget do
             Map.get(selecto.domain, :source)
           )
 
-        {:selecto_generated, {:raw_sql_filter, ["(", Enum.intersperse(conditions, " AND "), ")"]}}
+        Selecto.Builder.Provenance.generated_filter(
+          {:raw_sql_filter, ["(", Enum.intersperse(conditions, " AND "), ")"]}
+        )
 
       _ ->
         nil
@@ -300,7 +302,7 @@ defmodule Selecto.Retarget do
   # The filter wraps the context query's SQL: generated unless raw text
   # reached it.
   defp context_filter(filter, true), do: filter
-  defp context_filter(filter, false), do: {:selecto_generated, filter}
+  defp context_filter(filter, false), do: Selecto.Builder.Provenance.generated_filter(filter)
 
   defp tuple_terms(column, false), do: [column]
 

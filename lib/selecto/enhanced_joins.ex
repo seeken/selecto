@@ -449,10 +449,14 @@ defmodule Selecto.EnhancedJoins do
               :lte -> "<="
             end
 
-          "#{left_field} #{op_sql} #{right_field}"
+          Selecto.Builder.Provenance.reference(left_field) <>
+            " #{op_sql} " <> Selecto.Builder.Provenance.reference(right_field)
 
         {:date_range, date_field, from_field, to_field} ->
-          "#{date_field} BETWEEN #{from_field} AND #{to_field}"
+          Selecto.Builder.Provenance.reference(date_field) <>
+            " BETWEEN " <>
+            Selecto.Builder.Provenance.reference(from_field) <>
+            " AND " <> Selecto.Builder.Provenance.reference(to_field)
 
         {:custom_sql, sql} ->
           Selecto.Builder.Provenance.mark()

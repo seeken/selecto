@@ -282,8 +282,13 @@ defmodule Selecto.Builder.Sql.Where do
     do: build_conjunction(selecto, conj, filters)
 
   # A filter Selecto built from what it was given (retarget, JSON).
-  defp do_build(selecto, {:selecto_generated, filter}),
-    do: Selecto.Builder.Provenance.generated(fn -> do_build(selecto, filter) end)
+  defp do_build(selecto, {:selecto_generated, tag, filter}) do
+    if Selecto.Builder.Provenance.generated_tag?(tag) do
+      Selecto.Builder.Provenance.generated(fn -> do_build(selecto, filter) end)
+    else
+      raise ArgumentError, "selecto_generated is internal to Selecto"
+    end
+  end
 
   # Prebuilt SQL filters (used by JSON and other advanced operations).
   defp do_build(_selecto, {:raw_sql_filter, filter_iodata}) do

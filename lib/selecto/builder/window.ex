@@ -340,11 +340,15 @@ defmodule Selecto.Builder.Window do
         resolve_field_reference(selecto, source, [name | seen])
 
       _ ->
+        Selecto.Builder.Provenance.reference(name)
         if String.contains?(name, "."), do: name, else: "selecto_root.#{name}"
     end
   end
 
-  defp resolve_field_reference(_selecto, field, _seen), do: to_string(field)
+  defp resolve_field_reference(_selecto, field, _seen) do
+    Selecto.Builder.Provenance.mark()
+    to_string(field)
+  end
 
   # Extract joins required for window function fields
   defp extract_required_joins(selecto, %Spec{
@@ -484,7 +488,7 @@ defmodule Selecto.Builder.Window do
     if AdapterSupport.callback_available?(adapter, :quote_identifier, 1) do
       adapter.quote_identifier(alias_name)
     else
-      alias_name
+      Selecto.Builder.Provenance.reference(alias_name)
     end
   end
 end
