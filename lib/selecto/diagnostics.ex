@@ -59,10 +59,9 @@ defmodule Selecto.Diagnostics do
 
   defp run_explain(selecto, opts) do
     to_sql_opts = Keyword.get(opts, :to_sql_opts, [])
-    {query_sql, params} = Selecto.to_sql(selecto, to_sql_opts)
 
-    with {:ok, explain_sql} <- adapter_explain_sql(selecto, query_sql, opts),
-         {:ok, rows, columns} <- execute_raw(selecto, explain_sql, params) do
+    with {:ok, query_sql, params, explain_sql, rows, columns} <-
+           explain_statement(selecto, to_sql_opts, opts) do
       detail_position = Enum.find_index(columns, &(to_string(&1) == "detail")) || 0
 
       plan_lines =
@@ -82,6 +81,39 @@ defmodule Selecto.Diagnostics do
          rows: rows,
          plan_lines: plan_lines
        }}
+    end
+  end
+
+  # An adapter that guards its reads explains through the same path: even
+  # plain EXPLAIN can evaluate operators while planning.
+  defp explain_statement(selecto, to_sql_opts, opts) do
+    adapter = runtime_adapter(selecto)
+
+    if Selecto.AdapterSupport.callback_available?(adapter, :explain_read, 5) do
+      with {:ok, sql, params, read_opts} <-
+             Selecto.Executor.read_statement(selecto, to_sql_opts),
+           prefix = build_explain_sql("", opts),
+           {:ok, result} <-
+             Kernel.apply(adapter, :explain_read, [
+               runtime_connection(selecto),
+               sql,
+               params,
+               prefix,
+               read_opts
+             ]) do
+        {:ok, sql, params, prefix <> sql, Map.get(result, :rows, []),
+         Map.get(result, :columns, [])}
+      else
+        {:error, %Error{} = error} -> {:error, error}
+        {:error, reason} -> {:error, Error.from_reason(reason)}
+      end
+    else
+      {query_sql, params} = Selecto.to_sql(selecto, to_sql_opts)
+
+      with {:ok, explain_sql} <- adapter_explain_sql(selecto, query_sql, opts),
+           {:ok, rows, columns} <- execute_raw(selecto, explain_sql, params) do
+        {:ok, query_sql, params, explain_sql, rows, columns}
+      end
     end
   end
 
