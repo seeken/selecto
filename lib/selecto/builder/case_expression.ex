@@ -56,7 +56,7 @@ defmodule Selecto.Builder.CaseExpression do
     # Combine into CASE expression
     case_parts = [
       "CASE ",
-      spec.column,
+      Selecto.Builder.Provenance.reference(spec.column),
       when_clauses_sql,
       else_sql,
       " END"

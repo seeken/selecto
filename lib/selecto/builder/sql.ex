@@ -852,9 +852,10 @@ defmodule Selecto.Builder.Sql do
           json_builder_opts = json_builder_opts(selecto)
 
           Enum.map(json_specs, fn spec ->
-            {:selecto_generated,
-             {:raw_sql_filter,
-              Selecto.Builder.JsonOperations.build_json_filter(spec, json_builder_opts)}}
+            Selecto.Builder.Provenance.generated_filter(
+              {:raw_sql_filter,
+               Selecto.Builder.JsonOperations.build_json_filter(spec, json_builder_opts)}
+            )
           end)
       end
 
@@ -1149,7 +1150,7 @@ defmodule Selecto.Builder.Sql do
         [
           resolve_on_side(selecto, requires_join, left),
           " ",
-          to_string(operator),
+          operator |> Selecto.Builder.Provenance.operator() |> to_string(),
           " ",
           resolve_on_side(selecto, join, right)
         ]
@@ -1549,7 +1550,7 @@ defmodule Selecto.Builder.Sql do
 
   defp resolve_on_side(selecto, default_join, field_ref) when is_binary(field_ref) do
     if String.contains?(field_ref, ".") do
-      field_ref
+      Selecto.Builder.Provenance.reference(field_ref)
     else
       build_selector_string(selecto, default_join, field_ref)
     end
@@ -1559,7 +1560,10 @@ defmodule Selecto.Builder.Sql do
     build_selector_string(selecto, default_join, field_ref)
   end
 
-  defp resolve_on_side(_selecto, _default_join, field_ref), do: to_string(field_ref)
+  defp resolve_on_side(_selecto, _default_join, field_ref) do
+    Selecto.Builder.Provenance.mark()
+    to_string(field_ref)
+  end
 
   # Phase 4: LATERAL join integration functions
   defp build_lateral_joins(selecto) do

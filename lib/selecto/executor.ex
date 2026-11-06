@@ -93,10 +93,14 @@ defmodule Selecto.Executor do
     end
   end
 
+  # An adapter treats a statement as Selecto's own only with this stamp: text
+  # is hand-built unless the compile proved otherwise.
   defp put_raw_mark(opts, selecto) do
+    opts = Keyword.delete(opts, :selecto_generated)
+
     if raw_sql?(selecto),
       do: Keyword.put(opts, :selecto_raw_sql, true),
-      else: Keyword.delete(opts, :selecto_raw_sql)
+      else: opts |> Keyword.delete(:selecto_raw_sql) |> Keyword.put(:selecto_generated, true)
   end
 
   # prepare_read/1 records it; a read that skipped it compiles to find out.
@@ -113,7 +117,7 @@ defmodule Selecto.Executor do
     {_sql, marked?, nodes} =
       Selecto.Builder.Provenance.capture(fn -> Selecto.Builder.Sql.build(selecto, []) end)
 
-    {marked?, nodes}
+    {marked? or Selecto.Builder.Provenance.config_text?(selecto), nodes}
   rescue
     _exception -> {true, 0}
   end

@@ -3,6 +3,14 @@
 
 ## Unreleased
 
+- A read reaches an adapter stamped `selecto_generated` only when the compile
+  proved every part of it: text is hand-built otherwise. Builders pass text they
+  do not resolve through `Provenance.reference/1`, `{:ref, ...}`, join `on:`
+  sides and operators, conditional joins, lateral functions, tagging, hierarchy
+  and OLAP configuration included; join and schema configuration is walked whole.
+- The internal generated-filter tag carries a per-VM secret: it cannot be
+  reached through `Selecto.filter/2`.
+
 - Expose native composed segment filters and declared ordering entries for host
   inspection. Parameter placeholders remain intact, and configured query filters
   and required host policy are kept separate from declaration data.

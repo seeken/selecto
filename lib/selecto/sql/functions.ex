@@ -733,7 +733,9 @@ defmodule Selecto.SQL.Functions do
             try do
               Selecto.Builder.Sql.Select.prep_selector(selecto, complex_expr)
             rescue
-              _ -> {[inspect(complex_expr)], :selecto_root, []}
+              _ ->
+                Selecto.Builder.Provenance.mark()
+                {[inspect(complex_expr)], :selecto_root, []}
             end
 
           result ->

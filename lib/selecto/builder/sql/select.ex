@@ -334,6 +334,7 @@ defmodule Selecto.Builder.Sql.Select do
          Map.has_key?(Selecto.columns(selecto), field_ref) do
       prep_selector(selecto, field_ref, retarget_aliases)
     else
+      Selecto.Builder.Provenance.reference(field_ref)
       {[normalize_ref_field(selecto, field_ref)], :selecto_root, []}
     end
   end
@@ -1146,7 +1147,7 @@ defmodule Selecto.Builder.Sql.Select do
         parts -> Enum.intersperse(parts, ", ")
       end
 
-    {[sql_name, "(", args_iodata, ")"], join, param}
+    {[Selecto.Builder.Provenance.reference(sql_name), "(", args_iodata, ")"], join, param}
   end
 
   # Handle structured JSON path selectors.
@@ -1204,7 +1205,7 @@ defmodule Selecto.Builder.Sql.Select do
         # For dynamic columns, use them directly without table qualification
         if Map.has_key?(dynamic_columns, selector) do
           # Dynamic columns from UNNEST don't need table qualification
-          {[field_name], :selecto_root, []}
+          {[Selecto.Builder.Provenance.reference(field_name)], :selecto_root, []}
         else
           # Check if retargeting remaps this join alias.
           join_alias = Map.get(retarget_aliases, conf.requires_join, conf.requires_join)
