@@ -326,19 +326,47 @@ defmodule Selecto.ExecuteEntryPointTest do
       assert opts[:selecto_declared_functions] == ["lib.my_fn"]
     end
 
-    test "a read names the raw text it carries, for an adapter that types statements" do
+    test "a read says when a builder emitted text it did not generate" do
       query = Selecto.filter(query(CallerAdapter), {:raw_sql_filter, ["a = ", {:param, 1}]})
       assert {:ok, _result} = Selecto.execute(query)
       assert_received {:adapter_execute, _pid, opts}
-      assert opts[:selecto_raw_fragments] == ["a =  $0"]
+      assert opts[:selecto_raw_sql] == true
 
       assert {:ok, _result} = Selecto.execute(query(CallerAdapter))
       assert_received {:adapter_execute, _pid, opts}
-      refute Keyword.has_key?(opts, :selecto_raw_fragments)
+      refute Keyword.has_key?(opts, :selecto_raw_sql)
+    end
+
+    test "every builder that takes text marks the statement, nested ones too" do
+      base = query(CallerAdapter)
+      nested = Selecto.filter(base, {:raw_sql_filter, "x = 1"})
+
+      for marked <- [
+            Selecto.filter(base, {:exists, "SELECT 1"}),
+            Selecto.filter(base, {:exists, "SELECT 1", []}),
+            Selecto.filter(base, {"id", {:subquery, :in, "SELECT 1"}}),
+            Selecto.filter(base, {"id", "=", {:subquery, :any, "SELECT 1", []}}),
+            Selecto.filter(base, {"id", {:subquery, :in, nested}}),
+            Selecto.select(base, [{:raw_sql, "1"}]),
+            Selecto.select(base, [{:subquery, "SELECT 1", []}]),
+            Selecto.select(base, [{:custom_sql, "upper({{f}})", %{"f" => "name"}}]),
+            Selecto.union(base, nested)
+          ] do
+        assert {:ok, _result} = Selecto.execute(marked)
+        assert_received {:adapter_execute, _pid, opts}
+        assert opts[:selecto_raw_sql] == true
+      end
+    end
+
+    test "many equalities of one field compile to one membership" do
+      filters = for id <- 1..100, do: {"id", id}
+      {sql, params} = Selecto.to_sql(Selecto.filter(query(CallerAdapter), {:or, filters}))
+      refute IO.iodata_to_binary(sql) =~ " or "
+      assert List.flatten(params) |> length() >= 1
     end
 
     test "filters beyond the bound refuse typed, before the adapter is called" do
-      filters = for id <- 1..60_000, do: {"no_such", id}
+      filters = for id <- 1..60_000, do: {"id", id}
       query = %{query(CallerAdapter) | set: Map.put(query(CallerAdapter).set, :filtered, filters)}
 
       assert {:error, %Selecto.Error{details: %{reason: :filter_too_large}}} =

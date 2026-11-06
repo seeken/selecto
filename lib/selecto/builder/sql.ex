@@ -852,8 +852,9 @@ defmodule Selecto.Builder.Sql do
           json_builder_opts = json_builder_opts(selecto)
 
           Enum.map(json_specs, fn spec ->
-            {:raw_sql_filter,
-             Selecto.Builder.JsonOperations.build_json_filter(spec, json_builder_opts)}
+            {:selecto_generated,
+             {:raw_sql_filter,
+              Selecto.Builder.JsonOperations.build_json_filter(spec, json_builder_opts)}}
           end)
       end
 
@@ -1107,6 +1108,8 @@ defmodule Selecto.Builder.Sql do
   # values. Restore markers through the configured adapter so the outer query
   # can coordinate placeholders without assuming a database's syntax.
   defp build_subquery_join(selecto, join, config, fc, p, ctes) do
+    Selecto.Builder.Provenance.mark()
+
     subquery_sql =
       Map.get(config, :subquery) ||
         raise ArgumentError, "Subquery join #{inspect(join)} is missing :subquery SQL"
@@ -1674,6 +1677,12 @@ defmodule Selecto.Builder.Sql do
   # Convert user CTE spec to builder format. Query members over a
   # tenant-scoped relation take the root's tenant scope as the root stands
   # when it is compiled, whatever order the query was built in.
+  defp convert_user_cte_spec({tag, _definition, _params} = raw, _root)
+       when tag in [:raw_cte, :raw_recursive_cte] do
+    Selecto.Builder.Provenance.mark()
+    raw
+  end
+
   defp convert_user_cte_spec(%{type: :recursive} = spec, root) do
     %Selecto.Advanced.CTE.Spec{
       name: spec.name,

@@ -58,6 +58,7 @@ defmodule Selecto.Builder.Sql.Select do
   # Custom SQL clause (Phase 1 safety implementation)
   def prep_selector(selecto, {:custom_sql, sql_template, field_mappings})
       when is_binary(sql_template) or is_list(sql_template) do
+    Selecto.Builder.Provenance.mark()
     # Validate that all referenced fields exist
     available_fields = get_available_fields(selecto)
     validate_field_references(selecto, field_mappings, available_fields)
@@ -95,6 +96,7 @@ defmodule Selecto.Builder.Sql.Select do
   end
 
   def prep_selector(selecto, {:subquery, dynamic, params}) do
+    Selecto.Builder.Provenance.mark()
     prep_selector(selecto, {:subquery, dynamic, params}, %{})
   end
 
@@ -250,6 +252,7 @@ defmodule Selecto.Builder.Sql.Select do
   end
 
   def prep_selector(selecto, {:raw_sql, sql}) when is_binary(sql) do
+    Selecto.Builder.Provenance.mark()
     prep_selector(selecto, {:raw_sql, sql}, %{})
   end
 
@@ -306,6 +309,7 @@ defmodule Selecto.Builder.Sql.Select do
 
   def prep_selector(selecto, {:custom_sql, sql_template, field_mappings}, _retarget_aliases)
       when is_binary(sql_template) or is_list(sql_template) do
+    Selecto.Builder.Provenance.mark()
     prep_selector(selecto, {:custom_sql, sql_template, field_mappings})
   end
 
@@ -347,6 +351,7 @@ defmodule Selecto.Builder.Sql.Select do
   end
 
   def prep_selector(_selecto, {:subquery, dynamic, params}, _retarget_aliases) do
+    Selecto.Builder.Provenance.mark()
     # Dynamic subquery is already in the right format
     {[dynamic], [], params}
   end
@@ -889,6 +894,7 @@ defmodule Selecto.Builder.Sql.Select do
   end
 
   def prep_selector(_selecto, {:raw_sql, sql}, _retarget_aliases) when is_binary(sql) do
+    Selecto.Builder.Provenance.mark()
     # Trusted escape hatch for application-authored expressions. Never pass user input here.
     {[sql], :selecto_root, []}
   end
@@ -1219,6 +1225,9 @@ defmodule Selecto.Builder.Sql.Select do
       sub when is_binary(sub) ->
         # If the select value is a string, treat it as literal SQL
         # This handles cases like "string_agg(tags[name], ', ')" from tagging configurations
+        unless Regex.match?(~r/\A[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*\z/, sub),
+          do: Selecto.Builder.Provenance.mark()
+
         {[sub], conf.requires_join || :selecto_root, []}
 
       sub ->

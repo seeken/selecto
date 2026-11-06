@@ -10,6 +10,8 @@ defmodule Selecto.Builder.Sql.Where do
 
   import Selecto.Builder.Sql.Helpers
 
+  @or_to_membership 64
+
   alias Selecto.AdapterSQL
   alias Selecto.AdapterSupport
   alias Selecto.Builder.ExactCompare
@@ -59,8 +61,15 @@ defmodule Selecto.Builder.Sql.Where do
     end
   end
 
+  # Every filter of a compile, nested ones too, passes here: the node count
+  # a read is bounded by.
+  def build(selecto, filter) do
+    Selecto.Builder.Provenance.count_filter()
+    do_build(selecto, filter)
+  end
+
   # Handle CASE expressions in WHERE clause
-  def build(selecto, {field, {:instant_compare, operation, decimal}}) do
+  defp do_build(selecto, {field, {:instant_compare, operation, decimal}}) do
     # Revalidate manually constructed tuples as well as Expr helpers. The
     # governed field remains visible to normal policy and join resolution.
     Selecto.Expr.instant_compare(field, operation, decimal)
@@ -102,49 +111,49 @@ defmodule Selecto.Builder.Sql.Where do
     end
   end
 
-  def build(selecto, {:case, when_clauses, else_clause}) when is_list(when_clauses) do
+  defp do_build(selecto, {:case, when_clauses, else_clause}) when is_list(when_clauses) do
     {case_iodata, joins, params} = build_case_expression(selecto, when_clauses, else_clause)
     {joins, [" ", case_iodata, " "], params}
   end
 
-  def build(selecto, {:case, when_clauses}) when is_list(when_clauses) do
+  defp do_build(selecto, {:case, when_clauses}) when is_list(when_clauses) do
     build(selecto, {:case, when_clauses, nil})
   end
 
-  def build(selecto, {:udf, function_id, args}) when is_list(args) do
+  defp do_build(selecto, {:udf, function_id, args}) when is_list(args) do
     {selector_iodata, joins, params} = Select.build_udf(selecto, function_id, args, :filter)
     {List.wrap(joins), [" ", selector_iodata, " "], params}
   end
 
-  def build(selecto, {fields, {:text_search, value}})
-      when is_list(fields) and not is_list(value) do
+  defp do_build(selecto, {fields, {:text_search, value}})
+       when is_list(fields) and not is_list(value) do
     build_text_search(selecto, fields, value)
   end
 
-  def build(selecto, {fields, {:text_search, opts}}) when is_list(fields) and is_list(opts) do
+  defp do_build(selecto, {fields, {:text_search, opts}}) when is_list(fields) and is_list(opts) do
     {resolved_fields, value, text_search_opts} = normalize_text_search_spec(fields, opts)
     build_text_search(selecto, resolved_fields, value, text_search_opts)
   end
 
-  def build(selecto, {fields, {:text_search, value, opts}})
-      when is_list(fields) and is_list(opts) do
+  defp do_build(selecto, {fields, {:text_search, value, opts}})
+       when is_list(fields) and is_list(opts) do
     build_text_search(selecto, fields, value, opts)
   end
 
-  def build(selecto, {field, {:text_search, opts}}) when is_list(opts) do
+  defp do_build(selecto, {field, {:text_search, opts}}) when is_list(opts) do
     {resolved_fields, value, text_search_opts} = normalize_text_search_spec([field], opts)
     build_text_search(selecto, resolved_fields, value, text_search_opts)
   end
 
-  def build(selecto, {field, {:text_search, value}}) when not is_list(value) do
+  defp do_build(selecto, {field, {:text_search, value}}) when not is_list(value) do
     build_text_search(selecto, [field], value)
   end
 
-  def build(selecto, {field, {:text_search, value, opts}}) when is_list(opts) do
+  defp do_build(selecto, {field, {:text_search, value, opts}}) when is_list(opts) do
     build_text_search(selecto, [field], value, opts)
   end
 
-  def build(selecto, {field, {:subquery, :in, %Selecto{} = query_selecto}}) do
+  defp do_build(selecto, {field, {:subquery, :in, %Selecto{} = query_selecto}}) do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
     query_iodata = selecto_subquery_to_iodata(query_selecto)
@@ -155,7 +164,8 @@ defmodule Selecto.Builder.Sql.Where do
      end), param}
   end
 
-  def build(selecto, {field, {:subquery, :in, query, params}}) do
+  defp do_build(selecto, {field, {:subquery, :in, query, params}}) do
+    Selecto.Builder.Provenance.mark()
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
     query_iodata = Selecto.SQL.Params.rebind_finalized(query, params, selecto.adapter)
@@ -165,7 +175,8 @@ defmodule Selecto.Builder.Sql.Where do
      param ++ params}
   end
 
-  def build(selecto, {field, {:subquery, :in, query}}) do
+  defp do_build(selecto, {field, {:subquery, :in, query}}) do
+    Selecto.Builder.Provenance.mark()
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
 
@@ -173,8 +184,8 @@ defmodule Selecto.Builder.Sql.Where do
      in_subquery_clause(selecto, conf, field, sel, in_subquery_fragment(query), nil), param}
   end
 
-  def build(selecto, {field, comp, {:subquery, agg, %Selecto{} = query_selecto}})
-      when agg in [:any, :all] do
+  defp do_build(selecto, {field, comp, {:subquery, agg, %Selecto{} = query_selecto}})
+       when agg in [:any, :all] do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
     query_iodata = selecto_subquery_to_iodata(query_selecto)
@@ -192,7 +203,9 @@ defmodule Selecto.Builder.Sql.Where do
      ), param}
   end
 
-  def build(selecto, {field, comp, {:subquery, agg, query, params}}) when agg in [:any, :all] do
+  defp do_build(selecto, {field, comp, {:subquery, agg, query, params}})
+       when agg in [:any, :all] do
+    Selecto.Builder.Provenance.mark()
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
     query_iodata = Selecto.SQL.Params.rebind_finalized(query, params, selecto.adapter)
@@ -210,7 +223,8 @@ defmodule Selecto.Builder.Sql.Where do
      ), param ++ params}
   end
 
-  def build(selecto, {field, comp, {:subquery, agg, query}}) when agg in [:any, :all] do
+  defp do_build(selecto, {field, comp, {:subquery, agg, query}}) when agg in [:any, :all] do
+    Selecto.Builder.Provenance.mark()
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
     operator = subquery_operator!(comp)
@@ -227,68 +241,59 @@ defmodule Selecto.Builder.Sql.Where do
      ), param}
   end
 
-  def build(_selecto, {:exists, %Selecto{} = query_selecto}) do
+  defp do_build(_selecto, {:exists, %Selecto{} = query_selecto}) do
     query_iodata = selecto_subquery_to_iodata(query_selecto)
     {[], [" exists (", query_iodata, ") "], []}
   end
 
-  def build(selecto, {:exists, query, params}) do
+  defp do_build(selecto, {:exists, query, params}) do
+    Selecto.Builder.Provenance.mark()
     query_iodata = Selecto.SQL.Params.rebind_finalized(query, params, selecto.adapter)
     {[], [" exists (", query_iodata, ") "], params}
   end
 
-  def build(_selecto, {:exists, query}) do
+  defp do_build(_selecto, {:exists, query}) do
+    Selecto.Builder.Provenance.mark()
     {[], [" exists (", query, ") "], []}
   end
 
   # A scope filter (marked by provenance in Selecto.Builder.Sql): its
   # comparisons, and those of the computed columns it names, compile as
   # scope.
-  def build(selecto, {:selecto_scope, filter}),
+  defp do_build(selecto, {:selecto_scope, filter}),
     do: ExactCompare.in_scope(fn -> build(selecto, filter) end)
 
-  def build(selecto, {:not, filter}) do
+  defp do_build(selecto, {:not, filter}) do
     {j, c, p} = build(selecto, filter)
     {j, ["not ( ", c, " ) "], p}
   end
 
-  def build(selecto, {conj, filters}) when conj in [:and, :or] do
-    # Handle empty filter list - return empty result to avoid empty WHERE clauses
-    if Enum.empty?(filters) do
-      {[], [], []}
-    else
-      {joins, clauses, param_chunks} =
-        Enum.reduce(filters, {[], [], []}, fn
-          f, {joins, clauses, param_chunks} ->
-            {j, c, p} = build(selecto, f)
-            {[j | joins], [c | clauses], [p | param_chunks]}
-        end)
-
-      joins = Enum.reverse(joins)
-      clauses = Enum.reverse(clauses)
-      params = param_chunks |> Enum.reverse() |> List.flatten()
-
-      clause_parts = Enum.map(clauses, fn c -> ["(", c, ")"] end)
-      conj_str = " #{conj} "
-
-      final_clause = [
-        "(",
-        Enum.intersperse(clause_parts, conj_str),
-        ")"
-      ]
-
-      {joins, final_clause, params}
+  # Many equalities of one field are one membership: one parameter array, not
+  # a term each, for the compiler and every adapter after it.
+  defp do_build(selecto, {:or, filters})
+       when is_list(filters) and length(filters) >= @or_to_membership do
+    case same_field_scalars(filters) do
+      {field, values} -> do_build(selecto, {field, values})
+      nil -> build_conjunction(selecto, :or, filters)
     end
   end
 
+  defp do_build(selecto, {conj, filters}) when conj in [:and, :or],
+    do: build_conjunction(selecto, conj, filters)
+
+  # A filter Selecto built from what it was given (retarget, JSON).
+  defp do_build(selecto, {:selecto_generated, filter}),
+    do: Selecto.Builder.Provenance.generated(fn -> do_build(selecto, filter) end)
+
   # Prebuilt SQL filters (used by JSON and other advanced operations).
-  def build(_selecto, {:raw_sql_filter, filter_iodata}) do
+  defp do_build(_selecto, {:raw_sql_filter, filter_iodata}) do
+    Selecto.Builder.Provenance.mark()
     {[], [" ", filter_iodata, " "], []}
   end
 
   # The step of a depth-bounded recursive CTE stops at max_depth.
-  def build(selecto, {:recursion_depth_below, join_id, max_depth})
-      when is_atom(join_id) and is_integer(max_depth) and max_depth > 0 do
+  defp do_build(selecto, {:recursion_depth_below, join_id, max_depth})
+       when is_atom(join_id) and is_integer(max_depth) and max_depth > 0 do
     {[join_id],
      [
        " ",
@@ -299,15 +304,15 @@ defmodule Selecto.Builder.Sql.Where do
      ], []}
   end
 
-  def build(selecto, {field, {:datetime_part, part, predicate}}) do
+  defp do_build(selecto, {field, {:datetime_part, part, predicate}}) do
     build_datetime_predicate(selecto, field, :extract_part, part, predicate)
   end
 
-  def build(selecto, {field, {:datetime_format, format, predicate}}) do
+  defp do_build(selecto, {field, {:datetime_format, format, predicate}}) do
     build_datetime_predicate(selecto, field, :format, nil, predicate, %{format: format})
   end
 
-  def build(selecto, {field, {:text_normalized, options, predicate}}) when is_map(options) do
+  defp do_build(selecto, {field, {:text_normalized, options, predicate}}) when is_map(options) do
     conf = field_conf(selecto, field)
     {expression, joins, params} = Select.prep_selector(selecto, field)
 
@@ -325,7 +330,7 @@ defmodule Selecto.Builder.Sql.Where do
 
   # Handle :between with list format [{min, max}]
   # For datetime types, use >= start AND < end for better boundary handling
-  def build(selecto, {field, {:between, [min, max]}}) do
+  defp do_build(selecto, {field, {:between, [min, max]}}) do
     conf = field_conf(selecto, field)
     # Extract actual field name, not display name
     field_name = extract_database_field(field, conf)
@@ -374,7 +379,7 @@ defmodule Selecto.Builder.Sql.Where do
   end
 
   # Handle :between with separate bounds and structured-value dot notation.
-  def build(selecto, {field, {:between, min, max}}) when is_binary(field) do
+  defp do_build(selecto, {field, {:between, min, max}}) when is_binary(field) do
     domain = selecto.config
 
     case Json.parse_field_reference(field, domain) do
@@ -388,39 +393,39 @@ defmodule Selecto.Builder.Sql.Where do
 
   # Handle :between with separate min, max parameters
   # For datetime types, use >= start AND < end for better boundary handling
-  def build(selecto, {field, {:between, min, max}}) do
+  defp do_build(selecto, {field, {:between, min, max}}) do
     build_regular_between(selecto, field, min, max)
   end
 
-  def build(selecto, {field, {:starts_with, value}}) when is_binary(value) do
+  defp do_build(selecto, {field, {:starts_with, value}}) when is_binary(value) do
     pattern = escape_like_literal(value) <> "%"
     {sel, join, param} = Select.prep_selector(selecto, field)
 
     {List.wrap(join), like_clause(selecto, field, sel, "LIKE", pattern, " ESCAPE '!'"), param}
   end
 
-  def build(selecto, {field, {:text_contains, value}}) when is_binary(value) do
+  defp do_build(selecto, {field, {:text_contains, value}}) when is_binary(value) do
     pattern = "%" <> escape_like_literal(value) <> "%"
     {sel, join, param} = Select.prep_selector(selecto, field)
 
     {List.wrap(join), like_clause(selecto, field, sel, "LIKE", pattern, " ESCAPE '!'"), param}
   end
 
-  def build(selecto, {field, {:ends_with, value}}) when is_binary(value) do
+  defp do_build(selecto, {field, {:ends_with, value}}) when is_binary(value) do
     pattern = "%" <> escape_like_literal(value)
     {sel, join, param} = Select.prep_selector(selecto, field)
 
     {List.wrap(join), like_clause(selecto, field, sel, "LIKE", pattern, " ESCAPE '!'"), param}
   end
 
-  def build(selecto, {field, {:like, value}}) do
+  defp do_build(selecto, {field, {:like, value}}) do
     # ### Value must have a % in it to work!
     {sel, join, param} = Select.prep_selector(selecto, field)
     {List.wrap(join), like_clause(selecto, field, sel, "LIKE", value, ""), param}
   end
 
-  def build(selecto, {field, {comp, value}})
-      when comp in [:case_insensitive_like, :case_insensitive_not_like] do
+  defp do_build(selecto, {field, {comp, value}})
+       when comp in [:case_insensitive_like, :case_insensitive_not_like] do
     refuse_timestamp_operator(selecto, field, "a case-insensitive pattern")
     {sel, join, params} = Select.prep_selector(selecto, field)
 
@@ -443,8 +448,8 @@ defmodule Selecto.Builder.Sql.Where do
     end
   end
 
-  def build(selecto, {field, {comp, {:ref, ref_field}}})
-      when comp in [:=, :!=, :<, :>, :<=, :>=, :gt, :lt, :gte, :lte, :eq, :ne] do
+  defp do_build(selecto, {field, {comp, {:ref, ref_field}}})
+       when comp in [:=, :!=, :<, :>, :<=, :>=, :gt, :lt, :gte, :lte, :eq, :ne] do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
     {ref_sel, ref_join, ref_params} = Select.prep_selector(selecto, {:ref, ref_field})
@@ -465,7 +470,7 @@ defmodule Selecto.Builder.Sql.Where do
      param ++ ref_params}
   end
 
-  def build(selecto, {field, {comp, {:ref, ref_field}}}) when comp in ~w[= != < > <= >=] do
+  defp do_build(selecto, {field, {comp, {:ref, ref_field}}}) when comp in ~w[= != < > <= >=] do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
     {ref_sel, ref_join, ref_params} = Select.prep_selector(selecto, {:ref, ref_field})
@@ -475,16 +480,16 @@ defmodule Selecto.Builder.Sql.Where do
      param ++ ref_params}
   end
 
-  def build(selecto, {field, {:not_like, value}}) do
+  defp do_build(selecto, {field, {:not_like, value}}) do
     # NOT LIKE filter - value should already have % wildcards
     {sel, join, param} = Select.prep_selector(selecto, field)
     {List.wrap(join), like_clause(selecto, field, sel, "NOT LIKE", value, ""), param}
   end
 
   # Structured-value path with comparison operators.
-  def build(selecto, {field, {comp, value}})
-      when is_binary(field) and
-             comp in [:gt, :lt, :gte, :lte, :eq, :ne, :=, :!=, :<, :>, :<=, :>=] do
+  defp do_build(selecto, {field, {comp, value}})
+       when is_binary(field) and
+              comp in [:gt, :lt, :gte, :lte, :eq, :ne, :=, :!=, :<, :>, :<=, :>=] do
     domain = selecto.config
 
     case Json.parse_field_reference(field, domain) do
@@ -496,8 +501,8 @@ defmodule Selecto.Builder.Sql.Where do
     end
   end
 
-  def build(selecto, {field, {comp, value}})
-      when comp in [:=, :!=, :<, :>, :<=, :>=, :gt, :lt, :gte, :lte, :eq, :ne] do
+  defp do_build(selecto, {field, {comp, value}})
+       when comp in [:=, :!=, :<, :>, :<=, :>=, :gt, :lt, :gte, :lte, :eq, :ne] do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
 
@@ -524,7 +529,7 @@ defmodule Selecto.Builder.Sql.Where do
      ), param}
   end
 
-  def build(selecto, {field, {comp, value}}) when comp in ~w[= != < > <= >=] do
+  defp do_build(selecto, {field, {comp, value}}) when comp in ~w[= != < > <= >=] do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
 
@@ -540,7 +545,7 @@ defmodule Selecto.Builder.Sql.Where do
   end
 
   # Structured-value path with :in operator.
-  def build(selecto, {field, {:in, list}}) when is_binary(field) and is_list(list) do
+  defp do_build(selecto, {field, {:in, list}}) when is_binary(field) and is_list(list) do
     domain = selecto.config
 
     case Json.parse_field_reference(field, domain) do
@@ -567,7 +572,7 @@ defmodule Selecto.Builder.Sql.Where do
     end
   end
 
-  def build(selecto, {field, {:in, list}}) when is_list(list) do
+  defp do_build(selecto, {field, {:in, list}}) when is_list(list) do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
 
@@ -587,7 +592,7 @@ defmodule Selecto.Builder.Sql.Where do
     {List.wrap(conf.requires_join) ++ List.wrap(join), in_clause, param}
   end
 
-  def build(selecto, {field, {:not_in, list}}) when is_list(list) do
+  defp do_build(selecto, {field, {:not_in, list}}) when is_list(list) do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
 
@@ -607,7 +612,7 @@ defmodule Selecto.Builder.Sql.Where do
     {List.wrap(conf.requires_join) ++ List.wrap(join), not_in_clause, param}
   end
 
-  def build(selecto, {field, list}) when is_list(list) do
+  defp do_build(selecto, {field, list}) when is_list(list) do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
 
@@ -627,24 +632,24 @@ defmodule Selecto.Builder.Sql.Where do
     {List.wrap(conf.requires_join) ++ List.wrap(join), in_clause, param}
   end
 
-  def build(selecto, {field, {:not, nil}}) do
+  defp do_build(selecto, {field, {:not, nil}}) do
     # Handle {:not, nil} as "IS NOT NULL"
     build(selecto, {field, :not_null})
   end
 
-  def build(selecto, {field, :not_null}) do
+  defp do_build(selecto, {field, :not_null}) do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
     {List.wrap(conf.requires_join) ++ List.wrap(join), [" ", sel, " is not null "], param}
   end
 
-  def build(selecto, {field, value}) when is_nil(value) do
+  defp do_build(selecto, {field, value}) when is_nil(value) do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
     {List.wrap(conf.requires_join) ++ List.wrap(join), [" ", sel, " is null "], param}
   end
 
-  def build(selecto, {field, {:ref, ref_field}}) do
+  defp do_build(selecto, {field, {:ref, ref_field}}) do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
     {ref_sel, ref_join, ref_params} = Select.prep_selector(selecto, {:ref, ref_field})
@@ -655,13 +660,13 @@ defmodule Selecto.Builder.Sql.Where do
   end
 
   # Handle array filter specifications (must come before generic {field, value})
-  def build(selecto, {:array_filter, spec}) do
+  defp do_build(selecto, {:array_filter, spec}) do
     {sql, params} = Selecto.Advanced.ArrayOperations.to_sql(spec, [], selecto)
     {[], sql, params}
   end
 
   # Array contains - checks if array contains all specified elements
-  def build(selecto, {:array_contains, field, values}) when is_list(values) do
+  defp do_build(selecto, {:array_contains, field, values}) when is_list(values) do
     {sel, join, param} = Select.prep_selector(selecto, field)
 
     {sql, array_params} =
@@ -671,7 +676,7 @@ defmodule Selecto.Builder.Sql.Where do
   end
 
   # Array contained - checks if array is contained by specified elements
-  def build(selecto, {:array_contained, field, values}) when is_list(values) do
+  defp do_build(selecto, {:array_contained, field, values}) when is_list(values) do
     {sel, join, param} = Select.prep_selector(selecto, field)
 
     {sql, array_params} =
@@ -681,7 +686,7 @@ defmodule Selecto.Builder.Sql.Where do
   end
 
   # Array overlap - checks if arrays have any common elements
-  def build(selecto, {:array_overlap, field, values}) when is_list(values) do
+  defp do_build(selecto, {:array_overlap, field, values}) when is_list(values) do
     {sel, join, param} = Select.prep_selector(selecto, field)
 
     {sql, array_params} =
@@ -691,7 +696,7 @@ defmodule Selecto.Builder.Sql.Where do
   end
 
   # Array equality - checks if arrays are equal
-  def build(selecto, {:array_eq, field, values}) when is_list(values) do
+  defp do_build(selecto, {:array_eq, field, values}) when is_list(values) do
     {sel, join, param} = Select.prep_selector(selecto, field)
 
     {sql, array_params} =
@@ -705,9 +710,9 @@ defmodule Selecto.Builder.Sql.Where do
   # ---------------------------------------------------------------------------
 
   # JSON containment.
-  def build(selecto, {field, {:json_contains, value}})
-      when is_map(value) or is_list(value) or is_binary(value) or is_number(value) or
-             is_boolean(value) or is_nil(value) do
+  defp do_build(selecto, {field, {:json_contains, value}})
+       when is_map(value) or is_list(value) or is_binary(value) or is_number(value) or
+              is_boolean(value) or is_nil(value) do
     domain = selecto.config
 
     if Json.json_column?(domain, field) do
@@ -729,7 +734,7 @@ defmodule Selecto.Builder.Sql.Where do
   end
 
   # JSON key/path existence.
-  def build(selecto, {field, :exists}) do
+  defp do_build(selecto, {field, :exists}) do
     domain = selecto.config
 
     case Json.parse_field_reference(field, domain) do
@@ -749,7 +754,7 @@ defmodule Selecto.Builder.Sql.Where do
   end
 
   # JSON array membership.
-  def build(selecto, {field, {:contains, value}}) do
+  defp do_build(selecto, {field, {:contains, value}}) do
     domain = selecto.config
 
     case Json.parse_field_reference(field, domain) do
@@ -769,7 +774,7 @@ defmodule Selecto.Builder.Sql.Where do
   end
 
   # All-values JSON array membership.
-  def build(selecto, {field, {:contains_all, values}}) when is_list(values) do
+  defp do_build(selecto, {field, {:contains_all, values}}) when is_list(values) do
     domain = selecto.config
 
     case Json.parse_field_reference(field, domain) do
@@ -789,7 +794,7 @@ defmodule Selecto.Builder.Sql.Where do
   end
 
   # Generic field equality with structured-value dot notation.
-  def build(selecto, {field, value}) when is_binary(field) do
+  defp do_build(selecto, {field, value}) when is_binary(field) do
     domain = selecto.config
 
     case Json.parse_field_reference(field, domain) do
@@ -812,7 +817,7 @@ defmodule Selecto.Builder.Sql.Where do
     end
   end
 
-  def build(selecto, {field, value}) do
+  defp do_build(selecto, {field, value}) do
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
 
@@ -827,7 +832,7 @@ defmodule Selecto.Builder.Sql.Where do
      ), param}
   end
 
-  def build(_sel, other) do
+  defp do_build(_sel, other) do
     require Logger
 
     # Determine the type safely without logging the actual value (which may contain sensitive data)
@@ -1902,4 +1907,51 @@ defmodule Selecto.Builder.Sql.Where do
   # which opens a character class on SQL Server.
   defp escape_like_literal(value),
     do: String.replace(value, ~r/[!%_\[]/u, fn character -> "!" <> character end)
+
+  defp build_conjunction(selecto, conj, filters) do
+    # Handle empty filter list - return empty result to avoid empty WHERE clauses
+    if Enum.empty?(filters) do
+      {[], [], []}
+    else
+      {joins, clauses, param_chunks} =
+        Enum.reduce(filters, {[], [], []}, fn
+          f, {joins, clauses, param_chunks} ->
+            {j, c, p} = build(selecto, f)
+            {[j | joins], [c | clauses], [p | param_chunks]}
+        end)
+
+      joins = Enum.reverse(joins)
+      clauses = Enum.reverse(clauses)
+      params = param_chunks |> Enum.reverse() |> List.flatten()
+
+      clause_parts = Enum.map(clauses, fn c -> ["(", c, ")"] end)
+      conj_str = " #{conj} "
+
+      final_clause = [
+        "(",
+        Enum.intersperse(clause_parts, conj_str),
+        ")"
+      ]
+
+      {joins, final_clause, params}
+    end
+  end
+
+  defp same_field_scalars([{field, value} | _] = filters)
+       when is_binary(field) and is_binary(value),
+       do: same_field_scalars(filters, field, is_binary(value))
+
+  defp same_field_scalars([{field, value} | _] = filters)
+       when is_binary(field) and is_number(value),
+       do: same_field_scalars(filters, field, false)
+
+  defp same_field_scalars(_filters), do: nil
+
+  defp same_field_scalars(filters, field, binary?) do
+    scalar? = fn value -> if binary?, do: is_binary(value), else: is_number(value) end
+
+    if Enum.all?(filters, &(match?({^field, _}, &1) and scalar?.(elem(&1, 1)))),
+      do: {field, Enum.map(filters, &elem(&1, 1))},
+      else: nil
+  end
 end

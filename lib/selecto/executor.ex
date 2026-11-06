@@ -82,7 +82,7 @@ defmodule Selecto.Executor do
       opts
       |> Keyword.put(:selecto_read, true)
       |> put_declared_functions(declared_functions(selecto))
-      |> put_raw_fragments(raw_fragments(selecto))
+      |> put_raw_mark(selecto)
 
     case selecto |> Map.get(:set) |> Kernel.||(%{}) |> Map.get(:qualified_relations) do
       relations when is_map(relations) and map_size(relations) > 0 ->
@@ -93,46 +93,30 @@ defmodule Selecto.Executor do
     end
   end
 
-  defp put_raw_fragments(opts, []), do: Keyword.delete(opts, :selecto_raw_fragments)
-
-  defp put_raw_fragments(opts, fragments),
-    do: Keyword.put(opts, :selecto_raw_fragments, fragments)
-
-  # The text a query carries that Selecto did not generate: an adapter that
-  # types statements must see it apart from what it can prove.
-  defp raw_fragments(selecto) do
-    set =
-      selecto
-      |> Map.get(:set)
-      |> Kernel.||(%{})
-      |> Map.drop([:qualified_relations, :pg_operator_types])
-
-    domain_filters = selecto |> Map.get(:domain) |> Kernel.||(%{}) |> Map.get(:required_filters)
-
-    [set, domain_filters] |> collect_raw([]) |> Enum.uniq()
+  defp put_raw_mark(opts, selecto) do
+    if raw_sql?(selecto),
+      do: Keyword.put(opts, :selecto_raw_sql, true),
+      else: Keyword.delete(opts, :selecto_raw_sql)
   end
 
-  defp collect_raw({tag, text}, acc) when tag in [:raw_sql_filter, :raw_sql, :custom_sql],
-    do: [raw_text(text) | acc]
+  # prepare_read/1 records it; a read that skipped it compiles to find out.
+  defp raw_sql?(selecto) do
+    case selecto |> Map.get(:set) |> Kernel.||(%{}) |> Map.fetch(:raw_sql_compiled) do
+      {:ok, marked?} -> marked?
+      :error -> selecto |> compile_provenance() |> elem(0)
+    end
+  end
 
-  defp collect_raw({:custom_sql, text, _fields}, acc), do: [raw_text(text) | acc]
-  defp collect_raw(%_{}, acc), do: acc
-  defp collect_raw(term, acc) when is_tuple(term), do: term |> Tuple.to_list() |> collect_raw(acc)
-  defp collect_raw(term, acc) when is_list(term), do: Enum.reduce(term, acc, &collect_raw/2)
-  defp collect_raw(term, acc) when is_map(term), do: term |> Map.values() |> collect_raw(acc)
-  defp collect_raw(_term, acc), do: acc
+  # A statement that cannot compile counts as marked; its compile raises where
+  # it always did.
+  defp compile_provenance(selecto) do
+    {_sql, marked?, nodes} =
+      Selecto.Builder.Provenance.capture(fn -> Selecto.Builder.Sql.build(selecto, []) end)
 
-  defp raw_text(text) when is_binary(text), do: text
-
-  defp raw_text(parts) when is_list(parts),
-    do: parts |> List.flatten() |> Enum.map_join(" ", &raw_part/1)
-
-  defp raw_text(_other), do: ""
-
-  defp raw_part(part) when is_binary(part), do: part
-  defp raw_part(part) when is_integer(part), do: <<part::utf8>>
-  defp raw_part({:param, _value}), do: "$0"
-  defp raw_part(_other), do: ""
+    {marked?, nodes}
+  rescue
+    _exception -> {true, 0}
+  end
 
   defp put_declared_functions(opts, []), do: Keyword.delete(opts, :selecto_declared_functions)
 
@@ -261,30 +245,25 @@ defmodule Selecto.Executor do
   # zone-independently (Selecto.Builder.ExactCompare.storage_kind/4).
   @doc false
   def prepare_read(selecto) do
-    if filter_nodes(selecto) > @max_filter_nodes do
-      {:error,
-       Selecto.Error.validation_error("Filters are beyond the size Selecto will compile", %{
-         reason: :filter_too_large,
-         limit: @max_filter_nodes
-       })}
-    else
-      prepare_adapter_read(selecto)
+    with {:ok, prepared} <- prepare_adapter_read(selecto) do
+      {marked?, nodes} = compile_provenance(prepared)
+
+      if nodes > @max_filter_nodes do
+        {:error,
+         Selecto.Error.validation_error("Filters are beyond the size Selecto will compile", %{
+           reason: :filter_too_large,
+           limit: @max_filter_nodes
+         })}
+      else
+        {:ok, record_mark(prepared, marked?)}
+      end
     end
   end
 
-  # M6: every compile walks the filter tree, and an adapter that qualifies
-  # statements costs more than the tree does.
-  defp filter_nodes(selecto) do
-    selecto |> Map.get(:set) |> Kernel.||(%{}) |> Map.get(:filtered, []) |> count_nodes(0)
-  end
+  defp record_mark(%{set: set} = selecto, marked?) when is_map(set),
+    do: %{selecto | set: Map.put(set, :raw_sql_compiled, marked?)}
 
-  defp count_nodes(term, count) when is_list(term),
-    do: Enum.reduce(term, count + 1, &count_nodes/2)
-
-  defp count_nodes(term, count) when is_tuple(term),
-    do: term |> Tuple.to_list() |> count_nodes(count)
-
-  defp count_nodes(_term, count), do: count + 1
+  defp record_mark(selecto, _marked?), do: selecto
 
   defp prepare_adapter_read(selecto) do
     adapter = runtime_adapter(selecto)
