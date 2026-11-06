@@ -120,6 +120,27 @@ defmodule Selecto.ComputedValueColumnsTest do
     assert "Unassigned" in params
   end
 
+  test "a string literal under a cast keeps its inferred type, marked; a written one does not" do
+    assert {:ok, ["cast", ["literal", "1.5", "decimal", "inferred"], "integer"]} =
+             Selecto.Domain.Contract.ComputedValues.normalize([
+               "cast",
+               ["literal", "1.5"],
+               "integer"
+             ])
+
+    assert {:ok, ["cast", ["literal", "1.5", "decimal"], "integer"]} =
+             Selecto.Domain.Contract.ComputedValues.normalize([
+               "cast",
+               ["literal", "1.5", "decimal"],
+               "integer"
+             ])
+
+    {:ok, once} =
+      Selecto.Domain.Contract.ComputedValues.normalize(["cast", ["literal", "1"], "integer"])
+
+    assert {:ok, ^once} = Selecto.Domain.Contract.ComputedValues.normalize(once)
+  end
+
   test "case, divide, and json_text compile with bound values" do
     {sql, params} =
       domain()

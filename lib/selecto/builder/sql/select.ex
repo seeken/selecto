@@ -1972,6 +1972,24 @@ defmodule Selecto.Builder.Sql.Select do
     {[String.upcase(op), "(", sql, ")"], joins, params}
   end
 
+  # A string literal whose type was inferred, directly under a cast: a dialect
+  # that converts literals from text goes straight to the target; the others
+  # keep their cast of the inferred type, whose conversion is their dialect's.
+  defp compile_value(
+         selecto,
+         ["cast", ["literal", value, inferred, "inferred"], type],
+         retarget_aliases
+       ) do
+    {param, _join, params} = prep_selector(selecto, {:param, value}, retarget_aliases)
+
+    expression =
+      if Selecto.DialectSupport.literal_casts_from_text?(selecto.adapter),
+        do: param,
+        else: computed_cast!(selecto, param, inferred)
+
+    {computed_cast!(selecto, expression, type), [], params}
+  end
+
   defp compile_value(selecto, ["cast", value, type], retarget_aliases) do
     {sql, joins, params} = compile_value(selecto, value, retarget_aliases)
 

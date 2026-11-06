@@ -58,6 +58,9 @@ defmodule Selecto.Executor do
     else
       {:error, %Selecto.Error{} = error} ->
         {:error, error}
+
+      {:error, reason} ->
+        {:error, Selecto.Error.from_reason(reason)}
     end
   end
 
@@ -615,6 +618,9 @@ defmodule Selecto.Executor do
     else
       {:error, %Selecto.Error{} = error} ->
         {:error, error}
+
+      {:error, reason} ->
+        {:error, Selecto.Error.from_reason(reason)}
     end
   end
 
@@ -871,6 +877,7 @@ defmodule Selecto.Executor do
       end)
     else
       {:error, %Selecto.Error{} = error} -> {:error, error}
+      {:error, reason} -> {:error, Selecto.Error.from_reason(reason)}
     end
   end
 
@@ -929,6 +936,9 @@ defmodule Selecto.Executor do
     else
       {:error, %Selecto.Error{} = error} ->
         {:error, error}
+
+      {:error, reason} ->
+        {:error, Selecto.Error.from_reason(reason)}
     end
   end
 
