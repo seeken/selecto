@@ -260,6 +260,19 @@ defmodule Selecto.Expr do
   @spec eq(term(), term()) :: tuple()
   def eq(field, value), do: {field, value}
 
+  @doc "Compares a governed instant field to exact decimal epoch seconds, without timestamp rounding."
+  def instant_compare(field, operation, decimal)
+      when (is_binary(field) or is_atom(field)) and
+             (operation == :eq or operation == :ne or operation == :gt or operation == :gte or
+                operation == :lt or operation == :lte) and
+             is_binary(decimal) and byte_size(decimal) <= 32 do
+    if Regex.match?(~r/\A-?(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,9})?\z/, decimal),
+      do: {field, {:instant_compare, operation, decimal}},
+      else: raise(ArgumentError, "Exact instant comparison requires bounded decimal seconds")
+  end
+
+  def instant_compare(_, _, _), do: raise(ArgumentError, "Invalid exact instant comparison")
+
   @doc "Builds a not-equal filter."
   @spec neq(term(), term()) :: tuple()
   def neq(field, value), do: {field, {:ne, value}}

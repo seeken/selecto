@@ -20,6 +20,8 @@ filter_input_aliases() {
         lib/selecto/json.ex:'      %{type: type} when type in [:json, :jsonb] -> true' | \
         lib/selecto/domain/contract/computed_values.ex:'      t when t in ~w(utc_datetime datetime naive_datetime timestamp timestamptz) -> :datetime' | \
         lib/selecto/domain/contract/computed_values.ex:'      t when t in ~w(jsonb json) -> :json' | \
+        lib/selecto/dialect/instant.ex:'          source_type: :utc_datetime | :timestamptz | :epoch_datetime,' | \
+        lib/selecto/builder/sql/where.ex:'    unless type in ~w(utc_datetime timestamptz epoch_datetime) and' | \
         lib/selecto/builder/exact_compare.ex:'                 nchar_varying citext clob enum set bpchar)' | \
         lib/selecto/builder/exact_compare.ex:'  @non_text_types ~w(id integer bigint smallint tinyint mediumint serial bigserial int' | \
         lib/selecto/builder/exact_compare.ex:'                     utc_datetime_usec timestamp timestamptz epoch_datetime json jsonb map' | \

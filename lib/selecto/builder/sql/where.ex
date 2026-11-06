@@ -59,6 +59,48 @@ defmodule Selecto.Builder.Sql.Where do
   end
 
   # Handle CASE expressions in WHERE clause
+  def build(selecto, {field, {:instant_compare, operation, decimal}}) do
+    # Revalidate manually constructed tuples as well as Expr helpers. The
+    # governed field remains visible to normal policy and join resolution.
+    Selecto.Expr.instant_compare(field, operation, decimal)
+    conf = field_conf(selecto, field)
+    type = Map.get(conf, :type) |> to_string()
+
+    unless type in ~w(utc_datetime timestamptz epoch_datetime) and
+             is_nil(Selecto.Temporal.epoch_storage(conf)),
+           do:
+             raise(
+               ArgumentError,
+               "Exact comparison requires an instant field with supported storage"
+             )
+
+    storage = Map.get(conf, :storage)
+
+    unless storage in [nil, :naive_utc, "naive_utc"],
+      do: raise(ArgumentError, "Unsupported instant storage")
+
+    {selector, joins, params} = Select.prep_selector(selecto, field)
+
+    fragment = %Selecto.Dialect.Instant.Comparison{
+      operation: operation,
+      expression: selector,
+      value: {:param, decimal},
+      source_type: String.to_existing_atom(type),
+      storage: if(is_nil(storage), do: nil, else: :naive_utc)
+    }
+
+    case Selecto.DialectSupport.render_instant_comparison(selecto.adapter, fragment, selecto) do
+      {:ok, rendered} ->
+        {List.wrap(conf.requires_join) ++ List.wrap(joins), [" ", rendered, " "], params}
+
+      {:error, %Error{} = error} ->
+        raise Error.to_exception(error)
+
+      {:error, _} ->
+        raise ArgumentError, "Unsupported exact instant comparison"
+    end
+  end
+
   def build(selecto, {:case, when_clauses, else_clause}) when is_list(when_clauses) do
     {case_iodata, joins, params} = build_case_expression(selecto, when_clauses, else_clause)
     {joins, [" ", case_iodata, " "], params}

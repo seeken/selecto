@@ -47,6 +47,10 @@ defmodule Selecto.DialectSupport do
     render(adapter, :render_comparison, fragment, selecto, :case_insensitive_comparison)
   end
 
+  def render_instant_comparison(adapter, fragment, selecto) do
+    render(adapter, :render_instant_comparison, fragment, selecto, :exact_instant_comparisons)
+  end
+
   def render_bucket(adapter, fragment, selecto) do
     render(adapter, :render_bucket, fragment, selecto, :bucket_expression)
   end
