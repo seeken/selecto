@@ -74,7 +74,10 @@ defmodule Selecto.Executor do
   # schema-qualified relation names an adapter resolved in prepare_read/2
   # (PostgreSQL, ruling R23b).
   defp read_opts(selecto, opts) do
-    opts = Keyword.put(opts, :selecto_read, true)
+    opts =
+      opts
+      |> Keyword.put(:selecto_read, true)
+      |> put_declared_functions(declared_functions(selecto))
 
     case selecto |> Map.get(:set) |> Kernel.||(%{}) |> Map.get(:qualified_relations) do
       relations when is_map(relations) and map_size(relations) > 0 ->
@@ -83,6 +86,22 @@ defmodule Selecto.Executor do
       _ ->
         opts
     end
+  end
+
+  defp put_declared_functions(opts, []), do: Keyword.delete(opts, :selecto_declared_functions)
+
+  defp put_declared_functions(opts, functions),
+    do: Keyword.put(opts, :selecto_declared_functions, functions)
+
+  # The sql_names of the functions the domain declares (UDFs).
+  defp declared_functions(selecto) do
+    selecto
+    |> Selecto.UDF.functions()
+    |> Enum.flat_map(fn
+      {_id, %{} = spec} -> List.wrap(Map.get(spec, :sql_name) || Map.get(spec, "sql_name"))
+      _other -> []
+    end)
+    |> Enum.map(&to_string/1)
   end
 
   @doc false
