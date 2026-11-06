@@ -90,12 +90,22 @@ defmodule Selecto.Executor do
   # applied, compiled, with the options the adapter's read path takes. For
   # entry points that run the statement another way (EXPLAIN).
   def read_statement(selecto, to_sql_opts) do
-    with {:ok, selecto} <- prepare_read(selecto) do
+    with {:ok, selecto, opts} <- read_context(selecto) do
       {sql, params} = Selecto.to_sql(selecto, to_sql_opts)
-      {:ok, sql, params, read_opts(selecto, [])}
+      {:ok, sql, params, opts}
     end
   rescue
     refusal in Selecto.Builder.ScopeRefusal -> {:error, Selecto.Error.from_reason(refusal)}
+  end
+
+  @doc false
+  # The query as prepare_read/2 leaves it, and the adapter options of a read
+  # over it: for a caller that wraps the compiled statement (a count), then
+  # runs it through the adapter's guarded read path.
+  def read_context(selecto) do
+    with {:ok, selecto} <- prepare_read(selecto) do
+      {:ok, selecto, read_opts(selecto, [])}
+    end
   end
 
   @doc false
