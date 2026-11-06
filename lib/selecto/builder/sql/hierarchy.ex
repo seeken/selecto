@@ -240,7 +240,7 @@ defmodule Selecto.Builder.Sql.Hierarchy do
   """
   def build_closure_table_query(_selecto, join, config) do
     source_table = config.source
-    closure_table = Map.get(config, :closure_table, "#{source_table}_closure")
+    closure_table = closure_table_name(config)
     ancestor_field = Map.get(config, :ancestor_field, "ancestor_id")
     descendant_field = Map.get(config, :descendant_field, "descendant_id")
     depth_field = Map.get(config, :depth_field, "depth")
@@ -262,6 +262,11 @@ defmodule Selecto.Builder.Sql.Hierarchy do
     # No parameters needed for basic closure table query
     {query_iodata, []}
   end
+
+  @doc false
+  # The closure table a closure-table hierarchy join names.
+  def closure_table_name(config),
+    do: Map.get(config, :closure_table, "#{config.source}_closure")
 
   defp finalize_fragment(selecto, fragment) do
     adapter = adapter_for(selecto)

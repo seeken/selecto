@@ -89,10 +89,38 @@ defmodule Selecto.Executor do
   # Every relation a read's domain (and its set operands' domains) names:
   # source and schema tables, association bridges.
   def domain_relations(selecto) do
-    [selecto | set_operands(selecto)]
+    queries = [selecto | set_operands(selecto)]
+
+    queries
     |> Enum.map(&Map.get(&1, :domain))
     |> Enum.reduce([], &collect_relations/2)
+    |> Kernel.++(Enum.flat_map(queries, &generated_relations/1))
     |> Enum.uniq()
+  end
+
+  # Relations a join's compile names beyond the domain's tables: a tagging
+  # join's junction table, a closure table, a snowflake's normalization chain.
+  defp generated_relations(selecto) do
+    selecto
+    |> Map.get(:config)
+    |> Kernel.||(%{})
+    |> Map.get(:joins, %{})
+    |> Enum.flat_map(fn
+      {_id, %{join_type: :many_to_many} = join} ->
+        [to_string(Selecto.Builder.Sql.Tagging.join_table_name(join))]
+
+      {_id, %{join_type: :hierarchical_closure_table} = join} ->
+        [to_string(Selecto.Builder.Sql.Hierarchy.closure_table_name(join))]
+
+      {_id, %{join_type: :snowflake_dimension} = join} ->
+        join
+        |> Map.get(:normalization_joins, [])
+        |> Enum.flat_map(&List.wrap(Map.get(&1, :table)))
+        |> Enum.map(&to_string/1)
+
+      _join ->
+        []
+    end)
   end
 
   defp collect_relations(map, acc) when is_map(map) and not is_struct(map) do
