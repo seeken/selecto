@@ -12,13 +12,17 @@ defmodule Selecto.Builder.TypedOperator do
   # pg_catalog for built-in, domain, enum, range, array and composite types,
   # and the type's own schema for an extension or user base type (citext);
   # `arg` is the operator's argument type (a domain's base type, text for
-  # varchar, the type itself otherwise), schema-qualified. An operand whose
-  # type is not known still names pg_catalog's operator. IN and NOT IN are
+  # varchar, the type itself otherwise), schema-qualified. IN and NOT IN are
   # disjunctions of equalities, BETWEEN a pair of bounds, IN (subquery)
   # = ANY (subquery).
   #
-  # Without loaded types (compile-only SQL, other adapters) every function
-  # here renders the plain form, unchanged.
+  # An operand whose type is not known here (a computed field, a coalesce, an
+  # aggregate) renders the plain form: the adapter's last step
+  # (SelectoDBPostgreSQL.Qualify) types it by query scope, or refuses it. It
+  # is never defaulted to pg_catalog's operator, which would turn a citext
+  # comparison into a text one (R49c). Without loaded types (compile-only
+  # SQL, other adapters) every function here renders the plain form,
+  # unchanged.
 
   alias Selecto.Builder.ExactCompare
 
@@ -72,11 +76,11 @@ defmodule Selecto.Builder.TypedOperator do
     op = normalize(operator)
 
     cond do
-      not enabled?(selecto) or op == nil ->
+      not enabled?(selecto) or op == nil or type == nil ->
         plain(left, operator, right, opts)
 
       true ->
-        {schema, arg} = type || {"pg_catalog", nil}
+        {schema, arg} = type
         right = pattern_right(op, right, Keyword.get(opts, :escape))
 
         [
@@ -143,9 +147,9 @@ defmodule Selecto.Builder.TypedOperator do
   def compare_columns(selecto, left_type, left, operator, right_type, right) do
     op = normalize(operator)
 
-    if enabled?(selecto) and op != nil do
-      {left_schema, left_arg} = left_type || {"pg_catalog", nil}
-      {right_schema, right_arg} = right_type || {"pg_catalog", nil}
+    if enabled?(selecto) and op != nil and left_type != nil and right_type != nil do
+      {left_schema, left_arg} = left_type
+      {right_schema, right_arg} = right_type
 
       {schema, left_arg, right_arg} =
         if left_schema == right_schema,
@@ -170,7 +174,7 @@ defmodule Selecto.Builder.TypedOperator do
 
   @doc "IN / NOT IN over parameter values (each an iodata right operand)."
   def in_list(selecto, type, left, rights, negate?) do
-    if enabled?(selecto) do
+    if enabled?(selecto) and type != nil do
       equalities =
         rights
         |> Enum.map(&compare(selecto, type, left, "=", &1))
@@ -190,8 +194,8 @@ defmodule Selecto.Builder.TypedOperator do
   def subquery(selecto, type, left, operator, quantifier, fragment, plain) do
     op = normalize(operator)
 
-    if enabled?(selecto) and op != nil do
-      {schema, arg} = type || {"pg_catalog", nil}
+    if enabled?(selecto) and op != nil and type != nil do
+      {schema, arg} = type
 
       [
         " (",
@@ -203,7 +207,7 @@ defmodule Selecto.Builder.TypedOperator do
         ") ",
         quantifier,
         " ",
-        fragment,
+        typed_fragment(schema, arg, fragment),
         ") "
       ]
     else
@@ -213,8 +217,8 @@ defmodule Selecto.Builder.TypedOperator do
 
   @doc "left = ANY(array param) / NOT (left = ANY(array param))."
   def any_array(selecto, type, left, param, negate?) do
-    if enabled?(selecto) do
-      {schema, arg} = type || {"pg_catalog", nil}
+    if enabled?(selecto) and type != nil do
+      {schema, arg} = type
       array = if arg, do: ["CAST(", param, " AS ", arg, "[])"], else: param
       clause = ["(", cast(left, arg), " OPERATOR(", schema, ".=) ANY (", array, "))"]
       if negate?, do: [" NOT ", clause, " "], else: [" ", clause, " "]
@@ -227,7 +231,7 @@ defmodule Selecto.Builder.TypedOperator do
 
   @doc "left BETWEEN low AND high (both inclusive)."
   def between(selecto, type, left, low, high) do
-    if enabled?(selecto) do
+    if enabled?(selecto) and type != nil do
       [
         " (",
         compare(selecto, type, left, ">=", low),
@@ -239,6 +243,14 @@ defmodule Selecto.Builder.TypedOperator do
       [" ", left, " between ", low, " and ", high, " "]
     end
   end
+
+  # R50: an operator in an extension's schema (commonly writable) takes
+  # operands cast to the member's own type, the subquery's column included,
+  # so nothing planted beside it over a domain can be chosen.
+  defp typed_fragment("pg_catalog", _arg, fragment), do: fragment
+
+  defp typed_fragment(_schema, arg, fragment),
+    do: ["(SELECT CAST(selecto_q.v AS ", arg, ") FROM ", fragment, " AS selecto_q(v))"]
 
   defp plain(left, operator, right, opts) do
     case Keyword.get(opts, :escape) do
