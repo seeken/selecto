@@ -309,6 +309,23 @@ defmodule Selecto.ExecuteEntryPointTest do
       end
     end
 
+    test "a read carries the functions the domain declares, and only those" do
+      assert {:ok, _result} = Selecto.execute(query(CallerAdapter))
+      assert_received {:adapter_execute, _pid, opts}
+      refute Keyword.has_key?(opts, :selecto_declared_functions)
+
+      declared =
+        update_in(query(CallerAdapter).config, fn config ->
+          Map.put(config, :functions, %{my_fn: %{sql_name: "lib.my_fn"}})
+        end)
+
+      assert {:ok, _result} =
+               Selecto.execute(declared, selecto_declared_functions: ["public.forged"])
+
+      assert_received {:adapter_execute, _pid, opts}
+      assert opts[:selecto_declared_functions] == ["lib.my_fn"]
+    end
+
     test "the adapter receives the time remaining, capped at five minutes" do
       assert {:ok, _result} = Selecto.execute(query(CallerAdapter))
       assert_received {:adapter_execute, _pid, opts}
