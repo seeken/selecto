@@ -338,6 +338,7 @@ defmodule Selecto.QueryValidator do
   defp validate_filter!(_selecto, {:exists, _query}), do: :ok
   defp validate_filter!(_selecto, {:exists, _query, _params}), do: :ok
   defp validate_filter!(_selecto, {:raw_sql_filter, _filter_iodata}), do: :ok
+  defp validate_filter!(_selecto, {:selecto_generated, _filter}), do: :ok
 
   defp validate_filter!(selecto, {:udf, function_id, args}) when is_list(args) do
     validate_udf_call!(selecto, function_id, args, :filter)

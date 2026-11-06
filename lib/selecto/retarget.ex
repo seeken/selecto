@@ -185,7 +185,7 @@ defmodule Selecto.Retarget do
             Map.get(selecto.domain, :source)
           )
 
-        {:raw_sql_filter, ["(", Enum.intersperse(conditions, " AND "), ")"]}
+        {:selecto_generated, {:raw_sql_filter, ["(", Enum.intersperse(conditions, " AND "), ")"]}}
 
       _ ->
         nil
@@ -203,7 +203,9 @@ defmodule Selecto.Retarget do
       %{strategy: :exists, primary_key: primary_key} ->
         # The context selects only the target key, so its one column carries
         # the key's name; correlate on it outside the derived table.
-        {sql, params} = Selecto.to_sql(context(selecto))
+        {{sql, params}, marked?, _nodes} =
+          Selecto.Builder.Provenance.capture(fn -> Selecto.to_sql(context(selecto)) end)
+
         quote_id = &Selecto.Builder.Sql.Helpers.quote_identifier(selecto, &1)
         key = quote_id.(to_string(primary_key))
 
@@ -211,7 +213,7 @@ defmodule Selecto.Retarget do
           "select 1 from (#{sql}) #{quote_id.(@context_alias)} where " <>
             "#{quote_id.(@context_alias)}.#{key} = selecto_root.#{key}"
 
-        {:exists, correlated, params}
+        context_filter({:exists, correlated, params}, marked?)
     end
   end
 
@@ -230,8 +232,10 @@ defmodule Selecto.Retarget do
     quote_id = &Selecto.Builder.Sql.Helpers.quote_identifier(selecto, &1)
     context_alias = quote_id.(@context_alias)
 
-    {sql, _aliases, params} =
-      Selecto.gen_sql(context(selecto), unique_projection_aliases: true)
+    {{sql, _aliases, params}, marked?, _nodes} =
+      Selecto.Builder.Provenance.capture(fn ->
+        Selecto.gen_sql(context(selecto), unique_projection_aliases: true)
+      end)
 
     columns =
       keys
@@ -268,27 +272,35 @@ defmodule Selecto.Retarget do
             Enum.intersperse(conditions, " and ")
           ])
 
-        {:exists, correlated, params}
+        context_filter({:exists, correlated, params}, marked?)
 
       :in ->
         outer = Enum.flat_map(columns, &tuple_terms(elem(&1, 0), elem(&1, 2)))
         inner = Enum.flat_map(columns, &tuple_terms(elem(&1, 1), elem(&1, 2)))
         rebound = Selecto.SQL.Params.rebind_finalized(sql, params, selecto.adapter)
 
-        {:raw_sql_filter,
-         [
-           "(",
-           Enum.intersperse(outer, ", "),
-           ") in (select ",
-           Enum.intersperse(inner, ", "),
-           " from (",
-           rebound,
-           ") ",
-           context_alias,
-           ")"
-         ]}
+        context_filter(
+          {:raw_sql_filter,
+           [
+             "(",
+             Enum.intersperse(outer, ", "),
+             ") in (select ",
+             Enum.intersperse(inner, ", "),
+             " from (",
+             rebound,
+             ") ",
+             context_alias,
+             ")"
+           ]},
+          marked?
+        )
     end
   end
+
+  # The filter wraps the context query's SQL: generated unless raw text
+  # reached it.
+  defp context_filter(filter, true), do: filter
+  defp context_filter(filter, false), do: {:selecto_generated, filter}
 
   defp tuple_terms(column, false), do: [column]
 

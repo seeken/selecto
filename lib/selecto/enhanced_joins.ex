@@ -356,6 +356,7 @@ defmodule Selecto.EnhancedJoins do
   end
 
   defp build_lateral_join_sql(join_config, selecto) do
+    Selecto.Builder.Provenance.mark()
     adapter = Map.get(selecto, :adapter, Selecto.AdapterSupport.default_adapter())
 
     fragment = %TableFunctionJoin{
@@ -454,6 +455,7 @@ defmodule Selecto.EnhancedJoins do
           "#{date_field} BETWEEN #{from_field} AND #{to_field}"
 
         {:custom_sql, sql} ->
+          Selecto.Builder.Provenance.mark()
           sql
       end
     end)
