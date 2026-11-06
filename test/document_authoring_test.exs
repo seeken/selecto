@@ -1,5 +1,8 @@
 defmodule Selecto.DocumentAuthoringTest do
-  use ExUnit.Case, async: true
+  # These bounded inference checks have a wall-clock deadline; run them after
+  # unrelated asynchronous property workloads so scheduling does not decide
+  # whether the small authored sample can produce its deterministic report.
+  use ExUnit.Case, async: false
 
   alias Selecto.Document.{
     Canonical,

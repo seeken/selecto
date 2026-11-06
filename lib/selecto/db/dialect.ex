@@ -51,6 +51,8 @@ defmodule Selecto.DB.Dialect do
   @callback render_text_normalization(TextNormalization.t(), Selecto.t() | map()) ::
               render_result()
   @callback render_comparison(Comparison.t(), Selecto.t() | map()) :: render_result()
+  @callback render_instant_comparison(Selecto.Dialect.Instant.Comparison.t(), Selecto.t() | map()) ::
+              render_result()
   @callback render_bucket(BucketExpression.t(), Selecto.t() | map()) :: render_result()
   @callback render_hierarchy_adjacency(Adjacency.t(), Selecto.t() | map()) :: render_result()
   @callback render_hierarchy_materialized_path(MaterializedPath.t(), Selecto.t() | map()) ::
@@ -79,6 +81,7 @@ defmodule Selecto.DB.Dialect do
                       render_datetime_operation: 2,
                       render_text_normalization: 2,
                       render_comparison: 2,
+                      render_instant_comparison: 2,
                       render_bucket: 2,
                       render_hierarchy_adjacency: 2,
                       render_hierarchy_materialized_path: 2,

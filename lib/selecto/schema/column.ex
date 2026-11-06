@@ -159,6 +159,11 @@ defmodule Selecto.Schema.Column do
       epoch_storage: Map.get(config, :epoch_storage, Map.get(source_col, :epoch_storage))
     }
 
+    # Retain an explicit physical UTC-storage declaration for exact instant
+    # rendering. An omitted declaration adds no new key to existing columns.
+    storage = Map.get(config, :storage, Map.get(source_col, :storage))
+    base_col = if is_nil(storage), do: base_col, else: Map.put(base_col, :storage, storage)
+
     base_col =
       case Map.get(source_col, :computed) do
         computed when is_map(computed) ->
