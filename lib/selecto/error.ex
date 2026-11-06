@@ -300,9 +300,15 @@ defmodule Selecto.Error do
       |> then(fn details ->
         if sqlstate, do: Map.put(details, :sqlstate, sqlstate), else: details
       end)
+      |> Map.merge(server_code(normalized))
 
     %__MODULE__{type: type, message: driver_message(type, category), details: details}
   end
+
+  # The numeric code a server reported (MySQL family, which has no useful
+  # SQLSTATE for most errors), so a cancellation or a timeout stays itself.
+  defp server_code(%__MODULE__{details: %{code: code}}) when is_integer(code), do: %{code: code}
+  defp server_code(_normalized), do: %{}
 
   @doc false
   # A safe summary of a raw failure reason: an atom, a tagged tuple's tag, or
