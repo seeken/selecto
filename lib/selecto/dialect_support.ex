@@ -19,6 +19,14 @@ defmodule Selecto.DialectSupport do
     render(adapter, :render_computed_value, fragment, selecto, :computed_value)
   end
 
+  @doc "Whether the adapter's dialect casts a string literal from text."
+  def literal_casts_from_text?(adapter) do
+    case dialect(adapter) do
+      {:ok, dialect} -> AdapterSupport.callback_available?(dialect, :casts_literals_from_text?, 0)
+      {:error, _reason} -> false
+    end
+  end
+
   def render_json(adapter, callback, fragment, selecto)
       when callback in [
              :render_json_extraction,

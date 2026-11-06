@@ -46,6 +46,11 @@ defmodule Selecto.Domain.Contract.ComputedValues do
 
   defp normalize_node("literal", [value]), do: normalize_node("literal", [value, nil])
 
+  # A string literal under a cast whose type was inferred, not written: the
+  # compiler's dialect may convert it from text instead.
+  defp normalize_node("literal", [value, type, "inferred"]) when is_binary(value),
+    do: {:ok, ["literal", value, type, "inferred"]}
+
   defp normalize_node("literal", [value, type]) do
     cond do
       is_nil(value) ->
@@ -83,7 +88,8 @@ defmodule Selecto.Domain.Contract.ComputedValues do
 
   defp normalize_node("cast", [value, type]) do
     if to_string(type) in @cast_types do
-      with {:ok, value} <- normalize(value), do: {:ok, ["cast", value, to_string(type)]}
+      with {:ok, normalized} <- normalize(value),
+           do: {:ok, ["cast", mark_inferred(normalized, value), to_string(type)]}
     else
       {:error, "cast type must be one of #{Enum.join(@cast_types, ", ")}"}
     end
@@ -216,6 +222,7 @@ defmodule Selecto.Domain.Contract.ComputedValues do
 
   defp infer!(["field", path], resolve), do: category(resolve.(path))
   defp infer!(["literal", _value, type], _resolve), do: category(type)
+  defp infer!(["literal", _value, type, "inferred"], _resolve), do: category(type)
 
   defp infer!(["coalesce" | values], resolve),
     do: common(Enum.map(values, &infer!(&1, resolve)), "coalesce")
@@ -319,6 +326,12 @@ defmodule Selecto.Domain.Contract.ComputedValues do
       _ -> :other
     end
   end
+
+  defp mark_inferred(["literal", value, type], [tag, value])
+       when is_binary(value) and tag in ["literal", :literal],
+       do: ["literal", value, type, "inferred"]
+
+  defp mark_inferred(normalized, _value), do: normalized
 
   defp inferred_literal_type(value) when is_integer(value), do: "integer"
   defp inferred_literal_type(value) when is_float(value), do: "decimal"
