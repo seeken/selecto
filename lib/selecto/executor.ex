@@ -86,6 +86,19 @@ defmodule Selecto.Executor do
   end
 
   @doc false
+  # A read's statement as it would execute: the adapter's prepare_read/2
+  # applied, compiled, with the options the adapter's read path takes. For
+  # entry points that run the statement another way (EXPLAIN).
+  def read_statement(selecto, to_sql_opts) do
+    with {:ok, selecto} <- prepare_read(selecto) do
+      {sql, params} = Selecto.to_sql(selecto, to_sql_opts)
+      {:ok, sql, params, read_opts(selecto, [])}
+    end
+  rescue
+    refusal in Selecto.Builder.ScopeRefusal -> {:error, Selecto.Error.from_reason(refusal)}
+  end
+
+  @doc false
   # Every relation a read's domain (and its set operands' domains) names:
   # source and schema tables, association bridges.
   def domain_relations(selecto) do
