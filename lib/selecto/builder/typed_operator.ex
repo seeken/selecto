@@ -219,6 +219,7 @@ defmodule Selecto.Builder.TypedOperator do
   def any_array(selecto, type, left, param, negate?) do
     if enabled?(selecto) and type != nil do
       {schema, arg} = type
+      param = if arg == "pg_catalog.uuid", do: uuid_array(param), else: param
       array = if arg, do: ["CAST(", param, " AS ", arg, "[])"], else: param
       clause = ["(", cast(left, arg), " OPERATOR(", schema, ".=) ANY (", array, "))"]
       if negate?, do: [" NOT ", clause, " "], else: [" ", clause, " "]
@@ -268,7 +269,33 @@ defmodule Selecto.Builder.TypedOperator do
   defp pattern_right(_op, right, _escape), do: right
 
   defp cast(operand, nil), do: operand
+
+  defp cast(operand, "pg_catalog.uuid" = arg),
+    do: ["CAST(", uuid_param(operand), " AS ", arg, ")"]
+
   defp cast(operand, arg), do: ["CAST(", operand, " AS ", arg, ")"]
+
+  defp uuid_array({:param, values}) when is_list(values),
+    do: {:param, Enum.map(values, &if(is_binary(&1), do: uuid_value(&1), else: &1))}
+
+  defp uuid_array(param), do: param
+
+  # A uuid parameter is bound as the driver encodes it, whatever the field's
+  # declared type: text that is no uuid refuses, typed.
+  defp uuid_param({:param, value}) when is_binary(value), do: {:param, uuid_value(value)}
+  defp uuid_param([{:param, _value} = param]), do: [uuid_param(param)]
+  defp uuid_param(operand), do: operand
+
+  defp uuid_value(value) when byte_size(value) == 16, do: value
+
+  defp uuid_value(value) do
+    UUID.string_to_binary!(value)
+  rescue
+    ArgumentError ->
+      raise Selecto.Builder.ScopeRefusal,
+        message: "a value compared with a uuid column is not a uuid",
+        reason: :invalid_uuid
+  end
 
   defp normalize(operator),
     do: Map.get(@operators, operator |> to_string() |> String.trim() |> String.downcase())

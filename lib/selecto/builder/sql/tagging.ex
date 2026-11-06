@@ -56,7 +56,7 @@ defmodule Selecto.Builder.Sql.Tagging do
   def build_tagging_join_with_aggregation(selecto, join, config, fc, p, ctes) do
     _tag_field = Map.get(config, :tag_field, "name")
 
-    join_table = get_join_table_name(config)
+    join_table = join_table_name(config)
     main_foreign_key = get_main_foreign_key(config, selecto)
     tag_foreign_key = get_tag_foreign_key(config, selecto)
 
@@ -169,7 +169,7 @@ defmodule Selecto.Builder.Sql.Tagging do
   Returns: `{where_clause_iodata, params}`
   """
   def build_faceted_tag_filter(config, tag_values, match_type \\ :any) do
-    join_table = get_join_table_name(config)
+    join_table = join_table_name(config)
     tag_table = config.source
     tag_field = Map.get(config, :tag_field, "name")
     # Will be dynamically determined
@@ -279,7 +279,7 @@ defmodule Selecto.Builder.Sql.Tagging do
   """
   def build_tag_count_filter(config, {operator, count})
       when operator in [:gte, :gt, :lte, :lt, :eq] do
-    join_table = get_join_table_name(config)
+    join_table = join_table_name(config)
     main_foreign_key = Map.get(config, :main_foreign_key, "post_id")
 
     # Map operators to SQL
@@ -310,7 +310,7 @@ defmodule Selecto.Builder.Sql.Tagging do
   end
 
   def build_tag_count_filter(config, {:between, min_count, max_count}) do
-    join_table = get_join_table_name(config)
+    join_table = join_table_name(config)
     main_foreign_key = Map.get(config, :main_foreign_key, "post_id")
 
     where_iodata = [
@@ -332,7 +332,9 @@ defmodule Selecto.Builder.Sql.Tagging do
 
   # Helper functions
 
-  defp get_join_table_name(config) do
+  @doc false
+  # The junction table a tagging join names.
+  def join_table_name(config) do
     case Map.get(config, :join_table) || Map.get(config, :join_through) do
       nil ->
         source = to_string(config.source)
