@@ -238,6 +238,9 @@ defmodule Selecto.DynamicJoin do
         subquery_params: subquery_params,
         subquery_adapter: join_selecto.adapter,
         subquery_root_alias: subquery_root_alias,
+        # What the subquery reads, so an adapter resolves and guards its
+        # relations as it does the outer query's (Selecto.Executor.read_queries/1).
+        subquery_read: Map.take(join_selecto, [:domain, :config, :set]),
         on: on_conditions,
         type: join_type,
         requires_join: :selecto_root,

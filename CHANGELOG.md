@@ -3,6 +3,12 @@
 
 ## Unreleased
 
+- `Selecto.Executor.domain_relations/1` also returns the tables ad-hoc joins name
+  (`Selecto.join/3` with `source:`; a CTE is no table) and the relations of the
+  query a `join_subquery` carries, which `read_queries/1` lists. PostgreSQL
+  refused an ad-hoc join on a public table as `relation_unresolved`, and a
+  subquery join's tables went unresolved, so under a host path that diverged it
+  read the host's table.
 - A read reaches an adapter stamped `selecto_generated` only when the compile
   proved every part of it: text is hand-built otherwise. Builders pass text they
   do not resolve through `Provenance.reference/1`, `{:ref, ...}`, join `on:`

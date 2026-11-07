@@ -35,6 +35,7 @@ defmodule Selecto.Builder.Provenance do
     :subquery,
     :subquery_params,
     :subquery_adapter,
+    :subquery_read,
     :lateral_query,
     :conditions,
     :path_separator,
