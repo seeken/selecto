@@ -198,8 +198,11 @@ defmodule Selecto.Executor do
   end
 
   @doc false
-  # The tables `Selecto.join/3` names with `source:` (a CTE is no table).
+  # The tables `Selecto.join/3` names with `source:`. A CTE or VALUES list the
+  # statement defines is no table: the statement's own name shadows one.
   def dynamic_sources(selecto) do
+    local = statement_names(selecto)
+
     selecto
     |> dynamic_joins()
     |> Enum.flat_map(fn
@@ -208,11 +211,21 @@ defmodule Selecto.Executor do
 
       {_id, %{join_type: :custom, source: source}}
       when is_binary(source) or (is_atom(source) and not is_nil(source)) ->
-        [to_string(source)]
+        if to_string(source) in local, do: [], else: [to_string(source)]
 
       _join ->
         []
     end)
+  end
+
+  defp statement_names(selecto) do
+    set = Map.get(selecto, :set) || %{}
+
+    names =
+      Enum.map(List.wrap(Map.get(set, :ctes)), &Map.get(&1, :name)) ++
+        Enum.map(List.wrap(Map.get(set, :values_clauses)), &Map.get(&1, :alias))
+
+    for name <- names, not is_nil(name), do: to_string(name)
   end
 
   defp dynamic_joins(selecto) do

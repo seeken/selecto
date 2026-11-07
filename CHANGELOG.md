@@ -4,7 +4,8 @@
 ## Unreleased
 
 - `Selecto.Executor.domain_relations/1` also returns the tables ad-hoc joins name
-  (`Selecto.join/3` with `source:`; a CTE is no table) and the relations of the
+  (`Selecto.join/3` with `source:`; a CTE or VALUES list the statement defines is
+  no table) and the relations of the
   query a `join_subquery` carries, which `read_queries/1` lists. PostgreSQL
   refused an ad-hoc join on a public table as `relation_unresolved`, and a
   subquery join's tables went unresolved, so under a host path that diverged it
