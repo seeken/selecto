@@ -164,16 +164,62 @@ defmodule Selecto.Executor do
   end
 
   @doc false
-  # Every relation a read's domain (and its set operands' domains) names:
-  # source and schema tables, association bridges.
+  # Every relation a read names: its domains' source and schema tables and
+  # association bridges, the tables its ad-hoc joins name, across its set
+  # operands and the queries its subquery joins carry.
   def domain_relations(selecto) do
-    queries = [selecto | set_operands(selecto)]
+    queries = read_queries(selecto)
 
     queries
     |> Enum.map(&Map.get(&1, :domain))
     |> Enum.reduce([], &collect_relations/2)
     |> Kernel.++(Enum.flat_map(queries, &generated_relations/1))
+    |> Kernel.++(Enum.flat_map(queries, &dynamic_sources/1))
     |> Enum.uniq()
+  end
+
+  @doc false
+  # The queries one statement compiles: the read, its set operands, and the
+  # query each subquery join carries, with theirs.
+  def read_queries(selecto) do
+    queries = [selecto | set_operands(selecto)]
+
+    inner =
+      Enum.flat_map(queries, fn query ->
+        query
+        |> dynamic_joins()
+        |> Enum.flat_map(fn
+          {_id, %{subquery_read: %{} = subquery}} -> read_queries(subquery)
+          _join -> []
+        end)
+      end)
+
+    queries ++ inner
+  end
+
+  @doc false
+  # The tables `Selecto.join/3` names with `source:` (a CTE is no table).
+  def dynamic_sources(selecto) do
+    selecto
+    |> dynamic_joins()
+    |> Enum.flat_map(fn
+      {_id, %{join_type: :custom, source_kind: :cte}} ->
+        []
+
+      {_id, %{join_type: :custom, source: source}}
+      when is_binary(source) or (is_atom(source) and not is_nil(source)) ->
+        [to_string(source)]
+
+      _join ->
+        []
+    end)
+  end
+
+  defp dynamic_joins(selecto) do
+    case Map.get(selecto, :set) do
+      %{} = set -> Map.get(set, :dynamic_joins) || %{}
+      _none -> %{}
+    end
   end
 
   # Relations a join's compile names beyond the domain's tables: a tagging
