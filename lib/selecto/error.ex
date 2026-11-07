@@ -338,6 +338,9 @@ defmodule Selecto.Error do
   defp driver_error_type(%DBConnection.ConnectionError{}, _normalized), do: :connection_error
   defp driver_error_type(_reason, _normalized), do: :query_error
 
+  defp driver_category(%__MODULE__{details: %{category: :database_error}}, sqlstate),
+    do: Map.get(@sqlstate_categories, sqlstate, :database_error)
+
   defp driver_category(%__MODULE__{details: %{category: category}}, _sqlstate)
        when category in @driver_categories,
        do: category

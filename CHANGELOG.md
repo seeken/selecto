@@ -10,6 +10,12 @@
   and OLAP configuration included; join and schema configuration is walked whole.
 - The internal generated-filter tag carries a per-VM secret: it cannot be
   reached through `Selecto.filter/2`.
+- A compile carrying raw text runs in the host's session: an adapter's guard of
+  generated SQL waits for the compile, and only the schemas the domain declares
+  name its relations.
+- An adapter that enforces the deadline (`supports?(:execute_timeout)`) gets it in
+  the task path too, with time to end the read: a shutdown no longer abandons a
+  read on a connection the host holds. A cancel reports `query_canceled`.
 
 - Expose native composed segment filters and declared ordering entries for host
   inspection. Parameter placeholders remain intact, and configured query filters

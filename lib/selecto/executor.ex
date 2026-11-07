@@ -78,13 +78,20 @@ defmodule Selecto.Executor do
   # schema-qualified relation names an adapter resolved in prepare_read/2
   # (PostgreSQL, ruling R23b).
   defp read_opts(selecto, opts) do
+    raw? = raw_sql?(selecto)
+
     opts =
       opts
       |> Keyword.put(:selecto_read, true)
       |> put_declared_functions(declared_functions(selecto))
-      |> put_raw_mark(selecto)
+      |> put_raw_mark(raw?)
 
-    case selecto |> Map.get(:set) |> Kernel.||(%{}) |> Map.get(:qualified_relations) do
+    # Raw text runs in the host's session (R71): only the schemas the domain
+    # declares name its relations.
+    set = selecto |> Map.get(:set) |> Kernel.||(%{})
+    relations = Map.get(set, if(raw?, do: :declared_relations, else: :qualified_relations))
+
+    case relations do
       relations when is_map(relations) and map_size(relations) > 0 ->
         Keyword.put(opts, :selecto_qualified_relations, relations)
 
@@ -95,10 +102,10 @@ defmodule Selecto.Executor do
 
   # An adapter treats a statement as Selecto's own only with this stamp: text
   # is hand-built unless the compile proved otherwise.
-  defp put_raw_mark(opts, selecto) do
+  defp put_raw_mark(opts, raw?) do
     opts = Keyword.delete(opts, :selecto_generated)
 
-    if raw_sql?(selecto),
+    if raw?,
       do: Keyword.put(opts, :selecto_raw_sql, true),
       else: opts |> Keyword.delete(:selecto_raw_sql) |> Keyword.put(:selecto_generated, true)
   end
@@ -252,14 +259,23 @@ defmodule Selecto.Executor do
     with {:ok, prepared} <- prepare_adapter_read(selecto) do
       {marked?, nodes} = compile_provenance(prepared)
 
-      if nodes > @max_filter_nodes do
-        {:error,
-         Selecto.Error.validation_error("Filters are beyond the size Selecto will compile", %{
-           reason: :filter_too_large,
-           limit: @max_filter_nodes
-         })}
-      else
-        {:ok, record_mark(prepared, marked?)}
+      # An adapter's guard of generated SQL waits for the compile: it holds
+      # only when the statement is generated.
+      refusal = prepared |> Map.get(:set) |> Kernel.||(%{}) |> Map.get(:generated_read_refusal)
+
+      cond do
+        nodes > @max_filter_nodes ->
+          {:error,
+           Selecto.Error.validation_error("Filters are beyond the size Selecto will compile", %{
+             reason: :filter_too_large,
+             limit: @max_filter_nodes
+           })}
+
+        refusal != nil and not marked? ->
+          {:error, refusal}
+
+        true ->
+          {:ok, record_mark(prepared, marked?)}
       end
     end
   end
@@ -300,6 +316,7 @@ defmodule Selecto.Executor do
 
     with :ok <- check_query_complexity(selecto, opts, query_id) do
       with_timeout_protection(
+        selecto,
         opts,
         query_id,
         start_time,
@@ -325,7 +342,7 @@ defmodule Selecto.Executor do
         if run_in_caller?(selecto, opts, hook_snapshot) do
           with_adapter_timeout(opts, query_id, start_time, work)
         else
-          with_timeout_protection(opts, query_id, start_time, hook_snapshot, fn ->
+          with_timeout_protection(selecto, opts, query_id, start_time, hook_snapshot, fn ->
             work.(nil)
           end)
         end
@@ -491,15 +508,28 @@ defmodule Selecto.Executor do
 
   defp effective_timeout(opts), do: min(opts[:timeout] || @default_timeout, @max_timeout)
 
+  # Time an adapter that enforces the deadline itself has to end a read and undo
+  # it before its task is shut down.
+  @adapter_grace 5_000
+  @task_deadline :selecto_executor_task_deadline
+
   # Run the execution work with timeout protection: in a supervised task that
-  # is abandoned (shut down) when the timeout elapses.
-  defp with_timeout_protection(opts, query_id, start_time, hook_snapshot, work) do
+  # is abandoned (shut down) when the timeout elapses. A task killed in a read
+  # abandons the read's reply and transaction state on a connection the host may
+  # hold, so an adapter that enforces the deadline (`supports?(:execute_timeout)`)
+  # gets it and ends the read itself; the shutdown is left for a server that
+  # never answers.
+  defp with_timeout_protection(selecto, opts, query_id, start_time, hook_snapshot, work) do
     timeout = effective_timeout(opts)
     restore_hooks? = not Selecto.Performance.Hooks.empty_snapshot?(hook_snapshot)
+    started_at = System.monotonic_time(:millisecond)
+    adapter_deadline? = timeout > 0 and adapter_enforces_timeout?(runtime_adapter(selecto))
 
     # Wrap execution in Task.async for timeout enforcement
     task =
       Selecto.TaskSupervisor.async(fn ->
+        if adapter_deadline?, do: Process.put(@task_deadline, started_at + timeout)
+
         if restore_hooks? do
           Selecto.Performance.Hooks.restore_hooks(hook_snapshot)
 
@@ -513,10 +543,14 @@ defmodule Selecto.Executor do
         end
       end)
 
+    wait = if adapter_deadline?, do: timeout + @adapter_grace, else: timeout
+
     # Wait for task with timeout
-    case Task.yield(task, timeout) || Task.shutdown(task) do
+    case Task.yield(task, wait) || Task.shutdown(task) do
       {:ok, result} ->
-        result
+        if adapter_deadline? and System.monotonic_time(:millisecond) - started_at >= timeout,
+          do: timeout_result(timeout, query_id, start_time),
+          else: result
 
       {:exit, reason} ->
         exited_result(reason, query_id, start_time)
@@ -1170,6 +1204,13 @@ defmodule Selecto.Executor do
     )
   end
 
+  defp task_deadline_options(adapter_opts) do
+    case Process.get(@task_deadline) do
+      nil -> adapter_opts
+      deadline -> Keyword.merge(deadline_options(deadline), adapter_opts)
+    end
+  end
+
   defp deadline_options(nil), do: []
 
   defp deadline_options(deadline),
@@ -1196,6 +1237,7 @@ defmodule Selecto.Executor do
 
   defp execute_for_context(selecto, query, params, aliases, adapter_opts \\ []) do
     adapter = runtime_adapter(selecto)
+    adapter_opts = task_deadline_options(adapter_opts)
 
     Selecto.Telemetry.span([:adapter], %{adapter: adapter}, fn ->
       execute_with_adapter(

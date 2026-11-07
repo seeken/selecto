@@ -163,8 +163,12 @@ defmodule Selecto.ExecuteEntryPointTest do
 
       assert {:ok, _result} = Selecto.execute(query(CallerAdapter))
 
+      # The adapter enforces the deadline here too: a task killed in a read would
+      # abandon it on a connection the host may hold.
       assert_received {:adapter_execute, hooked_pid,
-                       [selecto_generated: true, selecto_read: true]}
+                       [selecto_generated: true, selecto_read: true, timeout: timeout]}
+
+      assert timeout > 0
 
       refute hooked_pid == self()
 
@@ -176,7 +180,7 @@ defmodule Selecto.ExecuteEntryPointTest do
                Selecto.execute(query(CallerAdapter), cache: true, cache_namespace: namespace)
 
       assert_received {:adapter_execute, cached_pid,
-                       [selecto_generated: true, selecto_read: true]}
+                       [selecto_generated: true, selecto_read: true, timeout: _]}
 
       refute cached_pid == self()
     end
