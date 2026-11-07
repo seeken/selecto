@@ -51,6 +51,16 @@ defmodule Selecto.ExecutorDomainRelationsTest do
     assert Selecto.Executor.dynamic_sources(query) == []
   end
 
+  test "a VALUES list an ad-hoc join reads is no relation" do
+    query =
+      configure("orders", [:id])
+      |> Selecto.with_values([["open", "Open"]], columns: ["status", "label"], as: "labels")
+      |> Selecto.join(:labels, source: "labels", owner_key: :id, related_key: :status)
+
+    assert Selecto.Executor.dynamic_sources(query) == []
+    assert Selecto.Executor.domain_relations(query) == ["orders"]
+  end
+
   test "a CTE an ad-hoc join reads is no relation" do
     query =
       configure("products", [:id])
