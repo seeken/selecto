@@ -10,9 +10,10 @@
   and OLAP configuration included; join and schema configuration is walked whole.
 - The internal generated-filter tag carries a per-VM secret: it cannot be
   reached through `Selecto.filter/2`.
-- A compile carrying raw text runs in the host's session: an adapter's guard of
-  generated SQL waits for the compile, and only the schemas the domain declares
-  name its relations.
+- A statement Selecto built that carries a host fragment stays generated: its
+  relations, filters and tenant scope keep their pin and guards, and only the
+  fragment is verbatim. An adapter tells it from text wholly the host's by
+  `selecto_raw_sql`.
 - An adapter that enforces the deadline (`supports?(:execute_timeout)`) gets it in
   the task path too, with time to end the read: a shutdown no longer abandons a
   read on a connection the host holds. A cancel reports `query_canceled`.

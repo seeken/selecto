@@ -1,3 +1,20 @@
+defmodule Selecto.Error.Refused do
+  @moduledoc """
+  Raised while enumerating a lazy stream that an adapter refused at that point:
+  a stream carries no `{:error, _}`, so its refusal keeps its fields here.
+  """
+  defexception [:message, :type, details: %{}]
+
+  @impl true
+  def exception(%{message: message} = error) do
+    %__MODULE__{
+      message: message,
+      type: Map.get(error, :type),
+      details: Map.get(error, :details) || %{}
+    }
+  end
+end
+
 defmodule Selecto.Error do
   @moduledoc """
   Standardized error structure for all Selecto operations.

@@ -86,12 +86,7 @@ defmodule Selecto.Executor do
       |> put_declared_functions(declared_functions(selecto))
       |> put_raw_mark(raw?)
 
-    # Raw text runs in the host's session (R71): only the schemas the domain
-    # declares name its relations.
-    set = selecto |> Map.get(:set) |> Kernel.||(%{})
-    relations = Map.get(set, if(raw?, do: :declared_relations, else: :qualified_relations))
-
-    case relations do
+    case selecto |> Map.get(:set) |> Kernel.||(%{}) |> Map.get(:qualified_relations) do
       relations when is_map(relations) and map_size(relations) > 0 ->
         Keyword.put(opts, :selecto_qualified_relations, relations)
 
@@ -259,23 +254,14 @@ defmodule Selecto.Executor do
     with {:ok, prepared} <- prepare_adapter_read(selecto) do
       {marked?, nodes} = compile_provenance(prepared)
 
-      # An adapter's guard of generated SQL waits for the compile: it holds
-      # only when the statement is generated.
-      refusal = prepared |> Map.get(:set) |> Kernel.||(%{}) |> Map.get(:generated_read_refusal)
-
-      cond do
-        nodes > @max_filter_nodes ->
-          {:error,
-           Selecto.Error.validation_error("Filters are beyond the size Selecto will compile", %{
-             reason: :filter_too_large,
-             limit: @max_filter_nodes
-           })}
-
-        refusal != nil and not marked? ->
-          {:error, refusal}
-
-        true ->
-          {:ok, record_mark(prepared, marked?)}
+      if nodes > @max_filter_nodes do
+        {:error,
+         Selecto.Error.validation_error("Filters are beyond the size Selecto will compile", %{
+           reason: :filter_too_large,
+           limit: @max_filter_nodes
+         })}
+      else
+        {:ok, record_mark(prepared, marked?)}
       end
     end
   end

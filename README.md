@@ -219,6 +219,14 @@ a Selecto governance boundary, not a substitute for database roles or row-level
 security. See [`docs/strict_mode.md`](docs/strict_mode.md) for the complete
 contract.
 
+### Hand-built SQL and raw fragments
+
+Text wholly the host's runs as the driver would run it, and a raw fragment
+(`{:raw_sql, ...}`, `:raw_sql_filter`, `:custom_sql`) stays verbatim inside a
+statement that otherwise keeps every guard. Both are the host's own code: **never
+build them from end-user input.** Tenant scope depends on a `raw_sql_filter` being
+well-formed: text that closes its own parenthesis escapes the scope.
+
 ## Named Domain Registry
 
 At HTTP, LiveView, API, or other trust boundaries, pass an opaque domain name

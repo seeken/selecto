@@ -7,8 +7,9 @@ defmodule Selecto.Builder.Provenance do
   # passes it through reference/1 or marks, and configuration is walked whole
   # (config_text?/1), so a name that is not a plain name counts wherever it
   # would land. Selecto's executor stamps a read as generated only when
-  # nothing marked it, and an adapter that types statements treats anything
-  # without the stamp as hand-built, as a whole.
+  # nothing marked it. A marked read is still Selecto's statement, carrying a host
+  # fragment (`selecto_raw_sql`): an adapter keeps its pin and guards and leaves the
+  # text verbatim. Only text with neither mark is wholly the host's.
 
   @raw :selecto_builder_raw_sql
   @nodes :selecto_builder_filter_nodes
