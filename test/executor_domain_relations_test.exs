@@ -530,6 +530,94 @@ defmodule Selecto.ExecutorDomainRelationsTest do
     assert refusal(statement) == {:cte_name_redefined, ["vv"]}
   end
 
+  test "only an undeclared root reads a list of its name" do
+    fake = fn query ->
+      Selecto.with_cte(query, "p", fn -> configure("r", [:id]) |> Selecto.select(["id"]) end,
+        columns: ["id"]
+      )
+    end
+
+    undeclared = configure("p", [:id]) |> fake.() |> Selecto.select(["id"])
+    assert refusal(undeclared) == :ok
+    assert Selecto.Executor.list_roots(undeclared) == ["p"]
+
+    declared =
+      configure("p", [:id]).domain
+      |> put_in([:source, :source_schema], "public")
+      |> Selecto.configure(nil, validate: false)
+      |> fake.()
+      |> Selecto.select(["id"])
+
+    assert refusal(declared) == {:cte_name_collision, ["p"]}
+    assert Selecto.Executor.list_roots(declared) == []
+
+    # A joined schema over table p is a table, whatever the root.
+    joined =
+      configure("r", [:id, :product_id]).domain
+      |> put_in([:source, :associations], %{
+        prod: %{queryable: :prod, field: :prod, owner_key: :product_id, related_key: :id}
+      })
+      |> Map.put(:schemas, %{prod: configure("p", [:id]).domain.source})
+      |> Map.put(:joins, %{prod: %{type: :left, name: "prod"}})
+      |> Selecto.configure(nil, validate: false)
+      |> fake.()
+      |> Selecto.select(["id"])
+
+    assert refusal(joined) == {:cte_name_collision, ["p"]}
+  end
+
+  test "a CASE subquery is a query of the statement" do
+    inner = configure("r", [:id, :product_id]) |> Selecto.select(["product_id"])
+
+    query =
+      configure("p", [:id])
+      |> Selecto.select(["id"])
+      |> Selecto.case_when_select([{[{"id", {:subquery, :in, inner}}], "HIGH"}],
+        else: "LOW",
+        as: "tier"
+      )
+
+    assert inner in Selecto.Executor.read_queries(query)
+    assert "r" in Selecto.Executor.domain_relations(query)
+
+    named = Selecto.with_values(query, [[1, 2]], columns: ["id", "product_id"], as: "r")
+    assert refusal(named) == {:cte_name_collision, ["r"]}
+  end
+
+  test "a raw CTE's name counts; its text is the host's" do
+    root = configure("p", [:id])
+    plain = root |> Selecto.with_ctes([{:raw_cte, "raw_one AS (SELECT 1 AS v)", []}])
+    assert refusal(Selecto.select(plain, ["id"])) == :ok
+
+    assert {"raw_one", {:raw, "raw_one AS (SELECT 1 AS v)", []}} in Selecto.Executor.definitions(
+             plain
+           )
+
+    inner = configure("r", [:id]) |> Selecto.select(["id"])
+
+    named =
+      root
+      |> Selecto.with_ctes([{:raw_cte, ~S["r" (id) AS (SELECT 1)], []}])
+      |> Selecto.filter({"id", {:subquery, :in, inner}})
+      |> Selecto.select(["id"])
+
+    assert refusal(named) == {:cte_name_collision, ["r"]}
+  end
+
+  test "an embedded query missing its required tenant refuses typed" do
+    inner =
+      configure("r", [:id, :tenant_id]).domain
+      |> put_in([:source, :tenant_field], :tenant_id)
+      |> Map.put(:tenant_required, true)
+      |> Selecto.configure(nil, validate: false)
+      |> Selecto.select(["id"])
+
+    query = configure("p", [:id]) |> Selecto.filter({"id", {:subquery, :in, inner}})
+
+    assert {:error, %Selecto.Error{details: %{code: :tenant_scope_missing}}} =
+             Selecto.Executor.prepare_read(query)
+  end
+
   test "a CTE whose body is a set operation compiles" do
     body = fn ->
       Selecto.union(

@@ -1765,8 +1765,13 @@ defmodule Selecto.Builder.Sql do
     out = for %{name: name} <- ordered, do: to_string(name)
 
     ready =
-      Enum.find(pending, fn spec ->
-        spec |> Map.get(:dependencies, []) |> List.wrap() |> Enum.all?(&(to_string(&1) in out))
+      Enum.find(pending, fn
+        %{} = spec ->
+          spec |> Map.get(:dependencies, []) |> List.wrap() |> Enum.all?(&(to_string(&1) in out))
+
+        # A raw CTE ({:raw_cte, sql, params}) declares no dependencies.
+        _raw ->
+          true
       end)
 
     case ready do

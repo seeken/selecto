@@ -396,7 +396,14 @@ defmodule Selecto.DynamicJoin do
     selecto
     |> Map.get(:set, %{})
     |> Map.get(:ctes, [])
-    |> Enum.find(&(Map.get(&1, :name) == cte_name))
+    |> Enum.find_value(fn
+      %{} = spec ->
+        if Map.get(spec, :name) == cte_name, do: spec
+
+      # A raw CTE ({:raw_cte, sql, params}) whose text names it.
+      raw ->
+        if cte_name in Selecto.Executor.list_name(raw), do: %{name: cte_name, columns: nil}
+    end)
   end
 
   defp get_cte_spec_by_name(_selecto, _cte_name), do: nil

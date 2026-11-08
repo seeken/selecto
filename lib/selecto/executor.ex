@@ -1,4 +1,7 @@
 defmodule Selecto.Executor do
+  # A raw CTE's text: `name [(columns)] AS [NOT] [MATERIALIZED] (`.
+  @raw_cte_head ~r/\A\s*("(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$]*)\s*(?:\([^)]*\)\s*)?as\s*(?:not\s+)?(?:materialized\s*)?\(/i
+
   @moduledoc """
   Query execution engine for Selecto.
 
@@ -186,16 +189,15 @@ defmodule Selecto.Executor do
 
   @doc false
   # The relations an adapter resolves for one read_scopes/1 entry: its own,
-  # without the names a CTE or VALUES list makes visible where it sits, plus the
-  # tables its joins generate. prepare_read/1 refuses a statement where a name
-  # it defines is a relation it reads (read_relations/1), so only an ad-hoc
-  # join's reference to a list is ever left out here.
+  # without a root read as a list (list_root/1) and the ad-hoc join sources
+  # that name a visible list. prepare_read/1 refuses a statement where a name
+  # it defines is any other relation it reads (read_relations/1), so nothing
+  # else is left out here.
   def scope_relations(%{set_result: true}), do: []
 
-  def scope_relations(%{query: query, visible: visible}) do
-    hideable = collect_relations(Map.get(query, :domain), []) ++ dynamic_sources(query)
-
-    Enum.reject(hideable, &(&1 in visible)) ++
+  def scope_relations(%{query: query, visible: visible} = scope) do
+    List.delete(collect_relations(Map.get(query, :domain), []), list_root(scope)) ++
+      Enum.reject(dynamic_sources(query), &(&1 in visible)) ++
       declared_sources(query) ++ generated_relations(query)
   end
 
@@ -278,9 +280,17 @@ defmodule Selecto.Executor do
       |> retarget_origins()
       |> Enum.flat_map(&scopes(&1, main, inside, roots, own, :origin, path))
 
+    joined = subquery_reads(query) ++ lateral_reads(query)
+
     nested =
-      (subquery_reads(query) ++ lateral_reads(query) ++ embedded_queries(query))
-      |> Enum.flat_map(&scopes(&1, main, inside, roots, [], :nested, path))
+      Enum.flat_map(joined, &scopes(&1, main, inside, roots, [], :nested, path)) ++
+        (query
+         |> embedded_queries()
+         |> Enum.reject(&(&1 in joined))
+         |> Enum.flat_map(fn embedded ->
+           [entry | rest] = scopes(embedded, main, inside, roots, [], :nested, path)
+           [Map.put(entry, :embedded, true) | rest]
+         end))
 
     # VALUES lists and join-generated CTEs are emitted before the user CTEs,
     # and the user CTEs in dependency order (Selecto.Builder.Sql.visible_ctes/2).
@@ -352,6 +362,10 @@ defmodule Selecto.Executor do
 
   defp find_queries(%Selecto{} = query, acc), do: [query | acc]
 
+  # A CASE, window, pivot, JSON or array spec, or any other struct a builder
+  # compiles, may carry a query of its own.
+  defp find_queries(%_{} = struct, acc), do: struct |> Map.from_struct() |> find_queries(acc)
+
   defp find_queries(%{} = map, acc) when not is_struct(map),
     do: Enum.reduce(map, acc, fn {_key, value}, acc -> find_queries(value, acc) end)
 
@@ -398,7 +412,28 @@ defmodule Selecto.Executor do
     Enum.flat_map(List.wrap(Map.get(set, :lateral_joins)), &lateral_query(&1, query))
   end
 
-  defp cte_names(specs), do: for(%{name: name} <- specs, not is_nil(name), do: to_string(name))
+  defp cte_names(specs), do: Enum.flat_map(specs, &list_name/1)
+
+  @doc false
+  # A CTE spec's name; a raw CTE's (`{:raw_cte, sql, params}`, the host's own
+  # text, R68) where its text starts `name [(columns)] AS (`; [] for a raw CTE
+  # whose name its text does not show.
+  def list_name(%{name: name}) when not is_nil(name), do: [to_string(name)]
+
+  def list_name({tag, sql, _params}) when tag in [:raw_cte, :raw_recursive_cte] do
+    case Regex.run(@raw_cte_head, IO.iodata_to_binary(sql), capture: :all_but_first) do
+      [~s(") <> _ = quoted | _] ->
+        [quoted |> String.slice(1..-2//1) |> String.replace(~s(""), ~s("))]
+
+      [name | _] ->
+        [String.downcase(name)]
+
+      nil ->
+        []
+    end
+  end
+
+  def list_name(_spec), do: []
 
   defp cte_queries(%{type: :recursive, name: name, base_query: base, recursive_query: step})
        when is_function(base, 0) and is_function(step, 1) do
@@ -475,10 +510,9 @@ defmodule Selecto.Executor do
 
   defp statement_names(selecto) do
     set = Map.get(selecto, :set) || %{}
-    names = Enum.map(List.wrap(Map.get(set, :ctes)), &Map.get(&1, :name))
 
     values_names(selecto) ++
-      generated_cte_names(selecto) ++ for(n <- names, not is_nil(n), do: to_string(n))
+      generated_cte_names(selecto) ++ cte_names(List.wrap(Map.get(set, :ctes)))
   end
 
   defp values_names(selecto) do
@@ -613,9 +647,26 @@ defmodule Selecto.Executor do
     scopes = read_scopes(selecto)
 
     with :ok <- no_nested_recursive_with(scopes),
-         :ok <- no_redefined_name(scopes) do
-      no_name_collision(scopes)
+         :ok <- no_redefined_name(scopes),
+         :ok <- no_name_collision(scopes) do
+      embedded_tenant_scopes(scopes)
     end
+  end
+
+  # A query a filter or selection embeds compiles on its own (Selecto.to_sql/2),
+  # so its tenant scope is checked as its own: a missing, mismatched or
+  # ambiguous one refuses typed here rather than raise while compiling.
+  defp embedded_tenant_scopes(scopes) do
+    Enum.reduce_while(scopes, :ok, fn
+      %{embedded: true, query: query}, :ok ->
+        case Selecto.Tenant.validate_scope(query, []) do
+          :ok -> {:cont, :ok}
+          {:error, _} = error -> {:halt, error}
+        end
+
+      _scope, :ok ->
+        {:cont, :ok}
+    end)
   end
 
   # One rule on every adapter, whatever each dialect shows a body: a CTE or
@@ -744,35 +795,65 @@ defmodule Selecto.Executor do
 
     generated = for name <- generated_cte_names(query), do: {name, {:generated, name}}
 
-    ctes ++ values ++ generated
+    raw =
+      for {tag, sql, params} = list <- List.wrap(Map.get(set, :ctes)),
+          tag in [:raw_cte, :raw_recursive_cte],
+          name <- list_name(list),
+          do: {name, {:raw, IO.iodata_to_binary(sql), params}}
+
+    ctes ++ values ++ generated ++ raw
   end
 
   @doc false
   # The relations one read_scopes/1 entry reads as tables, every name not a
-  # reference to a CTE or VALUES list:
-  #   * its domain's relations, unless the query is rooted on a list it defines
-  #     itself, or it is a CTE body rooted on a list visible where it sits (a
-  #     domain over a CTE); a filter subquery, subquery join, set member or
-  #     retarget origin whose domain names an enclosing list reads the table;
-  #   * each ad-hoc join's source, unless it names a list visible where it sits;
-  #   * each declared non-association join's source, and the tables its joins
-  #     generate (a closure or junction table), always: a domain declares
-  #     tables, and a generated CTE is emitted before the user's.
-  # A retarget origin never takes its target's names as references.
+  # reference to a CTE or VALUES list: its domain's relations, but for a root
+  # read as a list (list_root/1); each ad-hoc join's source, unless it names a
+  # list visible where it sits (a retarget origin never takes its target's);
+  # each declared non-association join's source, and the tables its joins
+  # generate (a closure or junction table), always.
   def read_relations(%{set_result: true}), do: []
 
-  def read_relations(%{query: query, kind: kind, visible: visible, forbidden: forbidden}) do
+  def read_relations(%{query: query, visible: visible, forbidden: forbidden} = scope) do
     references = visible -- forbidden
 
-    domain_references =
-      if kind in [:cte_body, :recursive_part],
-        do: references,
-        else: statement_names(query) -- forbidden
-
-    Enum.reject(collect_relations(Map.get(query, :domain), []), &(&1 in domain_references)) ++
+    List.delete(collect_relations(Map.get(query, :domain), []), list_root(scope)) ++
       Enum.reject(dynamic_sources(query), &(&1 in references)) ++
       declared_sources(query) ++ generated_relations(query)
   end
+
+  @doc false
+  # The list a read_scopes/1 entry's root reads, or nil: its domain's own
+  # source_table, when the domain declares no source_schema and the name is a
+  # CTE or VALUES list the query defines itself (a domain over a CTE), or, for
+  # a CTE body, one visible where the body sits. Joined schemas, through tables
+  # and anything a schema is declared for stay tables.
+  def list_root(%{set_result: true}), do: nil
+
+  def list_root(%{query: query, kind: kind, visible: visible, forbidden: forbidden}) do
+    source = (Map.get(query, :domain) || %{}) |> Map.get(:source) || %{}
+    root = Map.get(source, :source_table) || Map.get(source, "source_table")
+    declared = Map.get(source, :source_schema) || Map.get(source, "source_schema")
+
+    lists =
+      if kind in [:cte_body, :recursive_part],
+        do: visible -- forbidden,
+        else: statement_names(query) -- forbidden
+
+    cond do
+      is_nil(root) or declared not in [nil, ""] -> nil
+      to_string(root) in lists -> to_string(root)
+      true -> nil
+    end
+  end
+
+  def list_root(_scope), do: nil
+
+  @doc false
+  # The names the statement's roots read as lists (list_root/1): an adapter
+  # that resolves relations refuses one that also names a relation it can see.
+  def list_roots(selecto),
+    do:
+      selecto |> read_scopes() |> Enum.map(&list_root/1) |> Enum.reject(&is_nil/1) |> Enum.uniq()
 
   # A recursive CTE's base or step that defines its own CTE or VALUES list: the
   # nested WITH would scope over the whole UNION, or follow UNION ALL, which no
