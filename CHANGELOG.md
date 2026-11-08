@@ -3,21 +3,32 @@
 
 ## Unreleased
 
-- The CTEs Selecto generates for itself (a values-backed schema's list, and a
-  hierarchy, materialized-path or closure-table join's CTE) take a reserved
-  name that starts with `__selecto_` (`__selecto_closure_<join id>`, and so on),
-  so no table a host names is one of them. A closure join whose id was its
-  table's name generated a CTE named like its closure table, which hid that
-  table: on PostgreSQL it went unresolved and read another schema's closure
-  table. The tables a join generates are never hidden by any name, and every
-  generated name fits 63 characters (a longer id is cut and a digest of the id,
-  and of the rows for a values list, keeps it unique); MySQL and MariaDB failed
-  on a values list whose id passed about 40 characters.
-- A CTE body that reads a table named like a statement CTE emitted after it
-  refuses with `cte_name_collision` where the database would read the CTE:
-  SQLite under any `WITH`, MariaDB under `WITH RECURSIVE`
-  (`Selecto.Executor.later_cte_reads/2`). PostgreSQL and MySQL show the body
-  the table, as before.
+- One rule decides CTE and VALUES names on every adapter, checked once per
+  statement before it compiles (`Selecto.Executor.prepare_read/1`): a name
+  defined anywhere in the statement (a user's CTE or VALUES list, or a CTE
+  Selecto generates) that is also a relation read anywhere in it refuses with
+  `cte_name_collision`, and one name defined at two places with different
+  definitions refuses with `cte_name_redefined`. Every query of the statement
+  counts: CTE bodies at any depth, subquery and LATERAL joins, set members,
+  recursive bases and steps, a retarget origin, and the tables a join's
+  generated CTE reads. Each database scoped such names its own way (SQLite and
+  MariaDB under `WITH RECURSIVE` show a body the later CTEs from any position in
+  it; MariaDB lets an enclosing name win over a body's own), and a body could
+  read a CTE's rows for a table. Statements that used a CTE named like a table it
+  or another query read now refuse, including ones PostgreSQL and MySQL answered.
+  This replaces `later_cte_reads/2`, `scope_collisions/1` and MariaDB's
+  `nested_cte_shadowing`.
+- The CTEs Selecto generates for itself start with `__selecto_` and are named by
+  their content: a values-backed schema's by its id, fields and rows, a
+  hierarchy, materialized-path or closure-table join's by its id and definition
+  (source and closure table, columns, depth and path settings, declared schema).
+  Two closure joins with one id over different closure tables (in a root and a
+  CTE body, or in two union members) get two names; on MariaDB the body read the
+  root's. Every generated name fits 63 characters (a longer id is cut); MySQL and
+  MariaDB failed on a values list whose id passed about 40 characters.
+- A CTE whose body is a set operation compiles again: since the body's own CTEs
+  were emitted, it raised `ArgumentError` ("unsupported post-set mutations")
+  on every adapter.
 - `Selecto.Executor.read_queries/1` also lists the queries a CTE (`with_cte/3,4`,
   `with_recursive_cte/3`) and a LATERAL join build. `read_scopes/1` gives each
   with the CTE and VALUES names visible at its position and the queries enclosing

@@ -2,11 +2,12 @@ defmodule Selecto.Builder.GeneratedName do
   @moduledoc false
 
   # Names for the CTEs Selecto generates for itself (values-backed schemas,
-  # hierarchy, materialized-path and closure joins). They start with a reserved
-  # `__selecto_` prefix, so no table a host names is one of them, and fit the
-  # identifier limits of every supported database (PostgreSQL keeps 63 bytes,
-  # MySQL and MariaDB 64 characters): a longer id is cut and a digest of the
-  # whole id (and of the content, where it is given) keeps the name unique.
+  # hierarchy, materialized-path and closure joins): a `__selecto_` prefix, the
+  # id, and a digest of what the CTE holds (a values list's rows, a hierarchy
+  # join's definition), within the identifier limits of every supported
+  # database (PostgreSQL keeps 63 bytes, MySQL and MariaDB 64 characters): a
+  # longer id is cut. Selecto.Executor refuses a statement where one of them
+  # names a relation it reads, or names two different lists.
 
   @limit 63
   @digest 10
@@ -49,12 +50,37 @@ defmodule Selecto.Builder.GeneratedName do
     |> binary_part(0, @digest)
   end
 
+  # What decides a hierarchy join's generated CTE: the relation and columns it
+  # reads, its depth and path settings, its declared schema. Two joins with one
+  # id and different definitions (a root's and a CTE body's) get two names.
+  @definition_keys [
+    :source,
+    :source_schema,
+    :closure_table,
+    :ancestor_field,
+    :descendant_field,
+    :depth_field,
+    :id_field,
+    :name_field,
+    :parent_field,
+    :hierarchy_depth,
+    :depth_limit,
+    :path_field,
+    :path_separator,
+    :root_path
+  ]
+
   @doc false
-  def hierarchy(join), do: name("__selecto_hierarchy_", join)
+  def hierarchy(join, config), do: name("__selecto_hierarchy_", join, definition(config))
   @doc false
-  def materialized_path(join), do: name("__selecto_path_", join)
+  def materialized_path(join, config), do: name("__selecto_path_", join, definition(config))
   @doc false
-  def closure(join), do: name("__selecto_closure_", join)
+  def closure(join, config), do: name("__selecto_closure_", join, definition(config))
+
+  defp definition(config) when is_map(config),
+    do: config |> Map.take(@definition_keys) |> Enum.sort()
+
+  defp definition(_config), do: []
   @doc false
   def values(id, fields, rows), do: name("__selecto_values_", id, {fields, rows})
 end
