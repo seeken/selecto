@@ -166,86 +166,101 @@ defmodule Selecto.Executor do
   @doc false
   # Every relation a read names: its domains' source and schema tables and
   # association bridges, the tables its ad-hoc joins name, across every query
-  # the statement compiles (read_queries/1). A name the statement defines (a
-  # CTE or VALUES list) is no relation.
+  # the statement compiles, each without the names a CTE or VALUES list makes
+  # visible at its own position (read_scopes/1).
   def domain_relations(selecto) do
-    queries = read_queries(selecto)
-    local = Enum.flat_map(queries, &statement_names/1)
-
-    queries
-    |> Enum.flat_map(fn query ->
-      shadowing = names_shadowing(query, local)
-      query |> own_relations() |> Enum.reject(&(&1 in shadowing))
+    selecto
+    |> read_scopes()
+    |> Enum.flat_map(fn %{query: query, visible: visible} ->
+      query |> own_relations() |> Enum.reject(&(&1 in visible))
     end)
     |> Enum.uniq()
   end
 
   @doc false
-  # The statement's names that hide a table from `query`: all of them, except a
-  # non-recursive CTE's own name inside its body, which reads the table.
-  def names_shadowing(query, local) do
-    case query |> Map.get(:set) |> Kernel.||(%{}) |> Map.get(:selecto_cte_body) do
-      nil -> local
-      own -> Enum.reject(local, &(&1 == own))
-    end
-  end
-
-  @doc false
-  # The relations one query names itself, before the statement's own names are
-  # taken out: its domain's tables, those its joins generate, its ad-hoc sources.
+  # The relations one query names itself, before the names visible at its
+  # position are taken out: its domain's tables, those its joins generate, its
+  # ad-hoc sources.
   def own_relations(query) do
     collect_relations(Map.get(query, :domain), []) ++
       generated_relations(query) ++ dynamic_sources(query)
   end
 
   @doc false
-  # The names the statement defines for itself, across all its queries.
-  def local_names(selecto), do: selecto |> read_queries() |> Enum.flat_map(&statement_names/1)
+  # The queries one statement compiles, in read_scopes/1's order.
+  def read_queries(selecto), do: selecto |> read_scopes() |> Enum.map(& &1.query)
 
   @doc false
-  # The queries one statement compiles: the read, its set operands, the query
-  # each subquery join carries, and the queries its CTEs and LATERAL joins build,
-  # with theirs. A builder that raises adds nothing here: compiling raises too.
-  def read_queries(selecto) do
-    queries = [selecto | set_operands(selecto)]
+  # One entry per query the statement compiles: the read, its set operands, the
+  # query each subquery join carries, and the queries its CTEs and LATERAL joins
+  # build, with theirs. Each entry carries the names a CTE or VALUES list makes
+  # visible at the query's own position (they hide a table of that name): its
+  # own and its enclosing queries'; in a non-recursive WITH, a body sees only the
+  # CTEs before it. It also carries the queries that enclose it, nearest first.
+  # Set operation members and a retargeted query's origin are siblings, and
+  # enclose nothing of each other. A builder that raises adds nothing here:
+  # compiling raises too.
+  def read_scopes(selecto), do: scopes(selecto, [], [])
 
-    queries ++
-      Enum.flat_map(
-        queries,
-        &(&1 |> inner_queries() |> Enum.flat_map(fn q -> read_queries(q) end))
-      )
-  end
-
-  defp inner_queries(query) do
+  defp scopes(query, visible, enclosing) do
     set = Map.get(query, :set) || %{}
+    ctes = List.wrap(Map.get(set, :ctes))
+    main = visible ++ statement_names(query)
+    inside = [query | enclosing]
+    recursive? = Enum.any?(ctes, &match?(%{type: :recursive}, &1))
 
-    subqueries =
-      query
-      |> dynamic_joins()
-      |> Enum.flat_map(fn
-        {_id, %{subquery_read: %{} = subquery}} -> [subquery]
-        _join -> []
+    siblings = query |> direct_operands() |> Enum.flat_map(&scopes(&1, visible, enclosing))
+
+    nested =
+      (subquery_reads(query) ++ lateral_reads(query))
+      |> Enum.flat_map(&scopes(&1, main, inside))
+
+    bodies =
+      ctes
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {spec, index} ->
+        seen = if recursive?, do: main, else: visible ++ cte_names(Enum.take(ctes, index))
+        spec |> cte_queries() |> Enum.flat_map(&scopes(&1, seen, inside))
       end)
 
-    ctes = Enum.flat_map(List.wrap(Map.get(set, :ctes)), &cte_queries/1)
-    laterals = Enum.flat_map(List.wrap(Map.get(set, :lateral_joins)), &lateral_query(&1, query))
-    subqueries ++ ctes ++ laterals
+    [%{query: query, visible: main, enclosing: enclosing} | siblings ++ nested ++ bodies]
   end
+
+  defp direct_operands(query) do
+    set = Map.get(query, :set) || %{}
+
+    operands =
+      set
+      |> Map.get(:set_operations, [])
+      |> List.wrap()
+      |> Enum.flat_map(&[&1.left_query, &1.right_query])
+
+    case Map.get(set, :retarget_state) do
+      %{origin: %{} = origin} -> operands ++ [origin]
+      _ -> operands
+    end
+  end
+
+  defp subquery_reads(query) do
+    query
+    |> dynamic_joins()
+    |> Enum.flat_map(fn
+      {_id, %{subquery_read: %{} = subquery}} -> [subquery]
+      _join -> []
+    end)
+  end
+
+  defp lateral_reads(query) do
+    set = Map.get(query, :set) || %{}
+    Enum.flat_map(List.wrap(Map.get(set, :lateral_joins)), &lateral_query(&1, query))
+  end
+
+  defp cte_names(specs), do: for(%{name: name} <- specs, not is_nil(name), do: to_string(name))
 
   defp cte_queries(%{type: :recursive, name: name, base_query: base, recursive_query: step})
        when is_function(base, 0) and is_function(step, 1) do
     reference = Selecto.Builder.CteSql.create_cte_reference(to_string(name))
     built([fn -> base.() end, fn -> step.(reference) end])
-  end
-
-  defp cte_queries(%{query_builder: builder, name: name}) when is_function(builder, 0) do
-    for inner <- built([builder]) do
-      Map.put(
-        inner,
-        :set,
-        Map.put(Map.get(inner, :set) || %{}, :selecto_cte_body, to_string(name))
-      )
-    end
   end
 
   defp cte_queries(%{query_builder: builder}) when is_function(builder, 0), do: built([builder])

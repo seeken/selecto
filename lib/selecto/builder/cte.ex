@@ -124,6 +124,11 @@ defmodule Selecto.Builder.CteSql do
   defp generate_cte_sql(%Spec{type: :normal} = spec) do
     # Execute the query builder to get the Selecto query
     selecto_query = spec.query_builder.()
+    # A column list names the columns; without one the body's names do.
+    if is_nil(spec.columns),
+      do:
+        :ok =
+          Selecto.DynamicJoin.ensure_plain_projection!(selecto_query, "CTE #{inspect(spec.name)}")
 
     # Generate SQL from the Selecto query
     {sql_iodata, _aliases} = Sql.build_iodata(selecto_query, emit_user_ctes: false)

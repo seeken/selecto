@@ -4,9 +4,14 @@
 ## Unreleased
 
 - `Selecto.Executor.read_queries/1` also lists the queries a CTE (`with_cte/3,4`,
-  `with_recursive_cte/3`) and a LATERAL join build, and `own_relations/1` and
-  `names_shadowing/2` let an adapter resolve each query against its own root. A
-  non-recursive CTE's body reads the table its CTE is named after.
+  `with_recursive_cte/3`) and a LATERAL join build. `read_scopes/1` gives each
+  with the CTE and VALUES names visible at its position and the queries enclosing
+  it, and `own_relations/1` its own tables, so an adapter resolves each query
+  under its own declarations.
+- `join_subquery` and a CTE without a column list refuse a renamed selection
+  (`{:field, selector, alias}` or `as:`): the nested SQL carries no alias, so the
+  name did not exist (an ArgumentError from `List.to_string`, or a database
+  error).
 - Documented: an ad-hoc join's table gets no tenant scope (R76).
 - `Selecto.Executor.domain_relations/1` also returns the tables ad-hoc joins name
   (`Selecto.join/3` with `source:`; a CTE or VALUES list the statement defines is

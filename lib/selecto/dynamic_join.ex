@@ -231,6 +231,8 @@ defmodule Selecto.DynamicJoin do
     join_type = Keyword.get(public_options, :type, :left)
     on_conditions = Keyword.get(public_options, :on, [])
 
+    :ok = ensure_plain_projection!(join_selecto, "join_subquery #{inspect(join_id)}")
+
     # Generate SQL for the subquery
     {subquery_sql, _aliases, subquery_params} = Selecto.gen_sql(join_selecto, [])
 
@@ -269,6 +271,26 @@ defmodule Selecto.DynamicJoin do
     |> put_in([Access.key(:set), :active_joins], updated_joins)
     |> put_in([Access.key(:set), :dynamic_joins], updated_dynamic)
     |> register_dynamic_join_fields(join_id, subquery_config)
+  end
+
+  @doc false
+  # A nested query's columns keep their field names: its SQL carries no select
+  # alias, so `{:field, selector, alias}` (or `as:`) would name a column that is
+  # not there. Refuse it where the nested query is built, not at the database.
+  def ensure_plain_projection!(query, context) do
+    query
+    |> Map.get(:set, %{})
+    |> Map.get(:selected, [])
+    |> List.wrap()
+    |> Enum.each(fn
+      {:field, _selector, alias_name} = selector when not is_nil(alias_name) ->
+        raise ArgumentError,
+              "#{context}: a nested query cannot rename a selected field " <>
+                "(#{inspect(selector)}); select the field itself and refer to it by its name"
+
+      _selector ->
+        :ok
+    end)
   end
 
   # Private helpers

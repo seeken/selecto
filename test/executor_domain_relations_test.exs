@@ -61,6 +61,39 @@ defmodule Selecto.ExecutorDomainRelationsTest do
     assert Selecto.Executor.domain_relations(query) == ["orders"]
   end
 
+  test "a nested query cannot rename a selected field" do
+    for selector <- [{:field, "id", "x"}, {:field, "id", as: "x"}] do
+      inner = configure("reviews", [:id, :product_id]) |> Selecto.select([selector, "product_id"])
+
+      assert_raise ArgumentError, ~r/cannot rename a selected field/, fn ->
+        configure("products", [:id])
+        |> Selecto.DynamicJoin.join_subquery(:best, inner, on: [%{left: "id", right: "x"}])
+      end
+
+      cte =
+        configure("products", [:id])
+        |> Selecto.with_cte("best", fn -> inner end)
+        |> Selecto.select(["id"])
+
+      assert_raise ArgumentError, ~r/cannot rename a selected field/, fn ->
+        Selecto.to_sql(cte)
+      end
+    end
+  end
+
+  test "names a query defines hide tables only where they are visible" do
+    member =
+      configure("orders", [:id]) |> Selecto.with_values([["a"]], columns: ["c"], as: "products")
+
+    union =
+      Selecto.union(
+        configure("products", [:id]) |> Selecto.select(["id"]),
+        member |> Selecto.select(["id"])
+      )
+
+    assert "products" in Selecto.Executor.domain_relations(union)
+  end
+
   test "a CTE an ad-hoc join reads is no relation" do
     query =
       configure("products", [:id])
