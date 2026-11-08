@@ -46,6 +46,15 @@ defmodule Selecto.DynamicJoin do
   - `:related_key` - The key on the joined table
   - `:fields` - Map of field configurations to expose from the joined table
 
+  ## Tenant scope
+
+  A custom join (`:source`) carries no domain metadata, so Selecto applies no
+  tenant scope to its table: under `Selecto.with_tenant/2` the root is
+  filtered and the joined table is not. Filter the joined table yourself, or
+  declare the join on the domain, whose tables the tenant scope covers. A
+  `join_subquery/4` keeps the inner query's own tenant scope and its domain's
+  required filters.
+
   ## Examples
 
       # Enable domain-configured join
