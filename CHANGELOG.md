@@ -10,7 +10,13 @@
   under its own declarations.
 - A CTE body's own CTEs are emitted as a `WITH` inside the body; they were
   dropped, so the body read the real table of that name and lost its scope. A
-  CTE the body carries from the statement is still emitted once, at the top.
+  copy of a statement CTE in a body is left to the statement only where the body
+  already sees it: emitted before the body in the statement's `WITH`, which
+  orders user CTEs by their dependencies, or anywhere under `WITH RECURSIVE`.
+  Otherwise the body emits its own copy.
+- A recursive CTE whose base or recursive query defines its own CTE or VALUES list
+  refuses on every adapter (`recursive_cte_nested_with`): the nested `WITH` would
+  scope over the whole `UNION`, or follow `UNION ALL`, which no dialect parses.
 - `read_scopes/1` follows the emitted SQL: a retargeted query's origin is nested
   in the target, and a target CTE or VALUES list named like a table the origin
   reads refuses with `cte_name_collision`; a CTE body sees its query's VALUES

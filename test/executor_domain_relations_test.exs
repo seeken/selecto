@@ -116,6 +116,52 @@ defmodule Selecto.ExecutorDomainRelationsTest do
     assert Selecto.Executor.scope_collisions(query) == ["reviews"]
   end
 
+  test "a body sees the statement CTEs emitted before it, in dependency order" do
+    cte = fn name, deps ->
+      Selecto.Advanced.CTE.create_cte(
+        name,
+        fn -> configure("x", [:id]) |> Selecto.select(["id"]) end,
+        dependencies: deps
+      )
+    end
+
+    {a, b, c} = {cte.("a", ["c"]), cte.("b", []), cte.("c", [])}
+    root = configure("products", [:id]) |> Selecto.with_ctes([a, b, c])
+    names = &Enum.map(&1, fn spec -> spec.name end)
+
+    assert names.(Selecto.Builder.Sql.emitted_order(root.set.ctes)) == ["b", "c", "a"]
+    assert names.(Selecto.Builder.Sql.visible_ctes(root, a)) == ["b", "c"]
+    assert names.(Selecto.Builder.Sql.visible_ctes(root, b)) == []
+  end
+
+  test "a body's copy of a statement CTE emitted after it is emitted in the body" do
+    spec =
+      Selecto.Advanced.CTE.create_cte("c2", fn ->
+        configure("products", [:id]) |> Selecto.select(["id"])
+      end)
+
+    body = fn ->
+      configure("reviews", [:id]) |> Selecto.with_ctes([spec]) |> Selecto.select(["id"])
+    end
+
+    after_body =
+      configure("reviews", [:id])
+      |> Selecto.with_cte("cb", body)
+      |> Selecto.with_ctes([spec])
+      |> Selecto.select(["id"])
+
+    before_body =
+      configure("reviews", [:id])
+      |> Selecto.with_ctes([spec])
+      |> Selecto.with_cte("cb", body)
+      |> Selecto.select(["id"])
+
+    {sql_after, _} = Selecto.to_sql(after_body)
+    {sql_before, _} = Selecto.to_sql(before_body)
+    assert sql_after =~ ~r/cb AS \(\s*WITH c2 AS/
+    refute sql_before =~ ~r/cb AS \(\s*WITH/
+  end
+
   test "names a query defines hide tables only where they are visible" do
     member =
       configure("orders", [:id]) |> Selecto.with_values([["a"]], columns: ["c"], as: "products")
