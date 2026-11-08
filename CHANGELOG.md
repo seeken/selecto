@@ -11,9 +11,13 @@
 - A CTE body's own CTEs are emitted as a `WITH` inside the body; they were
   dropped, so the body read the real table of that name and lost its scope. A
   copy of a statement CTE in a body is left to the statement only where the body
-  already sees it: emitted before the body in the statement's `WITH`, which
-  orders user CTEs by their dependencies, or anywhere under `WITH RECURSIVE`.
-  Otherwise the body emits its own copy.
+  already sees it on every adapter: emitted before the body in the statement's
+  `WITH`, which orders user CTEs by their dependencies (MySQL does not show a
+  body a later CTE even under `WITH RECURSIVE`). Otherwise the body emits its own
+  copy. A body's copy of the statement's VALUES list is left to the statement.
+- A values-backed schema's CTE is named by its id and a digest of its rows, so a
+  nested query's list of the same id and other rows can no longer be hidden by an
+  enclosing one.
 - A recursive CTE whose base or recursive query defines its own CTE or VALUES list
   refuses on every adapter (`recursive_cte_nested_with`): the nested `WITH` would
   scope over the whole `UNION`, or follow `UNION ALL`, which no dialect parses.

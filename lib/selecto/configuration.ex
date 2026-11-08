@@ -358,13 +358,24 @@ defmodule Selecto.Configuration do
 
   defp default_relation_association_fields(relation), do: relation
 
+  defp values_digest(schema, rows) do
+    {Map.get(schema, :fields), rows}
+    |> :erlang.term_to_binary([:deterministic])
+    |> then(&:crypto.hash(:sha256, &1))
+    |> binary_part(0, 5)
+    |> Base.encode16(case: :lower)
+  end
+
   defp prepare_values_schemas(domain) do
     {schemas, values_relations} =
       Enum.reduce(Map.get(domain, :schemas, %{}), {%{}, %{}}, fn {id, schema},
                                                                  {schemas, relations} ->
         case Map.fetch(schema, :values) do
           {:ok, rows} ->
-            table = "__selecto_values_" <> to_string(id)
+            # Named by its content, so a nested query whose values schema has the
+            # same id and other rows gets another name: no WITH can hide it
+            # behind an enclosing one (MariaDB lets the enclosing one win).
+            table = "__selecto_values_" <> to_string(id) <> "_" <> values_digest(schema, rows)
 
             schema =
               schema

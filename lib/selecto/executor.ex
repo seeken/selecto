@@ -221,7 +221,6 @@ defmodule Selecto.Executor do
     main = visible ++ own
     inside = [query | enclosing]
     roots = [query | origin_chain(query)] ++ outer_roots
-    recursive? = Enum.any?(ctes, &match?(%{type: :recursive}, &1))
 
     siblings =
       query
@@ -244,12 +243,17 @@ defmodule Selecto.Executor do
     bodies =
       Enum.flat_map(ctes, fn spec ->
         before = Selecto.Builder.Sql.visible_ctes(query, spec)
-        seen = if recursive?, do: main, else: before_user ++ cte_names(before)
-        part = if match?(%{type: :recursive}, spec), do: :recursive_part, else: :cte_body
+        recursive_part? = match?(%{type: :recursive}, spec)
+        # A recursive CTE's own name is visible to its recursive query.
+        own_name = if recursive_part?, do: cte_names([spec]), else: []
+        seen = before_user ++ cte_names(before) ++ own_name
+        part = if recursive_part?, do: :recursive_part, else: :cte_body
 
         spec
         |> cte_queries()
-        |> Enum.map(&Selecto.Builder.Sql.own_ctes(&1, [spec | before]))
+        |> Enum.map(
+          &Selecto.Builder.Sql.own_ctes(&1, Selecto.Builder.Sql.carried_ctes(query, spec))
+        )
         |> Enum.flat_map(&scopes(&1, seen, inside, roots, [], part))
       end)
 

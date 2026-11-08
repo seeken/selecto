@@ -1730,23 +1730,30 @@ defmodule Selecto.Builder.Sql do
   defp scoped_member_query(builder, _root, _seen), do: builder
 
   @doc false
-  # The statement CTEs a body leaves to the statement: its own spec, and those it
-  # sees at its emitted position (visible_ctes/2).
-  def carried_ctes(root, spec), do: [spec | visible_ctes(root, spec)]
+  # What a body leaves to the statement: its own spec, the statement CTEs it sees
+  # at its emitted position (visible_ctes/2), and the statement's VALUES lists,
+  # which the WITH emits first. A body's copy of any of them is identical, so the
+  # statement's serves it.
+  def carried_ctes(root, spec) do
+    values = List.wrap(Map.get(Map.get(root, :set) || %{}, :values_clauses))
+    [spec | visible_ctes(root, spec)] ++ values
+  end
 
   @doc false
-  # The statement's user CTEs visible to `spec`'s body where the WITH emits it:
-  # every one under WITH RECURSIVE, else those emitted before it. The WITH emits
-  # user CTEs in dependency order (Selecto.Advanced.CTE.validate_dependencies/1):
-  # the first in list order whose dependencies are out, repeatedly.
+  # The statement's user CTEs a body at `spec`'s position sees on every adapter:
+  # those the WITH emits before it, in dependency order
+  # (Selecto.Advanced.CTE.validate_dependencies/1: the first in list order whose
+  # dependencies are out, repeatedly). Under WITH RECURSIVE, PostgreSQL and
+  # MariaDB also show a body the CTEs after it and MySQL does not, so only the
+  # ones before count.
   def visible_ctes(root, spec) do
-    ctes = List.wrap(Map.get(Map.get(root, :set) || %{}, :ctes))
-
-    if Enum.any?(ctes, &match?(%{type: :recursive}, &1)) do
-      Enum.reject(ctes, &(&1 == spec))
-    else
-      ctes |> emitted_order() |> Enum.take_while(&(&1 != spec))
-    end
+    root
+    |> Map.get(:set)
+    |> Kernel.||(%{})
+    |> Map.get(:ctes)
+    |> List.wrap()
+    |> emitted_order()
+    |> Enum.take_while(&(&1 != spec))
   end
 
   @doc false
@@ -1771,7 +1778,8 @@ defmodule Selecto.Builder.Sql do
   @doc false
   def own_ctes(%{set: %{} = set} = body, seen) do
     ctes = Enum.reject(List.wrap(Map.get(set, :ctes)), &(&1 in seen))
-    %{body | set: Map.put(set, :ctes, ctes)}
+    values = Enum.reject(List.wrap(Map.get(set, :values_clauses)), &(&1 in seen))
+    %{body | set: set |> Map.put(:ctes, ctes) |> Map.put(:values_clauses, values)}
   end
 
   def own_ctes(body, _seen), do: body
