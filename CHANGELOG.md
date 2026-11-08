@@ -4,20 +4,29 @@
 ## Unreleased
 
 - One rule decides CTE and VALUES names on every adapter, checked once per
-  statement before it compiles (`Selecto.Executor.prepare_read/1`): a name
-  defined anywhere in the statement (a user's CTE or VALUES list, or a CTE
-  Selecto generates) that is also a relation read anywhere in it refuses with
-  `cte_name_collision`, and one name defined at two places with different
-  definitions refuses with `cte_name_redefined`. Every query of the statement
-  counts: CTE bodies at any depth, subquery and LATERAL joins, set members,
-  recursive bases and steps, a retarget origin, and the tables a join's
-  generated CTE reads. Each database scoped such names its own way (SQLite and
-  MariaDB under `WITH RECURSIVE` show a body the later CTEs from any position in
-  it; MariaDB lets an enclosing name win over a body's own), and a body could
-  read a CTE's rows for a table. Statements that used a CTE named like a table it
-  or another query read now refuse, including ones PostgreSQL and MySQL answered.
-  This replaces `later_cte_reads/2`, `scope_collisions/1` and MariaDB's
-  `nested_cte_shadowing`.
+  statement before it compiles (`Selecto.Executor.prepare_read/1`). A name a
+  query reads is a reference to a list, not a table, where the statement makes
+  it one: a domain rooted on a CTE or VALUES list its own query defines (the
+  way to select from a CTE), a CTE body's domain rooted on a list visible where
+  the body sits, an ad-hoc join naming a visible list. Every other name a query
+  reads is a table, and a table named like a list defined anywhere in the
+  statement refuses with `cte_name_collision`. Tables read count in every query
+  of the statement: CTE bodies at any depth, subquery and LATERAL joins, filter
+  subqueries (`{:exists, query}`, `{:subquery, :in | :any | ..., query}`, and any
+  other %Selecto{} a filter or selection embeds), set members, recursive bases
+  and steps, a retarget origin, a domain's declared non-association joins
+  (`non_assoc: true, source: ...`), and the closure or junction table a join
+  reads. One name defined at two places with different definitions refuses
+  with `cte_name_redefined`, unless the two sit in different members of one set
+  operation: each member compiles with its own WITH and no member sees another's
+  (MariaDB rejects a WITH inside a set operand as a syntax error). Each database
+  scoped colliding names its own way (SQLite and MariaDB under `WITH RECURSIVE`
+  show a body the later CTEs from any position in it; MariaDB lets an enclosing
+  name win over a body's own; a filter subquery or a declared join read an outer
+  VALUES list for its table everywhere), and a query could read a list's rows
+  for a table. Statements that used a list named like a table read elsewhere now
+  refuse, including some PostgreSQL and MySQL answered. This replaces
+  `later_cte_reads/2`, `scope_collisions/1` and MariaDB's `nested_cte_shadowing`.
 - The CTEs Selecto generates for itself start with `__selecto_` and are named by
   their content: a values-backed schema's by its id, fields and rows, a
   hierarchy, materialized-path or closure-table join's by its id and definition

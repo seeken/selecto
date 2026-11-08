@@ -421,6 +421,113 @@ defmodule Selecto.ExecutorDomainRelationsTest do
     end
 
     assert refusal(root |> Selecto.with_cte("cb", copy) |> Selecto.with_cte("pc", builder)) == :ok
+
+    # Two closures that build one body define one list (the TPC-DS demo builds
+    # each copy with its own `fn -> cte end`).
+    built = builder.()
+
+    twice = fn ->
+      configure("reviews", [:id])
+      |> Selecto.with_cte("pc", fn -> built end)
+      |> Selecto.join(:pcj, source: "pc", source_kind: :cte, owner_key: :id, related_key: :id)
+      |> Selecto.select(["id"])
+    end
+
+    assert refusal(
+             root
+             |> Selecto.with_cte("cb", twice)
+             |> Selecto.with_cte("pc", fn -> built end)
+           ) ==
+             :ok
+  end
+
+  test "a filter subquery is a query of the statement" do
+    inner = configure("r", [:id, :product_id]) |> Selecto.select(["product_id"])
+    root = configure("p", [:id])
+
+    for filter <- [
+          {"id", {:subquery, :in, inner}},
+          {"id", "=", {:subquery, :any, inner}},
+          {:exists, inner}
+        ] do
+      query = root |> Selecto.filter(filter) |> Selecto.select(["id"])
+      assert "r" in Selecto.Executor.domain_relations(query)
+      assert inner in Selecto.Executor.read_queries(query)
+
+      named = Selecto.with_values(query, [[1, 2]], columns: ["id", "product_id"], as: "r")
+      assert refusal(named) == {:cte_name_collision, ["r"]}
+    end
+  end
+
+  test "a declared non-association join's table is a relation of the read" do
+    domain =
+      configure("p", [:id]).domain
+      |> Map.put(:joins, %{
+        lkd: %{non_assoc: true, source: "lk", type: :left, owner_key: :id, related_key: :pid}
+      })
+
+    query = Selecto.configure(domain, nil, validate: false) |> Selecto.select(["id"])
+    assert "lk" in Selecto.Executor.domain_relations(query)
+
+    named = Selecto.with_values(query, [[1]], columns: ["pid"], as: "lk")
+    assert refusal(named) == {:cte_name_collision, ["lk"]}
+  end
+
+  test "a domain rooted on a CTE reads the CTE; read as a table elsewhere it refuses" do
+    one = fn -> configure("p", [:id]) |> Selecto.select(["id"]) end
+    rooted = configure("cte_one", [:id]) |> Selecto.with_cte("cte_one", one, columns: ["id"])
+    assert refusal(Selecto.select(rooted, ["id"])) == :ok
+    refute "cte_one" in Selecto.Executor.domain_relations(rooted)
+
+    chained =
+      configure("cte_two", [:id])
+      |> Selecto.with_cte("cte_one", one, columns: ["id"])
+      |> Selecto.with_cte(
+        "cte_two",
+        fn -> configure("cte_one", [:id]) |> Selecto.select(["id"]) end,
+        columns: ["id"],
+        dependencies: ["cte_one"]
+      )
+
+    assert refusal(Selecto.select(chained, ["id"])) == :ok
+
+    # A body before the CTE reads the table of that name.
+    mixed =
+      configure("cte_one", [:id])
+      |> Selecto.with_cte("cb", fn -> configure("cte_one", [:id]) |> Selecto.select(["id"]) end)
+      |> Selecto.with_cte("cte_one", one, columns: ["id"])
+      |> Selecto.select(["id"])
+
+    assert refusal(mixed) == {:cte_name_collision, ["cte_one"]}
+
+    # A filter subquery over an enclosing list's name reads the table.
+    sub = configure("cte_one", [:id]) |> Selecto.select(["id"])
+    captured = rooted |> Selecto.filter({"id", {:subquery, :in, sub}}) |> Selecto.select(["id"])
+    assert refusal(captured) == {:cte_name_collision, ["cte_one"]}
+  end
+
+  test "lists of one name in two set members are private to each" do
+    member = fn label ->
+      configure("p", [:id])
+      |> Selecto.with_values([[1, label]], columns: ["id", "label"], as: "vv")
+      |> Selecto.join(:vj, source: "vv", owner_key: :id, related_key: :id)
+      |> Selecto.select(["id"])
+    end
+
+    union = Selecto.union(member.("L"), member.("R"), all: true)
+    assert refusal(union) == :ok
+
+    chained = Selecto.union(union, member.("S"), all: true)
+    assert refusal(chained) == :ok
+
+    # A member's list and a different statement list of that name refuse.
+    statement =
+      configure("p", [:id])
+      |> Selecto.with_values([[2, "MAIN"]], columns: ["id", "label"], as: "vv")
+      |> Selecto.with_cte("cb", fn -> union end)
+      |> Selecto.select(["id"])
+
+    assert refusal(statement) == {:cte_name_redefined, ["vv"]}
   end
 
   test "a CTE whose body is a set operation compiles" do
