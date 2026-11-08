@@ -8,10 +8,10 @@
   with the CTE and VALUES names visible at its position and the queries enclosing
   it, and `own_relations/1` its own tables, so an adapter resolves each query
   under its own declarations.
-- `join_subquery` and a CTE without a column list refuse a renamed selection
-  (`{:field, selector, alias}` or `as:`): the nested SQL carries no alias, so the
-  name did not exist (an ArgumentError from `List.to_string`, or a database
-  error).
+- `join_subquery` and a CTE without a column list refuse a field renamed with
+  `{:field, name, alias}` or `as:`: the nested SQL carries no alias, so the name
+  did not exist (an ArgumentError from `List.to_string`, or a database error).
+  Raw SQL that carries its own `AS` is left as written.
 - Documented: an ad-hoc join's table gets no tenant scope (R76).
 - `Selecto.Executor.domain_relations/1` also returns the tables ad-hoc joins name
   (`Selecto.join/3` with `source:`; a CTE or VALUES list the statement defines is
