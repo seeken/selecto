@@ -231,8 +231,6 @@ defmodule Selecto.DynamicJoin do
     join_type = Keyword.get(public_options, :type, :left)
     on_conditions = Keyword.get(public_options, :on, [])
 
-    :ok = ensure_plain_projection!(join_selecto, "join_subquery #{inspect(join_id)}")
-
     # Generate SQL for the subquery
     {subquery_sql, _aliases, subquery_params} = Selecto.gen_sql(join_selecto, [])
 
@@ -272,35 +270,6 @@ defmodule Selecto.DynamicJoin do
     |> put_in([Access.key(:set), :dynamic_joins], updated_dynamic)
     |> register_dynamic_join_fields(join_id, subquery_config)
   end
-
-  @doc false
-  # A nested query's columns keep their field names: its SQL carries no select
-  # alias, so renaming a field with `{:field, name, alias}` (or `as:`) would name
-  # a column that is not there. Refuse it where the nested query is built, not
-  # at the database. Raw SQL carries its own `AS`, and is left as written.
-  def ensure_plain_projection!(query, context) do
-    query
-    |> Map.get(:set, %{})
-    |> Map.get(:selected, [])
-    |> List.wrap()
-    |> Enum.each(fn selector ->
-      if renamed_field?(selector) do
-        raise ArgumentError,
-              "#{context}: a nested query cannot rename a selected field " <>
-                "(#{inspect(selector)}); select the field itself and refer to it by its name"
-      end
-    end)
-  end
-
-  defp renamed_field?({:field, _selector, alias_name}) when is_list(alias_name),
-    do: Keyword.has_key?(alias_name, :as)
-
-  defp renamed_field?({:field, selector, alias_name})
-       when (is_binary(selector) or is_atom(selector)) and
-              (is_binary(alias_name) or (is_atom(alias_name) and not is_nil(alias_name))),
-       do: to_string(alias_name) != subquery_output_field_name(selector)
-
-  defp renamed_field?(_selector), do: false
 
   # Private helpers
 
@@ -506,8 +475,22 @@ defmodule Selecto.DynamicJoin do
     end)
   end
 
-  defp subquery_output_fields({:field, _selector, alias_name}) do
-    [to_string(alias_name)]
+  # The subquery's SQL carries no select alias, so a plain field keeps its own
+  # name there: register that, so a reference to the alias fails as an unknown
+  # field instead of reaching the database. Raw SQL carries its own `AS`.
+  defp subquery_output_fields({:field, selector, _alias})
+       when is_binary(selector) or is_atom(selector),
+       do: [subquery_output_field_name(selector)]
+
+  defp subquery_output_fields({:field, _selector, alias_name})
+       when is_binary(alias_name) or (is_atom(alias_name) and not is_nil(alias_name)),
+       do: [to_string(alias_name)]
+
+  defp subquery_output_fields({:field, _selector, opts}) when is_list(opts) do
+    case Keyword.get(opts, :as) do
+      nil -> []
+      alias_name -> [to_string(alias_name)]
+    end
   end
 
   defp subquery_output_fields({:field, selector}) do

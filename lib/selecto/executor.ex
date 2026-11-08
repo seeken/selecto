@@ -200,45 +200,88 @@ defmodule Selecto.Executor do
   # Set operation members and a retargeted query's origin are siblings, and
   # enclose nothing of each other. A builder that raises adds nothing here:
   # compiling raises too.
-  def read_scopes(selecto), do: scopes(selecto, [], [])
+  #
+  # A retargeted query's origin compiles inside the target's WHERE, under the
+  # target's WITH: it is nested in the target. A name the target defines that
+  # the origin's tables also name is listed as `forbidden`: the origin would
+  # read the target's list for its own table (prepare_read/1 refuses it). Each
+  # entry's `roots` are the queries whose declared `source_schema` its tables
+  # take, nearest first: its own, then a retarget origin's (R59: a target
+  # declaring none takes its origin's), then its enclosing queries'.
+  def read_scopes(selecto), do: scopes(selecto, [], [], [], [])
 
-  defp scopes(query, visible, enclosing) do
+  defp scopes(query, visible, enclosing, outer_roots, forbidden) do
     set = Map.get(query, :set) || %{}
     ctes = List.wrap(Map.get(set, :ctes))
-    main = visible ++ statement_names(query)
+    own = statement_names(query)
+    main = visible ++ own
     inside = [query | enclosing]
+    roots = [query | origin_chain(query)] ++ outer_roots
     recursive? = Enum.any?(ctes, &match?(%{type: :recursive}, &1))
 
-    siblings = query |> direct_operands() |> Enum.flat_map(&scopes(&1, visible, enclosing))
+    siblings =
+      query
+      |> set_operation_members()
+      |> Enum.flat_map(&scopes(&1, visible, enclosing, outer_roots, []))
+
+    origins =
+      query
+      |> retarget_origins()
+      |> Enum.flat_map(&scopes(&1, main, inside, roots, own))
 
     nested =
       (subquery_reads(query) ++ lateral_reads(query))
-      |> Enum.flat_map(&scopes(&1, main, inside))
+      |> Enum.flat_map(&scopes(&1, main, inside, roots, []))
+
+    # VALUES lists and join-generated CTEs are emitted before the user CTEs.
+    before_user = visible ++ values_names(query) ++ generated_cte_names(query)
 
     bodies =
       ctes
       |> Enum.with_index()
       |> Enum.flat_map(fn {spec, index} ->
-        seen = if recursive?, do: main, else: visible ++ cte_names(Enum.take(ctes, index))
-        spec |> cte_queries() |> Enum.flat_map(&scopes(&1, seen, inside))
+        seen = if recursive?, do: main, else: before_user ++ cte_names(Enum.take(ctes, index))
+
+        spec
+        |> cte_queries()
+        |> Enum.map(&Selecto.Builder.Sql.own_ctes(&1, query))
+        |> Enum.flat_map(&scopes(&1, seen, inside, roots, []))
       end)
 
-    [%{query: query, visible: main, enclosing: enclosing} | siblings ++ nested ++ bodies]
+    [
+      %{query: query, visible: main, enclosing: enclosing, roots: roots, forbidden: forbidden}
+      | siblings ++ origins ++ nested ++ bodies
+    ]
   end
 
-  defp direct_operands(query) do
-    set = Map.get(query, :set) || %{}
+  defp set_operation_members(query) do
+    (Map.get(query, :set) || %{})
+    |> Map.get(:set_operations, [])
+    |> List.wrap()
+    |> Enum.flat_map(&[&1.left_query, &1.right_query])
+  end
 
-    operands =
-      set
-      |> Map.get(:set_operations, [])
-      |> List.wrap()
-      |> Enum.flat_map(&[&1.left_query, &1.right_query])
-
-    case Map.get(set, :retarget_state) do
-      %{origin: %{} = origin} -> operands ++ [origin]
-      _ -> operands
+  defp retarget_origins(query) do
+    case (Map.get(query, :set) || %{}) |> Map.get(:retarget_state) do
+      %{origin: %{} = origin} -> [origin]
+      _ -> []
     end
+  end
+
+  defp origin_chain(query) do
+    Enum.flat_map(retarget_origins(query), &[&1 | origin_chain(&1)])
+  end
+
+  @doc false
+  # Names a retarget target defines that its origin's own tables name: the
+  # origin compiles under the target's WITH and would read the target's list.
+  def scope_collisions(selecto) do
+    selecto
+    |> read_scopes()
+    |> Enum.flat_map(fn %{query: query, forbidden: forbidden} ->
+      query |> own_relations() |> Enum.filter(&(&1 in forbidden))
+    end)
+    |> Enum.uniq()
   end
 
   defp subquery_reads(query) do
@@ -307,12 +350,33 @@ defmodule Selecto.Executor do
 
   defp statement_names(selecto) do
     set = Map.get(selecto, :set) || %{}
+    names = Enum.map(List.wrap(Map.get(set, :ctes)), &Map.get(&1, :name))
 
-    names =
-      Enum.map(List.wrap(Map.get(set, :ctes)), &Map.get(&1, :name)) ++
-        Enum.map(List.wrap(Map.get(set, :values_clauses)), &Map.get(&1, :alias))
+    values_names(selecto) ++
+      generated_cte_names(selecto) ++ for(n <- names, not is_nil(n), do: to_string(n))
+  end
 
-    for name <- names, not is_nil(name), do: to_string(name)
+  defp values_names(selecto) do
+    set = Map.get(selecto, :set) || %{}
+
+    for %{} = values <- List.wrap(Map.get(set, :values_clauses)),
+        name = Map.get(values, :alias),
+        not is_nil(name),
+        do: to_string(name)
+  end
+
+  # The CTEs hierarchy joins emit (Selecto.Builder.Sql.Hierarchy).
+  defp generated_cte_names(selecto) do
+    selecto
+    |> Map.get(:config)
+    |> Kernel.||(%{})
+    |> Map.get(:joins, %{})
+    |> Enum.flat_map(fn
+      {id, %{join_type: :hierarchical_adjacency}} -> ["#{id}_hierarchy"]
+      {id, %{join_type: :hierarchical_materialized_path}} -> ["#{id}_materialized_path"]
+      {id, %{join_type: :hierarchical_closure_table}} -> ["#{id}_closure"]
+      _join -> []
+    end)
   end
 
   defp dynamic_joins(selecto) do
@@ -397,7 +461,8 @@ defmodule Selecto.Executor do
   # zone-independently (Selecto.Builder.ExactCompare.storage_kind/4).
   @doc false
   def prepare_read(selecto) do
-    with {:ok, prepared} <- prepare_adapter_read(selecto) do
+    with :ok <- no_scope_collision(selecto),
+         {:ok, prepared} <- prepare_adapter_read(selecto) do
       {marked?, nodes} = compile_provenance(prepared)
 
       if nodes > @max_filter_nodes do
@@ -409,6 +474,27 @@ defmodule Selecto.Executor do
       else
         {:ok, record_mark(prepared, marked?)}
       end
+    end
+  end
+
+  defp no_scope_collision(selecto) do
+    case scope_collisions(selecto) do
+      [] ->
+        :ok
+
+      names ->
+        {:error,
+         %Selecto.Error{
+           type: :query_enforcement,
+           message:
+             "A retargeted query defines a CTE or VALUES list named like a table its " <>
+               "origin reads; the origin would read the list",
+           details: %{
+             code: :query_rule_not_evaluable,
+             reason: :cte_name_collision,
+             relations: names
+           }
+         }}
     end
   end
 
