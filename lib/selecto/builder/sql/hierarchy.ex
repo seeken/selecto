@@ -43,7 +43,7 @@ defmodule Selecto.Builder.Sql.Hierarchy do
     {hierarchy_cte, cte_params} = build_adjacency_list_cte(selecto, join, config)
 
     # Create CTE name for this hierarchy
-    cte_name = hierarchy_cte_name(join)
+    cte_name = hierarchy_cte_name(join, config)
 
     # Build JOIN to reference the CTE in the main query
     # Join main table to the CTE results
@@ -70,7 +70,7 @@ defmodule Selecto.Builder.Sql.Hierarchy do
     {path_cte, cte_params} = build_materialized_path_query(selecto, join, config)
 
     # Create CTE name for this path query
-    cte_name = Selecto.Builder.GeneratedName.materialized_path(join)
+    cte_name = Selecto.Builder.GeneratedName.materialized_path(join, config)
 
     # Build JOIN to reference the materialized path CTE
     cte_join_iodata = [
@@ -96,7 +96,7 @@ defmodule Selecto.Builder.Sql.Hierarchy do
     {closure_cte, cte_params} = build_closure_table_query(selecto, join, config)
 
     # Create CTE name for this closure query
-    cte_name = Selecto.Builder.GeneratedName.closure(join)
+    cte_name = Selecto.Builder.GeneratedName.closure(join, config)
 
     # Build JOIN to reference the closure table CTE
     cte_join_iodata = [
@@ -158,7 +158,7 @@ defmodule Selecto.Builder.Sql.Hierarchy do
     parent_field = Map.get(config, :parent_field, "parent_id")
 
     fragment = %Adjacency{
-      cte_name: hierarchy_cte_name(join),
+      cte_name: hierarchy_cte_name(join, config),
       source_table: source_table,
       id_field: id_field,
       name_field: name_field,
@@ -207,7 +207,7 @@ defmodule Selecto.Builder.Sql.Hierarchy do
       end
 
     fragment = %MaterializedPath{
-      query_name: Selecto.Builder.GeneratedName.materialized_path(join),
+      query_name: Selecto.Builder.GeneratedName.materialized_path(join, config),
       source_table: source_table,
       path_field: path_field,
       path_separator: path_separator,
@@ -246,7 +246,7 @@ defmodule Selecto.Builder.Sql.Hierarchy do
     depth_field = Map.get(config, :depth_field, "depth")
 
     # Build closure table query that includes descendant count
-    query_name = Selecto.Builder.GeneratedName.closure(join)
+    query_name = Selecto.Builder.GeneratedName.closure(join, config)
 
     query_iodata = [
       query_name,
@@ -358,5 +358,5 @@ defmodule Selecto.Builder.Sql.Hierarchy do
     """
   end
 
-  def hierarchy_cte_name(join), do: Selecto.Builder.GeneratedName.hierarchy(join)
+  def hierarchy_cte_name(join, config), do: Selecto.Builder.GeneratedName.hierarchy(join, config)
 end

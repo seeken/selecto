@@ -1776,10 +1776,27 @@ defmodule Selecto.Builder.Sql do
   end
 
   @doc false
+  # A set-operation body is left as built: its members carry their own lists, and
+  # its result must stay the left member's set (Selecto.Builder.SetOperations).
+  # Otherwise only a list that loses a copy is rewritten.
+  def own_ctes(%{set: %{set_operations: [_ | _]}} = body, _seen), do: body
+
   def own_ctes(%{set: %{} = set} = body, seen) do
-    ctes = Enum.reject(List.wrap(Map.get(set, :ctes)), &(&1 in seen))
-    values = Enum.reject(List.wrap(Map.get(set, :values_clauses)), &(&1 in seen))
-    %{body | set: set |> Map.put(:ctes, ctes) |> Map.put(:values_clauses, values)}
+    set =
+      Enum.reduce([:ctes, :values_clauses], set, fn key, set ->
+        case Map.fetch(set, key) do
+          {:ok, lists} when is_list(lists) ->
+            case Enum.reject(lists, &(&1 in seen)) do
+              ^lists -> set
+              kept -> Map.put(set, key, kept)
+            end
+
+          _absent ->
+            set
+        end
+      end)
+
+    %{body | set: set}
   end
 
   def own_ctes(body, _seen), do: body

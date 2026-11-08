@@ -113,7 +113,9 @@ defmodule Selecto.ExecutorDomainRelationsTest do
       |> Selecto.retarget(:prod)
       |> Selecto.with_values([[1, 2]], columns: ["id", "product_id"], as: "reviews")
 
-    assert Selecto.Executor.scope_collisions(query) == ["reviews"]
+    assert {:error,
+            %Selecto.Error{details: %{reason: :cte_name_collision, relations: ["reviews"]}}} =
+             Selecto.Executor.prepare_read(query)
   end
 
   test "a body sees the statement CTEs emitted before it, in dependency order" do
@@ -252,9 +254,9 @@ defmodule Selecto.ExecutorDomainRelationsTest do
 
     for name <- [
           GeneratedName.values(long, [:id, :name], rows),
-          GeneratedName.hierarchy(long),
-          GeneratedName.materialized_path(long),
-          GeneratedName.closure(long <> long)
+          GeneratedName.hierarchy(long, %{source: "t"}),
+          GeneratedName.materialized_path(long, %{source: "t"}),
+          GeneratedName.closure(long <> long, %{source: "t"})
         ] do
       assert byte_size(name) <= 63
       assert String.starts_with?(name, "__selecto_")
@@ -266,8 +268,16 @@ defmodule Selecto.ExecutorDomainRelationsTest do
     refute GeneratedName.values(long, [:id, :name], rows) ==
              GeneratedName.values(long, [:id, :name], [%{id: "A", name: "Ship-A"}])
 
-    refute GeneratedName.closure(long <> long) == GeneratedName.closure(long <> other)
-    assert GeneratedName.closure(:locations) == "__selecto_closure_locations"
+    refute GeneratedName.closure(long <> long, %{}) == GeneratedName.closure(long <> other, %{})
+
+    # A join's name follows its definition: one id over two closure tables, two names.
+    root = %{source: "cats", closure_table: "cats_closure"}
+    body = %{source: "cats", closure_table: "cc2"}
+    assert GeneratedName.closure(:catj, root) =~ ~r/^__selecto_closure_catj_[0-9a-f]{10}$/
+    refute GeneratedName.closure(:catj, root) == GeneratedName.closure(:catj, body)
+
+    assert GeneratedName.closure(:catj, root) ==
+             GeneratedName.closure(:catj, Map.put(root, :x, 1))
   end
 
   test "a closure join's own CTE never hides its closure table" do
@@ -304,43 +314,134 @@ defmodule Selecto.ExecutorDomainRelationsTest do
 
     {sql, _params} = Selecto.to_sql(query)
 
-    assert sql =~ "__selecto_closure_cats AS"
+    assert sql =~ ~r/__selecto_closure_cats_[0-9a-f]{10} AS/
     assert sql =~ "JOIN cats_closure cl"
     assert "cats_closure" in Selecto.Executor.domain_relations(query)
+    assert {:ok, _} = Selecto.Executor.prepare_read(query)
+
+    # A user list named like the closure table the generated CTE reads refuses.
+    named = Selecto.with_values(query, [[1]], columns: ["ancestor_id"], as: "cats_closure")
+
+    assert {:error,
+            %Selecto.Error{details: %{reason: :cte_name_collision, relations: ["cats_closure"]}}} =
+             Selecto.Executor.prepare_read(named)
   end
 
-  test "a body reading a table named like a later statement CTE, per dialect" do
-    plain = fn name, table ->
-      Selecto.Advanced.CTE.create_cte(name, fn ->
-        configure(table, [:id]) |> Selecto.select(["id"])
-      end)
+  defp refusal(query) do
+    case Selecto.Executor.prepare_read(query) do
+      {:ok, _} -> :ok
+      {:error, %Selecto.Error{details: %{reason: reason, relations: names}}} -> {reason, names}
     end
+  end
 
-    walk =
-      Selecto.Advanced.CTE.create_recursive_cte("walk",
-        base_query: fn -> configure("x", [:id]) |> Selecto.select(["id"]) end,
-        recursive_query: fn _ref -> configure("x", [:id]) |> Selecto.select(["id"]) end
-      )
+  test "a list named like a relation read anywhere in the statement refuses" do
+    lk =
+      Selecto.Advanced.CTE.create_cte("lk", fn ->
+        configure("products", [:id]) |> Selecto.select(["id"])
+      end)
 
-    body = fn ->
+    ad_hoc = fn ->
       configure("products", [:id])
       |> Selecto.join(:lkj, source: "lk", owner_key: :id, related_key: :product_id)
       |> Selecto.select(["id"])
     end
 
-    cb = Selecto.Advanced.CTE.create_cte("cb", body)
-    lk = plain.("lk", "products")
+    subquery = fn ->
+      inner = configure("lk", [:id, :product_id]) |> Selecto.select(["product_id"])
 
-    later = configure("products", [:id]) |> Selecto.with_ctes([cb, lk])
-    recursive = configure("products", [:id]) |> Selecto.with_ctes([cb, lk, walk])
-    earlier = configure("products", [:id]) |> Selecto.with_ctes([lk, cb])
+      configure("products", [:id])
+      |> Selecto.DynamicJoin.join_subquery(:sq, inner, on: [%{left: "id", right: "product_id"}])
+      |> Selecto.select(["id"])
+    end
 
-    assert Selecto.Executor.later_cte_reads(later, :sqlite) == ["lk"]
-    assert Selecto.Executor.later_cte_reads(later, :mariadb) == []
-    assert Selecto.Executor.later_cte_reads(recursive, :mariadb) == ["lk"]
-    assert Selecto.Executor.later_cte_reads(recursive, :mysql) == []
-    assert Selecto.Executor.later_cte_reads(recursive, :postgresql) == []
-    assert Selecto.Executor.later_cte_reads(earlier, :sqlite) == []
+    cb = &Selecto.Advanced.CTE.create_cte("cb", &1)
+    root = configure("products", [:id])
+
+    # A body reading the table lk, the statement's CTE lk defined after it.
+    assert refusal(Selecto.with_ctes(root, [cb.(ad_hoc), lk])) == {:cte_name_collision, ["lk"]}
+    # Deeper: the body's subquery join reads the table.
+    assert refusal(Selecto.with_ctes(root, [cb.(subquery), lk])) == {:cte_name_collision, ["lk"]}
+    # Before the body the ad-hoc join names the CTE: no table is read.
+    assert refusal(Selecto.with_ctes(root, [lk, cb.(ad_hoc)])) == :ok
+
+    # A recursive base reading the table lk.
+    walk =
+      Selecto.Advanced.CTE.create_recursive_cte("walk",
+        base_query: subquery,
+        recursive_query: fn _ref -> configure("x", [:id]) |> Selecto.select(["id"]) end
+      )
+
+    assert refusal(Selecto.with_ctes(root, [walk, lk])) == {:cte_name_collision, ["lk"]}
+
+    # A union member reading the table a VALUES list of the other member names.
+    member = configure("orders", [:id]) |> Selecto.with_values([["a"]], columns: ["c"], as: "lk")
+
+    union =
+      Selecto.union(
+        configure("lk", [:id]) |> Selecto.select(["id"]),
+        member |> Selecto.select(["id"])
+      )
+
+    assert refusal(union) == {:cte_name_collision, ["lk"]}
+  end
+
+  test "one name defined twice with different lists refuses; identical copies do not" do
+    c2 = fn filter ->
+      Selecto.Advanced.CTE.create_cte("c2", fn ->
+        configure("products", [:id]) |> Selecto.filter({"id", filter}) |> Selecto.select(["id"])
+      end)
+    end
+
+    {own, all} = {c2.(1), c2.(2)}
+
+    body = fn spec ->
+      fn ->
+        configure("reviews", [:id])
+        |> Selecto.with_ctes([spec])
+        |> Selecto.join(:c2j, source: "c2", source_kind: :cte, owner_key: :id, related_key: :id)
+        |> Selecto.select(["id"])
+      end
+    end
+
+    root = configure("reviews", [:id])
+
+    assert refusal(Selecto.with_cte(root, "cb", body.(own)) |> Selecto.with_ctes([all])) ==
+             {:cte_name_redefined, ["c2"]}
+
+    assert refusal(Selecto.with_cte(root, "cb", body.(own)) |> Selecto.with_ctes([own])) == :ok
+
+    # Two with_cte calls with one builder define one list, whatever their ids.
+    builder = fn -> configure("products", [:id]) |> Selecto.select(["id"]) end
+
+    copy = fn ->
+      configure("reviews", [:id])
+      |> Selecto.with_cte("pc", builder)
+      |> Selecto.join(:pcj, source: "pc", source_kind: :cte, owner_key: :id, related_key: :id)
+      |> Selecto.select(["id"])
+    end
+
+    assert refusal(root |> Selecto.with_cte("cb", copy) |> Selecto.with_cte("pc", builder)) == :ok
+  end
+
+  test "a CTE whose body is a set operation compiles" do
+    body = fn ->
+      Selecto.union(
+        configure("products", [:id]) |> Selecto.select(["id"]),
+        configure("products", [:id]) |> Selecto.select(["id"]),
+        all: true
+      )
+    end
+
+    query =
+      configure("reviews", [:id])
+      |> Selecto.with_cte("u", body, columns: ["uid"])
+      |> Selecto.join(:uj, source: "u", source_kind: :cte, owner_key: :id, related_key: :uid)
+      |> Selecto.select(["id"])
+
+    {sql, _params} = Selecto.to_sql(query)
+    assert sql =~ ~r/WITH u \(uid\) AS \(/i
+    assert sql =~ ~r/UNION ALL/i
+    assert refusal(query) == :ok
   end
 
   test "a CTE an ad-hoc join reads is no relation" do

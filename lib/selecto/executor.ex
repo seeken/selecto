@@ -185,10 +185,11 @@ defmodule Selecto.Executor do
   end
 
   @doc false
-  # The relations one read_scopes/1 entry reads as tables: its own, without the
-  # names a CTE or VALUES list makes visible where it sits. The tables a join
-  # generates (a closure table, a junction table) are never hidden: the join
-  # reads that table, whatever its own generated CTE is called.
+  # The relations an adapter resolves for one read_scopes/1 entry: its own,
+  # without the names a CTE or VALUES list makes visible where it sits, plus the
+  # tables its joins generate. prepare_read/1 refuses a statement where a name
+  # it defines is a relation it reads (read_relations/1), so only an ad-hoc
+  # join's reference to a list is ever left out here.
   def scope_relations(%{query: query, visible: visible}) do
     hideable =
       collect_relations(Map.get(query, :domain), []) ++ dynamic_sources(query)
@@ -306,18 +307,6 @@ defmodule Selecto.Executor do
     Enum.flat_map(retarget_origins(query), &[&1 | origin_chain(&1)])
   end
 
-  @doc false
-  # Names a retarget target defines that its origin's own tables name: the
-  # origin compiles under the target's WITH and would read the target's list.
-  def scope_collisions(selecto) do
-    selecto
-    |> read_scopes()
-    |> Enum.flat_map(fn %{query: query, forbidden: forbidden} ->
-      query |> own_relations() |> Enum.filter(&(&1 in forbidden))
-    end)
-    |> Enum.uniq()
-  end
-
   defp subquery_reads(query) do
     query
     |> dynamic_joins()
@@ -406,14 +395,14 @@ defmodule Selecto.Executor do
     |> Kernel.||(%{})
     |> Map.get(:joins, %{})
     |> Enum.flat_map(fn
-      {id, %{join_type: :hierarchical_adjacency}} ->
-        [Selecto.Builder.GeneratedName.hierarchy(id)]
+      {id, %{join_type: :hierarchical_adjacency} = join} ->
+        [Selecto.Builder.GeneratedName.hierarchy(id, join)]
 
-      {id, %{join_type: :hierarchical_materialized_path}} ->
-        [Selecto.Builder.GeneratedName.materialized_path(id)]
+      {id, %{join_type: :hierarchical_materialized_path} = join} ->
+        [Selecto.Builder.GeneratedName.materialized_path(id, join)]
 
-      {id, %{join_type: :hierarchical_closure_table}} ->
-        [Selecto.Builder.GeneratedName.closure(id)]
+      {id, %{join_type: :hierarchical_closure_table} = join} ->
+        [Selecto.Builder.GeneratedName.closure(id, join)]
 
       _join ->
         []
@@ -519,26 +508,60 @@ defmodule Selecto.Executor do
   end
 
   defp no_scope_collision(selecto) do
-    with :ok <- no_nested_recursive_with(selecto),
-         :ok <- no_later_cte_read(selecto) do
-      retarget_collision(selecto)
+    scopes = read_scopes(selecto)
+
+    with :ok <- no_nested_recursive_with(scopes),
+         :ok <- no_redefined_name(scopes) do
+      no_name_collision(scopes)
     end
   end
 
-  # A CTE body that reads a table named like a statement CTE the WITH emits after
-  # it. MySQL and PostgreSQL's non-recursive WITH show the body the table; SQLite
-  # shows it the later CTE under any WITH, and MariaDB under WITH RECURSIVE, so
-  # there the table would silently read the CTE's rows. Refused on those.
-  defp no_later_cte_read(selecto) do
-    adapter = runtime_adapter(selecto)
+  # One rule on every adapter, whatever each dialect shows a body: a CTE or
+  # VALUES name defined anywhere in the statement (a user's, or one Selecto
+  # generates) that names a relation read anywhere in it refuses
+  # (`cte_name_collision`). Every query counts: CTE bodies at any depth,
+  # subquery and LATERAL joins, set members, recursive bases and steps, a
+  # retarget origin, and the relations a join's generated CTE reads.
+  defp no_name_collision(scopes) do
+    names = scopes |> Enum.flat_map(&definitions(&1.query)) |> Enum.map(&elem(&1, 0))
+    folded = MapSet.new(names, &String.downcase/1)
 
-    name =
-      if is_atom(adapter) and not is_nil(adapter) and Code.ensure_loaded?(adapter) and
-           function_exported?(adapter, :name, 0),
-         do: adapter.name(),
-         else: nil
+    scopes
+    |> Enum.flat_map(&read_relations/1)
+    |> Enum.filter(&MapSet.member?(folded, String.downcase(&1)))
+    |> Enum.uniq()
+    |> case do
+      [] ->
+        :ok
 
-    case later_cte_reads(selecto, name) do
+      relations ->
+        {:error,
+         %Selecto.Error{
+           type: :query_enforcement,
+           message:
+             "A CTE or VALUES list is named like a relation the statement reads; " <>
+               "rename the list",
+           details: %{
+             code: :query_rule_not_evaluable,
+             reason: :cte_name_collision,
+             relations: relations
+           }
+         }}
+    end
+  end
+
+  # The same CTE or VALUES name defined at two places with different
+  # definitions: which one a query reads would depend on the database's
+  # scoping (MariaDB lets an enclosing name win over a body's own; SQLite and
+  # MariaDB under WITH RECURSIVE show a body a later one). Identical copies are
+  # one list.
+  defp no_redefined_name(scopes) do
+    scopes
+    |> Enum.flat_map(&definitions(&1.query))
+    |> Enum.group_by(&String.downcase(elem(&1, 0)), &elem(&1, 1))
+    |> Enum.filter(fn {_name, definitions} -> length(Enum.uniq(definitions)) > 1 end)
+    |> Enum.map(&elem(&1, 0))
+    |> case do
       [] ->
         :ok
 
@@ -547,59 +570,58 @@ defmodule Selecto.Executor do
          %Selecto.Error{
            type: :query_enforcement,
            message:
-             "A CTE body reads a table named like a CTE the statement defines after it; " <>
-               "this database would read the CTE",
+             "A CTE or VALUES name is defined twice in the statement with different " <>
+               "definitions; rename one",
            details: %{
              code: :query_rule_not_evaluable,
-             reason: :cte_name_collision,
-             relations: Enum.uniq(names),
-             adapter: name
+             reason: :cte_name_redefined,
+             relations: Enum.sort(names)
            }
          }}
     end
   end
 
   @doc false
-  # The later statement CTE names a body's tables would resolve to on `adapter`.
-  def later_cte_reads(selecto, adapter) do
-    selecto
-    |> read_scopes()
-    |> Enum.filter(&(&1.kind in [:cte_body, :recursive_part] and Map.has_key?(&1, :cte_spec)))
-    |> Enum.flat_map(fn %{enclosing: [parent | _], cte_spec: spec} = entry ->
-      if sees_later_ctes?(adapter, parent) do
-        before = Selecto.Builder.Sql.visible_ctes(parent, spec)
+  # The names one query defines, each with what it holds: its user CTEs, its
+  # VALUES lists, the CTEs its hierarchy joins generate (named by their
+  # definition). A list's per-call id and validation mark are no part of what
+  # it holds: two with_cte calls with one builder define one list.
+  def definitions(query) do
+    set = Map.get(query, :set) || %{}
 
-        later =
-          for cte <- List.wrap(Map.get(Map.get(parent, :set) || %{}, :ctes)),
-              cte != spec,
-              cte not in before,
-              do: to_string(cte.name)
+    ctes =
+      for %{name: name} = spec <- List.wrap(Map.get(set, :ctes)),
+          not is_nil(name),
+          do: {to_string(name), {:cte, Map.drop(spec, [:id, :validated])}}
 
-        entry |> scope_relations() |> Enum.filter(&(&1 in later))
-      else
-        []
-      end
-    end)
+    values =
+      for %{} = values <- List.wrap(Map.get(set, :values_clauses)),
+          name = Map.get(values, :alias),
+          not is_nil(name),
+          do: {to_string(name), {:values, Map.drop(values, [:id, :validated])}}
+
+    generated = for name <- generated_cte_names(query), do: {name, {:generated, name}}
+
+    ctes ++ values ++ generated
   end
 
-  defp sees_later_ctes?(:sqlite, _parent), do: true
+  @doc false
+  # The relations one read_scopes/1 entry reads as tables: its domain's, those
+  # its joins generate, and each ad-hoc join source that is no CTE or VALUES
+  # name visible where it sits (a retarget origin does not take its target's).
+  def read_relations(%{query: query, visible: visible, forbidden: forbidden}) do
+    references = visible -- forbidden
 
-  defp sees_later_ctes?(:mariadb, parent),
-    do:
-      parent
-      |> Map.get(:set, %{})
-      |> Map.get(:ctes)
-      |> List.wrap()
-      |> Enum.any?(&match?(%{type: :recursive}, &1))
-
-  defp sees_later_ctes?(_adapter, _parent), do: false
+    collect_relations(Map.get(query, :domain), []) ++
+      generated_relations(query) ++
+      Enum.reject(dynamic_sources(query), &(&1 in references))
+  end
 
   # A recursive CTE's base or step that defines its own CTE or VALUES list: the
   # nested WITH would scope over the whole UNION, or follow UNION ALL, which no
   # dialect parses. Refused on every adapter.
-  defp no_nested_recursive_with(selecto) do
-    selecto
-    |> read_scopes()
+  defp no_nested_recursive_with(scopes) do
+    scopes
     |> Enum.filter(&(&1.kind == :recursive_part))
     |> Enum.flat_map(&defined_names(&1.query))
     |> case do
@@ -617,27 +639,6 @@ defmodule Selecto.Executor do
              code: :query_rule_not_evaluable,
              reason: :recursive_cte_nested_with,
              relations: Enum.uniq(names)
-           }
-         }}
-    end
-  end
-
-  defp retarget_collision(selecto) do
-    case scope_collisions(selecto) do
-      [] ->
-        :ok
-
-      names ->
-        {:error,
-         %Selecto.Error{
-           type: :query_enforcement,
-           message:
-             "A retargeted query defines a CTE or VALUES list named like a table its " <>
-               "origin reads; the origin would read the list",
-           details: %{
-             code: :query_rule_not_evaluable,
-             reason: :cte_name_collision,
-             relations: names
            }
          }}
     end
