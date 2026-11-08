@@ -275,23 +275,32 @@ defmodule Selecto.DynamicJoin do
 
   @doc false
   # A nested query's columns keep their field names: its SQL carries no select
-  # alias, so `{:field, selector, alias}` (or `as:`) would name a column that is
-  # not there. Refuse it where the nested query is built, not at the database.
+  # alias, so renaming a field with `{:field, name, alias}` (or `as:`) would name
+  # a column that is not there. Refuse it where the nested query is built, not
+  # at the database. Raw SQL carries its own `AS`, and is left as written.
   def ensure_plain_projection!(query, context) do
     query
     |> Map.get(:set, %{})
     |> Map.get(:selected, [])
     |> List.wrap()
-    |> Enum.each(fn
-      {:field, _selector, alias_name} = selector when not is_nil(alias_name) ->
+    |> Enum.each(fn selector ->
+      if renamed_field?(selector) do
         raise ArgumentError,
               "#{context}: a nested query cannot rename a selected field " <>
                 "(#{inspect(selector)}); select the field itself and refer to it by its name"
-
-      _selector ->
-        :ok
+      end
     end)
   end
+
+  defp renamed_field?({:field, _selector, alias_name}) when is_list(alias_name),
+    do: Keyword.has_key?(alias_name, :as)
+
+  defp renamed_field?({:field, selector, alias_name})
+       when (is_binary(selector) or is_atom(selector)) and
+              (is_binary(alias_name) or (is_atom(alias_name) and not is_nil(alias_name))),
+       do: to_string(alias_name) != subquery_output_field_name(selector)
+
+  defp renamed_field?(_selector), do: false
 
   # Private helpers
 

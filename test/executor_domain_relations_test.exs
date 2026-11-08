@@ -61,6 +61,17 @@ defmodule Selecto.ExecutorDomainRelationsTest do
     assert Selecto.Executor.domain_relations(query) == ["orders"]
   end
 
+  test "raw SQL in a nested query keeps its own alias" do
+    raw = {:field, {:raw_sql, "COUNT(*) AS n"}, "n"}
+    inner = configure("reviews", [:id, :product_id]) |> Selecto.select(["product_id", raw])
+
+    assert %Selecto{} =
+             configure("products", [:id])
+             |> Selecto.DynamicJoin.join_subquery(:best, inner,
+               on: [%{left: "id", right: "product_id"}]
+             )
+  end
+
   test "a nested query cannot rename a selected field" do
     for selector <- [{:field, "id", "x"}, {:field, "id", as: "x"}] do
       inner = configure("reviews", [:id, :product_id]) |> Selecto.select([selector, "product_id"])
