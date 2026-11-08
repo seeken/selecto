@@ -243,6 +243,106 @@ defmodule Selecto.ExecutorDomainRelationsTest do
     assert "products" in Selecto.Executor.domain_relations(union)
   end
 
+  test "generated CTE names are reserved and fit 63 characters" do
+    alias Selecto.Builder.GeneratedName
+
+    long = "status_" <> String.duplicate("y", 39)
+    other = "status_" <> String.duplicate("y", 38) <> "z"
+    rows = [%{id: "A", name: "Item-A"}]
+
+    for name <- [
+          GeneratedName.values(long, [:id, :name], rows),
+          GeneratedName.hierarchy(long),
+          GeneratedName.materialized_path(long),
+          GeneratedName.closure(long <> long)
+        ] do
+      assert byte_size(name) <= 63
+      assert String.starts_with?(name, "__selecto_")
+    end
+
+    refute GeneratedName.values(long, [:id, :name], rows) ==
+             GeneratedName.values(other, [:id, :name], rows)
+
+    refute GeneratedName.values(long, [:id, :name], rows) ==
+             GeneratedName.values(long, [:id, :name], [%{id: "A", name: "Ship-A"}])
+
+    refute GeneratedName.closure(long <> long) == GeneratedName.closure(long <> other)
+    assert GeneratedName.closure(:locations) == "__selecto_closure_locations"
+  end
+
+  test "a closure join's own CTE never hides its closure table" do
+    cat = :cats
+    cols = %{id: %{type: :integer}, name: %{type: :string}}
+
+    domain = %{
+      name: "items",
+      source: %{
+        source_table: "items",
+        primary_key: :id,
+        fields: [:id, :cat_id],
+        redact_fields: [],
+        columns: %{id: %{type: :integer}, cat_id: %{type: :integer}},
+        associations: %{
+          cat => %{queryable: :catq, field: cat, owner_key: :cat_id, related_key: :id}
+        }
+      },
+      schemas: %{
+        catq: %{
+          source_table: "cats",
+          primary_key: :id,
+          fields: [:id, :name],
+          redact_fields: [],
+          columns: cols,
+          associations: %{}
+        }
+      },
+      joins: %{cat => %{type: :hierarchical, name: "cat", hierarchy_type: :closure_table}}
+    }
+
+    query =
+      Selecto.configure(domain, nil, validate: false) |> Selecto.select(["id", "cats_depth"])
+
+    {sql, _params} = Selecto.to_sql(query)
+
+    assert sql =~ "__selecto_closure_cats AS"
+    assert sql =~ "JOIN cats_closure cl"
+    assert "cats_closure" in Selecto.Executor.domain_relations(query)
+  end
+
+  test "a body reading a table named like a later statement CTE, per dialect" do
+    plain = fn name, table ->
+      Selecto.Advanced.CTE.create_cte(name, fn ->
+        configure(table, [:id]) |> Selecto.select(["id"])
+      end)
+    end
+
+    walk =
+      Selecto.Advanced.CTE.create_recursive_cte("walk",
+        base_query: fn -> configure("x", [:id]) |> Selecto.select(["id"]) end,
+        recursive_query: fn _ref -> configure("x", [:id]) |> Selecto.select(["id"]) end
+      )
+
+    body = fn ->
+      configure("products", [:id])
+      |> Selecto.join(:lkj, source: "lk", owner_key: :id, related_key: :product_id)
+      |> Selecto.select(["id"])
+    end
+
+    cb = Selecto.Advanced.CTE.create_cte("cb", body)
+    lk = plain.("lk", "products")
+
+    later = configure("products", [:id]) |> Selecto.with_ctes([cb, lk])
+    recursive = configure("products", [:id]) |> Selecto.with_ctes([cb, lk, walk])
+    earlier = configure("products", [:id]) |> Selecto.with_ctes([lk, cb])
+
+    assert Selecto.Executor.later_cte_reads(later, :sqlite) == ["lk"]
+    assert Selecto.Executor.later_cte_reads(later, :mariadb) == []
+    assert Selecto.Executor.later_cte_reads(recursive, :mariadb) == ["lk"]
+    assert Selecto.Executor.later_cte_reads(recursive, :mysql) == []
+    assert Selecto.Executor.later_cte_reads(recursive, :postgresql) == []
+    assert Selecto.Executor.later_cte_reads(earlier, :sqlite) == []
+  end
+
   test "a CTE an ad-hoc join reads is no relation" do
     query =
       configure("products", [:id])

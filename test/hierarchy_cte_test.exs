@@ -81,7 +81,7 @@ defmodule Selecto.HierarchyCteTest do
     cte_sql = IO.iodata_to_binary(cte_iodata)
 
     # Verify CTE structure
-    assert String.contains?(cte_sql, "categories_hierarchy AS (")
+    assert String.contains?(cte_sql, "__selecto_hierarchy_categories AS (")
     assert String.contains?(cte_sql, "UNION ALL")
 
     # Verify params is a list
@@ -95,10 +95,10 @@ defmodule Selecto.HierarchyCteTest do
   test "hierarchy_cte_name generates correct CTE name" do
     # Test the helper function directly via module attribute access
     result = Hierarchy.hierarchy_cte_name(:categories)
-    assert result == "categories_hierarchy"
+    assert result == "__selecto_hierarchy_categories"
 
     result = Hierarchy.hierarchy_cte_name(:employees)
-    assert result == "employees_hierarchy"
+    assert result == "__selecto_hierarchy_employees"
   end
 
   test "build_adjacency_list_cte handles different configuration options" do
@@ -118,13 +118,13 @@ defmodule Selecto.HierarchyCteTest do
     cte_sql = IO.iodata_to_binary(cte_iodata)
 
     # Verify custom CTE name
-    assert String.contains?(cte_sql, "employees_hierarchy")
+    assert String.contains?(cte_sql, "__selecto_hierarchy_employees")
 
     # Verify custom depth limit is used
     assert 10 in cte_params
 
     # Verify it generates valid SQL structure
-    assert String.contains?(cte_sql, "employees_hierarchy AS (")
+    assert String.contains?(cte_sql, "__selecto_hierarchy_employees AS (")
     assert String.contains?(cte_sql, "UNION ALL")
   end
 
@@ -144,7 +144,7 @@ defmodule Selecto.HierarchyCteTest do
     assert 5 in cte_params
 
     # Should generate valid SQL
-    assert String.contains?(cte_sql, "nodes_hierarchy AS (")
+    assert String.contains?(cte_sql, "__selecto_hierarchy_nodes AS (")
   end
 
   test "full adjacency hierarchy query preserves recursive CTE params" do
@@ -163,7 +163,7 @@ defmodule Selecto.HierarchyCteTest do
 
     {sql, params} = Selecto.to_sql(query)
 
-    assert sql =~ "WITH RECURSIVE manager_tree_hierarchy AS"
+    assert sql =~ "WITH RECURSIVE __selecto_hierarchy_manager_tree AS"
     assert sql =~ "h.level < $1"
     assert params == [5]
   end
@@ -183,7 +183,7 @@ defmodule Selecto.HierarchyCteTest do
     query_sql = IO.iodata_to_binary(query_iodata)
 
     # Should generate materialized path CTE definition
-    assert String.contains?(query_sql, "categories_materialized_path AS")
+    assert String.contains?(query_sql, "__selecto_path_categories AS")
 
     # Should include depth calculation
     assert String.contains?(query_sql, "length(path)")
@@ -217,7 +217,7 @@ defmodule Selecto.HierarchyCteTest do
     assert ["%"] == query_params
 
     # Should generate valid CTE name
-    assert String.contains?(query_sql, "items_materialized_path")
+    assert String.contains?(query_sql, "__selecto_path_items")
   end
 
   test "build_closure_table_query generates closure table SQL" do
@@ -236,7 +236,7 @@ defmodule Selecto.HierarchyCteTest do
     query_sql = IO.iodata_to_binary(query_iodata)
 
     # Should generate closure table CTE definition
-    assert String.contains?(query_sql, "categories_closure AS")
+    assert String.contains?(query_sql, "__selecto_closure_categories AS")
 
     # Should join main table with closure table
     assert String.contains?(query_sql, "FROM categories c")

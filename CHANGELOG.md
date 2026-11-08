@@ -3,6 +3,21 @@
 
 ## Unreleased
 
+- The CTEs Selecto generates for itself (a values-backed schema's list, and a
+  hierarchy, materialized-path or closure-table join's CTE) take a reserved
+  name that starts with `__selecto_` (`__selecto_closure_<join id>`, and so on),
+  so no table a host names is one of them. A closure join whose id was its
+  table's name generated a CTE named like its closure table, which hid that
+  table: on PostgreSQL it went unresolved and read another schema's closure
+  table. The tables a join generates are never hidden by any name, and every
+  generated name fits 63 characters (a longer id is cut and a digest of the id,
+  and of the rows for a values list, keeps it unique); MySQL and MariaDB failed
+  on a values list whose id passed about 40 characters.
+- A CTE body that reads a table named like a statement CTE emitted after it
+  refuses with `cte_name_collision` where the database would read the CTE:
+  SQLite under any `WITH`, MariaDB under `WITH RECURSIVE`
+  (`Selecto.Executor.later_cte_reads/2`). PostgreSQL and MySQL show the body
+  the table, as before.
 - `Selecto.Executor.read_queries/1` also lists the queries a CTE (`with_cte/3,4`,
   `with_recursive_cte/3`) and a LATERAL join build. `read_scopes/1` gives each
   with the CTE and VALUES names visible at its position and the queries enclosing
