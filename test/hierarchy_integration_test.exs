@@ -46,7 +46,7 @@ defmodule Selecto.HierarchyIntegrationTest do
       assert is_list(from_clause)
       join_sql = IO.iodata_to_binary(from_clause)
       assert String.contains?(join_sql, "LEFT JOIN")
-      assert String.contains?(join_sql, "categories_hierarchy")
+      assert String.contains?(join_sql, "__selecto_hierarchy_categories")
 
       # Should have parameters (depth limit)
       assert is_list(params)
@@ -59,7 +59,7 @@ defmodule Selecto.HierarchyIntegrationTest do
 
       # Verify CTE structure
       cte_sql = IO.iodata_to_binary(cte_iodata)
-      assert String.contains?(cte_sql, "categories_hierarchy AS (")
+      assert String.contains?(cte_sql, "__selecto_hierarchy_categories AS (")
       assert String.contains?(cte_sql, "UNION ALL")
       assert cte_params == [5]
     end
@@ -67,16 +67,20 @@ defmodule Selecto.HierarchyIntegrationTest do
     test "adjacency list generates proper custom columns" do
       # Test that schema join configuration creates proper custom column references
       join_id = :department
-      cte_alias = "#{join_id}_hierarchy"
+      cte_alias = Hierarchy.hierarchy_cte_name(join_id)
 
       # These should reference CTE fields, not generate invalid subqueries
       expected_path_select = "#{cte_alias}.path"
       expected_level_select = "#{cte_alias}.level"
       expected_path_array_select = "#{cte_alias}.path_array"
 
-      assert String.contains?(expected_path_select, "department_hierarchy.path")
-      assert String.contains?(expected_level_select, "department_hierarchy.level")
-      assert String.contains?(expected_path_array_select, "department_hierarchy.path_array")
+      assert String.contains?(expected_path_select, "__selecto_hierarchy_department.path")
+      assert String.contains?(expected_level_select, "__selecto_hierarchy_department.level")
+
+      assert String.contains?(
+               expected_path_array_select,
+               "__selecto_hierarchy_department.path_array"
+             )
     end
   end
 
@@ -109,7 +113,7 @@ defmodule Selecto.HierarchyIntegrationTest do
       # Should have JOIN clause
       join_sql = IO.iodata_to_binary(from_clause)
       assert String.contains?(join_sql, "LEFT JOIN")
-      assert String.contains?(join_sql, "menu_items_materialized_path")
+      assert String.contains?(join_sql, "__selecto_path_menu_items")
 
       # Should have path pattern parameter
       assert is_list(params)
@@ -119,7 +123,7 @@ defmodule Selecto.HierarchyIntegrationTest do
       assert length(ctes) == 1
       [{:raw_cte, cte_iodata, _cte_params}] = ctes
       cte_sql = IO.iodata_to_binary(cte_iodata)
-      assert String.contains?(cte_sql, "menu_items_materialized_path AS")
+      assert String.contains?(cte_sql, "__selecto_path_menu_items AS")
       assert String.contains?(cte_sql, "length(item_path)")
       assert String.contains?(cte_sql, "string_to_array(item_path")
     end
@@ -186,7 +190,7 @@ defmodule Selecto.HierarchyIntegrationTest do
       # Should have JOIN clause
       join_sql = IO.iodata_to_binary(from_clause)
       assert String.contains?(join_sql, "LEFT JOIN")
-      assert String.contains?(join_sql, "locations_closure")
+      assert String.contains?(join_sql, "__selecto_closure_locations")
 
       # Basic closure queries don't need parameters
       assert params == []
@@ -195,7 +199,7 @@ defmodule Selecto.HierarchyIntegrationTest do
       assert length(ctes) == 1
       [{:raw_cte, cte_iodata, _}] = ctes
       cte_sql = IO.iodata_to_binary(cte_iodata)
-      assert String.contains?(cte_sql, "locations_closure AS")
+      assert String.contains?(cte_sql, "__selecto_closure_locations AS")
       assert String.contains?(cte_sql, "FROM locations c")
       assert String.contains?(cte_sql, "JOIN location_closure cl")
       assert String.contains?(cte_sql, "cl.level")
@@ -294,7 +298,7 @@ defmodule Selecto.HierarchyIntegrationTest do
         end)
 
       cte_types = Enum.map(combined_ctes, fn {cte_type, _cte_iodata, _cte_params} -> cte_type end)
-      path_cte = Enum.find(cte_sqls, &String.contains?(&1, "menus_materialized_path"))
+      path_cte = Enum.find(cte_sqls, &String.contains?(&1, "__selecto_path_menus"))
 
       assert :raw_recursive_cte in cte_types
       assert path_cte != nil

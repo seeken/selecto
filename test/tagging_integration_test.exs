@@ -110,9 +110,9 @@ defmodule Selecto.TaggingIntegrationTest do
       assert String.contains?(tagging_sql_str, "LEFT JOIN tags")
 
       # Hierarchy should have recursive CTE definition
-      assert String.contains?(hierarchy_sql_str, "categories_hierarchy AS (")
+      assert String.contains?(hierarchy_sql_str, "__selecto_hierarchy_categories AS (")
       assert String.contains?(hierarchy_sql_str, "UNION ALL")
-      assert String.contains?(hierarchy_sql_str, "categories_hierarchy")
+      assert String.contains?(hierarchy_sql_str, "__selecto_hierarchy_categories")
     end
   end
 

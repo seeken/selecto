@@ -171,9 +171,7 @@ defmodule Selecto.Executor do
   def domain_relations(selecto) do
     selecto
     |> read_scopes()
-    |> Enum.flat_map(fn %{query: query, visible: visible} ->
-      query |> own_relations() |> Enum.reject(&(&1 in visible))
-    end)
+    |> Enum.flat_map(&scope_relations/1)
     |> Enum.uniq()
   end
 
@@ -184,6 +182,18 @@ defmodule Selecto.Executor do
   def own_relations(query) do
     collect_relations(Map.get(query, :domain), []) ++
       generated_relations(query) ++ dynamic_sources(query)
+  end
+
+  @doc false
+  # The relations one read_scopes/1 entry reads as tables: its own, without the
+  # names a CTE or VALUES list makes visible where it sits. The tables a join
+  # generates (a closure table, a junction table) are never hidden: the join
+  # reads that table, whatever its own generated CTE is called.
+  def scope_relations(%{query: query, visible: visible}) do
+    hideable =
+      collect_relations(Map.get(query, :domain), []) ++ dynamic_sources(query)
+
+    Enum.reject(hideable, &(&1 in visible)) ++ generated_relations(query)
   end
 
   @doc false
@@ -254,7 +264,10 @@ defmodule Selecto.Executor do
         |> Enum.map(
           &Selecto.Builder.Sql.own_ctes(&1, Selecto.Builder.Sql.carried_ctes(query, spec))
         )
-        |> Enum.flat_map(&scopes(&1, seen, inside, roots, [], part))
+        |> Enum.flat_map(fn body ->
+          [entry | rest] = scopes(body, seen, inside, roots, [], part)
+          [Map.put(entry, :cte_spec, spec) | rest]
+        end)
       end)
 
     [
@@ -393,10 +406,17 @@ defmodule Selecto.Executor do
     |> Kernel.||(%{})
     |> Map.get(:joins, %{})
     |> Enum.flat_map(fn
-      {id, %{join_type: :hierarchical_adjacency}} -> ["#{id}_hierarchy"]
-      {id, %{join_type: :hierarchical_materialized_path}} -> ["#{id}_materialized_path"]
-      {id, %{join_type: :hierarchical_closure_table}} -> ["#{id}_closure"]
-      _join -> []
+      {id, %{join_type: :hierarchical_adjacency}} ->
+        [Selecto.Builder.GeneratedName.hierarchy(id)]
+
+      {id, %{join_type: :hierarchical_materialized_path}} ->
+        [Selecto.Builder.GeneratedName.materialized_path(id)]
+
+      {id, %{join_type: :hierarchical_closure_table}} ->
+        [Selecto.Builder.GeneratedName.closure(id)]
+
+      _join ->
+        []
     end)
   end
 
@@ -499,10 +519,80 @@ defmodule Selecto.Executor do
   end
 
   defp no_scope_collision(selecto) do
-    with :ok <- no_nested_recursive_with(selecto) do
+    with :ok <- no_nested_recursive_with(selecto),
+         :ok <- no_later_cte_read(selecto) do
       retarget_collision(selecto)
     end
   end
+
+  # A CTE body that reads a table named like a statement CTE the WITH emits after
+  # it. MySQL and PostgreSQL's non-recursive WITH show the body the table; SQLite
+  # shows it the later CTE under any WITH, and MariaDB under WITH RECURSIVE, so
+  # there the table would silently read the CTE's rows. Refused on those.
+  defp no_later_cte_read(selecto) do
+    adapter = runtime_adapter(selecto)
+
+    name =
+      if is_atom(adapter) and not is_nil(adapter) and Code.ensure_loaded?(adapter) and
+           function_exported?(adapter, :name, 0),
+         do: adapter.name(),
+         else: nil
+
+    case later_cte_reads(selecto, name) do
+      [] ->
+        :ok
+
+      names ->
+        {:error,
+         %Selecto.Error{
+           type: :query_enforcement,
+           message:
+             "A CTE body reads a table named like a CTE the statement defines after it; " <>
+               "this database would read the CTE",
+           details: %{
+             code: :query_rule_not_evaluable,
+             reason: :cte_name_collision,
+             relations: Enum.uniq(names),
+             adapter: name
+           }
+         }}
+    end
+  end
+
+  @doc false
+  # The later statement CTE names a body's tables would resolve to on `adapter`.
+  def later_cte_reads(selecto, adapter) do
+    selecto
+    |> read_scopes()
+    |> Enum.filter(&(&1.kind in [:cte_body, :recursive_part] and Map.has_key?(&1, :cte_spec)))
+    |> Enum.flat_map(fn %{enclosing: [parent | _], cte_spec: spec} = entry ->
+      if sees_later_ctes?(adapter, parent) do
+        before = Selecto.Builder.Sql.visible_ctes(parent, spec)
+
+        later =
+          for cte <- List.wrap(Map.get(Map.get(parent, :set) || %{}, :ctes)),
+              cte != spec,
+              cte not in before,
+              do: to_string(cte.name)
+
+        entry |> scope_relations() |> Enum.filter(&(&1 in later))
+      else
+        []
+      end
+    end)
+  end
+
+  defp sees_later_ctes?(:sqlite, _parent), do: true
+
+  defp sees_later_ctes?(:mariadb, parent),
+    do:
+      parent
+      |> Map.get(:set, %{})
+      |> Map.get(:ctes)
+      |> List.wrap()
+      |> Enum.any?(&match?(%{type: :recursive}, &1))
+
+  defp sees_later_ctes?(_adapter, _parent), do: false
 
   # A recursive CTE's base or step that defines its own CTE or VALUES list: the
   # nested WITH would scope over the whole UNION, or follow UNION ALL, which no

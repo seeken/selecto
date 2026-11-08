@@ -70,7 +70,7 @@ defmodule Selecto.Builder.Sql.Hierarchy do
     {path_cte, cte_params} = build_materialized_path_query(selecto, join, config)
 
     # Create CTE name for this path query
-    cte_name = "#{join}_materialized_path"
+    cte_name = Selecto.Builder.GeneratedName.materialized_path(join)
 
     # Build JOIN to reference the materialized path CTE
     cte_join_iodata = [
@@ -96,7 +96,7 @@ defmodule Selecto.Builder.Sql.Hierarchy do
     {closure_cte, cte_params} = build_closure_table_query(selecto, join, config)
 
     # Create CTE name for this closure query
-    cte_name = "#{join}_closure"
+    cte_name = Selecto.Builder.GeneratedName.closure(join)
 
     # Build JOIN to reference the closure table CTE
     cte_join_iodata = [
@@ -207,7 +207,7 @@ defmodule Selecto.Builder.Sql.Hierarchy do
       end
 
     fragment = %MaterializedPath{
-      query_name: "#{join}_materialized_path",
+      query_name: Selecto.Builder.GeneratedName.materialized_path(join),
       source_table: source_table,
       path_field: path_field,
       path_separator: path_separator,
@@ -246,7 +246,7 @@ defmodule Selecto.Builder.Sql.Hierarchy do
     depth_field = Map.get(config, :depth_field, "depth")
 
     # Build closure table query that includes descendant count
-    query_name = "#{join}_closure"
+    query_name = Selecto.Builder.GeneratedName.closure(join)
 
     query_iodata = [
       query_name,
@@ -358,5 +358,5 @@ defmodule Selecto.Builder.Sql.Hierarchy do
     """
   end
 
-  def hierarchy_cte_name(join), do: "#{join}_hierarchy"
+  def hierarchy_cte_name(join), do: Selecto.Builder.GeneratedName.hierarchy(join)
 end
