@@ -162,6 +162,74 @@ defmodule Selecto.ExecutorDomainRelationsTest do
     refute sql_before =~ ~r/cb AS \(\s*WITH/
   end
 
+  test "under WITH RECURSIVE a body still sees only the CTEs emitted before it" do
+    plain = fn name ->
+      Selecto.Advanced.CTE.create_cte(name, fn ->
+        configure("x", [:id]) |> Selecto.select(["id"])
+      end)
+    end
+
+    walk =
+      Selecto.Advanced.CTE.create_recursive_cte("walk",
+        base_query: fn -> configure("x", [:id]) |> Selecto.select(["id"]) end,
+        recursive_query: fn _ref -> configure("x", [:id]) |> Selecto.select(["id"]) end
+      )
+
+    {cb, c2} = {plain.("cb"), plain.("c2")}
+    root = configure("products", [:id]) |> Selecto.with_ctes([cb, c2, walk])
+
+    # MySQL shows no body a later CTE, even under WITH RECURSIVE.
+    assert Selecto.Builder.Sql.visible_ctes(root, cb) == []
+  end
+
+  test "a values-backed schema's CTE is named by its rows" do
+    values_domain = fn rows ->
+      %{
+        name: :items,
+        source: %{
+          source_table: "items",
+          primary_key: :id,
+          fields: [:id, :status_id],
+          columns: %{id: %{type: :integer}, status_id: %{type: :string}},
+          associations: %{
+            status: %{
+              queryable: :status,
+              field: :status,
+              owner_key: :status_id,
+              related_key: :id,
+              cardinality: :one
+            }
+          }
+        },
+        schemas: %{
+          status: %{
+            primary_key: :id,
+            fields: [:id, :name],
+            columns: %{id: %{type: :string}, name: %{type: :string}},
+            values: rows,
+            associations: %{}
+          }
+        },
+        joins: %{status: %{type: :left}}
+      }
+    end
+
+    table = fn rows ->
+      {sql, _aliases, _params} =
+        values_domain.(rows)
+        |> Selecto.configure(:mock_connection)
+        |> Selecto.select(["id", "status.name"])
+        |> Selecto.gen_sql([])
+
+      [name] = Regex.run(~r/__selecto_values_status_[0-9a-f]{10}/, sql)
+      name
+    end
+
+    a = table.([%{id: "A", name: "Item-A"}])
+    refute a == table.([%{id: "A", name: "Ship-A"}])
+    assert a == table.([%{id: "A", name: "Item-A"}])
+  end
+
   test "names a query defines hide tables only where they are visible" do
     member =
       configure("orders", [:id]) |> Selecto.with_values([["a"]], columns: ["c"], as: "products")
