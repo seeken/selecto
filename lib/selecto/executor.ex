@@ -208,9 +208,13 @@ defmodule Selecto.Executor do
   # entry's `roots` are the queries whose declared `source_schema` its tables
   # take, nearest first: its own, then a retarget origin's (R59: a target
   # declaring none takes its origin's), then its enclosing queries'.
-  def read_scopes(selecto), do: scopes(selecto, [], [], [], [])
+  #
+  # Each entry also carries its `kind` (:query, :member, :origin, :nested,
+  # :cte_body, :recursive_part) and `outer`, the names visible from enclosing
+  # queries where it sits.
+  def read_scopes(selecto), do: scopes(selecto, [], [], [], [], :query)
 
-  defp scopes(query, visible, enclosing, outer_roots, forbidden) do
+  defp scopes(query, visible, enclosing, outer_roots, forbidden, kind) do
     set = Map.get(query, :set) || %{}
     ctes = List.wrap(Map.get(set, :ctes))
     own = statement_names(query)
@@ -222,37 +226,50 @@ defmodule Selecto.Executor do
     siblings =
       query
       |> set_operation_members()
-      |> Enum.flat_map(&scopes(&1, visible, enclosing, outer_roots, []))
+      |> Enum.flat_map(&scopes(&1, visible, enclosing, outer_roots, [], :member))
 
     origins =
       query
       |> retarget_origins()
-      |> Enum.flat_map(&scopes(&1, main, inside, roots, own))
+      |> Enum.flat_map(&scopes(&1, main, inside, roots, own, :origin))
 
     nested =
       (subquery_reads(query) ++ lateral_reads(query))
-      |> Enum.flat_map(&scopes(&1, main, inside, roots, []))
+      |> Enum.flat_map(&scopes(&1, main, inside, roots, [], :nested))
 
-    # VALUES lists and join-generated CTEs are emitted before the user CTEs.
+    # VALUES lists and join-generated CTEs are emitted before the user CTEs,
+    # and the user CTEs in dependency order (Selecto.Builder.Sql.visible_ctes/2).
     before_user = visible ++ values_names(query) ++ generated_cte_names(query)
 
     bodies =
-      ctes
-      |> Enum.with_index()
-      |> Enum.flat_map(fn {spec, index} ->
-        seen = if recursive?, do: main, else: before_user ++ cte_names(Enum.take(ctes, index))
+      Enum.flat_map(ctes, fn spec ->
+        before = Selecto.Builder.Sql.visible_ctes(query, spec)
+        seen = if recursive?, do: main, else: before_user ++ cte_names(before)
+        part = if match?(%{type: :recursive}, spec), do: :recursive_part, else: :cte_body
 
         spec
         |> cte_queries()
-        |> Enum.map(&Selecto.Builder.Sql.own_ctes(&1, query))
-        |> Enum.flat_map(&scopes(&1, seen, inside, roots, []))
+        |> Enum.map(&Selecto.Builder.Sql.own_ctes(&1, [spec | before]))
+        |> Enum.flat_map(&scopes(&1, seen, inside, roots, [], part))
       end)
 
     [
-      %{query: query, visible: main, enclosing: enclosing, roots: roots, forbidden: forbidden}
+      %{
+        query: query,
+        kind: kind,
+        outer: visible,
+        visible: main,
+        enclosing: enclosing,
+        roots: roots,
+        forbidden: forbidden
+      }
       | siblings ++ origins ++ nested ++ bodies
     ]
   end
+
+  @doc false
+  # The names a CTE body defines for itself (its own CTEs and VALUES lists).
+  def defined_names(query), do: statement_names(query) -- generated_cte_names(query)
 
   defp set_operation_members(query) do
     (Map.get(query, :set) || %{})
@@ -478,6 +495,40 @@ defmodule Selecto.Executor do
   end
 
   defp no_scope_collision(selecto) do
+    with :ok <- no_nested_recursive_with(selecto) do
+      retarget_collision(selecto)
+    end
+  end
+
+  # A recursive CTE's base or step that defines its own CTE or VALUES list: the
+  # nested WITH would scope over the whole UNION, or follow UNION ALL, which no
+  # dialect parses. Refused on every adapter.
+  defp no_nested_recursive_with(selecto) do
+    selecto
+    |> read_scopes()
+    |> Enum.filter(&(&1.kind == :recursive_part))
+    |> Enum.flat_map(&defined_names(&1.query))
+    |> case do
+      [] ->
+        :ok
+
+      names ->
+        {:error,
+         %Selecto.Error{
+           type: :query_enforcement,
+           message:
+             "A recursive CTE's base or recursive query cannot define its own CTE or " <>
+               "VALUES list",
+           details: %{
+             code: :query_rule_not_evaluable,
+             reason: :recursive_cte_nested_with,
+             relations: Enum.uniq(names)
+           }
+         }}
+    end
+  end
+
+  defp retarget_collision(selecto) do
     case scope_collisions(selecto) do
       [] ->
         :ok

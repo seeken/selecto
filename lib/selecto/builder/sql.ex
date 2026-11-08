@@ -1688,11 +1688,13 @@ defmodule Selecto.Builder.Sql do
   end
 
   defp convert_user_cte_spec(%{type: :recursive} = spec, root) do
+    seen = carried_ctes(root, spec)
+
     %Selecto.Advanced.CTE.Spec{
       name: spec.name,
       type: :recursive,
-      base_query: scoped_member_query(spec.base_query, root),
-      recursive_query: scoped_member_query(spec.recursive_query, root),
+      base_query: scoped_member_query(spec.base_query, root, seen),
+      recursive_query: scoped_member_query(spec.recursive_query, root, seen),
       validated: true,
       dependencies: Map.get(spec, :dependencies, []),
       columns: Map.get(spec, :columns),
@@ -1705,34 +1707,74 @@ defmodule Selecto.Builder.Sql do
     %Selecto.Advanced.CTE.Spec{
       name: spec.name,
       type: :normal,
-      query_builder: scoped_member_query(spec.query_builder || spec.query, root),
+      query_builder:
+        scoped_member_query(spec.query_builder || spec.query, root, carried_ctes(root, spec)),
       validated: true,
       columns: Map.get(spec, :columns),
       dependencies: Map.get(spec, :dependencies, [])
     }
   end
 
-  # A CTE body emits the CTEs it defines itself, as a WITH of its own; one it
-  # carries from the statement (a body built from the root) the statement emits.
-  defp scoped_member_query(builder, root) when is_function(builder, 0),
-    do: fn -> builder.() |> Selecto.QueryMembers.Data.scope_member(root) |> own_ctes(root) end
+  # A CTE body emits the CTEs it defines itself, as a WITH of its own. A copy of
+  # a statement CTE the body can already see where it is emitted (one emitted
+  # before it, or any under WITH RECURSIVE), and the body's own CTE, are left to
+  # the statement; any other copy the body emits itself.
+  defp scoped_member_query(builder, root, seen) when is_function(builder, 0),
+    do: fn -> builder.() |> Selecto.QueryMembers.Data.scope_member(root) |> own_ctes(seen) end
 
-  defp scoped_member_query(builder, root) when is_function(builder, 1),
+  defp scoped_member_query(builder, root, seen) when is_function(builder, 1),
     do: fn cte_ref ->
-      builder.(cte_ref) |> Selecto.QueryMembers.Data.scope_member(root) |> own_ctes(root)
+      builder.(cte_ref) |> Selecto.QueryMembers.Data.scope_member(root) |> own_ctes(seen)
     end
 
-  defp scoped_member_query(builder, _root), do: builder
+  defp scoped_member_query(builder, _root, _seen), do: builder
 
   @doc false
-  def own_ctes(%{set: %{} = set} = body, root) do
-    statement = List.wrap(Map.get(root.set, :ctes))
-    ctes = Enum.reject(List.wrap(Map.get(set, :ctes)), &(&1 in statement))
+  # The statement CTEs a body leaves to the statement: its own spec, and those it
+  # sees at its emitted position (visible_ctes/2).
+  def carried_ctes(root, spec), do: [spec | visible_ctes(root, spec)]
 
+  @doc false
+  # The statement's user CTEs visible to `spec`'s body where the WITH emits it:
+  # every one under WITH RECURSIVE, else those emitted before it. The WITH emits
+  # user CTEs in dependency order (Selecto.Advanced.CTE.validate_dependencies/1):
+  # the first in list order whose dependencies are out, repeatedly.
+  def visible_ctes(root, spec) do
+    ctes = List.wrap(Map.get(Map.get(root, :set) || %{}, :ctes))
+
+    if Enum.any?(ctes, &match?(%{type: :recursive}, &1)) do
+      Enum.reject(ctes, &(&1 == spec))
+    else
+      ctes |> emitted_order() |> Enum.take_while(&(&1 != spec))
+    end
+  end
+
+  @doc false
+  def emitted_order(ctes), do: emitted_order(ctes, [])
+
+  defp emitted_order([], ordered), do: Enum.reverse(ordered)
+
+  defp emitted_order(pending, ordered) do
+    out = for %{name: name} <- ordered, do: to_string(name)
+
+    ready =
+      Enum.find(pending, fn spec ->
+        spec |> Map.get(:dependencies, []) |> List.wrap() |> Enum.all?(&(to_string(&1) in out))
+      end)
+
+    case ready do
+      nil -> Enum.reverse(ordered) ++ pending
+      spec -> emitted_order(List.delete(pending, spec), [spec | ordered])
+    end
+  end
+
+  @doc false
+  def own_ctes(%{set: %{} = set} = body, seen) do
+    ctes = Enum.reject(List.wrap(Map.get(set, :ctes)), &(&1 in seen))
     %{body | set: Map.put(set, :ctes, ctes)}
   end
 
-  def own_ctes(body, _root), do: body
+  def own_ctes(body, _seen), do: body
 
   # Phase 4.2: VALUES clause integration as CTEs
   defp build_values_clauses_as_ctes(selecto, requested_joins) do
