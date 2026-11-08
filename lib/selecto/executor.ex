@@ -165,36 +165,108 @@ defmodule Selecto.Executor do
 
   @doc false
   # Every relation a read names: its domains' source and schema tables and
-  # association bridges, the tables its ad-hoc joins name, across its set
-  # operands and the queries its subquery joins carry.
+  # association bridges, the tables its ad-hoc joins name, across every query
+  # the statement compiles (read_queries/1). A name the statement defines (a
+  # CTE or VALUES list) is no relation.
   def domain_relations(selecto) do
     queries = read_queries(selecto)
+    local = Enum.flat_map(queries, &statement_names/1)
 
     queries
-    |> Enum.map(&Map.get(&1, :domain))
-    |> Enum.reduce([], &collect_relations/2)
-    |> Kernel.++(Enum.flat_map(queries, &generated_relations/1))
-    |> Kernel.++(Enum.flat_map(queries, &dynamic_sources/1))
+    |> Enum.flat_map(fn query ->
+      shadowing = names_shadowing(query, local)
+      query |> own_relations() |> Enum.reject(&(&1 in shadowing))
+    end)
     |> Enum.uniq()
   end
 
   @doc false
-  # The queries one statement compiles: the read, its set operands, and the
-  # query each subquery join carries, with theirs.
+  # The statement's names that hide a table from `query`: all of them, except a
+  # non-recursive CTE's own name inside its body, which reads the table.
+  def names_shadowing(query, local) do
+    case query |> Map.get(:set) |> Kernel.||(%{}) |> Map.get(:selecto_cte_body) do
+      nil -> local
+      own -> Enum.reject(local, &(&1 == own))
+    end
+  end
+
+  @doc false
+  # The relations one query names itself, before the statement's own names are
+  # taken out: its domain's tables, those its joins generate, its ad-hoc sources.
+  def own_relations(query) do
+    collect_relations(Map.get(query, :domain), []) ++
+      generated_relations(query) ++ dynamic_sources(query)
+  end
+
+  @doc false
+  # The names the statement defines for itself, across all its queries.
+  def local_names(selecto), do: selecto |> read_queries() |> Enum.flat_map(&statement_names/1)
+
+  @doc false
+  # The queries one statement compiles: the read, its set operands, the query
+  # each subquery join carries, and the queries its CTEs and LATERAL joins build,
+  # with theirs. A builder that raises adds nothing here: compiling raises too.
   def read_queries(selecto) do
     queries = [selecto | set_operands(selecto)]
 
-    inner =
-      Enum.flat_map(queries, fn query ->
-        query
-        |> dynamic_joins()
-        |> Enum.flat_map(fn
-          {_id, %{subquery_read: %{} = subquery}} -> read_queries(subquery)
-          _join -> []
-        end)
+    queries ++
+      Enum.flat_map(
+        queries,
+        &(&1 |> inner_queries() |> Enum.flat_map(fn q -> read_queries(q) end))
+      )
+  end
+
+  defp inner_queries(query) do
+    set = Map.get(query, :set) || %{}
+
+    subqueries =
+      query
+      |> dynamic_joins()
+      |> Enum.flat_map(fn
+        {_id, %{subquery_read: %{} = subquery}} -> [subquery]
+        _join -> []
       end)
 
-    queries ++ inner
+    ctes = Enum.flat_map(List.wrap(Map.get(set, :ctes)), &cte_queries/1)
+    laterals = Enum.flat_map(List.wrap(Map.get(set, :lateral_joins)), &lateral_query(&1, query))
+    subqueries ++ ctes ++ laterals
+  end
+
+  defp cte_queries(%{type: :recursive, name: name, base_query: base, recursive_query: step})
+       when is_function(base, 0) and is_function(step, 1) do
+    reference = Selecto.Builder.CteSql.create_cte_reference(to_string(name))
+    built([fn -> base.() end, fn -> step.(reference) end])
+  end
+
+  defp cte_queries(%{query_builder: builder, name: name}) when is_function(builder, 0) do
+    for inner <- built([builder]) do
+      Map.put(
+        inner,
+        :set,
+        Map.put(Map.get(inner, :set) || %{}, :selecto_cte_body, to_string(name))
+      )
+    end
+  end
+
+  defp cte_queries(%{query_builder: builder}) when is_function(builder, 0), do: built([builder])
+  defp cte_queries(_spec), do: []
+
+  defp lateral_query(%{subquery_builder: builder}, query) when is_function(builder, 1),
+    do: built([fn -> builder.(query) end])
+
+  defp lateral_query(_spec, _query), do: []
+
+  defp built(builders) do
+    Enum.flat_map(builders, fn builder ->
+      try do
+        case builder.() do
+          %{domain: domain} = inner when is_map(domain) -> [inner]
+          _other -> []
+        end
+      rescue
+        _exception -> []
+      end
+    end)
   end
 
   @doc false

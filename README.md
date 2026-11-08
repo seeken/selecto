@@ -167,6 +167,15 @@ compiles with the server's collated comparison. A host that pins a site or
 scopes a tenantless domain with `Selecto.filter/2` and needs exact matching
 must use one of the mechanisms above.
 
+### Ad-hoc joins and tenant scope
+
+An ad-hoc join, `Selecto.join(selecto, id, source: "table", ...)`, carries no
+domain metadata, so Selecto applies no tenant scope to its table: under
+`Selecto.with_tenant/2` the root is filtered and the joined table is not. The
+host must filter the joined table itself, or use a join declared on the domain,
+whose tables the tenant scope covers. A `join_subquery` keeps the inner query's
+own tenant scope and its domain's required filters.
+
 ## Configuration Providers
 
 A trusted application provider can derive a domain from another configuration
