@@ -8,10 +8,18 @@
   with the CTE and VALUES names visible at its position and the queries enclosing
   it, and `own_relations/1` its own tables, so an adapter resolves each query
   under its own declarations.
-- `join_subquery` and a CTE without a column list refuse a field renamed with
-  `{:field, name, alias}` or `as:`: the nested SQL carries no alias, so the name
-  did not exist (an ArgumentError from `List.to_string`, or a database error).
-  Raw SQL that carries its own `AS` is left as written.
+- A CTE body's own CTEs are emitted as a `WITH` inside the body; they were
+  dropped, so the body read the real table of that name and lost its scope. A
+  CTE the body carries from the statement is still emitted once, at the top.
+- `read_scopes/1` follows the emitted SQL: a retargeted query's origin is nested
+  in the target, and a target CTE or VALUES list named like a table the origin
+  reads refuses with `cte_name_collision`; a CTE body sees its query's VALUES
+  lists and join-generated CTEs; each entry lists the `roots` whose declared
+  schema its tables take (a retarget target's origin among them).
+- A renamed plain field in a nested query (`{:field, name, alias}` or `as:`) no
+  longer raises from `List.to_string`: the nested SQL carries no alias, so the
+  subquery join registers the field's own name, and a reference to the alias
+  fails as an unknown field.
 - Documented: an ad-hoc join's table gets no tenant scope (R76).
 - `Selecto.Executor.domain_relations/1` also returns the tables ad-hoc joins name
   (`Selecto.join/3` with `source:`; a CTE or VALUES list the statement defines is

@@ -72,24 +72,48 @@ defmodule Selecto.ExecutorDomainRelationsTest do
              )
   end
 
-  test "a nested query cannot rename a selected field" do
-    for selector <- [{:field, "id", "x"}, {:field, "id", as: "x"}] do
+  test "a nested query's renamed plain field keeps its own name" do
+    # The nested SQL carries no select alias: the column is the field's own name.
+    for selector <- [{:field, "id", "x"}, {:field, "id", as: "x"}, {:field, "id", as: "id"}] do
       inner = configure("reviews", [:id, :product_id]) |> Selecto.select([selector, "product_id"])
 
-      assert_raise ArgumentError, ~r/cannot rename a selected field/, fn ->
+      joined =
         configure("products", [:id])
-        |> Selecto.DynamicJoin.join_subquery(:best, inner, on: [%{left: "id", right: "x"}])
-      end
+        |> Selecto.DynamicJoin.join_subquery(:best, inner,
+          on: [%{left: "id", right: "product_id"}]
+        )
 
-      cte =
-        configure("products", [:id])
-        |> Selecto.with_cte("best", fn -> inner end)
-        |> Selecto.select(["id"])
-
-      assert_raise ArgumentError, ~r/cannot rename a selected field/, fn ->
-        Selecto.to_sql(cte)
-      end
+      fields = joined.set.dynamic_joins.best.fields |> Map.keys()
+      assert "best.id" in fields, inspect(selector)
+      refute "best.x" in fields, inspect(selector)
     end
+  end
+
+  test "a CTE body without a column list may rename a field, as before" do
+    body = fn ->
+      configure("products", [:id]) |> Selecto.select([{:field, "id", "product_id"}])
+    end
+
+    query = configure("products", [:id]) |> Selecto.with_cte("cb", body) |> Selecto.select(["id"])
+    assert {sql, _params} = Selecto.to_sql(query)
+    assert sql =~ "cb"
+  end
+
+  test "a retarget target's VALUES named like its origin's table is a collision" do
+    domain =
+      domain("reviews", [:id, :product_id])
+      |> put_in([:source, :associations], %{
+        prod: %{queryable: :prod, field: :prod, owner_key: :product_id, related_key: :id}
+      })
+      |> Map.put(:schemas, %{prod: domain("products", [:id]).source})
+      |> Map.put(:joins, %{prod: %{type: :left, name: "prod"}})
+
+    query =
+      Selecto.configure(domain, nil, validate: false)
+      |> Selecto.retarget(:prod)
+      |> Selecto.with_values([[1, 2]], columns: ["id", "product_id"], as: "reviews")
+
+    assert Selecto.Executor.scope_collisions(query) == ["reviews"]
   end
 
   test "names a query defines hide tables only where they are visible" do

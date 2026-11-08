@@ -1712,13 +1712,27 @@ defmodule Selecto.Builder.Sql do
     }
   end
 
+  # A CTE body emits the CTEs it defines itself, as a WITH of its own; one it
+  # carries from the statement (a body built from the root) the statement emits.
   defp scoped_member_query(builder, root) when is_function(builder, 0),
-    do: fn -> Selecto.QueryMembers.Data.scope_member(builder.(), root) end
+    do: fn -> builder.() |> Selecto.QueryMembers.Data.scope_member(root) |> own_ctes(root) end
 
   defp scoped_member_query(builder, root) when is_function(builder, 1),
-    do: fn cte_ref -> Selecto.QueryMembers.Data.scope_member(builder.(cte_ref), root) end
+    do: fn cte_ref ->
+      builder.(cte_ref) |> Selecto.QueryMembers.Data.scope_member(root) |> own_ctes(root)
+    end
 
   defp scoped_member_query(builder, _root), do: builder
+
+  @doc false
+  def own_ctes(%{set: %{} = set} = body, root) do
+    statement = List.wrap(Map.get(root.set, :ctes))
+    ctes = Enum.reject(List.wrap(Map.get(set, :ctes)), &(&1 in statement))
+
+    %{body | set: Map.put(set, :ctes, ctes)}
+  end
+
+  def own_ctes(body, _root), do: body
 
   # Phase 4.2: VALUES clause integration as CTEs
   defp build_values_clauses_as_ctes(selecto, requested_joins) do

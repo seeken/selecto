@@ -124,14 +124,8 @@ defmodule Selecto.Builder.CteSql do
   defp generate_cte_sql(%Spec{type: :normal} = spec) do
     # Execute the query builder to get the Selecto query
     selecto_query = spec.query_builder.()
-    # A column list names the columns; without one the body's names do.
-    if is_nil(spec.columns),
-      do:
-        :ok =
-          Selecto.DynamicJoin.ensure_plain_projection!(selecto_query, "CTE #{inspect(spec.name)}")
-
     # Generate SQL from the Selecto query
-    {sql_iodata, _aliases} = Sql.build_iodata(selecto_query, emit_user_ctes: false)
+    {sql_iodata, _aliases} = Sql.build_iodata(selecto_query, [])
     sql_iodata = rewrite_cte_root_alias(sql_iodata, spec.name)
     {_sql, params} = Selecto.SQL.Params.finalize(sql_iodata, adapter: selecto_query.adapter)
 
@@ -159,11 +153,11 @@ defmodule Selecto.Builder.CteSql do
       bound_recursion(spec, spec.base_query.(), spec.recursive_query.(cte_ref))
 
     # Execute base query
-    {base_sql_iodata, _base_aliases} = Sql.build_iodata(base_selecto, emit_user_ctes: false)
+    {base_sql_iodata, _base_aliases} = Sql.build_iodata(base_selecto, [])
 
     # Execute recursive query with CTE reference
     {recursive_sql_iodata, _recursive_aliases} =
-      Sql.build_iodata(recursive_selecto, emit_user_ctes: false)
+      Sql.build_iodata(recursive_selecto, [])
 
     base_sql_iodata = rewrite_cte_root_alias(base_sql_iodata, spec.name)
     recursive_sql_iodata = rewrite_cte_root_alias(recursive_sql_iodata, spec.name)
