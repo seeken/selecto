@@ -21,7 +21,8 @@ defmodule Selecto.Builder.RawCte do
   # comma; on MySQL and MariaDB also `#` comments, `--` not followed by
   # whitespace, `/*!` and `/*M!` executable comments and "double quotes"
   # (ANSI_QUOTES is not known); outside PostgreSQL, dollar quotes and nested
-  # block comments; on SQLite, `$name`, `@name` and `:name` parameters.
+  # block comments; on SQLite, Tcl-style `$name(...)` parameters (also with
+  # `@`, `:` or `#`), which it reads up to the `)`.
 
   @dialects [:postgresql, :mysql, :mariadb, :sqlite, :duckdb, :any]
 
@@ -232,17 +233,20 @@ defmodule Selecto.Builder.RawCte do
     with {:ok, _name, rest} <- quoted(rest, ?], ""), do: balanced(rest, depth, d)
   end
 
-  # SQLite reads `$name`, `@name` and `:name` as parameters, `$name(...)` with
-  # anything up to its `)`: refused there.
-  defp balanced(<<p, c, _::binary>>, _depth, d)
-       when d in [:sqlite, :any] and p in [?$, ?@, ?:] and
-              (c in ?a..?z or c in ?A..?Z or c == ?_ or c >= 0x80),
-       do: :error
+  # SQLite reads `$name(...)` (also with `@`, `:` or `#`) as one parameter,
+  # anything up to its `)` included: refused there.
+  defp balanced(<<p, rest::binary>>, depth, d)
+       when d in [:sqlite, :any] and p in [?@, ?:, ?#] do
+    if tcl_call?(rest, 0), do: :error, else: balanced(rest, depth, d)
+  end
 
   # A `$` that does not follow an identifier character may open a dollar quote:
   # PostgreSQL reads it; elsewhere it is refused. `$1` is a parameter.
   defp balanced("$" <> rest, depth, d) do
-    case dollar_tag(rest, "") do
+    case if(d in [:sqlite, :any] and tcl_call?(rest, 0), do: :call, else: dollar_tag(rest, "")) do
+      :call ->
+        :error
+
       {:ok, tag, rest} when d == :postgresql ->
         case :binary.split(rest, "$" <> tag <> "$") do
           [_string, rest] -> balanced(rest, depth, d)
@@ -271,6 +275,14 @@ defmodule Selecto.Builder.RawCte do
   defp string("\\" <> _rest), do: :error
   defp string(<<_c, rest::binary>>), do: string(rest)
   defp string(""), do: :error
+
+  # Whether the text after a SQLite `$`, `@`, `:` or `#` is a Tcl-style
+  # `name(...)` parameter: identifier characters (and `::`), then `(`.
+  defp tcl_call?("::" <> rest, n), do: tcl_call?(rest, n)
+  defp tcl_call?("(" <> _rest, n), do: n > 0
+
+  defp tcl_call?(<<c, rest::binary>>, n) when word?(c), do: tcl_call?(rest, n + 1)
+  defp tcl_call?(_rest, _n), do: false
 
   # `$tag$` or `$$` opens a dollar-quoted string; `$1` is a parameter.
   defp dollar_tag("$" <> rest, tag), do: {:ok, tag, rest}
