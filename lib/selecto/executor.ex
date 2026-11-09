@@ -1,7 +1,4 @@
 defmodule Selecto.Executor do
-  # A raw CTE's text: `name [(columns)] AS [NOT] [MATERIALIZED] (`.
-  @raw_cte_head ~r/\A\s*("(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_$]*)\s*(?:\([^)]*\)\s*)?as\s*(?:not\s+)?(?:materialized\s*)?\(/i
-
   @moduledoc """
   Query execution engine for Selecto.
 
@@ -334,8 +331,8 @@ defmodule Selecto.Executor do
   # The queries a filter, a selection or any other part of a query embeds and
   # compiles inside it (`{:exists, query}`, `{field, {:subquery, :in, query}}`,
   # `{field, op, {:subquery, :any, query}}`, a scope or HAVING filter, a
-  # select expression): every %Selecto{} in its set, domain and configuration
-  # that read_scopes/1 does not already list (set members, a retarget origin,
+  # select expression): every %Selecto{} in its set that read_scopes/1 does not
+  # already list (set members, a retarget origin,
   # subquery and LATERAL joins, CTE bodies).
   defp embedded_queries(query) do
     set = Map.get(query, :set) || %{}
@@ -349,8 +346,10 @@ defmodule Selecto.Executor do
           else: joins
       end)
 
-    [set_part, Map.get(query, :domain), Map.get(query, :config)]
-    |> Enum.flat_map(&find_queries(&1, []))
+    # Only the query's own set: a domain or configuration may hold queries
+    # (query members) the query does not use.
+    set_part
+    |> find_queries([])
     |> Enum.reverse()
     |> Enum.uniq()
   end
@@ -415,21 +414,15 @@ defmodule Selecto.Executor do
   defp cte_names(specs), do: Enum.flat_map(specs, &list_name/1)
 
   @doc false
-  # A CTE spec's name; a raw CTE's (`{:raw_cte, sql, params}`, the host's own
-  # text, R68) where its text starts `name [(columns)] AS (`; [] for a raw CTE
-  # whose name its text does not show.
+  # A CTE spec's name; every name a raw CTE's text (`{:raw_cte, sql, params}`,
+  # the host's own, R68) defines (Selecto.Builder.RawCte); [] for raw text that
+  # does not parse, which prepare_read/1 refuses (`raw_cte_unparsed`).
   def list_name(%{name: name}) when not is_nil(name), do: [to_string(name)]
 
   def list_name({tag, sql, _params}) when tag in [:raw_cte, :raw_recursive_cte] do
-    case Regex.run(@raw_cte_head, IO.iodata_to_binary(sql), capture: :all_but_first) do
-      [~s(") <> _ = quoted | _] ->
-        [quoted |> String.slice(1..-2//1) |> String.replace(~s(""), ~s("))]
-
-      [name | _] ->
-        [String.downcase(name)]
-
-      nil ->
-        []
+    case Selecto.Builder.RawCte.names(sql) do
+      {:ok, names} -> names
+      :error -> []
     end
   end
 
@@ -646,10 +639,83 @@ defmodule Selecto.Executor do
   defp no_scope_collision(selecto) do
     scopes = read_scopes(selecto)
 
-    with :ok <- no_nested_recursive_with(scopes),
+    with :ok <- raw_ctes_parse(scopes),
+         :ok <- list_roots_quotable(scopes),
+         :ok <- no_nested_recursive_with(scopes),
          :ok <- no_redefined_name(scopes),
          :ok <- no_name_collision(scopes) do
       embedded_tenant_scopes(scopes)
+    end
+  end
+
+  # A raw CTE's text must be plain definitions whose names can be read
+  # (Selecto.Builder.RawCte): otherwise which names it defines is unknown.
+  defp raw_ctes_parse(scopes) do
+    scopes
+    |> Enum.flat_map(fn %{query: query} ->
+      List.wrap(Map.get(Map.get(query, :set) || %{}, :ctes))
+    end)
+    |> Enum.filter(fn
+      {tag, sql, _params} when tag in [:raw_cte, :raw_recursive_cte] ->
+        Selecto.Builder.RawCte.names(sql) == :error
+
+      _spec ->
+        false
+    end)
+    |> case do
+      [] ->
+        :ok
+
+      _unparsed ->
+        {:error,
+         %Selecto.Error{
+           type: :query_enforcement,
+           message:
+             "A raw CTE's text is not plain `name [(columns)] AS (...)` definitions; " <>
+               "Selecto cannot tell which names it defines",
+           details: %{code: :query_rule_not_evaluable, reason: :raw_cte_unparsed}
+         }}
+    end
+  end
+
+  # A root read as a list is named in the SQL like any table: a name an
+  # identifier cannot hold refuses typed rather than raise while compiling.
+  # A root naming a raw CTE that its text leaves unquoted reads it only where
+  # the name needs no quoting: Selecto quotes a mixed-case or reserved root, and
+  # the database folds the raw text's unquoted name, so the two would differ.
+  defp list_roots_quotable(scopes) do
+    unquoted_raw =
+      for %{query: query} <- scopes,
+          {tag, sql, _params} <- List.wrap(Map.get(Map.get(query, :set) || %{}, :ctes)),
+          tag in [:raw_cte, :raw_recursive_cte],
+          {:ok, entries} <- [Selecto.Builder.RawCte.entries(sql)],
+          {name, false} <- entries,
+          do: name
+
+    scopes
+    |> Enum.map(&list_root/1)
+    |> Enum.reject(fn root ->
+      is_nil(root) or
+        (Selecto.Builder.Sql.Helpers.valid_identifier?(root) and
+           not (root in unquoted_raw and Selecto.Builder.Sql.Helpers.needs_quoting?(root)))
+    end)
+    |> case do
+      [] ->
+        :ok
+
+      names ->
+        {:error,
+         %Selecto.Error{
+           type: :query_enforcement,
+           message:
+             "A CTE or VALUES list a root reads has a name an identifier cannot hold, " <>
+               "or a raw CTE leaves a name unquoted that the root must quote",
+           details: %{
+             code: :query_rule_not_evaluable,
+             reason: :invalid_identifier,
+             relations: Enum.uniq(names)
+           }
+         }}
     end
   end
 

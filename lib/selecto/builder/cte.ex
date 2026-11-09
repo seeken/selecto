@@ -130,7 +130,7 @@ defmodule Selecto.Builder.CteSql do
     {_sql, params} = Selecto.SQL.Params.finalize(sql_iodata, adapter: selecto_query.adapter)
 
     # Build CTE definition
-    cte_name = escape_identifier(spec.name)
+    cte_name = Selecto.Builder.Sql.Helpers.list_identifier(selecto_query.adapter, spec.name)
 
     cte_definition =
       case spec.columns do
@@ -169,7 +169,7 @@ defmodule Selecto.Builder.CteSql do
       Selecto.SQL.Params.finalize(recursive_sql_iodata, adapter: recursive_selecto.adapter)
 
     # Build recursive CTE definition
-    cte_name = escape_identifier(spec.name)
+    cte_name = Selecto.Builder.Sql.Helpers.list_identifier(base_selecto.adapter, spec.name)
 
     cte_definition =
       case columns do
