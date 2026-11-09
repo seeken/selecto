@@ -112,4 +112,84 @@ defmodule Selecto.Builder.RawCteTest do
       assert RawCte.names(text, d) == :error, "#{d}: #{text}"
     end
   end
+
+  # Each case maps every dialect to the names the database reads, or :error
+  # where the text is refused.
+  @adversarial [
+    # a10, a11: a non-ASCII byte is an identifier character, so the `$` after
+    # it continues the name and opens no dollar quote.
+    {"ca AS (SELECT 1 AS ä$$), za AS (SELECT 2 AS v), cb AS (SELECT 3 AS ö$$)",
+     all: {:ok, ["ca", "za", "cb"]}},
+    {"ca AS (SELECT 1 AS ä$t$), za AS (SELECT 2 AS v), cb AS (SELECT 3 AS ö$t$)",
+     all: {:ok, ["ca", "za", "cb"]}},
+    # a13, a14: a -- comment ends at a carriage return on PostgreSQL and DuckDB
+    # only; :any cannot tell, so it refuses.
+    {"ca AS (SELECT 1 AS v) -- c\r, za AS (SELECT 1 AS v) -- e\n",
+     postgresql: {:ok, ["ca", "za"]},
+     duckdb: {:ok, ["ca", "za"]},
+     mysql: {:ok, ["ca"]},
+     mariadb: {:ok, ["ca"]},
+     sqlite: {:ok, ["ca"]},
+     any: :error},
+    {"ca AS (SELECT 1 AS v -- c\r), za AS (SELECT 1 AS v -- e\n)",
+     postgresql: {:ok, ["ca", "za"]},
+     duckdb: {:ok, ["ca", "za"]},
+     mysql: {:ok, ["ca"]},
+     mariadb: {:ok, ["ca"]},
+     sqlite: {:ok, ["ca"]},
+     any: :error},
+    # a15, a16: MariaDB runs /*M! comments; refused on MySQL and MariaDB.
+    {"ca AS (SELECT 1 AS v) /*M! , za AS (SELECT 1 AS v) */",
+     postgresql: {:ok, ["ca"]},
+     duckdb: {:ok, ["ca"]},
+     sqlite: {:ok, ["ca"]},
+     mysql: :error,
+     mariadb: :error,
+     any: :error},
+    {"ca AS (SELECT 1 AS v) /*M!100100 , za AS (SELECT 1 AS v) */",
+     postgresql: {:ok, ["ca"]},
+     duckdb: {:ok, ["ca"]},
+     sqlite: {:ok, ["ca"]},
+     mysql: :error,
+     mariadb: :error,
+     any: :error},
+    # a17-a19: SQLite reads $x(...), @x(...) and :x(...) as one parameter
+    # token; refused on SQLite and :any.
+    {"ca AS (SELECT $x(') AS v), za AS (SELECT 2 AS v), cb AS (SELECT $y(') AS w)",
+     postgresql: {:ok, ["ca"]},
+     duckdb: {:ok, ["ca"]},
+     mysql: {:ok, ["ca"]},
+     mariadb: {:ok, ["ca"]},
+     sqlite: :error,
+     any: :error},
+    {"ca AS (SELECT @x(') AS v), za AS (SELECT 2 AS v), cb AS (SELECT @y(') AS w)",
+     postgresql: {:ok, ["ca"]},
+     duckdb: {:ok, ["ca"]},
+     mysql: {:ok, ["ca"]},
+     mariadb: {:ok, ["ca"]},
+     sqlite: :error,
+     any: :error},
+    {"ca AS (SELECT :x(') AS v), za AS (SELECT 2 AS v), cb AS (SELECT :y(') AS w)",
+     postgresql: {:ok, ["ca"]},
+     duckdb: {:ok, ["ca"]},
+     mysql: {:ok, ["ca"]},
+     mariadb: {:ok, ["ca"]},
+     sqlite: :error,
+     any: :error}
+  ]
+
+  test "adversarial texts read as each database reads them, or are refused" do
+    for {text, expected} <- @adversarial, d <- @all do
+      want = Keyword.get(expected, :all) || Keyword.fetch!(expected, d)
+      assert RawCte.names(text, d) == want, "#{d}: #{inspect(text)}"
+    end
+  end
+
+  test "a non-ASCII byte before $ opens no dollar quote; one inside a tag is read" do
+    assert RawCte.names("ca AS (SELECT 1 AS \xe4$$), za AS (SELECT 2 AS v)", :postgresql) ==
+             {:ok, ["ca", "za"]}
+
+    assert RawCte.names("ca AS (SELECT $ä$ ) $ä$ AS v), za AS (SELECT 2 AS v)", :postgresql) ==
+             {:ok, ["ca", "za"]}
+  end
 end

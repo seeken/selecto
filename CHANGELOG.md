@@ -28,11 +28,18 @@
   with `raw_cte_unparsed`. Refused everywhere: a backslash in a string literal,
   non-ASCII names, SEARCH/CYCLE clauses, a RECURSIVE prefix, a trailing comma;
   outside PostgreSQL, dollar quotes and nested block comments; on MySQL and
-  MariaDB, `#` comments, `--` not followed by whitespace, `/*!` comments and
-  "double quotes" (ANSI_QUOTES is not known). Names compare case-insensitively
+  MariaDB, `#` comments, `--` not followed by whitespace, `/*!` and `/*M!`
+  comments and "double quotes" (ANSI_QUOTES is not known); on SQLite, Tcl-style
+  `$x(...)`, `@x(...)` and `:x(...)` parameters. A `--` comment ends at a
+  carriage return on PostgreSQL and DuckDB and at a newline elsewhere; text a
+  dialect-neutral reader cannot tell refuses. A non-ASCII byte is an identifier
+  character, so a `$` after it opens no dollar quote. A raw CTE whose params do
+  not match the placeholders in its text refuses with
+  `raw_cte_params_mismatch` instead of raising. Names compare case-insensitively
   on every adapter, which refuses some names a case-keeping MySQL would tell
   apart. A CTE or VALUES list's name is written unquoted when it is plain
-  (letters, digits and underscores, not starting with a digit, not reserved), in
+  (letters, digits and underscores, not starting with a digit, and in any case
+  not a word PostgreSQL, MySQL 8.4, MariaDB 11.4, SQLite or DuckDB reserves), in
   its definition and in every root and join naming it, so PostgreSQL folds it as
   it folds the host's own SQL naming it; other names, and a raw CTE's quoted
   names, are quoted. A list root or an ad-hoc join's source whose name an

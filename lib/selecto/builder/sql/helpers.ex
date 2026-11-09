@@ -80,15 +80,64 @@ defmodule Selecto.Builder.Sql.Helpers do
   defp plain_identifier?(_str), do: false
 
   # The characters a table, column or alias name may contain.
+  # Reserved words of every supported dialect (PostgreSQL, MySQL 8.4, MariaDB
+  # 11.4, SQLite, DuckDB), lower case: a list name that is one, in any case, is
+  # quoted (plain_name?/1).
+  @dialect_reserved ~w(
+    abort accessible action add after all alter always analyse analyze and anti any array as
+    asc asensitive asof asymmetric attach authorization autoincrement before begin between
+    bigint binary bit blob boolean both by call cascade case cast change char character
+    check coalesce collate collation column commit concurrently condition conflict
+    constraint continue convert create cross cube cume_dist current current_catalog
+    current_date current_role current_schema current_time current_timestamp current_user
+    cursor database databases day_hour day_microsecond day_minute day_second dec decimal
+    declare default deferrable deferred delayed delete delete_domain_id dense_rank desc
+    describe detach deterministic distinct distinctrow div do do_domain_ids double drop dual
+    each else elseif empty enclosed end escape escaped except exclude exclusive exists exit
+    explain extract fail false fetch filter first first_value float float4 float8 following
+    for force foreign freeze from full fulltext function general generated get glob grant
+    greatest group grouping groups having high_priority hour_microsecond hour_minute
+    hour_second if ignore ignore_domain_ids ignore_server_ids ilike immediate in index
+    indexed infile initially inner inout insensitive insert instead int int1 int2 int3 int4
+    int8 integer intersect interval into io_after_gtids io_before_gtids is isnull iterate
+    join json json_array json_arrayagg json_exists json_object json_objectagg json_query
+    json_scalar json_serialize json_table json_value key keys kill lag last last_value
+    lateral lead leading least leave left like limit linear lines load localtime
+    localtimestamp lock long longblob longtext loop low_priority manual map master_bind
+    master_heartbeat_period master_ssl_verify_server_cert match materialized maxvalue
+    mediumblob mediumint mediumtext merge_action middleint minute_microsecond minute_second
+    mod modifies national natural nchar no no_write_to_binlog none normalize not nothing
+    notnull nth_value ntile null nullif nulls numeric of offset on only optimize
+    optimizer_costs option optionally or order others out outer outfile over overlaps
+    overlay page_checksum parallel parse_vcol_expr partition percent_rank pivot pivot_longer
+    pivot_wider placing plan position positional pragma preceding precision primary
+    procedure purge qualify query raise range rank read read_write reads real recursive
+    ref_system_id references regexp reindex release rename repeat replace require resignal
+    restrict return returning revoke right rlike rollback row row_number rownum rows
+    savepoint schema schemas second_microsecond select semi sensitive separator session_user
+    set setof show signal similar slow smallint some spatial specific sql sql_big_result
+    sql_calc_found_rows sql_small_result sqlexception sqlstate sqlwarning ssl starting
+    stats_auto_recalc stats_persistent stats_sample_pages stored straight_join struct
+    substring summarize symmetric system system_user table tablesample temp temporary
+    terminated then ties time timestamp tinyblob tinyint tinytext to trailing transaction
+    treat trigger trim true try_cast unbounded undo union unique unlock unpivot unsigned
+    update usage use user using utc_date utc_time utc_timestamp vacuum values varbinary
+    varchar varcharacter variadic varying vector verbose view virtual when where while
+    window with without write xmlattributes xmlconcat xmlelement xmlexists xmlforest
+    xmlnamespaces xmlparse xmlpi xmlroot xmlserialize xmltable xor year_month zerofill
+  )
+
   @doc false
   # Whether a list name can stand unquoted on every adapter: letters, digits and
   # underscores, not starting with a digit, not a reserved word, in any case.
   # Unquoted, PostgreSQL folds it to lower case, as it folds a host's own SQL
   # naming it unquoted.
-  def plain_name?(name) when is_binary(name),
-    do:
-      Regex.match?(~r/\A[A-Za-z_][A-Za-z0-9_]*\z/, name) and
-        not needs_quoting?(String.downcase(name))
+  def plain_name?(name) when is_binary(name) do
+    lower = String.downcase(name)
+
+    Regex.match?(~r/\A[A-Za-z_][A-Za-z0-9_]*\z/, name) and not needs_quoting?(lower) and
+      lower not in @dialect_reserved
+  end
 
   def plain_name?(_name), do: false
 

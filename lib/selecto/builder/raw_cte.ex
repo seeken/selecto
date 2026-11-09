@@ -19,8 +19,9 @@ defmodule Selecto.Builder.RawCte do
   # literal (MySQL and MariaDB treat it as an escape, PostgreSQL and SQLite do
   # not), non-ASCII names, SEARCH/CYCLE clauses, a RECURSIVE prefix, a trailing
   # comma; on MySQL and MariaDB also `#` comments, `--` not followed by
-  # whitespace, `/*!` versioned comments and "double quotes" (ANSI_QUOTES is not
-  # known); outside PostgreSQL, dollar quotes and nested block comments.
+  # whitespace, `/*!` and `/*M!` executable comments and "double quotes"
+  # (ANSI_QUOTES is not known); outside PostgreSQL, dollar quotes and nested
+  # block comments; on SQLite, `$name`, `@name` and `:name` parameters.
 
   @dialects [:postgresql, :mysql, :mariadb, :sqlite, :duckdb, :any]
 
@@ -84,14 +85,20 @@ defmodule Selecto.Builder.RawCte do
 
   defguardp mysql?(d) when d in [:mysql, :mariadb, :any]
   defguardp space?(c) when c in [?\s, ?\t, ?\n, ?\r, ?\f, ?\v]
-  defguardp word?(c) when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c in [?_, ?$]
+  # Bytes 0x80 and up are identifier characters (PostgreSQL reads them so).
+  defguardp word?(c) when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c in [?_, ?$] or c >= 0x80
 
   # Whitespace and comments.
   defp skip(<<c, rest::binary>>, d) when space?(c), do: skip(rest, d)
   defp skip("#" <> _rest, d) when mysql?(d), do: :error
 
   defp skip("--" <> rest, d) do
-    if comment_dashes?(rest, d), do: rest |> line_end() |> skip(d), else: :error
+    with true <- comment_dashes?(rest, d),
+         {:ok, rest} <- line_end(rest, d) do
+      skip(rest, d)
+    else
+      _ -> :error
+    end
   end
 
   defp skip("/*" <> rest, d) do
@@ -105,14 +112,33 @@ defmodule Selecto.Builder.RawCte do
   defp comment_dashes?(<<c, _::binary>>, _d) when space?(c), do: true
   defp comment_dashes?(_rest, _d), do: false
 
-  defp line_end(text) do
-    case :binary.split(text, "\n") do
-      [_comment, rest] -> rest
-      [_comment] -> ""
+  # A `--` comment ends at a line feed; on PostgreSQL and DuckDB also at a
+  # carriage return. Where dialects disagree (:any), a carriage return in one is
+  # refused.
+  defp line_end(text, d) do
+    {line, rest} =
+      case :binary.split(text, "\n") do
+        [line, rest] -> {line, rest}
+        [line] -> {line, ""}
+      end
+
+    case {:binary.split(line, "\r"), d} do
+      {[_line], _d} ->
+        {:ok, rest}
+
+      {[_comment, after_cr], d} when d in [:postgresql, :duckdb] ->
+        {:ok, after_cr <> "\n" <> rest}
+
+      {[_comment, _after_cr], :any} ->
+        :error
+
+      {[_comment, _after_cr], _d} ->
+        {:ok, rest}
     end
   end
 
   defp block("!" <> _rest, d) when mysql?(d), do: :error
+  defp block("M!" <> _rest, d) when mysql?(d), do: :error
   defp block(rest, d), do: block_end(rest, 1, d)
 
   # Block comments nest only in PostgreSQL; elsewhere a nested opener is refused.
@@ -130,7 +156,8 @@ defmodule Selecto.Builder.RawCte do
 
   defp name(<<c, _::binary>> = text, _d) when c in ?a..?z or c in ?A..?Z or c == ?_ do
     {word, rest} = word(text, "")
-    {:ok, word, rest}
+    # Unquoted non-ASCII names are refused: dialects disagree on them.
+    if word =~ ~r/\A[\x00-\x7f]*\z/, do: {:ok, word, rest}, else: :error
   end
 
   defp name(_text, _d), do: :error
@@ -179,7 +206,12 @@ defmodule Selecto.Builder.RawCte do
   defp balanced("#" <> _rest, _depth, d) when mysql?(d), do: :error
 
   defp balanced("--" <> rest, depth, d) do
-    if comment_dashes?(rest, d), do: rest |> line_end() |> balanced(depth, d), else: :error
+    with true <- comment_dashes?(rest, d),
+         {:ok, rest} <- line_end(rest, d) do
+      balanced(rest, depth, d)
+    else
+      _ -> :error
+    end
   end
 
   defp balanced("/*" <> rest, depth, d) do
@@ -199,6 +231,13 @@ defmodule Selecto.Builder.RawCte do
   defp balanced("[" <> rest, depth, d) when d in [:sqlite, :any] do
     with {:ok, _name, rest} <- quoted(rest, ?], ""), do: balanced(rest, depth, d)
   end
+
+  # SQLite reads `$name`, `@name` and `:name` as parameters, `$name(...)` with
+  # anything up to its `)`: refused there.
+  defp balanced(<<p, c, _::binary>>, _depth, d)
+       when d in [:sqlite, :any] and p in [?$, ?@, ?:] and
+              (c in ?a..?z or c in ?A..?Z or c == ?_ or c >= 0x80),
+       do: :error
 
   # A `$` that does not follow an identifier character may open a dollar quote:
   # PostgreSQL reads it; elsewhere it is refused. `$1` is a parameter.
@@ -237,7 +276,7 @@ defmodule Selecto.Builder.RawCte do
   defp dollar_tag("$" <> rest, tag), do: {:ok, tag, rest}
 
   defp dollar_tag(<<c, rest::binary>>, tag)
-       when c in ?a..?z or c in ?A..?Z or c == ?_ or (c in ?0..?9 and tag != ""),
+       when c in ?a..?z or c in ?A..?Z or c == ?_ or c >= 0x80 or (c in ?0..?9 and tag != ""),
        do: dollar_tag(rest, <<tag::binary, c>>)
 
   defp dollar_tag(_rest, _tag), do: :none
