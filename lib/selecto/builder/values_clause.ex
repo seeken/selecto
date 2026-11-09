@@ -113,13 +113,16 @@ defmodule Selecto.Builder.ValuesClause do
     "\"#{escaped}\""
   end
 
+  # A VALUES list's name, quoted exactly when a root or join naming it is
+  # (Selecto.Builder.Sql.Helpers.needs_quoting?/1), so a mixed-case or reserved
+  # name defines and reads the same list on every adapter.
   defp quote_alias(identifier) do
     identifier = to_string(identifier)
 
-    if Regex.match?(~r/^[A-Za-z_][A-Za-z0-9_$]*$/, identifier) do
-      identifier
-    else
+    if Selecto.Builder.Sql.Helpers.needs_quoting?(identifier) do
       quote_identifier(identifier)
+    else
+      identifier
     end
   end
 
@@ -143,19 +146,19 @@ defmodule Selecto.Builder.ValuesClause do
   defp generate_values_cte_sql(%Spec{} = spec, adapter) do
     case AdapterSupport.adapter_name(adapter) do
       name when name in [:mysql, :mariadb, :mssql] ->
-        generate_select_union_cte_sql(spec)
+        generate_select_union_cte_sql(spec, adapter)
 
       _ ->
-        generate_values_only_cte_sql(spec)
+        generate_values_only_cte_sql(spec, adapter)
     end
   end
 
-  defp generate_values_only_cte_sql(%Spec{} = spec) do
+  defp generate_values_only_cte_sql(%Spec{} = spec, adapter) do
     values_rows = build_values_rows(spec.data, spec.data_type)
     column_list = build_column_list(spec.columns)
 
     [
-      quote_alias(spec.alias),
+      Selecto.Builder.Sql.Helpers.list_identifier(adapter, spec.alias),
       " ",
       column_list,
       " AS (VALUES ",
@@ -164,11 +167,11 @@ defmodule Selecto.Builder.ValuesClause do
     ]
   end
 
-  defp generate_select_union_cte_sql(%Spec{} = spec) do
+  defp generate_select_union_cte_sql(%Spec{} = spec, adapter) do
     select_rows = build_select_rows(spec.data, spec.data_type, spec.columns)
 
     [
-      quote_alias(spec.alias),
+      Selecto.Builder.Sql.Helpers.list_identifier(adapter, spec.alias),
       " AS (",
       select_rows,
       ")"

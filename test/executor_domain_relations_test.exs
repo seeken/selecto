@@ -618,6 +618,82 @@ defmodule Selecto.ExecutorDomainRelationsTest do
              Selecto.Executor.prepare_read(query)
   end
 
+  test "every name a raw CTE's text defines counts; unreadable text refuses" do
+    inner = configure("r", [:id]) |> Selecto.select(["id"])
+    root = configure("p", [:id]) |> Selecto.filter({"id", {:subquery, :in, inner}})
+
+    for text <- [
+          "x13 AS (SELECT 1 AS v), r AS (SELECT 2 AS id)",
+          "/* c */ r AS (SELECT 2 AS id)",
+          "-- c\n r AS (SELECT 2 AS id)",
+          "`r` AS (SELECT 2 AS id)",
+          ~S["R" AS (SELECT 2 AS id)]
+        ] do
+      query = root |> Selecto.with_ctes([{:raw_cte, text, []}]) |> Selecto.select(["id"])
+      assert {:cte_name_collision, [_r]} = refusal(query), text
+    end
+
+    unreadable = root |> Selecto.with_ctes([{:raw_cte, "SELECT 1", []}]) |> Selecto.select(["id"])
+
+    assert {:error, %Selecto.Error{details: %{reason: :raw_cte_unparsed}}} =
+             Selecto.Executor.prepare_read(unreadable)
+  end
+
+  test "a query member the query does not use is no query of the statement" do
+    member =
+      configure("r", [:id, :tenant_id]).domain
+      |> put_in([:source, :tenant_field], :tenant_id)
+      |> Map.put(:tenant_required, true)
+      |> Selecto.configure(nil, validate: false)
+      |> Selecto.select(["id"])
+
+    domain = Map.put(configure("p", [:id]).domain, :query_members, %{unused: %{query: member}})
+    query = Selecto.configure(domain, nil, validate: false) |> Selecto.select(["id"])
+
+    assert refusal(query) == :ok
+    refute member in Selecto.Executor.read_queries(query)
+    assert refusal(Selecto.with_values(query, [[1]], columns: ["id"], as: "r")) == :ok
+  end
+
+  test "a list root is quoted like the list it reads" do
+    domain = configure("MixedList", [:id]).domain
+
+    query =
+      Selecto.configure(domain, nil, validate: false)
+      |> Selecto.with_values([[1]], columns: ["id"], as: "MixedList")
+      |> Selecto.select(["id"])
+
+    {sql, _params} = Selecto.to_sql(query)
+    assert sql =~ ~S["MixedList" ("id") AS] or sql =~ ~S["MixedList"]
+    refute sql =~ ~r/WITH MixedList\b/
+
+    # A root naming a raw CTE whose text leaves a mixed-case name unquoted.
+    unquoted =
+      Selecto.configure(domain, nil, validate: false)
+      |> Selecto.with_ctes([{:raw_cte, "MixedList AS (SELECT 1 AS id)", []}])
+      |> Selecto.select(["id"])
+
+    assert {:error, %Selecto.Error{details: %{reason: :invalid_identifier}}} =
+             Selecto.Executor.prepare_read(unquoted)
+
+    quoted_raw =
+      Selecto.configure(domain, nil, validate: false)
+      |> Selecto.with_ctes([{:raw_cte, ~S["MixedList" AS (SELECT 1 AS id)], []}])
+      |> Selecto.select(["id"])
+
+    assert {:ok, _} = Selecto.Executor.prepare_read(quoted_raw)
+
+    bad = put_in(domain, [:source, :source_table], ~S[bad"name])
+
+    quoted =
+      Selecto.configure(bad, nil, validate: false)
+      |> Selecto.with_values([[1]], columns: ["id"], as: ~S[bad"name])
+      |> Selecto.select(["id"])
+
+    assert {:error, %Selecto.Error{details: %{reason: :invalid_identifier}}} =
+             Selecto.Executor.prepare_read(quoted)
+  end
+
   test "a CTE whose body is a set operation compiles" do
     body = fn ->
       Selecto.union(

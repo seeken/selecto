@@ -20,16 +20,22 @@
   `cte_name_redefined`, unless the two sit in different members of one set
   operation, each compiled with its own WITH (MariaDB rejects a WITH inside a
   set operand as a syntax error). Definitions compare by the SQL their bodies
-  compile to. A raw CTE (`{:raw_cte, sql, params}`) counts by the name its text
-  starts with; its body is the host's own text (R68), and one whose name the
-  text does not show is not checked. An adapter that resolves relations
-  (PostgreSQL) refuses a root list named like a relation on the session's
-  search_path; elsewhere such a root reads the list. A query a filter or CASE
-  embeds missing its required tenant refuses typed (`tenant_scope_missing`)
-  instead of raising. Statements that used a list named like a table read
-  elsewhere now refuse, including some PostgreSQL and MySQL answered. This
-  replaces `later_cte_reads/2`, `scope_collisions/1` and MariaDB's
-  `nested_cte_shadowing`; a raw CTE no longer raises `BadMapError`.
+  compile to. A raw CTE (`{:raw_cte, sql, params}`) must be plain
+  `name [(columns)] AS [NOT] [MATERIALIZED] (...)` definitions, comments allowed
+  (Selecto.Builder.RawCte): every name it defines counts, its bodies are the
+  host's own text (R68), and text that does not parse to the end refuses with
+  `raw_cte_unparsed`. Names compare case-insensitively on every adapter. A CTE
+  or VALUES list's name is quoted exactly when a root or join naming it is, so a
+  mixed-case or reserved list name reads its list; a list root whose name an
+  identifier cannot hold refuses with `invalid_identifier`. Query members a
+  domain declares but the read does not use are not checked. An adapter that
+  resolves relations (PostgreSQL) refuses a root list named like a relation on
+  the session's search_path; elsewhere such a root reads the list. A query a
+  filter or CASE embeds missing its required tenant refuses typed
+  (`tenant_scope_missing`) instead of raising. Statements that used a list named
+  like a table read elsewhere now refuse, including some PostgreSQL and MySQL
+  answered. This replaces `later_cte_reads/2`, `scope_collisions/1` and
+  MariaDB's `nested_cte_shadowing`; a raw CTE no longer raises `BadMapError`.
 - The CTEs Selecto generates for itself start with `__selecto_` and are named by
   their content: a values-backed schema's by its id, fields and rows, a
   hierarchy, materialized-path or closure-table join's by its id and definition

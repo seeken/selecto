@@ -80,6 +80,30 @@ defmodule Selecto.Builder.Sql.Helpers do
   defp plain_identifier?(_str), do: false
 
   # The characters a table, column or alias name may contain.
+  @doc false
+  # A CTE or VALUES list's name as `adapter` writes it, quoted exactly when a
+  # root or join naming it is (quote_identifier/2), so mixed-case and reserved
+  # names define and read one list. Never raises: an embedded quote is doubled.
+  def list_identifier(adapter, name) do
+    name = to_string(name)
+
+    cond do
+      not needs_quoting?(name) ->
+        name
+
+      Selecto.AdapterSupport.callback_available?(adapter, :quote_identifier, 1) ->
+        adapter.quote_identifier(name)
+
+      true ->
+        "\"" <> String.replace(name, "\"", "\"\"") <> "\""
+    end
+  end
+
+  @doc false
+  # Whether quote_identifier/2 accepts `str` (it raises otherwise).
+  def valid_identifier?(str) when is_binary(str), do: identifier_chars?(str)
+  def valid_identifier?(_str), do: false
+
   defp identifier_chars?(<<char, rest::binary>>)
        when char in ?a..?z or char in ?A..?Z or char in ?0..?9 or
               char in [?_, ?\s, ?:, ?&, ?-],
