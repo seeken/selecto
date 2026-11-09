@@ -469,7 +469,7 @@ defmodule Selecto.Builder.Sql.WhereTest do
     end
 
     test "exists, raw_sql_filter, and empty conjunction" do
-      assert_raise ArgumentError, ~r/placeholder count/, fn ->
+      assert_raise Selecto.Builder.ScopeRefusal, ~r/placeholder count/, fn ->
         Where.build(selecto(), {:exists, "SELECT 1", ["x"]})
       end
 

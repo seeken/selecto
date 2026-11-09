@@ -66,40 +66,86 @@ defmodule Selecto.SQL.Params do
       |> Enum.with_index(1)
       |> Enum.map(fn {value, index} -> placeholder.(index, value) |> IO.iodata_to_binary() end)
 
-    # Only the code is rebound: a placeholder-like sequence in a string, a
-    # quoted name, a comment or a dollar quote stays text.
-    pieces = pieces(sql, Selecto.AdapterSupport.adapter_name(adapter))
-
     # A placeholder that names no index (`?`) repeats; numbered ones (`$1`)
     # are rebound by number, however often each appears.
     if IO.iodata_to_binary(placeholder.(1, hd(params))) ==
          IO.iodata_to_binary(placeholder.(2, hd(params))) do
+      finder = fn code -> :binary.matches(code, hd(placeholders)) end
+      pieces = pieces(sql, Selecto.AdapterSupport.adapter_name(adapter), finder)
       rebind_repeated(pieces, params, hd(placeholders))
     else
-      rebind_numbered(pieces, params, placeholders)
+      pattern = numbered_pattern(placeholders)
+      finder = fn code -> Regex.scan(pattern, code, return: :index) |> Enum.map(&hd/1) end
+      pieces = pieces(sql, Selecto.AdapterSupport.adapter_name(adapter), finder)
+      rebind_numbered(pieces, params, placeholders, pattern)
     end
   end
 
-  # The text as {:code, text} and {:text, text} pieces, in order: strings,
-  # quoted names, comments and dollar quotes as the dialect reads them are
-  # text. Unterminated, the rest is text.
-  defp pieces(sql, dialect), do: scan(sql, dialect, "", [])
+  # Only the code is rebound: a placeholder-like sequence in a string, a
+  # quoted name, a comment or a dollar quote stays text. Where a backslash's
+  # meaning in a string depends on the session (PostgreSQL's
+  # standard_conforming_strings; the MySQL family's NO_BACKSLASH_ESCAPES and
+  # ANSI_QUOTES), the text is read under each mode: the placeholders must sit
+  # at the same places under all of them, or the fragment is refused typed
+  # rather than leave a placeholder unbound or rebind a literal.
+  defp pieces(sql, dialect, finder) do
+    [first | others] =
+      for mode <- string_modes(dialect) do
+        pieces = scan(sql, mode, "", [])
+        {pieces, placeholder_offsets(pieces, finder)}
+      end
+
+    if Enum.all?(others, fn {_pieces, offsets} -> offsets == elem(first, 1) end) do
+      elem(first, 0)
+    else
+      raise Selecto.Builder.ScopeRefusal,
+        reason: :placeholder_ambiguous,
+        message:
+          "A nested SQL fragment's placeholders depend on how the session reads " <>
+            "backslashes in its string literals; write the literal without a backslash"
+    end
+  end
+
+  defp string_modes(:postgresql), do: [:postgresql, :pg_bs]
+  defp string_modes(d) when d in [:mysql, :mariadb], do: [:mysql, :mysql_ansi, :mysql_nbe]
+  defp string_modes(d), do: [d]
+
+  defp placeholder_offsets(pieces, finder) do
+    {offsets, _end} =
+      Enum.flat_map_reduce(pieces, 0, fn
+        {:text, text}, at ->
+          {[], at + byte_size(text)}
+
+        {:code, code}, at ->
+          {Enum.map(finder.(code), fn {start, length} -> {at + start, length} end),
+           at + byte_size(code)}
+      end)
+
+    offsets
+  end
 
   defguardp word_byte?(c)
             when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c in [?_, ?$] or c >= 0x80
 
-  defguardp my?(d) when d in [:mysql, :mariadb]
+  # Scan modes: :postgresql (standard_conforming_strings on), :pg_bs (off);
+  # :mysql (backslash escapes, "..." a string), :mysql_ansi (ANSI_QUOTES),
+  # :mysql_nbe (NO_BACKSLASH_ESCAPES).
+  defguardp my?(d) when d in [:mysql, :mariadb, :mysql_ansi, :mysql_nbe]
+  defguardp pg?(d) when d in [:postgresql, :pg_bs]
 
   defp scan("", _d, code, out), do: Enum.reverse(code_piece(out, code))
 
   defp scan("'" <> rest, d, code, out) do
-    escapes? = my?(d) or (d == :postgresql and escape_prefix?(code))
+    escapes? =
+      d in [:mysql, :mariadb, :mysql_ansi, :pg_bs] or
+        (d in [:postgresql, :duckdb] and escape_prefix?(code))
+
     {text, rest} = quoted_end(rest, ?', escapes?, "'")
     scan(rest, d, "", [{:text, text} | code_piece(out, code)])
   end
 
   defp scan("\"" <> rest, d, code, out) do
-    {text, rest} = quoted_end(rest, ?", my?(d), "\"")
+    {text, rest} = quoted_end(rest, ?", d in [:mysql, :mariadb], "\"")
     scan(rest, d, "", [{:text, text} | code_piece(out, code)])
   end
 
@@ -118,7 +164,7 @@ defmodule Selecto.SQL.Params do
          rest != "" do
       scan(rest, d, code <> "--", out)
     else
-      {text, rest} = line(rest, d in [:postgresql, :duckdb], "--")
+      {text, rest} = line(rest, pg?(d) or d == :duckdb, "--")
       scan(rest, d, "", [{:text, text} | code_piece(out, code)])
     end
   end
@@ -132,12 +178,12 @@ defmodule Selecto.SQL.Params do
     if my?(d) and (match?("!" <> _, rest) or match?("M!" <> _, rest)) do
       scan(rest, d, code <> "/*", out)
     else
-      {text, rest} = block(rest, d == :postgresql, 1, "/*")
+      {text, rest} = block(rest, pg?(d), 1, "/*")
       scan(rest, d, "", [{:text, text} | code_piece(out, code)])
     end
   end
 
-  defp scan("$" <> rest, d, code, out) when d in [:postgresql, :duckdb] do
+  defp scan("$" <> rest, d, code, out) when pg?(d) or d == :duckdb do
     with false <- after_word?(code),
          {:ok, tag, after_tag} <- dollar_tag(rest, "") do
       delimiter = "$" <> tag <> "$"
@@ -327,20 +373,20 @@ defmodule Selecto.SQL.Params do
 
       rebound
     else
-      raise ArgumentError,
-            "adapter placeholder count does not match the finalized parameter count"
+      count_mismatch()
     end
   end
 
-  defp rebind_numbered(pieces, params, placeholders) do
-    values = placeholders |> Enum.zip(params) |> Map.new()
+  defp numbered_pattern(placeholders) do
+    placeholders
+    |> Enum.sort_by(&String.length/1, :desc)
+    |> Enum.map(&Regex.escape/1)
+    |> Enum.join("|")
+    |> then(&Regex.compile!("((?<![A-Za-z0-9_$\\x80-\\xff])(?:#{&1})(?![0-9]))"))
+  end
 
-    pattern =
-      placeholders
-      |> Enum.sort_by(&String.length/1, :desc)
-      |> Enum.map(&Regex.escape/1)
-      |> Enum.join("|")
-      |> then(&Regex.compile!("((?<![A-Za-z0-9_$\\x80-\\xff])(?:#{&1})(?![0-9]))"))
+  defp rebind_numbered(pieces, params, placeholders, pattern) do
+    values = placeholders |> Enum.zip(params) |> Map.new()
 
     parts =
       Enum.flat_map(pieces, fn
@@ -364,9 +410,16 @@ defmodule Selecto.SQL.Params do
     if Enum.all?(placeholders, &(&1 in parts)) do
       rebound
     else
-      raise ArgumentError,
-            "adapter placeholder count does not match the finalized parameter count"
+      count_mismatch()
     end
+  end
+
+  # A nested fragment whose placeholders its params do not match refuses
+  # typed (Selecto.Error.from_reason/1) rather than raise from the compile.
+  defp count_mismatch do
+    raise Selecto.Builder.ScopeRefusal,
+      reason: :placeholder_count_mismatch,
+      message: "adapter placeholder count does not match the finalized parameter count"
   end
 
   defp placeholder_fun(adapter) when is_atom(adapter) do

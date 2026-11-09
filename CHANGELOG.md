@@ -56,7 +56,15 @@
   `raw_cte_params_mismatch` instead of raising or binding a value of the
   statement around it. A `$n` may repeat. Rebinding a nested query's compiled
   text (a subquery, LATERAL or retarget fragment) rewrites placeholders only
-  outside strings, comments, dollar quotes and quoted names.
+  outside strings, comments, dollar quotes and quoted names (DuckDB's and
+  PostgreSQL's `E'...'` read backslash escapes). Where a backslash in a string
+  reads differently under the session's mode (PostgreSQL
+  standard_conforming_strings; MySQL and MariaDB NO_BACKSLASH_ESCAPES and
+  ANSI_QUOTES), the fragment is read under every mode, and one whose
+  placeholders do not sit at the same places under all of them refuses typed
+  (`placeholder_ambiguous`) rather than leave a placeholder unbound or rebind
+  a literal. A fragment whose placeholders its params do not match refuses
+  typed (`placeholder_count_mismatch`) instead of raising ArgumentError.
   A query the statement compiles without an adapter of its own (a subquery
   join's) is read in the statement's dialect. Names compare case-insensitively
   on every adapter, which refuses some names a case-keeping MySQL would tell
