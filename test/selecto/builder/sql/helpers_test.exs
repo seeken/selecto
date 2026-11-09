@@ -28,10 +28,16 @@ defmodule Selecto.Builder.Sql.HelpersTest do
   test "on PostgreSQL a reserved-only plain name is quoted folded; elsewhere as written" do
     pg = SelectoDBPostgreSQL.Adapter
 
-    for name <- ~w(Rank RANK First Query Plan Action Position Rows Json With) do
+    for name <- ~w(Rank RANK First Query Plan Action Position Rows Json) do
       assert Helpers.list_identifier(pg, name) == ~s("#{String.downcase(name)}"), name
       assert Helpers.raw_identifier(pg, name) == ~s("#{String.downcase(name)}"), name
       assert Helpers.list_identifier(nil, name) == ~s("#{name}"), name
+    end
+
+    # Names Selecto always quoted on PostgreSQL (its own reserved list), and
+    # those PostgreSQL itself reserves, stay quoted as written.
+    for name <- ~w(Order Key Text Date User Select With Desc Window) do
+      assert Helpers.list_identifier(pg, name) == ~s("#{name}"), name
     end
 
     # Names outside the plain pattern keep their case; plain ones stay bare.

@@ -66,15 +66,152 @@ defmodule Selecto.SQL.Params do
       |> Enum.with_index(1)
       |> Enum.map(fn {value, index} -> placeholder.(index, value) |> IO.iodata_to_binary() end)
 
+    # Only the code is rebound: a placeholder-like sequence in a string, a
+    # quoted name, a comment or a dollar quote stays text.
+    pieces = pieces(sql, Selecto.AdapterSupport.adapter_name(adapter))
+
     # A placeholder that names no index (`?`) repeats; numbered ones (`$1`)
     # are rebound by number, however often each appears.
     if IO.iodata_to_binary(placeholder.(1, hd(params))) ==
          IO.iodata_to_binary(placeholder.(2, hd(params))) do
-      rebind_repeated(sql, params, hd(placeholders))
+      rebind_repeated(pieces, params, hd(placeholders))
     else
-      rebind_numbered(sql, params, placeholders)
+      rebind_numbered(pieces, params, placeholders)
     end
   end
+
+  # The text as {:code, text} and {:text, text} pieces, in order: strings,
+  # quoted names, comments and dollar quotes as the dialect reads them are
+  # text. Unterminated, the rest is text.
+  defp pieces(sql, dialect), do: scan(sql, dialect, "", [])
+
+  defguardp word_byte?(c)
+            when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c in [?_, ?$] or c >= 0x80
+
+  defguardp my?(d) when d in [:mysql, :mariadb]
+
+  defp scan("", _d, code, out), do: Enum.reverse(code_piece(out, code))
+
+  defp scan("'" <> rest, d, code, out) do
+    escapes? = my?(d) or (d == :postgresql and escape_prefix?(code))
+    {text, rest} = quoted_end(rest, ?', escapes?, "'")
+    scan(rest, d, "", [{:text, text} | code_piece(out, code)])
+  end
+
+  defp scan("\"" <> rest, d, code, out) do
+    {text, rest} = quoted_end(rest, ?", my?(d), "\"")
+    scan(rest, d, "", [{:text, text} | code_piece(out, code)])
+  end
+
+  defp scan("`" <> rest, d, code, out) do
+    {text, rest} = quoted_end(rest, ?`, false, "`")
+    scan(rest, d, "", [{:text, text} | code_piece(out, code)])
+  end
+
+  defp scan("[" <> rest, :sqlite, code, out) do
+    {text, rest} = until(rest, "]", "[")
+    scan(rest, :sqlite, "", [{:text, text} | code_piece(out, code)])
+  end
+
+  defp scan("--" <> rest, d, code, out) do
+    if my?(d) and not match?(<<c, _::binary>> when c in [?\s, ?\t, ?\n, ?\r, ?\f, ?\v], rest) and
+         rest != "" do
+      scan(rest, d, code <> "--", out)
+    else
+      {text, rest} = line(rest, d in [:postgresql, :duckdb], "--")
+      scan(rest, d, "", [{:text, text} | code_piece(out, code)])
+    end
+  end
+
+  defp scan("#" <> rest, d, code, out) when my?(d) do
+    {text, rest} = line(rest, false, "#")
+    scan(rest, d, "", [{:text, text} | code_piece(out, code)])
+  end
+
+  defp scan("/*" <> rest, d, code, out) do
+    if my?(d) and (match?("!" <> _, rest) or match?("M!" <> _, rest)) do
+      scan(rest, d, code <> "/*", out)
+    else
+      {text, rest} = block(rest, d == :postgresql, 1, "/*")
+      scan(rest, d, "", [{:text, text} | code_piece(out, code)])
+    end
+  end
+
+  defp scan("$" <> rest, d, code, out) when d in [:postgresql, :duckdb] do
+    with false <- after_word?(code),
+         {:ok, tag, after_tag} <- dollar_tag(rest, "") do
+      delimiter = "$" <> tag <> "$"
+
+      {text, rest} =
+        case :binary.split(after_tag, delimiter) do
+          [body, rest] -> {delimiter <> body <> delimiter, rest}
+          [body] -> {delimiter <> body, ""}
+        end
+
+      scan(rest, d, "", [{:text, text} | code_piece(out, code)])
+    else
+      _code -> scan(rest, d, code <> "$", out)
+    end
+  end
+
+  defp scan(<<c, rest::binary>>, d, code, out), do: scan(rest, d, <<code::binary, c>>, out)
+
+  defp code_piece(out, ""), do: out
+  defp code_piece(out, code), do: [{:code, code} | out]
+
+  defp after_word?(""), do: false
+  defp after_word?(code), do: word_byte?(:binary.last(code))
+
+  # `E'...'` (not inside a longer word) reads backslash escapes.
+  defp escape_prefix?(code) do
+    case byte_size(code) do
+      0 -> false
+      1 -> code in ["E", "e"]
+      n -> :binary.part(code, n - 1, 1) in ["E", "e"] and not word_byte?(:binary.at(code, n - 2))
+    end
+  end
+
+  defp quoted_end(<<q, q, rest::binary>>, q, escapes?, acc),
+    do: quoted_end(rest, q, escapes?, <<acc::binary, q, q>>)
+
+  defp quoted_end(<<q, rest::binary>>, q, _escapes?, acc), do: {<<acc::binary, q>>, rest}
+
+  defp quoted_end(<<?\\, c, rest::binary>>, q, true, acc),
+    do: quoted_end(rest, q, true, <<acc::binary, ?\\, c>>)
+
+  defp quoted_end(<<c, rest::binary>>, q, escapes?, acc),
+    do: quoted_end(rest, q, escapes?, <<acc::binary, c>>)
+
+  defp quoted_end("", _q, _escapes?, acc), do: {acc, ""}
+
+  defp until(text, stop, acc) do
+    case :binary.split(text, stop) do
+      [body, rest] -> {acc <> body <> stop, rest}
+      [body] -> {acc <> body, ""}
+    end
+  end
+
+  defp line(<<?\n, rest::binary>>, _cr?, acc), do: {<<acc::binary, ?\n>>, rest}
+  defp line(<<?\r, rest::binary>>, true, acc), do: {<<acc::binary, ?\r>>, rest}
+  defp line(<<c, rest::binary>>, cr?, acc), do: line(rest, cr?, <<acc::binary, c>>)
+  defp line("", _cr?, acc), do: {acc, ""}
+
+  defp block("*/" <> rest, _nests?, 1, acc), do: {acc <> "*/", rest}
+  defp block("*/" <> rest, nests?, depth, acc), do: block(rest, nests?, depth - 1, acc <> "*/")
+  defp block("/*" <> rest, true, depth, acc), do: block(rest, true, depth + 1, acc <> "/*")
+
+  defp block(<<c, rest::binary>>, nests?, depth, acc),
+    do: block(rest, nests?, depth, <<acc::binary, c>>)
+
+  defp block("", _nests?, _depth, acc), do: {acc, ""}
+
+  defp dollar_tag("$" <> rest, tag), do: {:ok, tag, rest}
+
+  defp dollar_tag(<<c, rest::binary>>, tag)
+       when c in ?a..?z or c in ?A..?Z or c == ?_ or c >= 0x80 or (c in ?0..?9 and tag != ""),
+       do: dollar_tag(rest, <<tag::binary, c>>)
+
+  defp dollar_tag(_rest, _tag), do: :none
 
   # Process iodata with parameter offset for coordinated numbering
   defp finalize_with_offset(fragments, offset, placeholder_fun) do
@@ -171,22 +308,31 @@ defmodule Selecto.SQL.Params do
 
   defp traverse([], state, _placeholder_fun), do: state
 
-  defp rebind_repeated(sql, params, placeholder) do
-    segments = String.split(sql, placeholder, trim: false)
+  defp rebind_repeated(pieces, params, placeholder) do
+    parts =
+      Enum.flat_map(pieces, fn
+        {:text, text} ->
+          [text]
 
-    if length(segments) == length(params) + 1 do
-      [first | rest] = segments
+        {:code, code} ->
+          code |> String.split(placeholder, trim: false) |> Enum.intersperse(:placeholder)
+      end)
 
-      rest
-      |> Enum.zip(params)
-      |> Enum.reduce([first], fn {segment, value}, acc -> [acc, {:param, value}, segment] end)
+    if Enum.count(parts, &(&1 == :placeholder)) == length(params) do
+      {rebound, []} =
+        Enum.map_reduce(parts, params, fn
+          :placeholder, [value | rest] -> {{:param, value}, rest}
+          text, rest -> {text, rest}
+        end)
+
+      rebound
     else
       raise ArgumentError,
             "adapter placeholder count does not match the finalized parameter count"
     end
   end
 
-  defp rebind_numbered(sql, params, placeholders) do
+  defp rebind_numbered(pieces, params, placeholders) do
     values = placeholders |> Enum.zip(params) |> Map.new()
 
     pattern =
@@ -194,17 +340,24 @@ defmodule Selecto.SQL.Params do
       |> Enum.sort_by(&String.length/1, :desc)
       |> Enum.map(&Regex.escape/1)
       |> Enum.join("|")
-      |> then(&Regex.compile!("((?:#{&1})(?![0-9]))"))
+      |> then(&Regex.compile!("((?<![A-Za-z0-9_$\\x80-\\xff])(?:#{&1})(?![0-9]))"))
 
-    parts = Regex.split(pattern, sql, include_captures: true, trim: false)
+    parts =
+      Enum.flat_map(pieces, fn
+        {:text, text} -> [{:text, text}]
+        {:code, code} -> Regex.split(pattern, code, include_captures: true, trim: false)
+      end)
 
     rebound =
-      parts
-      |> Enum.map(fn part ->
-        case Map.fetch(values, part) do
-          {:ok, value} -> {:param, value}
-          :error -> part
-        end
+      Enum.map(parts, fn
+        {:text, text} ->
+          text
+
+        part ->
+          case Map.fetch(values, part) do
+            {:ok, value} -> {:param, value}
+            :error -> part
+          end
       end)
 
     # Every parameter is bound at least once; a placeholder may repeat.

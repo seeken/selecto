@@ -240,4 +240,30 @@ defmodule Selecto.Builder.RawCteTest do
       refute RawCte.params_match?(text, [5], :sqlite), text
     end
   end
+
+  test "without params, placeholder-like text in literals and names is no placeholder" do
+    for text <- [
+          "x AS (SELECT 'cost $5' AS v)",
+          "x AS (SELECT 1 AS v -- costs $1\n)",
+          "x AS (SELECT $$a $1$$ AS v)",
+          "x AS (SELECT 1 AS a$1)",
+          ~S[x AS (SELECT 1 AS "w$1")]
+        ] do
+      assert RawCte.params_match?(text, [], :postgresql), text
+    end
+
+    for d <- [:mysql, :mariadb, :sqlite],
+        text <- [
+          "x AS (SELECT 'why?' AS v)",
+          "x AS (SELECT 1 AS v -- why?\n)",
+          "x AS (SELECT 1 AS v /* ? */)",
+          "x AS (SELECT 1 AS `w?`)"
+        ] do
+      assert RawCte.params_match?(text, [], d), "#{d}: #{text}"
+    end
+
+    # $2 alone leaves a param unbound.
+    refute RawCte.params_match?("x AS (SELECT $2::int AS v)", [1, 2], :postgresql)
+    refute RawCte.params_match?("x AS (SELECT $2::int AS v)", [1, 2], :duckdb)
+  end
 end
