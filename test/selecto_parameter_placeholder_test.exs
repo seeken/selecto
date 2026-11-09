@@ -132,12 +132,12 @@ defmodule Selecto.ParameterPlaceholderTest do
   test "$0, $00 and DuckDB's ? number the next parameter: refused typed" do
     for adapter <- [SelectoDBPostgreSQL.Adapter, SelectoDBDuckDB.Adapter],
         sql <- ["SELECT $1, $0", "SELECT $1, $00"] do
-      assert_raise Selecto.Builder.ScopeRefusal, ~r/cannot number/, fn ->
+      assert_raise Selecto.Builder.ScopeRefusal, ~r/do not bind/, fn ->
         Params.rebind_finalized(sql, [5], adapter)
       end
     end
 
-    assert_raise Selecto.Builder.ScopeRefusal, ~r/cannot number/, fn ->
+    assert_raise Selecto.Builder.ScopeRefusal, ~r/do not bind/, fn ->
       Params.rebind_finalized("SELECT $1, CAST(? AS VARCHAR)", [5], SelectoDBDuckDB.Adapter)
     end
 
@@ -155,5 +155,75 @@ defmodule Selecto.ParameterPlaceholderTest do
     assert_raise Selecto.Builder.ScopeRefusal, fn ->
       Params.rebind_finalized(sql, ["a"], SelectoDBPostgreSQL.Adapter)
     end
+  end
+
+  test "a nested fragment's placeholder its own params do not bind refuses, params or not" do
+    pg = SelectoDBPostgreSQL.Adapter
+    duck = SelectoDBDuckDB.Adapter
+    lite = SelectoDBSQLite.Adapter
+
+    for {sql, params, adapter} <- [
+          {"SELECT 1 WHERE CAST($1 AS text) = '1'", [], pg},
+          {"SELECT 1 WHERE x = $01", [], pg},
+          {"SELECT 1 WHERE x = $001", [], pg},
+          {"SELECT 1 WHERE x = $1 AND y = CAST($3 AS text)", ["a"], pg},
+          {"SELECT 1 WHERE x = CAST($2 AS VARCHAR)", ["a"], duck},
+          {"SELECT 1 WHERE x = CAST(? AS VARCHAR)", [], duck},
+          {"SELECT 1 WHERE x = CAST($0 AS VARCHAR)", [], duck},
+          {"SELECT 1 WHERE x = ?1", [], lite},
+          {"SELECT 1 WHERE x = ? AND y = ?2", ["a"], lite},
+          {"SELECT 1 WHERE x = :name", [], lite},
+          {"SELECT 1 WHERE x = ?", [], lite},
+          {"SELECT 1 WHERE x = ?", [], SelectoDBMySQL.Adapter},
+          {"SELECT 1 WHERE x = ?", [], SelectoDBMariaDB.Adapter}
+        ] do
+      assert_raise Selecto.Builder.ScopeRefusal, ~r/do not bind/, fn ->
+        Params.rebind_finalized(sql, params, adapter)
+      end
+    end
+
+    # Placeholder-like text in literals and comments of a fragment without
+    # params stays as written.
+    for {sql, adapter} <- [
+          {"SELECT 1 WHERE n <> 'cost $1' /* $2 */ AND m <> $$ $1 $$ -- $3\n", pg},
+          {"SELECT 1 WHERE n <> 'why? $1' /* ? */", duck},
+          {"SELECT 1 WHERE n <> 'why? :x ?1' /* ? */ -- ?\n", lite},
+          {"SELECT 1 WHERE n <> 'why?' /* ? */ # ?\n", SelectoDBMySQL.Adapter}
+        ] do
+      assert Params.rebind_finalized(sql, [], adapter) == sql
+    end
+  end
+
+  test "a verbatim nested query, given without params, is checked the same way" do
+    domain = %{
+      name: "p",
+      source: %{
+        source_table: "p",
+        primary_key: :id,
+        fields: [:id],
+        redact_fields: [],
+        columns: %{id: %{type: :integer}},
+        associations: %{}
+      },
+      schemas: %{},
+      joins: %{}
+    }
+
+    query = Selecto.configure(domain, nil, validate: false) |> Selecto.select(["id"])
+
+    for filter <- [
+          {:exists, "SELECT 1 FROM p x WHERE CAST($1 AS text) = '1'"},
+          {"id", {:subquery, :in, "SELECT id FROM p x WHERE CAST($1 AS text) = '1'"}},
+          {"id", "=", {:subquery, :any, "SELECT id FROM p x WHERE CAST($1 AS text) = '1'"}}
+        ] do
+      assert_raise Selecto.Builder.ScopeRefusal, fn ->
+        Selecto.to_sql(Selecto.filter(query, filter))
+      end
+    end
+
+    assert {_sql, []} =
+             Selecto.to_sql(
+               Selecto.filter(query, {:exists, "SELECT 1 FROM p x WHERE 'c $1' <> ''"})
+             )
   end
 end

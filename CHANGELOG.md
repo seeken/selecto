@@ -63,14 +63,20 @@
   ANSI_QUOTES), the fragment is read under every mode, and one whose
   placeholders do not sit at the same places under all of them refuses typed
   (`placeholder_ambiguous`) rather than leave a placeholder unbound or rebind
-  a literal. A fragment whose placeholders its params do not match refuses
-  typed (`placeholder_count_mismatch`) instead of raising ArgumentError. Block
+  a literal. A nested fragment, given with params or without (`{:exists, sql}`,
+  `{:subquery, :in, sql}`, `{field, comp, {:subquery, agg, sql}}`, a nested
+  query's raw filter), refuses typed (`placeholder_count_mismatch`) instead of
+  raising ArgumentError or binding a value of the statement around it when its
+  code holds a placeholder its own params do not bind: on PostgreSQL and DuckDB
+  a `$n` above its params; on SQLite, MySQL and MariaDB a `?` count that
+  differs from them, and any `?` without params. Block
   comments nest on DuckDB as on PostgreSQL, and on both a string segment that
   continues an `E'...'` across whitespace holding a newline reads escapes too.
   A placeholder the binding cannot number refuses typed
   (`placeholder_unsupported`) when any session mode reads it as code: `$0`,
   `$00`, `$01` and `$1_0` (PostgreSQL reads `$01` as `$1`; DuckDB reads `$0`
-  as the next parameter), and on DuckDB a `?`. Every execute entry point (`execute`,
+  as the next parameter), on DuckDB a `?` or `$name`, and on SQLite a numbered
+  or named parameter (`?NNN`, `:x`, `@x`, `$x`). Every execute entry point (`execute`,
   `execute_one`, `execute_with_metadata`, `execute_count_with_metadata`,
   `execute_projection_sum_with_metadata`, `execute_stream`) and `explain`
   return such a compile refusal as `{:error, %Selecto.Error{}}`, as do
