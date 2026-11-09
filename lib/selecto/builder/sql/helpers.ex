@@ -81,14 +81,26 @@ defmodule Selecto.Builder.Sql.Helpers do
 
   # The characters a table, column or alias name may contain.
   @doc false
-  # A CTE or VALUES list's name as `adapter` writes it, quoted exactly when a
-  # root or join naming it is (quote_identifier/2), so mixed-case and reserved
-  # names define and read one list. Never raises: an embedded quote is doubled.
+  # Whether a list name can stand unquoted on every adapter: letters, digits and
+  # underscores, not starting with a digit, not a reserved word, in any case.
+  # Unquoted, PostgreSQL folds it to lower case, as it folds a host's own SQL
+  # naming it unquoted.
+  def plain_name?(name) when is_binary(name),
+    do:
+      Regex.match?(~r/\A[A-Za-z_][A-Za-z0-9_]*\z/, name) and
+        not needs_quoting?(String.downcase(name))
+
+  def plain_name?(_name), do: false
+
+  @doc false
+  # A CTE or VALUES list's name as `adapter` writes it in its definition:
+  # unquoted when plain_name?/1, quoted otherwise. Never raises: an embedded
+  # quote is doubled.
   def list_identifier(adapter, name) do
     name = to_string(name)
 
     cond do
-      not needs_quoting?(name) ->
+      plain_name?(name) ->
         name
 
       Selecto.AdapterSupport.callback_available?(adapter, :quote_identifier, 1) ->
@@ -97,6 +109,54 @@ defmodule Selecto.Builder.Sql.Helpers do
       true ->
         "\"" <> String.replace(name, "\"", "\"\"") <> "\""
     end
+  end
+
+  @doc false
+  # A relation a root or a join names: a CTE or VALUES list visible to the
+  # query is written as its definition is (list_identifier/2, or as a raw
+  # CTE's text quotes it); anything else as quote_identifier/2 writes it.
+  def relation_identifier(selecto, name) do
+    name = to_string(name)
+
+    case list_kind(selecto, name) do
+      :list -> if plain_name?(name), do: name, else: quote_identifier(selecto, name)
+      _other -> quote_identifier(selecto, name)
+    end
+  end
+
+  @doc false
+  # How a list of `name` visible to `selecto` is defined: :list (a Selecto
+  # CTE or VALUES list, or a raw CTE's unquoted name), :quoted_raw (a raw CTE
+  # quoting it), or nil when no list of that name is visible.
+  def list_kind(selecto, name) do
+    set = Map.get(selecto, :set) || %{}
+    dialect = Selecto.Executor.dialect(selecto)
+
+    own =
+      Enum.flat_map(List.wrap(Map.get(set, :ctes)), fn
+        {tag, sql, _params} when tag in [:raw_cte, :raw_recursive_cte] ->
+          case Selecto.Builder.RawCte.entries(sql, dialect) do
+            {:ok, entries} ->
+              for {n, quoted?} <- entries, do: {n, if(quoted?, do: :quoted_raw, else: :list)}
+
+            :error ->
+              []
+          end
+
+        %{name: n} when not is_nil(n) ->
+          [{to_string(n), :list}]
+
+        _other ->
+          []
+      end) ++
+        for(
+          %{} = values <- List.wrap(Map.get(set, :values_clauses)),
+          n = Map.get(values, :alias),
+          not is_nil(n),
+          do: {to_string(n), :list}
+        ) ++ List.wrap(Map.get(set, :visible_lists))
+
+    Enum.find_value(own, fn {n, kind} -> if n == name, do: kind end)
   end
 
   @doc false

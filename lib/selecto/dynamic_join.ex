@@ -402,7 +402,8 @@ defmodule Selecto.DynamicJoin do
 
       # A raw CTE ({:raw_cte, sql, params}) whose text names it.
       raw ->
-        if cte_name in Selecto.Executor.list_name(raw), do: %{name: cte_name, columns: nil}
+        if cte_name in Selecto.Executor.list_name(raw, Selecto.Executor.dialect(selecto)),
+          do: %{name: cte_name, columns: nil}
     end)
   end
 

@@ -6,48 +6,75 @@ defmodule Selecto.Builder.RawCte do
   #
   #     name [(columns)] AS [NOT] [MATERIALIZED] ( body ) [, ...]
   #
-  # with comments (`-- ...`, `/* ... */`) allowed before, between and after
-  # them. A name is unquoted (`[A-Za-z_][A-Za-z0-9_$]*`), "double quoted",
-  # `backtick quoted` or [bracketed], each with its doubled-quote escape. A
-  # body's parentheses are balanced past string literals, quoted identifiers,
-  # dollar-quoted strings and comments. A string literal holding a backslash is
-  # not read (MySQL and MariaDB treat it as an escape, PostgreSQL and SQLite do
-  # not), nor is anything else this does not recognise: `:error`, which
-  # Selecto.Executor refuses as `raw_cte_unparsed`.
+  # with comments allowed before, between and after them, read the way
+  # `dialect` lexes them (:postgresql, :mysql, :mariadb, :sqlite, :duckdb, or
+  # :any, which refuses whatever one of them reads differently). A name is
+  # unquoted (`[A-Za-z_][A-Za-z0-9_$]*`), "double quoted", `backtick quoted` or,
+  # on SQLite, [bracketed]. A body's parentheses are balanced past string
+  # literals, quoted identifiers, comments and (PostgreSQL) dollar-quoted
+  # strings. `{:param, value}` markers in iodata text read as a neutral literal.
+  #
+  # Refused (`:error`, which Selecto.Executor refuses as `raw_cte_unparsed`):
+  # anything this does not recognise to the end, a backslash in a string
+  # literal (MySQL and MariaDB treat it as an escape, PostgreSQL and SQLite do
+  # not), non-ASCII names, SEARCH/CYCLE clauses, a RECURSIVE prefix, a trailing
+  # comma; on MySQL and MariaDB also `#` comments, `--` not followed by
+  # whitespace, `/*!` versioned comments and "double quotes" (ANSI_QUOTES is not
+  # known); outside PostgreSQL, dollar quotes and nested block comments.
 
-  @spec names(iodata()) :: {:ok, [String.t()]} | :error
-  def names(sql) do
-    with {:ok, entries} <- entries(sql), do: {:ok, Enum.map(entries, &elem(&1, 0))}
+  @dialects [:postgresql, :mysql, :mariadb, :sqlite, :duckdb, :any]
+
+  @spec names(iodata(), atom()) :: {:ok, [String.t()]} | :error
+  def names(sql, dialect \\ :any) do
+    with {:ok, entries} <- entries(sql, dialect), do: {:ok, Enum.map(entries, &elem(&1, 0))}
   end
 
   @doc false
   # Each name with whether the text quotes it: an unquoted name is folded by
   # the database (PostgreSQL to lower case), a quoted one kept as written.
-  @spec entries(iodata()) :: {:ok, [{String.t(), boolean()}]} | :error
-  def entries(sql) do
-    with {:ok, rest} <- sql |> IO.iodata_to_binary() |> skip(),
-         {:ok, entries} <- definitions(rest, []) do
+  @spec entries(iodata(), atom()) :: {:ok, [{String.t(), boolean()}]} | :error
+  def entries(sql, dialect \\ :any) do
+    dialect = if dialect in @dialects, do: dialect, else: :any
+
+    with {:ok, text} <- text(sql),
+         {:ok, rest} <- skip(text, dialect),
+         {:ok, entries} <- definitions(rest, [], dialect) do
       {:ok, Enum.reverse(entries)}
     end
   end
 
-  defp definitions(text, names) do
+  # The text as a binary, each {:param, value} as a neutral literal; anything
+  # else that is not iodata is unreadable.
+  defp text(sql) do
+    {:ok, sql |> flatten([]) |> Enum.reverse() |> IO.iodata_to_binary()}
+  catch
+    :unreadable -> :error
+  end
+
+  defp flatten(binary, acc) when is_binary(binary), do: [binary | acc]
+  defp flatten(byte, acc) when is_integer(byte) and byte in 0..255, do: [byte | acc]
+  defp flatten({:param, _value}, acc), do: [" 0 " | acc]
+  defp flatten(list, acc) when is_list(list), do: Enum.reduce(list, acc, &flatten/2)
+  defp flatten(_other, _acc), do: throw(:unreadable)
+
+  defp definitions(text, entries, d) do
     quoted? = match?(<<q, _::binary>> when q in [?", ?`, ?[], text)
 
-    with {:ok, name, rest} <- name(text),
-         {:ok, rest} <- skip(rest),
-         {:ok, rest} <- columns(rest),
-         {:ok, rest} <- keyword(rest, "as"),
-         {:ok, rest} <- optional(rest, "not"),
-         {:ok, rest} <- optional(rest, "materialized"),
-         {:ok, rest} <- body(rest),
-         {:ok, rest} <- skip(rest) do
+    with {:ok, name, rest} <- name(text, d),
+         {:ok, rest} <- skip(rest, d),
+         {:ok, rest} <- columns(rest, d),
+         {:ok, rest} <- keyword(rest, "as", d),
+         {:ok, rest} <- optional(rest, "not", d),
+         {:ok, rest} <- optional(rest, "materialized", d),
+         {:ok, rest} <- body(rest, d),
+         {:ok, rest} <- skip(rest, d) do
       case rest do
         "" ->
-          {:ok, [{name, quoted?} | names]}
+          {:ok, [{name, quoted?} | entries]}
 
         "," <> more ->
-          with {:ok, more} <- skip(more), do: definitions(more, [{name, quoted?} | names])
+          with {:ok, more} <- skip(more, d),
+               do: definitions(more, [{name, quoted?} | entries], d)
 
         _other ->
           :error
@@ -55,19 +82,28 @@ defmodule Selecto.Builder.RawCte do
     end
   end
 
-  # Whitespace and comments.
-  defp skip(<<c, rest::binary>>) when c in [?\s, ?\t, ?\n, ?\r, ?\f, ?\v], do: skip(rest)
-  defp skip("--" <> rest), do: rest |> line_end() |> skip()
+  defguardp mysql?(d) when d in [:mysql, :mariadb, :any]
+  defguardp space?(c) when c in [?\s, ?\t, ?\n, ?\r, ?\f, ?\v]
+  defguardp word?(c) when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c in [?_, ?$]
 
-  defp skip("/*" <> rest) do
-    case block_end(rest, 1) do
-      {:ok, rest} -> skip(rest)
-      :error -> :error
-    end
+  # Whitespace and comments.
+  defp skip(<<c, rest::binary>>, d) when space?(c), do: skip(rest, d)
+  defp skip("#" <> _rest, d) when mysql?(d), do: :error
+
+  defp skip("--" <> rest, d) do
+    if comment_dashes?(rest, d), do: rest |> line_end() |> skip(d), else: :error
   end
 
-  defp skip(text) when is_binary(text), do: {:ok, text}
-  defp skip(other), do: other
+  defp skip("/*" <> rest, d) do
+    with {:ok, rest} <- block(rest, d), do: skip(rest, d)
+  end
+
+  defp skip(text, _d), do: {:ok, text}
+
+  # MySQL and MariaDB read `--` as a comment only before whitespace.
+  defp comment_dashes?(_rest, d) when not mysql?(d), do: true
+  defp comment_dashes?(<<c, _::binary>>, _d) when space?(c), do: true
+  defp comment_dashes?(_rest, _d), do: false
 
   defp line_end(text) do
     case :binary.split(text, "\n") do
@@ -76,97 +112,120 @@ defmodule Selecto.Builder.RawCte do
     end
   end
 
-  # Block comments nest in PostgreSQL; counting them is safe everywhere.
-  defp block_end("*/" <> rest, 1), do: {:ok, rest}
-  defp block_end("*/" <> rest, depth), do: block_end(rest, depth - 1)
-  defp block_end("/*" <> rest, depth), do: block_end(rest, depth + 1)
-  defp block_end(<<_c, rest::binary>>, depth), do: block_end(rest, depth)
-  defp block_end("", _depth), do: :error
+  defp block("!" <> _rest, d) when mysql?(d), do: :error
+  defp block(rest, d), do: block_end(rest, 1, d)
 
-  defp name(<<?", rest::binary>>), do: quoted(rest, ?", "")
-  defp name(<<?`, rest::binary>>), do: quoted(rest, ?`, "")
-  defp name(<<?[, rest::binary>>), do: quoted(rest, ?], "")
+  # Block comments nest only in PostgreSQL; elsewhere a nested opener is refused.
+  defp block_end("*/" <> rest, 1, _d), do: {:ok, rest}
+  defp block_end("*/" <> rest, depth, d), do: block_end(rest, depth - 1, d)
+  defp block_end("/*" <> rest, depth, :postgresql), do: block_end(rest, depth + 1, :postgresql)
+  defp block_end("/*" <> _rest, _depth, _d), do: :error
+  defp block_end(<<_c, rest::binary>>, depth, d), do: block_end(rest, depth, d)
+  defp block_end("", _depth, _d), do: :error
 
-  defp name(<<c, _::binary>> = text) when c in ?a..?z or c in ?A..?Z or c == ?_ do
+  defp name(<<?", _::binary>>, d) when d in [:mysql, :mariadb, :any], do: :error
+  defp name(<<?", rest::binary>>, _d), do: quoted(rest, ?", "")
+  defp name(<<?`, rest::binary>>, _d), do: quoted(rest, ?`, "")
+  defp name(<<?[, rest::binary>>, d) when d in [:sqlite, :any], do: quoted(rest, ?], "")
+
+  defp name(<<c, _::binary>> = text, _d) when c in ?a..?z or c in ?A..?Z or c == ?_ do
     {word, rest} = word(text, "")
     {:ok, word, rest}
   end
 
-  defp name(_text), do: :error
+  defp name(_text, _d), do: :error
 
   defp quoted(<<q, q, rest::binary>>, q, acc), do: quoted(rest, q, <<acc::binary, q>>)
   defp quoted(<<q, rest::binary>>, q, acc), do: if(acc == "", do: :error, else: {:ok, acc, rest})
   defp quoted(<<c, rest::binary>>, q, acc), do: quoted(rest, q, <<acc::binary, c>>)
   defp quoted("", _q, _acc), do: :error
 
-  defp word(<<c, rest::binary>>, acc)
-       when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c in [?_, ?$],
-       do: word(rest, <<acc::binary, c>>)
-
+  defp word(<<c, rest::binary>>, acc) when word?(c), do: word(rest, <<acc::binary, c>>)
   defp word(rest, acc), do: {acc, rest}
 
-  defp columns("(" <> rest) do
-    with {:ok, rest} <- balanced(rest, 1), do: skip(rest)
+  defp columns("(" <> rest, d) do
+    with {:ok, rest} <- balanced(rest, 1, d), do: skip(rest, d)
   end
 
-  defp columns(text), do: {:ok, text}
+  defp columns(text, _d), do: {:ok, text}
 
-  defp keyword(text, keyword) do
+  defp keyword(text, keyword, d) do
     case word(text, "") do
       {word, rest} when word != "" ->
-        if String.downcase(word) == keyword, do: skip(rest), else: :error
+        if String.downcase(word) == keyword, do: skip(rest, d), else: :error
 
       _ ->
         :error
     end
   end
 
-  defp optional(text, keyword) do
+  defp optional(text, keyword, d) do
     case word(text, "") do
       {word, rest} when word != "" ->
-        if String.downcase(word) == keyword, do: skip(rest), else: {:ok, text}
+        if String.downcase(word) == keyword, do: skip(rest, d), else: {:ok, text}
 
       _ ->
         {:ok, text}
     end
   end
 
-  defp body("(" <> rest), do: balanced(rest, 1)
-  defp body(_text), do: :error
+  defp body("(" <> rest, d), do: balanced(rest, 1, d)
+  defp body(_text, _d), do: :error
 
   # Past a body's closing parenthesis.
-  defp balanced(")" <> rest, 1), do: {:ok, rest}
-  defp balanced(")" <> rest, depth), do: balanced(rest, depth - 1)
-  defp balanced("(" <> rest, depth), do: balanced(rest, depth + 1)
-  defp balanced("--" <> rest, depth), do: rest |> line_end() |> balanced(depth)
+  defp balanced(")" <> rest, 1, _d), do: {:ok, rest}
+  defp balanced(")" <> rest, depth, d), do: balanced(rest, depth - 1, d)
+  defp balanced("(" <> rest, depth, d), do: balanced(rest, depth + 1, d)
+  defp balanced("#" <> _rest, _depth, d) when mysql?(d), do: :error
 
-  defp balanced("/*" <> rest, depth) do
-    with {:ok, rest} <- block_end(rest, 1), do: balanced(rest, depth)
+  defp balanced("--" <> rest, depth, d) do
+    if comment_dashes?(rest, d), do: rest |> line_end() |> balanced(depth, d), else: :error
   end
 
-  defp balanced("'" <> rest, depth) do
-    with {:ok, rest} <- string(rest), do: balanced(rest, depth)
+  defp balanced("/*" <> rest, depth, d) do
+    with {:ok, rest} <- block(rest, d), do: balanced(rest, depth, d)
   end
 
-  defp balanced(<<q, rest::binary>>, depth) when q in [?", ?`] do
-    with {:ok, _name, rest} <- quoted(rest, q, ""), do: balanced(rest, depth)
+  defp balanced("'" <> rest, depth, d) do
+    with {:ok, rest} <- string(rest), do: balanced(rest, depth, d)
   end
 
-  defp balanced("$" <> rest, depth) do
+  defp balanced(<<?", _::binary>>, _depth, d) when d in [:mysql, :mariadb, :any], do: :error
+
+  defp balanced(<<q, rest::binary>>, depth, d) when q in [?", ?`] do
+    with {:ok, _name, rest} <- quoted(rest, q, ""), do: balanced(rest, depth, d)
+  end
+
+  defp balanced("[" <> rest, depth, d) when d in [:sqlite, :any] do
+    with {:ok, _name, rest} <- quoted(rest, ?], ""), do: balanced(rest, depth, d)
+  end
+
+  # A `$` that does not follow an identifier character may open a dollar quote:
+  # PostgreSQL reads it; elsewhere it is refused. `$1` is a parameter.
+  defp balanced("$" <> rest, depth, d) do
     case dollar_tag(rest, "") do
-      {:ok, tag, rest} ->
+      {:ok, tag, rest} when d == :postgresql ->
         case :binary.split(rest, "$" <> tag <> "$") do
-          [_string, rest] -> balanced(rest, depth)
+          [_string, rest] -> balanced(rest, depth, d)
           [_unterminated] -> :error
         end
 
+      {:ok, _tag, _rest} ->
+        :error
+
       :none ->
-        balanced(rest, depth)
+        balanced(rest, depth, d)
     end
   end
 
-  defp balanced(<<_c, rest::binary>>, depth), do: balanced(rest, depth)
-  defp balanced("", _depth), do: :error
+  # An identifier or number, `$` included: a `$` inside it never opens a quote.
+  defp balanced(<<c, _::binary>> = text, depth, d) when word?(c) do
+    {_word, rest} = word(text, "")
+    balanced(rest, depth, d)
+  end
+
+  defp balanced(<<_c, rest::binary>>, depth, d), do: balanced(rest, depth, d)
+  defp balanced("", _depth, _d), do: :error
 
   defp string("''" <> rest), do: string(rest)
   defp string("'" <> rest), do: {:ok, rest}

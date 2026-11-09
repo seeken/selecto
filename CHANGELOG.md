@@ -20,13 +20,22 @@
   `cte_name_redefined`, unless the two sit in different members of one set
   operation, each compiled with its own WITH (MariaDB rejects a WITH inside a
   set operand as a syntax error). Definitions compare by the SQL their bodies
-  compile to. A raw CTE (`{:raw_cte, sql, params}`) must be plain
-  `name [(columns)] AS [NOT] [MATERIALIZED] (...)` definitions, comments allowed
-  (Selecto.Builder.RawCte): every name it defines counts, its bodies are the
-  host's own text (R68), and text that does not parse to the end refuses with
-  `raw_cte_unparsed`. Names compare case-insensitively on every adapter. A CTE
-  or VALUES list's name is quoted exactly when a root or join naming it is, so a
-  mixed-case or reserved list name reads its list; a list root whose name an
+  compile to. A raw CTE (`{:raw_cte, sql, params}`, a binary or iodata with
+  `{:param, value}` markers) must be plain
+  `name [(columns)] AS [NOT] [MATERIALIZED] (...)` definitions, read the way its
+  adapter lexes them (Selecto.Builder.RawCte): every name counts, its bodies are
+  the host's own text (R68), and text that does not parse to the end refuses
+  with `raw_cte_unparsed`. Refused everywhere: a backslash in a string literal,
+  non-ASCII names, SEARCH/CYCLE clauses, a RECURSIVE prefix, a trailing comma;
+  outside PostgreSQL, dollar quotes and nested block comments; on MySQL and
+  MariaDB, `#` comments, `--` not followed by whitespace, `/*!` comments and
+  "double quotes" (ANSI_QUOTES is not known). Names compare case-insensitively
+  on every adapter, which refuses some names a case-keeping MySQL would tell
+  apart. A CTE or VALUES list's name is written unquoted when it is plain
+  (letters, digits and underscores, not starting with a digit, not reserved), in
+  its definition and in every root and join naming it, so PostgreSQL folds it as
+  it folds the host's own SQL naming it; other names, and a raw CTE's quoted
+  names, are quoted. A list root or an ad-hoc join's source whose name an
   identifier cannot hold refuses with `invalid_identifier`. Query members a
   domain declares but the read does not use are not checked. An adapter that
   resolves relations (PostgreSQL) refuses a root list named like a relation on

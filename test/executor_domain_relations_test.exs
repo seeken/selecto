@@ -655,7 +655,7 @@ defmodule Selecto.ExecutorDomainRelationsTest do
     assert refusal(Selecto.with_values(query, [[1]], columns: ["id"], as: "r")) == :ok
   end
 
-  test "a list root is quoted like the list it reads" do
+  test "a plain list name is written unquoted in its definition and every reference" do
     domain = configure("MixedList", [:id]).domain
 
     query =
@@ -664,24 +664,49 @@ defmodule Selecto.ExecutorDomainRelationsTest do
       |> Selecto.select(["id"])
 
     {sql, _params} = Selecto.to_sql(query)
-    assert sql =~ ~S["MixedList" ("id") AS] or sql =~ ~S["MixedList"]
-    refute sql =~ ~r/WITH MixedList\b/
+    assert sql =~ ~r/WITH MixedList\b/
+    assert sql =~ ~r/from MixedList selecto_root/i
+    refute sql =~ ~S["MixedList"]
 
-    # A root naming a raw CTE whose text leaves a mixed-case name unquoted.
+    # An ad-hoc join and a CTE body naming the list write it the same way.
+    joined =
+      configure("p", [:id])
+      |> Selecto.with_values([[1]], columns: ["id"], as: "MixedList")
+      |> Selecto.join(:mj, source: "MixedList", owner_key: :id, related_key: :id)
+      |> Selecto.with_cte("cb", fn ->
+        Selecto.configure(domain, nil, validate: false) |> Selecto.select(["id"])
+      end)
+      |> Selecto.select(["id"])
+
+    {sql, _params} = Selecto.to_sql(joined)
+    refute sql =~ ~S["MixedList"]
+
+    # Two lists whose names fold together are one name.
+    folded =
+      configure("p", [:id])
+      |> Selecto.with_values([[1]], columns: ["id"], as: "MixF")
+      |> Selecto.with_values([[2]], columns: ["id"], as: "mixf")
+      |> Selecto.select(["id"])
+
+    assert refusal(folded) == {:cte_name_redefined, ["mixf"]}
+
+    # A raw CTE's unquoted name reads like a Selecto list's; a quoted one keeps
+    # its quotes in every reference.
     unquoted =
       Selecto.configure(domain, nil, validate: false)
       |> Selecto.with_ctes([{:raw_cte, "MixedList AS (SELECT 1 AS id)", []}])
       |> Selecto.select(["id"])
 
-    assert {:error, %Selecto.Error{details: %{reason: :invalid_identifier}}} =
-             Selecto.Executor.prepare_read(unquoted)
+    assert {:ok, _} = Selecto.Executor.prepare_read(unquoted)
+    assert Selecto.to_sql(unquoted) |> elem(0) =~ ~r/from MixedList selecto_root/i
 
     quoted_raw =
       Selecto.configure(domain, nil, validate: false)
-      |> Selecto.with_ctes([{:raw_cte, ~S["MixedList" AS (SELECT 1 AS id)], []}])
+      |> Selecto.with_ctes([{:raw_cte, "`MixedList` AS (SELECT 1 AS id)", []}])
       |> Selecto.select(["id"])
 
     assert {:ok, _} = Selecto.Executor.prepare_read(quoted_raw)
+    refute Selecto.to_sql(quoted_raw) |> elem(0) =~ ~r/from MixedList selecto_root/i
 
     bad = put_in(domain, [:source, :source_table], ~S[bad"name])
 
@@ -692,6 +717,29 @@ defmodule Selecto.ExecutorDomainRelationsTest do
 
     assert {:error, %Selecto.Error{details: %{reason: :invalid_identifier}}} =
              Selecto.Executor.prepare_read(quoted)
+
+    # An ad-hoc join on a list whose name an identifier cannot hold.
+    dollar =
+      configure("p", [:id])
+      |> Selecto.with_values([[1]], columns: ["id"], as: "v$x")
+      |> Selecto.join(:vj, source: "v$x", owner_key: :id, related_key: :id)
+      |> Selecto.select(["id"])
+
+    assert {:error, %Selecto.Error{details: %{reason: :invalid_identifier, relations: ["v$x"]}}} =
+             Selecto.Executor.prepare_read(dollar)
+  end
+
+  test "a raw CTE's iodata text with parameters is read, not raised on" do
+    query =
+      configure("p", [:id])
+      |> Selecto.with_ctes([{:raw_cte, ["x14 AS (SELECT ", {:param, 1}, " AS pid)"], []}])
+      |> Selecto.select(["id"])
+
+    assert {:ok, _} = Selecto.Executor.prepare_read(query)
+
+    assert {"x14", {:raw, ["x14 AS (SELECT ", {:param, 1}, " AS pid)"], []}} in Selecto.Executor.definitions(
+             query
+           )
   end
 
   test "a CTE whose body is a set operation compiles" do
