@@ -115,6 +115,8 @@ defmodule Selecto.Diagnostics do
         {:ok, query_sql, params, explain_sql, rows, columns}
       end
     end
+  rescue
+    refusal in Selecto.Builder.ScopeRefusal -> {:error, Error.from_reason(refusal)}
   end
 
   defp adapter_explain_sql(selecto, query_sql, opts) do

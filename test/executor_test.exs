@@ -538,6 +538,26 @@ defmodule Selecto.ExecutorTest do
     assert is_integer(metadata.execution_time)
   end
 
+  test "a compile refusal comes back typed from every execute entry point" do
+    # A nested fragment whose placeholder its params do not match refuses while
+    # compiling (Selecto.Builder.ScopeRefusal).
+    refused = Selecto.filter(selecto_for(:single), {:exists, "SELECT 1", ["x"]})
+    streamed = Selecto.filter(selecto_for(:single_stream), {:exists, "SELECT 1", ["x"]})
+    opts = [analyze_complexity: false]
+
+    for result <- [
+          Selecto.execute(refused, opts),
+          Selecto.execute_one(refused, opts),
+          Selecto.execute_with_metadata(refused, opts),
+          Selecto.execute_count_with_metadata(refused, opts),
+          Selecto.execute_projection_sum_with_metadata(refused, "id", opts),
+          Selecto.execute_stream(streamed, opts),
+          Selecto.explain(refused)
+        ] do
+      assert {:error, %Selecto.Error{details: %{reason: :placeholder_count_mismatch}}} = result
+    end
+  end
+
   test "count and projection sum drop an unpaginated ORDER BY from their derived table" do
     ordered = Selecto.order_by(selecto_for(:single), "id")
 

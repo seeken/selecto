@@ -42,7 +42,19 @@ defmodule Selecto.Executor do
   @spec execute(Selecto.Types.t(), Selecto.Types.execute_options()) ::
           Selecto.Types.safe_execute_result()
   def execute(selecto, opts \\ []) do
-    Selecto.Telemetry.operation(:execute, selecto, fn -> do_execute(selecto, opts) end)
+    Selecto.Telemetry.operation(:execute, selecto, fn ->
+      typed(fn -> do_execute(selecto, opts) end)
+    end)
+  end
+
+  # A compile refusal (Selecto.Builder.ScopeRefusal: a nested fragment's
+  # placeholders ambiguous or miscounted, a scope compare that cannot be made
+  # exact) raised from any execute entry point comes back as a typed error,
+  # as each entry point's spec promises.
+  defp typed(fun) do
+    fun.()
+  rescue
+    refusal in Selecto.Builder.ScopeRefusal -> {:error, Selecto.Error.from_reason(refusal)}
   end
 
   defp do_execute(%Selecto{provider: provider} = selecto, opts) when not is_nil(provider) do
@@ -1587,7 +1599,7 @@ defmodule Selecto.Executor do
 
   def execute_with_metadata(selecto, opts) do
     Selecto.Telemetry.operation(:execute_with_metadata, selecto, fn ->
-      do_execute_with_metadata(selecto, opts)
+      typed(fn -> do_execute_with_metadata(selecto, opts) end)
     end)
   end
 
@@ -1681,7 +1693,7 @@ defmodule Selecto.Executor do
 
   def execute_count_with_metadata(selecto, opts) do
     Selecto.Telemetry.operation(:count, selecto, fn ->
-      do_execute_count_with_metadata(selecto, opts)
+      typed(fn -> do_execute_count_with_metadata(selecto, opts) end)
     end)
   end
 
@@ -1708,7 +1720,7 @@ defmodule Selecto.Executor do
 
   def execute_projection_sum_with_metadata(selecto, column, opts) do
     Selecto.Telemetry.operation(:projection_sum, selecto, fn ->
-      do_execute_projection_sum_with_metadata(selecto, column, opts)
+      typed(fn -> do_execute_projection_sum_with_metadata(selecto, column, opts) end)
     end)
   end
 
@@ -1876,7 +1888,9 @@ defmodule Selecto.Executor do
     do: Selecto.Configuration.Provider.invoke(selecto, :execute_stream, [opts])
 
   def execute_stream(selecto, opts) do
-    Selecto.Telemetry.operation(:stream_open, selecto, fn -> do_execute_stream(selecto, opts) end)
+    Selecto.Telemetry.operation(:stream_open, selecto, fn ->
+      typed(fn -> do_execute_stream(selecto, opts) end)
+    end)
   end
 
   # A stream is checked for complexity before it opens. Its rows are read
@@ -1945,7 +1959,9 @@ defmodule Selecto.Executor do
   @spec execute_one(Selecto.Types.t(), Selecto.Types.execute_options()) ::
           Selecto.Types.safe_execute_one_result()
   def execute_one(selecto, opts \\ []) do
-    Selecto.Telemetry.operation(:execute_one, selecto, fn -> do_execute_one(selecto, opts) end)
+    Selecto.Telemetry.operation(:execute_one, selecto, fn ->
+      typed(fn -> do_execute_one(selecto, opts) end)
+    end)
   end
 
   defp do_execute_one(selecto, opts) do

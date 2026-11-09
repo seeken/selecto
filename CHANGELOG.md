@@ -64,7 +64,15 @@
   placeholders do not sit at the same places under all of them refuses typed
   (`placeholder_ambiguous`) rather than leave a placeholder unbound or rebind
   a literal. A fragment whose placeholders its params do not match refuses
-  typed (`placeholder_count_mismatch`) instead of raising ArgumentError.
+  typed (`placeholder_count_mismatch`) instead of raising ArgumentError. Block
+  comments nest on DuckDB as on PostgreSQL, and on both a string segment that
+  continues an `E'...'` across whitespace holding a newline reads escapes too.
+  `$01` and `$1_0` (which PostgreSQL reads as `$1` and `$10`) refuse typed
+  (`placeholder_unsupported`). Every execute entry point (`execute`,
+  `execute_one`, `execute_with_metadata`, `execute_count_with_metadata`,
+  `execute_projection_sum_with_metadata`, `execute_stream`) and `explain`
+  return such a compile refusal as `{:error, %Selecto.Error{}}`;
+  `Selecto.to_sql/2` and `gen_sql/2` still raise it.
   A query the statement compiles without an adapter of its own (a subquery
   join's) is read in the statement's dialect. Names compare case-insensitively
   on every adapter, which refuses some names a case-keeping MySQL would tell

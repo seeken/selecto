@@ -266,4 +266,11 @@ defmodule Selecto.Builder.RawCteTest do
     refute RawCte.params_match?("x AS (SELECT $2::int AS v)", [1, 2], :postgresql)
     refute RawCte.params_match?("x AS (SELECT $2::int AS v)", [1, 2], :duckdb)
   end
+
+  test "a raw CTE numbering a placeholder $01 or $1_0 does not match its params" do
+    for d <- [:postgresql, :duckdb],
+        text <- ["x AS (SELECT $01 AS v)", "x AS (SELECT $1_0 AS v)"] do
+      refute RawCte.params_match?(text, [5], d), "#{d}: #{text}"
+    end
+  end
 end
