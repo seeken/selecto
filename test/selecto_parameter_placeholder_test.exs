@@ -226,4 +226,56 @@ defmodule Selecto.ParameterPlaceholderTest do
                Selecto.filter(query, {:exists, "SELECT 1 FROM p x WHERE 'c $1' <> ''"})
              )
   end
+
+  test "a set member's and CTE body's raw $1 is rebound as its own param" do
+    domain = fn table ->
+      %{
+        name: table,
+        source: %{
+          source_table: table,
+          primary_key: :id,
+          fields: [:id, :name],
+          redact_fields: [],
+          columns: %{id: %{type: :integer}, name: %{type: :string}},
+          associations: %{}
+        },
+        schemas: %{},
+        joins: %{}
+      }
+    end
+
+    q = fn table -> Selecto.configure(domain.(table), nil, validate: false) end
+    left = q.("p") |> Selecto.filter({"name", "L"}) |> Selecto.select(["id"])
+
+    own =
+      q.("p")
+      |> Selecto.filter({"name", {:!=, "q"}})
+      |> Selecto.filter({:raw_sql_filter, "CAST($1 AS text) = 'q'"})
+      |> Selecto.select(["id"])
+
+    # The member's raw $1 is its own first param, a copy of "q"; never "L".
+    {sql, params} = Selecto.to_sql(Selecto.union(left, own, all: true))
+    assert params == ["L", "q", "q"]
+    assert sql =~ "CAST($3 AS text) = 'q'"
+
+    {sql, params} =
+      q.("c")
+      |> Selecto.filter({"name", {:!=, "zz"}})
+      |> Selecto.with_cte("c", fn -> own end, columns: ["id"])
+      |> Selecto.select(["id"])
+      |> Selecto.to_sql()
+
+    # The body's raw $1 is the body's "q"; never the outer "zz".
+    assert params == ["q", "q", "zz"]
+    assert sql =~ "CAST($2 AS text) = 'q'"
+
+    unbound =
+      q.("p")
+      |> Selecto.filter({:raw_sql_filter, "CAST($1 AS text) = '1'"})
+      |> Selecto.select(["id"])
+
+    assert_raise Selecto.Builder.ScopeRefusal, fn ->
+      Selecto.to_sql(Selecto.union(left, unbound, all: true))
+    end
+  end
 end
