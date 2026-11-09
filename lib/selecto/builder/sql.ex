@@ -1649,10 +1649,12 @@ defmodule Selecto.Builder.Sql do
           {sql, []}
 
         {:error, %Selecto.Error{} = error} ->
-          raise Selecto.Error.to_exception(error)
+          Selecto.Builder.ScopeRefusal.unsupported!(error, :lateral_unsupported)
 
         {:error, reason} ->
-          raise ArgumentError, "unsupported UNNEST operation: #{inspect(reason)}"
+          raise Selecto.Builder.ScopeRefusal,
+            reason: :lateral_unsupported,
+            message: "unsupported UNNEST operation: #{inspect(reason)}"
       end
 
     join = %TableFunctionJoin{
@@ -1669,10 +1671,12 @@ defmodule Selecto.Builder.Sql do
           sql
 
         {:error, %Selecto.Error{} = error} ->
-          raise Selecto.Error.to_exception(error)
+          Selecto.Builder.ScopeRefusal.unsupported!(error, :lateral_unsupported)
 
         {:error, reason} ->
-          raise ArgumentError, "unsupported table-function join: #{inspect(reason)}"
+          raise Selecto.Builder.ScopeRefusal,
+            reason: :lateral_unsupported,
+            message: "unsupported table-function join: #{inspect(reason)}"
       end
 
     {unnest_clause, field_params ++ collection_params}

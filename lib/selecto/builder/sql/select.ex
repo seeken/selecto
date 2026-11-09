@@ -520,7 +520,7 @@ defmodule Selecto.Builder.Sql.Select do
     case Selecto.DialectSupport.render_collection_operation(selecto.adapter, fragment, selecto) do
       {:ok, {iodata, dialect_params}} -> {iodata, [], values_params ++ dialect_params}
       {:ok, iodata} -> {iodata, [], values_params}
-      {:error, %Error{} = error} -> raise Error.to_exception(error)
+      {:error, %Error{} = error} -> Selecto.Builder.ScopeRefusal.unsupported!(error)
       {:error, reason} -> raise ArgumentError, "unsupported array constructor: #{inspect(reason)}"
     end
   end
@@ -1099,7 +1099,7 @@ defmodule Selecto.Builder.Sql.Select do
         expression
 
       {:error, %Error{} = error} ->
-        raise Error.to_exception(error)
+        Selecto.Builder.ScopeRefusal.unsupported!(error)
 
       {:error, reason} ->
         raise ArgumentError, "unsupported elapsed-days operation: #{inspect(reason)}"
@@ -1113,7 +1113,7 @@ defmodule Selecto.Builder.Sql.Select do
     do: {iodata, joins, params}
 
   defp render_selector_fragment!({:error, %Error{} = error}, _joins, _params, _feature),
-    do: raise(Error.to_exception(error))
+    do: Selecto.Builder.ScopeRefusal.unsupported!(error)
 
   defp render_selector_fragment!({:error, reason}, _joins, _params, feature),
     do: raise(ArgumentError, "unsupported #{feature}: #{inspect(reason)}")
@@ -1666,7 +1666,7 @@ defmodule Selecto.Builder.Sql.Select do
             unsupported_feature: :aggregate_filter
           })
 
-        raise Error.to_exception(error)
+        Selecto.Builder.ScopeRefusal.unsupported!(error)
     end
   end
 
@@ -2061,7 +2061,7 @@ defmodule Selecto.Builder.Sql.Select do
   defp render_computed_value!(selecto, fragment) do
     case Selecto.DialectSupport.render_computed_value(selecto.adapter, fragment, selecto) do
       {:ok, expression} -> expression
-      {:error, %Error{} = error} -> raise Error.to_exception(error)
+      {:error, %Error{} = error} -> Selecto.Builder.ScopeRefusal.unsupported!(error)
       {:error, reason} -> raise ArgumentError, "unsupported computed value: #{inspect(reason)}"
     end
   end

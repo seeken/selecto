@@ -285,9 +285,11 @@ defmodule Selecto.WindowJsonRegressionTest do
         as: "rolling_avg"
       )
 
-    assert_raise RuntimeError, ~r/MSSQL window frames do not support interval boundaries/, fn ->
-      Selecto.to_sql(query)
-    end
+    assert_raise Selecto.Builder.ScopeRefusal,
+                 ~r/MSSQL window frames do not support interval boundaries/,
+                 fn ->
+                   Selecto.to_sql(query)
+                 end
   end
 
   test "mssql rejects nth_value explicitly" do
@@ -302,9 +304,11 @@ defmodule Selecto.WindowJsonRegressionTest do
         as: "second_salary"
       )
 
-    assert_raise RuntimeError, ~r/MSSQL window functions do not support nth_value yet/, fn ->
-      Selecto.to_sql(query)
-    end
+    assert_raise Selecto.Builder.ScopeRefusal,
+                 ~r/MSSQL window functions do not support nth_value yet/,
+                 fn ->
+                   Selecto.to_sql(query)
+                 end
   end
 
   test "mssql lag and lead compile with offset params and quoted aliases" do

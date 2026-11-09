@@ -250,6 +250,9 @@ defmodule Selecto.Error do
     connection_error("Database connection failed", exit_details(reason))
   end
 
+  def from_reason(%Selecto.Builder.ScopeRefusal{error: %__MODULE__{} = error, reason: reason}),
+    do: %{error | details: Map.put_new(error.details || %{}, :reason, reason)}
+
   def from_reason(%Selecto.Builder.ScopeRefusal{message: message, reason: reason}) do
     %__MODULE__{
       type: :query_enforcement,

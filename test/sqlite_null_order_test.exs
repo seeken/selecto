@@ -134,7 +134,7 @@ defmodule Selecto.SQLiteNullOrderTest do
       connection: connection
     } do
       for adapter <- [OldSQLiteAdapter, UnversionedSQLiteAdapter] do
-        assert_raise RuntimeError,
+        assert_raise Selecto.Builder.ScopeRefusal,
                      "SQLite provider does not support NULL ordering for set results",
                      fn ->
                        configure(connection, adapter)

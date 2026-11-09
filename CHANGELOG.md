@@ -3,6 +3,18 @@
 
 ## Unreleased
 
+- A nested fragment's bare `$n` whose param the adapter renders wrapped
+  (DuckDB's Decimal as `(SELECT CAST($n AS DECIMAL(38,s)))`) refuses
+  `placeholder_count_mismatch` in a set member, CTE body or subquery, instead
+  of binding the statement's own `$n`. An integer element of marker iodata
+  is read as the text it renders (`["CAST($", 1, ...]` is `$1`). A SQL shape
+  the adapter cannot render (unnest and table-function laterals, collection,
+  JSON, window, text-search and aggregate-FILTER fragments, NULL placement
+  that cannot be expressed) raises `Selecto.Builder.ScopeRefusal` carrying the
+  adapter's error, typed through every execute entry point; unnest and
+  table-function laterals with reason `lateral_unsupported`. Direct builder
+  calls that raised `RuntimeError` for these raise `ScopeRefusal` with the same
+  message.
 - A read resolves and checks only the relations its compiled statement names
   (`Selecto.Executor.prepare_read/1`). A domain's declared joins the query does
   not use (association joins, non-association `source:` joins, through,

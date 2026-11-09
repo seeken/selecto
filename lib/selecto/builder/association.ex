@@ -107,7 +107,7 @@ defmodule Selecto.Builder.Association do
 
       case Selecto.DialectSupport.render_computed_value(selecto.adapter, fragment, selecto) do
         {:ok, sql} -> sql
-        {:error, %Selecto.Error{} = error} -> raise Selecto.Error.to_exception(error)
+        {:error, %Selecto.Error{} = error} -> Selecto.Builder.ScopeRefusal.unsupported!(error)
         {:error, reason} -> raise ArgumentError, "unsupported key cast: #{inspect(reason)}"
       end
     else

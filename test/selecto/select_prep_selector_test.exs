@@ -165,7 +165,7 @@ defmodule Selecto.SelectPrepSelectorTest do
   end
 
   test "mssql raises on unsupported aggregate FILTER shapes" do
-    assert_raise RuntimeError,
+    assert_raise Selecto.Builder.ScopeRefusal,
                  ~r/MSSQL does not support this aggregate FILTER shape yet/,
                  fn ->
                    Select.prep_selector(

@@ -321,7 +321,7 @@ defmodule Selecto.Builder.Sql.WhereTest do
       assert pg_boolean_legacy_sql =~ ~r/name\s+@@\s+to_tsquery\(\$1\)/i
       assert pg_boolean_legacy_params == ["term"]
 
-      assert_raise RuntimeError, ~r/does not support this text search mode/, fn ->
+      assert_raise Selecto.Builder.ScopeRefusal, ~r/does not support this text search mode/, fn ->
         Where.build(selecto(), {"name", {:text_search, "term", [mode: :query_expansion]}})
       end
 
@@ -331,7 +331,7 @@ defmodule Selecto.Builder.Sql.WhereTest do
 
       sqlite_selecto = Map.put(selecto(), :adapter, SelectoDBSQLite.Adapter)
 
-      assert_raise RuntimeError, ~r/requires an FTS5-configured field/i, fn ->
+      assert_raise Selecto.Builder.ScopeRefusal, ~r/requires an FTS5-configured field/i, fn ->
         Where.build(sqlite_selecto, {"name", {:text_search, "term"}})
       end
 
@@ -419,12 +419,14 @@ defmodule Selecto.Builder.Sql.WhereTest do
       assert pg_boolean_sql =~ ~r/name\s+@@\s+to_tsquery\(\$1\)/i
       assert pg_boolean_params == ["foo & bar"]
 
-      assert_raise RuntimeError, ~r/does not support this text search mode/i, fn ->
-        Where.build(
-          sqlite_fts_selecto(),
-          {"name", {:text_search, "term", [mode: :query_expansion]}}
-        )
-      end
+      assert_raise Selecto.Builder.ScopeRefusal,
+                   ~r/does not support this text search mode/i,
+                   fn ->
+                     Where.build(
+                       sqlite_fts_selecto(),
+                       {"name", {:text_search, "term", [mode: :query_expansion]}}
+                     )
+                   end
 
       subquery = "SELECT id FROM users WHERE active = true"
       {_joins, sq_iodata, _} = Where.build(selecto(), {"id", {:subquery, :in, subquery, []}})
@@ -550,9 +552,11 @@ defmodule Selecto.Builder.Sql.WhereTest do
     test "fails closed when an adapter does not implement datetime predicates" do
       sqlite_selecto = Map.put(selecto(), :adapter, SelectoDBSQLite.Adapter)
 
-      assert_raise RuntimeError, ~r/does not support the requested SQL fragment/, fn ->
-        Where.build(sqlite_selecto, {"created_at", {:datetime_part, :month, 8}})
-      end
+      assert_raise Selecto.Builder.ScopeRefusal,
+                   ~r/does not support the requested SQL fragment/,
+                   fn ->
+                     Where.build(sqlite_selecto, {"created_at", {:datetime_part, :month, 8}})
+                   end
     end
   end
 

@@ -305,7 +305,7 @@ defmodule Selecto.Builder.Window do
       sql
     else
       {:error, %Error{} = error} ->
-        raise Error.to_exception(error)
+        Selecto.Builder.ScopeRefusal.unsupported!(error)
 
       {:error, reason} ->
         error =
@@ -457,7 +457,7 @@ defmodule Selecto.Builder.Window do
             unsupported_feature: :window_nth_value
           })
 
-        raise Error.to_exception(error)
+        Selecto.Builder.ScopeRefusal.unsupported!(error)
 
       _ ->
         :ok

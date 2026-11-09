@@ -367,9 +367,16 @@ defmodule Selecto.EnhancedJoins do
     }
 
     case Selecto.DialectSupport.render_table_function_join(adapter, fragment, selecto) do
-      {:ok, sql} -> [" ", sql]
-      {:error, %Selecto.Error{} = error} -> raise Selecto.Error.to_exception(error)
-      {:error, reason} -> raise ArgumentError, "unsupported lateral join: #{inspect(reason)}"
+      {:ok, sql} ->
+        [" ", sql]
+
+      {:error, %Selecto.Error{} = error} ->
+        Selecto.Builder.ScopeRefusal.unsupported!(error, :lateral_unsupported)
+
+      {:error, reason} ->
+        raise Selecto.Builder.ScopeRefusal,
+          reason: :lateral_unsupported,
+          message: "unsupported lateral join: #{inspect(reason)}"
     end
   end
 

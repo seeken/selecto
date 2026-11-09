@@ -592,7 +592,7 @@ defmodule Selecto.Builder.Subselect do
   defp unwrap_dialect_fragment!({:ok, iodata}), do: {iodata, []}
 
   defp unwrap_dialect_fragment!({:error, %Selecto.Error{} = error}),
-    do: raise(Selecto.Error.to_exception(error))
+    do: Selecto.Builder.ScopeRefusal.unsupported!(error)
 
   defp unwrap_dialect_fragment!({:error, reason}),
     do: raise(ArgumentError, "unsupported subselect dialect fragment: #{inspect(reason)}")

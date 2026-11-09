@@ -10,7 +10,7 @@ defmodule Selecto.Builder.JsonOperationsTest do
         value: %{"price_band" => "premium"}
       )
 
-    assert_raise RuntimeError, ~r/does not support this JSON operation/, fn ->
+    assert_raise Selecto.Builder.ScopeRefusal, ~r/does not support this JSON operation/, fn ->
       BuilderJsonOperations.build_json_filter(spec, adapter: SelectoDBMySQL.Adapter)
     end
   end
@@ -18,14 +18,14 @@ defmodule Selecto.Builder.JsonOperationsTest do
   test "mssql rejects unsupported json aggregate and construction operations explicitly" do
     agg_spec = JsonOperations.create_json_operation(:json_agg, "metadata", as: "metadata_items")
 
-    assert_raise RuntimeError, ~r/does not support this JSON operation/, fn ->
+    assert_raise Selecto.Builder.ScopeRefusal, ~r/does not support this JSON operation/, fn ->
       BuilderJsonOperations.build_json_select(agg_spec, adapter: SelectoDBMSSQL.Adapter)
     end
 
     build_spec =
       JsonOperations.create_json_operation(:json_build_object, nil, value: [{"color", "red"}])
 
-    assert_raise RuntimeError, ~r/does not support this JSON operation/, fn ->
+    assert_raise Selecto.Builder.ScopeRefusal, ~r/does not support this JSON operation/, fn ->
       BuilderJsonOperations.build_json_select(build_spec, adapter: SelectoDBMSSQL.Adapter)
     end
   end
@@ -36,7 +36,7 @@ defmodule Selecto.Builder.JsonOperationsTest do
         value: %{"price_band" => "premium"}
       )
 
-    assert_raise RuntimeError, ~r/does not support this JSON operation/, fn ->
+    assert_raise Selecto.Builder.ScopeRefusal, ~r/does not support this JSON operation/, fn ->
       BuilderJsonOperations.build_json_filter(spec, adapter: SelectoDBMSSQL.Adapter)
     end
   end

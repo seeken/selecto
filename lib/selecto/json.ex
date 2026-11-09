@@ -139,7 +139,7 @@ defmodule Selecto.Json do
         if contains_params?(sql), do: sql, else: IO.iodata_to_binary(sql)
 
       {:error, %Selecto.Error{} = error} ->
-        raise Selecto.Error.to_exception(error)
+        Selecto.Builder.ScopeRefusal.unsupported!(error)
 
       {:error, reason} ->
         raise ArgumentError, "adapter JSON rendering failed: #{inspect(reason)}"

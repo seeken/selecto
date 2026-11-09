@@ -190,9 +190,11 @@ defmodule Selecto.SQLFunctionsTest do
     } do
       sqlite = %{selecto | adapter: SelectoDBSQLite.Adapter}
 
-      assert_raise RuntimeError, ~r/does not support this collection operation/, fn ->
-        Functions.prep_advanced_selector(sqlite, {:array_append, "tags", "new"})
-      end
+      assert_raise Selecto.Builder.ScopeRefusal,
+                   ~r/does not support this collection operation/,
+                   fn ->
+                     Functions.prep_advanced_selector(sqlite, {:array_append, "tags", "new"})
+                   end
     end
   end
 
