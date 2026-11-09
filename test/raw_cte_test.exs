@@ -185,6 +185,21 @@ defmodule Selecto.Builder.RawCteTest do
     end
   end
 
+  test "SQLite refuses only Tcl-style name(...) parameters" do
+    for text <- [
+          "ca AS (SELECT #x(') AS v), za AS (SELECT 2 AS v), cb AS (SELECT #y(') AS w)",
+          "ca AS (SELECT $a::b(') AS v), za AS (SELECT 2 AS v), cb AS (SELECT $y(') AS w)"
+        ] do
+      assert RawCte.names(text, :sqlite) == :error, text
+    end
+
+    assert RawCte.names("ca AS (SELECT :a AS v), za AS (SELECT @b, $c, ?1 AS v)", :sqlite) ==
+             {:ok, ["ca", "za"]}
+
+    assert RawCte.names("ca AS (SELECT CAST(:a AS INT) AS v), za AS (SELECT 2)", :sqlite) ==
+             {:ok, ["ca", "za"]}
+  end
+
   test "a non-ASCII byte before $ opens no dollar quote; one inside a tag is read" do
     assert RawCte.names("ca AS (SELECT 1 AS \xe4$$), za AS (SELECT 2 AS v)", :postgresql) ==
              {:ok, ["ca", "za"]}
