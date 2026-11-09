@@ -128,4 +128,32 @@ defmodule Selecto.ParameterPlaceholderTest do
       end
     end
   end
+
+  test "$0, $00 and DuckDB's ? number the next parameter: refused typed" do
+    for adapter <- [SelectoDBPostgreSQL.Adapter, SelectoDBDuckDB.Adapter],
+        sql <- ["SELECT $1, $0", "SELECT $1, $00"] do
+      assert_raise Selecto.Builder.ScopeRefusal, ~r/cannot number/, fn ->
+        Params.rebind_finalized(sql, [5], adapter)
+      end
+    end
+
+    assert_raise Selecto.Builder.ScopeRefusal, ~r/cannot number/, fn ->
+      Params.rebind_finalized("SELECT $1, CAST(? AS VARCHAR)", [5], SelectoDBDuckDB.Adapter)
+    end
+
+    # On DuckDB a ? in a literal stays text.
+    assert Enum.filter(
+             Params.rebind_finalized("SELECT $1, 'why?'", [5], SelectoDBDuckDB.Adapter),
+             &is_tuple/1
+           ) == [{:param, 5}]
+  end
+
+  test "an odd placeholder any session mode reads as code refuses" do
+    # Under standard_conforming_strings off, '\'' ends where `$01` is code.
+    sql = "SELECT 1 WHERE n <> '\\'' AND n = $01 -- '\n AND n = $1"
+
+    assert_raise Selecto.Builder.ScopeRefusal, fn ->
+      Params.rebind_finalized(sql, ["a"], SelectoDBPostgreSQL.Adapter)
+    end
+  end
 end

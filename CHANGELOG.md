@@ -67,11 +67,15 @@
   typed (`placeholder_count_mismatch`) instead of raising ArgumentError. Block
   comments nest on DuckDB as on PostgreSQL, and on both a string segment that
   continues an `E'...'` across whitespace holding a newline reads escapes too.
-  `$01` and `$1_0` (which PostgreSQL reads as `$1` and `$10`) refuse typed
-  (`placeholder_unsupported`). Every execute entry point (`execute`,
+  A placeholder the binding cannot number refuses typed
+  (`placeholder_unsupported`) when any session mode reads it as code: `$0`,
+  `$00`, `$01` and `$1_0` (PostgreSQL reads `$01` as `$1`; DuckDB reads `$0`
+  as the next parameter), and on DuckDB a `?`. Every execute entry point (`execute`,
   `execute_one`, `execute_with_metadata`, `execute_count_with_metadata`,
   `execute_projection_sum_with_metadata`, `execute_stream`) and `explain`
-  return such a compile refusal as `{:error, %Selecto.Error{}}`;
+  return such a compile refusal as `{:error, %Selecto.Error{}}`, as do
+  `Selecto.Livebook.run/3` and `run_shape/3`,
+  `Selecto.Performance.Hooks.with_hooks/3` and `Selecto.Performance.QueryAnalyzer`;
   `Selecto.to_sql/2` and `gen_sql/2` still raise it.
   A query the statement compiles without an adapter of its own (a subquery
   join's) is read in the statement's dialect. Names compare case-insensitively

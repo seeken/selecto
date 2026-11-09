@@ -61,6 +61,10 @@ defmodule Selecto.Performance.QueryAnalyzer do
       true ->
         apply(adapter, callback, args)
     end
+  rescue
+    # An adapter that compiles without its own guard: a compile refusal
+    # (Selecto.Builder.ScopeRefusal) is a typed error.
+    refusal in Selecto.Builder.ScopeRefusal -> {:error, Error.from_reason(refusal)}
   end
 
   defp numeric_differences(left, right) do
