@@ -459,18 +459,62 @@ defmodule Selecto.ExecutorDomainRelationsTest do
     end
   end
 
-  test "a declared non-association join's table is a relation of the read" do
+  test "a declared non-association join's table is a relation of the read it joins" do
     domain =
       configure("p", [:id]).domain
       |> Map.put(:joins, %{
-        lkd: %{non_assoc: true, source: "lk", type: :left, owner_key: :id, related_key: :pid}
+        lkd: %{
+          non_assoc: true,
+          source: "lk",
+          type: :left,
+          owner_key: :id,
+          related_key: :pid,
+          fields: %{
+            "lkd.pid" => %{colid: "lkd.pid", field: "pid", requires_join: :lkd, type: :integer}
+          }
+        }
       })
 
-    query = Selecto.configure(domain, nil, validate: false) |> Selecto.select(["id"])
+    query = Selecto.configure(domain, nil, validate: false)
     assert "lk" in Selecto.Executor.domain_relations(query)
 
-    named = Selecto.with_values(query, [[1]], columns: ["pid"], as: "lk")
-    assert refusal(named) == {:cte_name_collision, ["lk"]}
+    # Unused, the join's table is not read: a list named like it reads.
+    unused = Selecto.with_values(query, [[1]], columns: ["pid"], as: "lk")
+    assert refusal(Selecto.select(unused, ["id"])) == :ok
+
+    assert refusal(Selecto.select(unused, ["id", "lkd.pid"])) ==
+             {:cte_name_collision, ["lk"]}
+  end
+
+  test "only relations the compiled read names are resolved and checked" do
+    # An unused declared join (association, non-association, through table)
+    # names no relation of the read; a used one, a subselect or a filter on it
+    # does.
+    domain =
+      configure("p", [:id, :lid]).domain
+      |> put_in([:source, :associations], %{
+        al: %{queryable: :alq, field: :al, owner_key: :id, related_key: :pid}
+      })
+      |> Map.put(:schemas, %{
+        alq: configure("alloc", [:id, :pid]).domain.source
+      })
+      |> Map.put(:joins, %{al: %{type: :left, name: "al"}})
+
+    query = Selecto.configure(domain, nil, validate: false)
+    named = Selecto.with_values(query, [[1, 1]], columns: ["id", "pid"], as: "alloc")
+
+    assert refusal(Selecto.select(named, ["id"])) == :ok
+
+    for used <- [
+          Selecto.select(named, ["id", "al.pid"]),
+          named |> Selecto.select(["id"]) |> Selecto.filter({"al.pid", 1}),
+          named |> Selecto.select(["id"]) |> Selecto.order_by(["al.pid"]),
+          named
+          |> Selecto.select(["id"])
+          |> Selecto.subselect([%{target_schema: :alq, fields: [:pid], alias: "s"}])
+        ] do
+      assert refusal(used) == {:cte_name_collision, ["alloc"]}
+    end
   end
 
   test "a domain rooted on a CTE reads the CTE; read as a table elsewhere it refuses" do
@@ -561,9 +605,10 @@ defmodule Selecto.ExecutorDomainRelationsTest do
       |> Map.put(:joins, %{prod: %{type: :left, name: "prod"}})
       |> Selecto.configure(nil, validate: false)
       |> fake.()
-      |> Selecto.select(["id"])
 
-    assert refusal(joined) == {:cte_name_collision, ["p"]}
+    assert refusal(Selecto.select(joined, ["id", "prod.id"])) == {:cte_name_collision, ["p"]}
+    # Unused, the join reads nothing.
+    assert refusal(Selecto.select(joined, ["id"])) == :ok
   end
 
   test "a CASE subquery is a query of the statement" do

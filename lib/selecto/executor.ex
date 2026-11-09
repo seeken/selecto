@@ -11,6 +11,10 @@ defmodule Selecto.Executor do
   @query_execution_event [:selecto, :query, :execution]
   @max_filter_nodes 50_000
 
+  # The names the statement compiled before prepare_read/1 names (see
+  # put_emitted_names/1); kept in the query only while it prepares.
+  @emitted_names :selecto_emitted_names
+
   @doc """
   Execute a query and return results with standardized error handling.
 
@@ -193,9 +197,10 @@ defmodule Selecto.Executor do
   def scope_relations(%{set_result: true}), do: []
 
   def scope_relations(%{query: query, visible: visible} = scope) do
-    List.delete(collect_relations(Map.get(query, :domain), []), list_root(scope)) ++
-      Enum.reject(dynamic_sources(query), &(&1 in visible)) ++
-      declared_sources(query) ++ generated_relations(query)
+    (List.delete(collect_relations(Map.get(query, :domain), []), list_root(scope)) ++
+       Enum.reject(dynamic_sources(query), &(&1 in visible)) ++
+       declared_sources(query) ++ generated_relations(query))
+    |> Enum.filter(&emitted?(&1, Map.get(scope, :emitted, :all)))
   end
 
   @doc false
@@ -224,7 +229,13 @@ defmodule Selecto.Executor do
   # Each entry also carries its `kind` (:query, :member, :origin, :nested,
   # :cte_body, :recursive_part) and `outer`, the names visible from enclosing
   # queries where it sits.
-  def read_scopes(selecto), do: scopes(selecto, [], [], [], [], :query, [])
+  def read_scopes(selecto) do
+    emitted = emitted_names(selecto)
+
+    selecto
+    |> scopes([], [], [], [], :query, [])
+    |> Enum.map(&Map.put(&1, :emitted, emitted))
+  end
 
   # A set operation's result is its left member plus the operations: each
   # member compiles on its own, with its own WITH (parenthesized, or a derived
@@ -631,8 +642,11 @@ defmodule Selecto.Executor do
   # zone-independently (Selecto.Builder.ExactCompare.storage_kind/4).
   @doc false
   def prepare_read(selecto) do
+    selecto = put_emitted_names(selecto)
+
     with :ok <- no_scope_collision(selecto),
          {:ok, prepared} <- prepare_adapter_read(selecto) do
+      prepared = drop_emitted_names(prepared)
       {marked?, nodes} = compile_provenance(prepared)
 
       if nodes > @max_filter_nodes do
@@ -915,9 +929,10 @@ defmodule Selecto.Executor do
   def read_relations(%{query: query, visible: visible, forbidden: forbidden} = scope) do
     references = visible -- forbidden
 
-    List.delete(collect_relations(Map.get(query, :domain), []), list_root(scope)) ++
-      Enum.reject(dynamic_sources(query), &(&1 in references)) ++
-      declared_sources(query) ++ generated_relations(query)
+    (List.delete(collect_relations(Map.get(query, :domain), []), list_root(scope)) ++
+       Enum.reject(dynamic_sources(query), &(&1 in references)) ++
+       declared_sources(query) ++ generated_relations(query))
+    |> Enum.filter(&emitted?(&1, Map.get(scope, :emitted, :all)))
   end
 
   @doc false
@@ -1006,6 +1021,106 @@ defmodule Selecto.Executor do
            }
          }}
     end
+  end
+
+  # A domain names relations its read may never touch: the tables of declared
+  # joins, through and closure tables the query does not use. Only those the
+  # statement compiles to name are resolved and checked (scope_relations/1,
+  # read_relations/1): the read is compiled once first, the definitions of the
+  # lists it defines (`name [(columns)] AS [[NOT] MATERIALIZED] (`) are taken
+  # out of its text, and a relation whose name the rest holds as a word, in any
+  # case, is kept. Text holding a name it does not read (a column, an alias, a
+  # literal, a reference to a list) only keeps the relation in. A statement that
+  # does not compile keeps every relation.
+  defp put_emitted_names(%{set: set} = selecto) when is_map(set) do
+    case compiled_names(selecto) do
+      :all -> selecto
+      names -> %{selecto | set: Map.put(set, @emitted_names, names)}
+    end
+  end
+
+  defp put_emitted_names(selecto), do: selecto
+
+  defp drop_emitted_names(%{set: set} = selecto) when is_map(set),
+    do: %{selecto | set: Map.delete(set, @emitted_names)}
+
+  defp drop_emitted_names(selecto), do: selecto
+
+  defp emitted_names(selecto) do
+    case selecto |> Map.get(:set) |> Kernel.||(%{}) |> Map.get(@emitted_names) do
+      {:names, %MapSet{}, text} = names when is_binary(text) -> names
+      _none -> :all
+    end
+  end
+
+  @word ~r/[a-z_\x80-\xff][a-z0-9_$\x80-\xff]*/
+  @quoted [{~r/"((?:[^"]|"")*)"/, ~s(""), ~s(")}, {~r/`((?:[^`]|``)*)`/, "``", "`"}]
+
+  # The compiled text, its list definitions taken out, and its words and
+  # quoted identifiers, lower case.
+  defp compiled_names(selecto) do
+    {{sql, _aliases, _params}, _marked?, _nodes} =
+      Selecto.Builder.Provenance.capture(fn -> Selecto.Builder.Sql.build(selecto, []) end)
+
+    text = without_definitions(String.downcase(sql), list_names(selecto))
+
+    quoted =
+      for {pattern, doubled, quote} <- @quoted,
+          [_all, name] <- Regex.scan(pattern, text),
+          do: String.replace(name, doubled, quote)
+
+    words = for [word] <- Regex.scan(@word, text), do: word
+    {:names, MapSet.new(words ++ quoted), text}
+  rescue
+    _exception -> :all
+  catch
+    _kind, _reason -> :all
+  end
+
+  defp list_names(selecto) do
+    selecto
+    |> scopes([], [], [], [], :query, [])
+    |> Enum.flat_map(&statement_names(&1.query))
+    |> Enum.map(&String.downcase/1)
+    |> Enum.uniq()
+  end
+
+  defp without_definitions(text, []), do: text
+
+  defp without_definitions(text, lists) do
+    names = lists |> Enum.flat_map(&spellings/1) |> Enum.map_join("|", &Regex.escape/1)
+
+    Regex.replace(
+      ~r/(?<![a-z0-9_$\x80-\xff])(?:#{names})(?![a-z0-9_$\x80-\xff])(?:\s*\([^()]*\))?\s+as\s*(?:not\s+materialized\s*|materialized\s*)?\(/,
+      text,
+      " ("
+    )
+  end
+
+  # A name as a statement may write it: bare, or in double quotes, backticks
+  # or brackets, its quote doubled.
+  defp spellings(name) do
+    [
+      name,
+      ~s(") <> String.replace(name, ~s("), ~s("")) <> ~s("),
+      "`" <> String.replace(name, "`", "``") <> "`",
+      "[" <> String.replace(name, "]", "]]") <> "]"
+    ]
+  end
+
+  # Whether the compiled text, its list definitions taken out, names a
+  # relation (or, schema-qualified, its last segment): as a word or quoted
+  # identifier, or, for a name with other characters, anywhere in the text.
+  defp emitted?(_name, :all), do: true
+
+  defp emitted?(name, {:names, names, text}) do
+    name = String.downcase(to_string(name))
+
+    Enum.any?([name, name |> String.split(".") |> List.last()], fn name ->
+      name in names or
+        (not Regex.match?(~r/\A[a-z_\x80-\xff][a-z0-9_$\x80-\xff]*\z/, name) and
+           String.contains?(text, name))
+    end)
   end
 
   defp record_mark(%{set: set} = selecto, marked?) when is_map(set),
