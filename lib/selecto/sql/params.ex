@@ -66,7 +66,10 @@ defmodule Selecto.SQL.Params do
       |> Enum.with_index(1)
       |> Enum.map(fn {value, index} -> placeholder.(index, value) |> IO.iodata_to_binary() end)
 
-    if Enum.uniq(placeholders) |> length() == 1 do
+    # A placeholder that names no index (`?`) repeats; numbered ones (`$1`)
+    # are rebound by number, however often each appears.
+    if IO.iodata_to_binary(placeholder.(1, hd(params))) ==
+         IO.iodata_to_binary(placeholder.(2, hd(params))) do
       rebind_repeated(sql, params, hd(placeholders))
     else
       rebind_numbered(sql, params, placeholders)
@@ -191,10 +194,12 @@ defmodule Selecto.SQL.Params do
       |> Enum.sort_by(&String.length/1, :desc)
       |> Enum.map(&Regex.escape/1)
       |> Enum.join("|")
-      |> then(&Regex.compile!("(#{&1})"))
+      |> then(&Regex.compile!("((?:#{&1})(?![0-9]))"))
+
+    parts = Regex.split(pattern, sql, include_captures: true, trim: false)
 
     rebound =
-      Regex.split(pattern, sql, include_captures: true, trim: false)
+      parts
       |> Enum.map(fn part ->
         case Map.fetch(values, part) do
           {:ok, value} -> {:param, value}
@@ -202,13 +207,12 @@ defmodule Selecto.SQL.Params do
         end
       end)
 
-    consumed = Enum.count(rebound, &match?({:param, _value}, &1))
-
-    if consumed == length(params) do
+    # Every parameter is bound at least once; a placeholder may repeat.
+    if Enum.all?(placeholders, &(&1 in parts)) do
       rebound
     else
       raise ArgumentError,
-            "adapter placeholders do not match the finalized parameter sequence"
+            "adapter placeholder count does not match the finalized parameter count"
     end
   end
 

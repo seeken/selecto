@@ -237,6 +237,18 @@ defmodule Selecto.Executor do
     |> Enum.map(&Map.put(&1, :emitted, emitted))
   end
 
+  # A query the statement compiles is written in the statement's dialect: one
+  # carried without an adapter (a subquery join's query, a set member) takes
+  # its nearest enclosing query's.
+  defp adopt_adapter(%{} = query, %{} = outer) do
+    case {Map.get(query, :adapter), Map.get(outer, :adapter)} do
+      {nil, adapter} when not is_nil(adapter) -> Map.put(query, :adapter, adapter)
+      _ -> query
+    end
+  end
+
+  defp adopt_adapter(query, _outer), do: query
+
   # A set operation's result is its left member plus the operations: each
   # member compiles on its own, with its own WITH (parenthesized, or a derived
   # table on SQLite), so the result defines and reads nothing of its own; its
@@ -244,6 +256,8 @@ defmodule Selecto.Executor do
   # two lists in different members are private to each (cte_name_redefined
   # compares only lists whose paths are nested, prefix-wise).
   defp scopes(query, visible, enclosing, outer_roots, forbidden, kind, path) do
+    query = adopt_adapter(query, List.first(enclosing))
+
     case set_operation_members(query) do
       [] ->
         query_scopes(query, visible, enclosing, outer_roots, forbidden, kind, path)
@@ -255,7 +269,9 @@ defmodule Selecto.Executor do
           members
           |> Enum.with_index()
           |> Enum.flat_map(fn {member, index} ->
-            scopes(member, visible, enclosing, outer_roots, [], :member, path ++ [{token, index}])
+            member
+            |> adopt_adapter(query)
+            |> scopes(visible, enclosing, outer_roots, [], :member, path ++ [{token, index}])
           end)
 
         [
@@ -705,17 +721,19 @@ defmodule Selecto.Executor do
     end
   end
 
-  # A raw CTE's params must bind to its text's placeholders: a count that does
-  # not match refuses typed rather than raise while compiling.
+  # A raw CTE's params must bind exactly the placeholders of its text, in the
+  # statement's dialect (Selecto.Builder.RawCte.params_match?/3): otherwise a
+  # placeholder would bind a value of the statement around it, or the compile
+  # would raise. Refused typed.
   defp raw_ctes_params_bind(scopes) do
     scopes
     |> Enum.flat_map(fn %{query: query} ->
-      adapter = Map.get(query, :adapter, Selecto.AdapterSupport.default_adapter())
-      for list <- List.wrap(Map.get(Map.get(query, :set) || %{}, :ctes)), do: {list, adapter}
+      for list <- List.wrap(Map.get(Map.get(query, :set) || %{}, :ctes)),
+          do: {list, dialect(query)}
     end)
     |> Enum.reject(fn
-      {{tag, sql, params}, adapter} when tag in [:raw_cte, :raw_recursive_cte] ->
-        Selecto.Builder.CteSql.raw_params_bind?(sql, params, adapter)
+      {{tag, sql, params}, dialect} when tag in [:raw_cte, :raw_recursive_cte] ->
+        Selecto.Builder.RawCte.params_match?(sql, List.wrap(params), dialect)
 
       _spec ->
         true
@@ -970,22 +988,34 @@ defmodule Selecto.Executor do
   def list_root_identifiers(selecto) do
     scopes = read_scopes(selecto)
 
-    quoted_raw =
+    raw =
       for %{query: query} <- scopes,
           {tag, sql, _params} <- List.wrap(Map.get(Map.get(query, :set) || %{}, :ctes)),
           tag in [:raw_cte, :raw_recursive_cte],
           {:ok, entries} <- [Selecto.Builder.RawCte.entries(sql, dialect(query))],
-          {name, true} <- entries,
-          do: name
+          entry <- entries,
+          do: entry
+
+    adapter = Map.get(selecto, :adapter)
 
     scopes
     |> Enum.map(&list_root/1)
     |> Enum.reject(&is_nil/1)
     |> Enum.uniq()
     |> Enum.map(fn name ->
-      if Selecto.Builder.Sql.Helpers.plain_name?(name) and name not in quoted_raw,
-        do: {name, name},
-        else: {name, "\"" <> String.replace(name, "\"", "\"\"") <> "\""}
+      identifier =
+        cond do
+          {name, true} in raw ->
+            "\"" <> String.replace(name, "\"", "\"\"") <> "\""
+
+          {name, false} in raw ->
+            Selecto.Builder.Sql.Helpers.raw_identifier(adapter, name)
+
+          true ->
+            Selecto.Builder.Sql.Helpers.list_identifier(adapter, name)
+        end
+
+      {name, identifier}
     end)
   end
 

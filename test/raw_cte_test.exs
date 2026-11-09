@@ -207,4 +207,37 @@ defmodule Selecto.Builder.RawCteTest do
     assert RawCte.names("ca AS (SELECT $ä$ ) $ä$ AS v), za AS (SELECT 2 AS v)", :postgresql) ==
              {:ok, ["ca", "za"]}
   end
+
+  test "params bind exactly the placeholders of the text, in each dialect's syntax" do
+    for d <- [:postgresql, :duckdb] do
+      assert RawCte.params_match?("r AS (SELECT $1::int AS v)", [5], d)
+      assert RawCte.params_match?("r AS (SELECT $1::int AS v, $1::int AS w)", [5], d)
+      assert RawCte.params_match?("r AS (SELECT $2::int AS v, $1::int AS w)", [5, 6], d)
+      assert RawCte.params_match?("r AS (SELECT 1 AS v)", [], d)
+      refute RawCte.params_match?("r AS (SELECT $1::int AS v, $2::text AS w)", [5], d)
+      refute RawCte.params_match?("r AS (SELECT $1::text AS v)", [], d)
+      refute RawCte.params_match?("r AS (SELECT 1 AS v)", [5], d)
+      refute RawCte.params_match?("r AS (SELECT $1::int AS v, '$1' AS w)", [5], d)
+      refute RawCte.params_match?("r AS (SELECT $1::int AS v /* $1 */)", [5], d)
+      refute RawCte.params_match?(["r AS (SELECT ", {:param, 5}, " AS v)"], [6], d)
+      refute RawCte.params_match?(["r AS (SELECT ", {:param, 5}, " AS v, $1 AS w)"], [], d)
+      assert RawCte.params_match?(["r AS (SELECT ", {:param, 5}, " AS v)"], [], d)
+    end
+
+    refute RawCte.params_match?("r AS (SELECT ? AS v)", [5], :duckdb)
+    refute RawCte.params_match?("r AS (SELECT ? AS v)", [5], :postgresql)
+
+    for d <- [:mysql, :mariadb, :sqlite] do
+      assert RawCte.params_match?("r AS (SELECT ? AS v, ? AS w)", [5, 6], d)
+      refute RawCte.params_match?("r AS (SELECT ? AS v, ? AS w)", [5], d)
+      refute RawCte.params_match?("r AS (SELECT ? AS v)", [], d)
+      refute RawCte.params_match?("r AS (SELECT ? AS v, '?' AS w)", [5], d)
+      refute RawCte.params_match?("r AS (SELECT $1 AS v)", [5], d)
+    end
+
+    for text <- ["r AS (SELECT :a AS v)", "r AS (SELECT ?1 AS v)", "r AS (SELECT $a AS v)"] do
+      refute RawCte.params_match?(text, [], :sqlite), text
+      refute RawCte.params_match?(text, [5], :sqlite), text
+    end
+  end
 end

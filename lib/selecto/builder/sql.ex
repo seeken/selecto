@@ -1811,7 +1811,7 @@ defmodule Selecto.Builder.Sql do
   defp list_entries({tag, sql, _params}, root) when tag in [:raw_cte, :raw_recursive_cte] do
     case Selecto.Builder.RawCte.entries(sql, Selecto.Executor.dialect(root)) do
       {:ok, entries} ->
-        for {n, quoted?} <- entries, do: {n, if(quoted?, do: :quoted_raw, else: :list)}
+        for {n, quoted?} <- entries, do: {n, if(quoted?, do: :quoted_raw, else: :raw)}
 
       :error ->
         []
