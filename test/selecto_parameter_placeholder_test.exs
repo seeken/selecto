@@ -60,4 +60,39 @@ defmodule Selecto.ParameterPlaceholderTest do
                sql
     end
   end
+
+  test "a nested fragment whose placeholders depend on the session's backslash mode refuses" do
+    ambiguous = [
+      {SelectoDBPostgreSQL.Adapter, "SELECT 1 WHERE name <> 'O\\'Brien' AND id = $1"},
+      {SelectoDBPostgreSQL.Adapter, "SELECT 1 WHERE name <> 'O\\'x $1' AND id = $1"},
+      {SelectoDBMySQL.Adapter, "SELECT 1 WHERE path <> 'C:\\' AND id = ?"},
+      {SelectoDBMariaDB.Adapter, ~S[SELECT 1 WHERE path <> "C:\" AND id = ?]}
+    ]
+
+    for {adapter, sql} <- ambiguous do
+      assert_raise Selecto.Builder.ScopeRefusal, ~r/backslash/, fn ->
+        Params.rebind_finalized(sql, [5], adapter)
+      end
+    end
+
+    # A backslash that reads the same either way, and DuckDB's E'' escapes.
+    same =
+      Params.rebind_finalized(
+        "SELECT 1 WHERE p <> 'C:\\x' AND id = $1 ",
+        [5],
+        SelectoDBPostgreSQL.Adapter
+      )
+
+    assert Enum.filter(same, &is_tuple/1) == [{:param, 5}]
+
+    rebound = Params.rebind_finalized("SELECT E'it\\'s $1', $1", [5], SelectoDBDuckDB.Adapter)
+    assert Enum.filter(rebound, &is_tuple/1) == [{:param, 5}]
+    assert IO.iodata_to_binary(Enum.reject(rebound, &is_tuple/1)) == "SELECT E'it\\'s $1', "
+  end
+
+  test "a nested fragment whose placeholders its params do not match refuses typed" do
+    assert_raise Selecto.Builder.ScopeRefusal, ~r/placeholder count/, fn ->
+      Params.rebind_finalized("SELECT 1", [5], SelectoDBMySQL.Adapter)
+    end
+  end
 end
