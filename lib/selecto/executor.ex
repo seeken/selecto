@@ -1063,9 +1063,17 @@ defmodule Selecto.Executor do
   # literal, a reference to a list) only keeps the relation in. A statement that
   # does not compile keeps every relation.
   defp put_emitted_names(%{set: set} = selecto) when is_map(set) do
-    case compiled_names(selecto) do
-      :all -> selecto
-      names -> %{selecto | set: Map.put(set, @emitted_names, names)}
+    scopes = scopes(selecto, [], [], [], [], :query, [])
+
+    # A statement whose queries name no relation but their roots has nothing
+    # to leave out: it is not compiled twice.
+    if Enum.all?(scopes, &only_root?/1) do
+      selecto
+    else
+      case compiled_names(selecto, scopes) do
+        :all -> selecto
+        names -> %{selecto | set: Map.put(set, @emitted_names, names)}
+      end
     end
   end
 
@@ -1088,11 +1096,25 @@ defmodule Selecto.Executor do
 
   # The compiled text, its list definitions taken out, and its words and
   # quoted identifiers, lower case.
-  defp compiled_names(selecto) do
+  defp only_root?(%{set_result: true}), do: true
+
+  defp only_root?(%{query: query}) do
+    domain = Map.get(query, :domain)
+    source = (domain || %{}) |> Map.get(:source) || %{}
+    root = Map.get(source, :source_table) || Map.get(source, "source_table")
+
+    (collect_relations(domain, []) ++
+       dynamic_sources(query) ++ declared_sources(query) ++ generated_relations(query))
+    |> Enum.uniq()
+    |> Kernel.--([to_string(root)])
+    |> Enum.empty?()
+  end
+
+  defp compiled_names(selecto, scopes) do
     {{sql, _aliases, _params}, _marked?, _nodes} =
       Selecto.Builder.Provenance.capture(fn -> Selecto.Builder.Sql.build(selecto, []) end)
 
-    text = without_definitions(String.downcase(sql), list_names(selecto))
+    text = without_definitions(String.downcase(sql), list_names(scopes))
 
     quoted =
       for {pattern, doubled, quote} <- @quoted,
@@ -1107,9 +1129,8 @@ defmodule Selecto.Executor do
     _kind, _reason -> :all
   end
 
-  defp list_names(selecto) do
-    selecto
-    |> scopes([], [], [], [], :query, [])
+  defp list_names(scopes) do
+    scopes
     |> Enum.flat_map(&statement_names(&1.query))
     |> Enum.map(&String.downcase/1)
     |> Enum.uniq()

@@ -735,6 +735,32 @@ defmodule Selecto.ExecutorDomainRelationsTest do
              inspect(text)
     end
 
+    only_second =
+      root
+      |> Selecto.with_ctes([{:raw_cte, "pa AS (SELECT $2::int AS pid)", [5, 6]}])
+      |> Selecto.select(["pid"])
+
+    assert {:error, %Selecto.Error{details: %{reason: :raw_cte_params_mismatch}}} =
+             Selecto.Executor.prepare_read(only_second)
+
+    # Without params, `$1` in a literal is text, nested or not.
+    literal =
+      configure("pa", [:pid])
+      |> Selecto.with_ctes([{:raw_cte, "pa AS (SELECT 1 AS pid, 'cost $1' AS v)", []}])
+      |> Selecto.select(["pid"])
+      |> Selecto.filter({"pid", 1})
+
+    nested =
+      configure("p", [:id])
+      |> Selecto.DynamicJoin.join_subquery(:sq, literal, on: [%{left: "id", right: "pid"}])
+      |> Selecto.select(["id", "sq.pid"])
+      |> Selecto.filter({"id", 2})
+
+    assert {:ok, _} = Selecto.Executor.prepare_read(nested)
+    {sql, params} = Selecto.to_sql(nested)
+    assert sql =~ "'cost $1'"
+    assert params == [1, 2]
+
     twice =
       root
       |> Selecto.with_ctes([{:raw_cte, "pa AS (SELECT $1::int AS pid, $1::int AS q)", [5]}])

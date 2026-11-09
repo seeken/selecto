@@ -11,7 +11,10 @@
   environment, or named like a list the query defines, no longer refuses a
   read that does not use it. A join the query selects, filters, orders or
   groups on, or that a subselect reads, still counts. `prepare_read/1` compiles
-  the statement once more before the adapter prepares it.
+  the statement once more before the adapter prepares it, unless every query
+  of the statement names no relation but its root: measured on a loaded host,
+  about +45–80µs on simple reads and +200–270µs (about 12%) on a CTE with an
+  IN subquery.
 - One rule decides CTE and VALUES names on every adapter, checked once per
   statement before it compiles (`Selecto.Executor.prepare_read/1`). A name a
   query reads is a reference to a CTE or VALUES list at two places only: a
@@ -45,11 +48,15 @@
   dialect-neutral reader cannot tell refuses. A non-ASCII byte is an identifier
   character, so a `$` after it opens no dollar quote. A raw CTE's params must
   bind exactly the placeholders of its text, in the statement's dialect (`$n`
-  on PostgreSQL and DuckDB, each `n` at most the number of params; `?` on
-  MySQL, MariaDB and SQLite, one per param; none without params; no params
-  beside `{:param, value}` markers; none in a string, comment or name, nor of
-  another syntax); otherwise it refuses with `raw_cte_params_mismatch` instead
-  of raising or binding a value of the statement around it. A `$n` may repeat.
+  on PostgreSQL and DuckDB, every `n` from 1 to the number of params; `?` on
+  MySQL, MariaDB and SQLite, one per param; none outside literals without
+  params, where `$1` or `?` in a string, comment, dollar quote or quoted name
+  stays text; no params beside `{:param, value}` markers; with params, none
+  in a literal nor of another syntax); otherwise it refuses with
+  `raw_cte_params_mismatch` instead of raising or binding a value of the
+  statement around it. A `$n` may repeat. Rebinding a nested query's compiled
+  text (a subquery, LATERAL or retarget fragment) rewrites placeholders only
+  outside strings, comments, dollar quotes and quoted names.
   A query the statement compiles without an adapter of its own (a subquery
   join's) is read in the statement's dialect. Names compare case-insensitively
   on every adapter, which refuses some names a case-keeping MySQL would tell
@@ -57,11 +64,14 @@
   (letters, digits and underscores, not starting with a digit, and in any case
   not a word PostgreSQL, MySQL 8.4, MariaDB 11.4, SQLite or DuckDB reserves), in
   its definition and in every root and join naming it, so PostgreSQL folds it as
-  it folds the host's own SQL naming it. On PostgreSQL a name of that pattern
-  quoted only for a reserved word (`Rank`, `First`, `With`) is quoted folded
-  (`"rank"`), as is every reference to a raw CTE's unquoted name, so host text
-  naming it unquoted reads the same list; other adapters keep it as written.
-  Other names, and a raw CTE's quoted names, are quoted as written. A list root or an ad-hoc join's source whose name an
+  it folds the host's own SQL naming it. On PostgreSQL a list name is spelled
+  as Selecto always spelled it there: one it left unquoted that another
+  dialect now reserves (`Rank`, `First`, `Json`) is quoted folded (`"rank"`);
+  one it always quoted (`Order`, `Key`, `Text`) or that PostgreSQL reserves
+  (`With`, `Desc`) is quoted as written; a reference to a raw CTE's unquoted
+  name is quoted folded, as PostgreSQL reads the raw text. Other adapters
+  quote reserved names as written. Other names, and a raw CTE's quoted names,
+  are quoted as written. A list root or an ad-hoc join's source whose name an
   identifier cannot hold refuses with `invalid_identifier`. Query members a
   domain declares but the read does not use are not checked. An adapter that
   resolves relations (PostgreSQL) refuses a root list named like a relation on

@@ -127,6 +127,21 @@ defmodule Selecto.Builder.Sql.Helpers do
     xmlnamespaces xmlparse xmlpi xmlroot xmlserialize xmltable xor year_month zerofill
   )
 
+  # PostgreSQL's reserved and type/function-name keywords, which it refuses
+  # as an unquoted table name.
+  @pg_reserved ~w(
+    all analyse analyze and any array as asc asymmetric authorization binary both case
+    cast check collate collation column concurrently constraint create cross
+    current_catalog current_date current_role current_schema current_time
+    current_timestamp current_user default deferrable desc distinct do else end except
+    false fetch for foreign freeze from full grant group having ilike in initially inner
+    intersect into is isnull join lateral leading left like limit localtime
+    localtimestamp natural not notnull null offset on only or order outer overlaps
+    placing primary references returning right select session_user similar some
+    symmetric system_user table tablesample then to trailing true union unique user
+    using variadic verbose when where window with
+  )
+
   @doc false
   # Whether a list name can stand unquoted on every adapter: letters, digits and
   # underscores, not starting with a digit, not a reserved word, in any case.
@@ -143,19 +158,29 @@ defmodule Selecto.Builder.Sql.Helpers do
 
   @doc false
   # A CTE or VALUES list's name as `adapter` writes it in its definition and
-  # every reference: unquoted when plain_name?/1. A name of the plain pattern
-  # quoted only because some dialect reserves it is, on PostgreSQL (which folds
-  # unquoted names), quoted in its folded, lower-case form, so host text naming
-  # it unquoted still reads it; elsewhere quoting keeps case-insensitive names
-  # as they are. Anything else is quoted as written. Never raises: an embedded
-  # quote is doubled.
+  # every reference: unquoted when plain_name?/1. On PostgreSQL, which folds
+  # unquoted names, a name is spelled as Selecto always spelled it there: one
+  # Selecto left unquoted (the plain pattern, not in its own reserved list)
+  # that another dialect now reserves (`Rank`, `Json`) is quoted in its
+  # folded form (`"rank"`, as PostgreSQL read it unquoted), unless PostgreSQL
+  # itself reserves it (`With`, `Desc`, which it never read unquoted); every
+  # other name, those Selecto always quoted (`Order`, `Key`) included, is
+  # quoted as written. Elsewhere quoting keeps case-insensitive names as they
+  # are. Never raises: an embedded quote is doubled.
   def list_identifier(adapter, name) do
     name = to_string(name)
+    lower = String.downcase(name)
 
     cond do
-      plain_name?(name) -> name
-      folds?(adapter) and plain_word?(name) -> quoted(adapter, String.downcase(name))
-      true -> quoted(adapter, name)
+      plain_name?(name) ->
+        name
+
+      folds?(adapter) and plain_word?(name) and not needs_quoting?(lower) and
+          lower not in @pg_reserved ->
+        quoted(adapter, lower)
+
+      true ->
+        quoted(adapter, name)
     end
   end
 

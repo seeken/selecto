@@ -48,15 +48,15 @@ defmodule Selecto.Builder.RawCte do
 
   @doc false
   # Whether a raw CTE's params bind exactly the placeholders of its text, in
-  # the dialect's own syntax: `$n` on PostgreSQL and DuckDB, each `n` at most
-  # the number of params; `?` on MySQL, MariaDB and SQLite, one per param.
-  # Without params the text holds none: one would bind a value of the
-  # statement around it. Params given hold at least one. `{:param, value}`
-  # markers take no params and no placeholders. A placeholder-like sequence
-  # the binding would rewrite but the database does not read as one (in a
-  # string, a comment, a name) does not match, nor does a placeholder of
-  # another syntax (a SQLite `?NNN`, `:name`, `@name` or `$name`, a DuckDB
-  # `?`). Text that does not parse matches here (raw_cte_unparsed refuses it).
+  # the dialect's own syntax: `$n` on PostgreSQL and DuckDB, every `n` from 1
+  # to the number of params used; `?` on MySQL, MariaDB and SQLite, one per
+  # param. Without params the text holds no placeholder outside its strings,
+  # comments and quoted names: one would bind a value of the statement around
+  # it. `{:param, value}` markers take no params. With params, a
+  # placeholder-like sequence inside a literal does not match (the text is
+  # rebound as written), nor does a placeholder of another syntax (a SQLite
+  # `?NNN`, `:name`, `@name` or `$name`, a DuckDB `?`). Text that does not
+  # parse matches here (raw_cte_unparsed refuses it).
   @spec params_match?(iodata(), list(), atom()) :: boolean()
   def params_match?(sql, params, dialect) do
     dialect = if dialect in @dialects, do: dialect, else: :any
@@ -64,7 +64,8 @@ defmodule Selecto.Builder.RawCte do
     with {:ok, text} <- text(sql),
          {:ok, tokens} <- placeholders(sql, dialect) do
       cond do
-        marker?(sql) -> params == [] and tokens == [] and textual(text, dialect) == 0
+        params == [] -> tokens == []
+        marker?(sql) -> false
         length(tokens) != textual(text, dialect) -> false
         true -> bound?(tokens, length(params), dialect)
       end
@@ -114,8 +115,7 @@ defmodule Selecto.Builder.RawCte do
   defp bound?(tokens, n, d) when d in [:postgresql, :duckdb] do
     numbers = for {:dollar, i} <- tokens, do: i
 
-    length(numbers) == length(tokens) and
-      if(n == 0, do: tokens == [], else: tokens != [] and Enum.all?(numbers, &(&1 in 1..n)))
+    length(numbers) == length(tokens) and Enum.sort(Enum.uniq(numbers)) == Enum.to_list(1..n)
   end
 
   defp bound?(tokens, n, d) when d in [:mysql, :mariadb, :sqlite],
