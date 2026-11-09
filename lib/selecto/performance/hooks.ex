@@ -136,6 +136,14 @@ defmodule Selecto.Performance.Hooks do
   This is the main entry point for integrating hooks into query execution.
   """
   def with_hooks(selecto, execution_fn, options \\ []) do
+    do_with_hooks(selecto, execution_fn, options)
+  rescue
+    # A compile refusal (Selecto.Builder.ScopeRefusal) is a typed error, as
+    # from Selecto.execute/2.
+    refusal in Selecto.Builder.ScopeRefusal -> {:error, Selecto.Error.from_reason(refusal)}
+  end
+
+  defp do_with_hooks(selecto, execution_fn, options) do
     compiled = Keyword.get(options, :compiled)
 
     context = %{

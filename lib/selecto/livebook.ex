@@ -25,7 +25,12 @@ defmodule Selecto.Livebook do
   """
   @spec run(String.t(), Selecto.t(), keyword()) :: run_result()
   def run(label, selecto, opts \\ []) do
-    explain(label, selecto, opts)
+    with :ok <- print_sql(label, selecto, opts) do
+      run_printed(selecto, opts)
+    end
+  end
+
+  defp run_printed(selecto, opts) do
     preview_count = Keyword.get(opts, :preview_count, 10)
     execute_opts = Keyword.get(opts, :execute_opts, [])
 
@@ -52,7 +57,12 @@ defmodule Selecto.Livebook do
   """
   @spec run_shape(String.t(), Selecto.t(), keyword()) :: run_result()
   def run_shape(label, selecto, opts \\ []) do
-    explain(label, selecto, opts)
+    with :ok <- print_sql(label, selecto, opts) do
+      run_shape_printed(selecto, opts)
+    end
+  end
+
+  defp run_shape_printed(selecto, opts) do
     preview_count = Keyword.get(opts, :preview_count, 10)
 
     case Selecto.execute_shape(selecto) do
@@ -69,5 +79,19 @@ defmodule Selecto.Livebook do
         IO.inspect(error, label: "Shape execution error")
         error
     end
+  end
+
+  # The SQL is printed before the read runs; a compile refusal
+  # (Selecto.Builder.ScopeRefusal) comes back as the typed error the read
+  # would return, printed like one.
+  defp print_sql(label, selecto, opts) do
+    explain(label, selecto, opts)
+    :ok
+  rescue
+    refusal in Selecto.Builder.ScopeRefusal ->
+      error = {:error, Selecto.Error.from_reason(refusal)}
+      IO.puts("\n=== #{label} ===")
+      IO.inspect(error, label: "Execution error")
+      error
   end
 end

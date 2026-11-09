@@ -46,6 +46,9 @@ defmodule Selecto.ExecutorTest do
     def supports?(:stream), do: true
     def supports?(:projection_sum), do: true
     def supports?(_feature), do: false
+
+    # An analysis that compiles without its own guard.
+    def analyze_query(selecto, _opts), do: {:ok, %{query: Selecto.to_sql(selecto)}}
   end
 
   defmodule NoStreamCapabilityAdapter do
@@ -556,6 +559,21 @@ defmodule Selecto.ExecutorTest do
         ] do
       assert {:error, %Selecto.Error{details: %{reason: :placeholder_count_mismatch}}} = result
     end
+  end
+
+  test "a compile refusal comes back typed from the helpers that run queries" do
+    refused = Selecto.filter(selecto_for(:single), {:exists, "SELECT 1", ["x"]})
+    typed = &match?({:error, %Selecto.Error{details: %{reason: :placeholder_count_mismatch}}}, &1)
+
+    ExUnit.CaptureIO.capture_io(fn ->
+      assert typed.(Selecto.Livebook.run("refused", refused))
+      assert typed.(Selecto.Livebook.run_shape("refused", refused))
+    end)
+
+    assert typed.(Selecto.Performance.Hooks.with_hooks(refused, fn _context -> {:ok, :ran} end))
+    assert typed.(Selecto.Performance.QueryAnalyzer.analyze_query(refused))
+    assert typed.(Selecto.Performance.QueryAnalyzer.get_query_plan(refused))
+    assert typed.(Selecto.Performance.QueryAnalyzer.compare_queries(refused, refused))
   end
 
   test "count and projection sum drop an unpaginated ORDER BY from their derived table" do

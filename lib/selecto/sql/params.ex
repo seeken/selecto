@@ -77,7 +77,6 @@ defmodule Selecto.SQL.Params do
       pattern = numbered_pattern(placeholders)
       finder = fn code -> Regex.scan(pattern, code, return: :index) |> Enum.map(&hd/1) end
       pieces = pieces(sql, Selecto.AdapterSupport.adapter_name(adapter), finder)
-      no_odd_numbers!(pieces)
       rebind_numbered(pieces, params, placeholders, pattern)
     end
   end
@@ -93,6 +92,7 @@ defmodule Selecto.SQL.Params do
     [first | others] =
       for mode <- string_modes(dialect) do
         pieces = scan(sql, mode, "", [])
+        no_odd_placeholders!(pieces, dialect)
         {pieces, placeholder_offsets(pieces, finder)}
       end
 
@@ -408,16 +408,19 @@ defmodule Selecto.SQL.Params do
     end
   end
 
-  # `$01` (PostgreSQL reads it as `$1`) and `$1_0` (PostgreSQL 16 reads it as
-  # `$10`) are not rebound by their spelling: refused typed.
-  defp no_odd_numbers!(pieces) do
+  # Placeholders the binding does not rewrite, which would bind the
+  # statement's own values: a `$` number not spelled `[1-9][0-9]*` (`$0`,
+  # `$01`, which PostgreSQL reads as `$1`; `$1_0`, PostgreSQL 16's `$10`), and
+  # on DuckDB a `?` (the next parameter after the largest seen). Refused typed
+  # when any session mode reads one as code.
+  defp no_odd_placeholders!(pieces, dialect) when dialect in [:postgresql, :duckdb] do
     odd? =
       Enum.any?(pieces, fn
         {:code, code} ->
           Regex.match?(
-            ~r/(?<![A-Za-z0-9_$\x80-\xff])\$(?:0[0-9_]*[0-9]|[0-9][0-9_]*_[0-9])/,
+            ~r/(?<![A-Za-z0-9_$\x80-\xff])\$(?:0[0-9_]*|[0-9][0-9_]*_[0-9_]*)(?![0-9_])/,
             code
-          )
+          ) or (dialect == :duckdb and String.contains?(code, "?"))
 
         _text ->
           false
@@ -427,10 +430,12 @@ defmodule Selecto.SQL.Params do
       raise Selecto.Builder.ScopeRefusal,
         reason: :placeholder_unsupported,
         message:
-          "A nested SQL fragment numbers a placeholder with a leading zero or an " <>
-            "underscore; write it as $n"
+          "A nested SQL fragment holds a placeholder the binding cannot number " <>
+            "($0, a leading zero or an underscore, or ? on DuckDB); write it as $n"
     end
   end
+
+  defp no_odd_placeholders!(_pieces, _dialect), do: :ok
 
   defp numbered_pattern(placeholders) do
     placeholders
