@@ -25,6 +25,7 @@ defmodule Selecto.Builder.RawCte do
   # `@`, `:` or `#`), which it reads up to the `)`.
 
   @dialects [:postgresql, :mysql, :mariadb, :sqlite, :duckdb, :any]
+  @collect :selecto_raw_cte_placeholders
 
   @spec names(iodata(), atom()) :: {:ok, [String.t()]} | :error
   def names(sql, dialect \\ :any) do
@@ -44,6 +45,83 @@ defmodule Selecto.Builder.RawCte do
       {:ok, Enum.reverse(entries)}
     end
   end
+
+  @doc false
+  # Whether a raw CTE's params bind exactly the placeholders of its text, in
+  # the dialect's own syntax: `$n` on PostgreSQL and DuckDB, each `n` at most
+  # the number of params; `?` on MySQL, MariaDB and SQLite, one per param.
+  # Without params the text holds none: one would bind a value of the
+  # statement around it. Params given hold at least one. `{:param, value}`
+  # markers take no params and no placeholders. A placeholder-like sequence
+  # the binding would rewrite but the database does not read as one (in a
+  # string, a comment, a name) does not match, nor does a placeholder of
+  # another syntax (a SQLite `?NNN`, `:name`, `@name` or `$name`, a DuckDB
+  # `?`). Text that does not parse matches here (raw_cte_unparsed refuses it).
+  @spec params_match?(iodata(), list(), atom()) :: boolean()
+  def params_match?(sql, params, dialect) do
+    dialect = if dialect in @dialects, do: dialect, else: :any
+
+    with {:ok, text} <- text(sql),
+         {:ok, tokens} <- placeholders(sql, dialect) do
+      cond do
+        marker?(sql) -> params == [] and tokens == [] and textual(text, dialect) == 0
+        length(tokens) != textual(text, dialect) -> false
+        true -> bound?(tokens, length(params), dialect)
+      end
+    else
+      _unparsed -> true
+    end
+  end
+
+  @doc false
+  # The placeholders a raw CTE's bodies hold, outside strings, comments and
+  # quoted names: {:dollar, n}, {:question, digits} or {:named, name}.
+  def placeholders(sql, dialect) do
+    previous = Process.get(@collect)
+    Process.put(@collect, [])
+
+    try do
+      case entries(sql, dialect) do
+        {:ok, _entries} -> {:ok, Enum.reverse(Process.get(@collect))}
+        :error -> :error
+      end
+    after
+      if previous, do: Process.put(@collect, previous), else: Process.delete(@collect)
+    end
+  end
+
+  defp note(token) do
+    case Process.get(@collect) do
+      nil -> :ok
+      acc -> Process.put(@collect, [token | acc])
+    end
+  end
+
+  defp marker?({:param, _value}), do: true
+  defp marker?(list) when is_list(list), do: Enum.any?(list, &marker?/1)
+  defp marker?(_other), do: false
+
+  # What the binding rewrites, read as plain text.
+  defp textual(text, d) when d in [:postgresql, :duckdb],
+    do: length(Regex.scan(~r/\$[0-9]+/, text))
+
+  defp textual(text, d) when d in [:mysql, :mariadb, :sqlite],
+    do: length(:binary.matches(text, "?"))
+
+  defp textual(text, :any),
+    do: length(Regex.scan(~r/\$[0-9]+/, text)) + length(:binary.matches(text, "?"))
+
+  defp bound?(tokens, n, d) when d in [:postgresql, :duckdb] do
+    numbers = for {:dollar, i} <- tokens, do: i
+
+    length(numbers) == length(tokens) and
+      if(n == 0, do: tokens == [], else: tokens != [] and Enum.all?(numbers, &(&1 in 1..n)))
+  end
+
+  defp bound?(tokens, n, d) when d in [:mysql, :mariadb, :sqlite],
+    do: Enum.all?(tokens, &(&1 == {:question, ""})) and length(tokens) == n
+
+  defp bound?(tokens, n, :any), do: if(n == 0, do: tokens == [], else: tokens != [])
 
   # The text as a binary, each {:param, value} as a neutral literal; anything
   # else that is not iodata is unreadable.
@@ -237,7 +315,26 @@ defmodule Selecto.Builder.RawCte do
   # anything up to its `)` included: refused there.
   defp balanced(<<p, rest::binary>>, depth, d)
        when d in [:sqlite, :any] and p in [?@, ?:, ?#] do
-    if tcl_call?(rest, 0), do: :error, else: balanced(rest, depth, d)
+    cond do
+      tcl_call?(rest, 0) ->
+        :error
+
+      d == :sqlite and match?(<<c, _::binary>> when word?(c), rest) ->
+        {name, rest} = word(rest, "")
+        note({:named, <<p, name::binary>>})
+        balanced(rest, depth, d)
+
+      true ->
+        balanced(rest, depth, d)
+    end
+  end
+
+  # `?` is a parameter (`?NNN` numbered) everywhere but PostgreSQL, where it is
+  # an operator.
+  defp balanced("?" <> rest, depth, d) when d != :postgresql do
+    {digits, rest} = digits(rest, "")
+    note({:question, digits})
+    balanced(rest, depth, d)
   end
 
   # A `$` that does not follow an identifier character may open a dollar quote:
@@ -257,7 +354,19 @@ defmodule Selecto.Builder.RawCte do
         :error
 
       :none ->
-        balanced(rest, depth, d)
+        case {digits(rest, ""), rest} do
+          {{"", _rest}, <<c, _::binary>>} when d in [:sqlite, :duckdb] and word?(c) ->
+            {name, rest} = word(rest, "")
+            note({:named, "$" <> name})
+            balanced(rest, depth, d)
+
+          {{"", _rest}, _text} ->
+            balanced(rest, depth, d)
+
+          {{number, rest}, _text} ->
+            note({:dollar, String.to_integer(number)})
+            balanced(rest, depth, d)
+        end
     end
   end
 
@@ -269,6 +378,9 @@ defmodule Selecto.Builder.RawCte do
 
   defp balanced(<<_c, rest::binary>>, depth, d), do: balanced(rest, depth, d)
   defp balanced("", _depth, _d), do: :error
+
+  defp digits(<<c, rest::binary>>, acc) when c in ?0..?9, do: digits(rest, <<acc::binary, c>>)
+  defp digits(rest, acc), do: {acc, rest}
 
   defp string("''" <> rest), do: string(rest)
   defp string("'" <> rest), do: {:ok, rest}

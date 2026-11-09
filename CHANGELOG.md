@@ -43,16 +43,25 @@
   and `$x` parameters read). A `--` comment ends at a
   carriage return on PostgreSQL and DuckDB and at a newline elsewhere; text a
   dialect-neutral reader cannot tell refuses. A non-ASCII byte is an identifier
-  character, so a `$` after it opens no dollar quote. A raw CTE whose params do
-  not match the placeholders in its text refuses with
-  `raw_cte_params_mismatch` instead of raising. Names compare case-insensitively
+  character, so a `$` after it opens no dollar quote. A raw CTE's params must
+  bind exactly the placeholders of its text, in the statement's dialect (`$n`
+  on PostgreSQL and DuckDB, each `n` at most the number of params; `?` on
+  MySQL, MariaDB and SQLite, one per param; none without params; no params
+  beside `{:param, value}` markers; none in a string, comment or name, nor of
+  another syntax); otherwise it refuses with `raw_cte_params_mismatch` instead
+  of raising or binding a value of the statement around it. A `$n` may repeat.
+  A query the statement compiles without an adapter of its own (a subquery
+  join's) is read in the statement's dialect. Names compare case-insensitively
   on every adapter, which refuses some names a case-keeping MySQL would tell
   apart. A CTE or VALUES list's name is written unquoted when it is plain
   (letters, digits and underscores, not starting with a digit, and in any case
   not a word PostgreSQL, MySQL 8.4, MariaDB 11.4, SQLite or DuckDB reserves), in
   its definition and in every root and join naming it, so PostgreSQL folds it as
-  it folds the host's own SQL naming it; other names, and a raw CTE's quoted
-  names, are quoted. A list root or an ad-hoc join's source whose name an
+  it folds the host's own SQL naming it. On PostgreSQL a name of that pattern
+  quoted only for a reserved word (`Rank`, `First`, `With`) is quoted folded
+  (`"rank"`), as is every reference to a raw CTE's unquoted name, so host text
+  naming it unquoted reads the same list; other adapters keep it as written.
+  Other names, and a raw CTE's quoted names, are quoted as written. A list root or an ad-hoc join's source whose name an
   identifier cannot hold refuses with `invalid_identifier`. Query members a
   domain declares but the read does not use are not checked. An adapter that
   resolves relations (PostgreSQL) refuses a root list named like a relation on

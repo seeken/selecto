@@ -699,6 +699,51 @@ defmodule Selecto.ExecutorDomainRelationsTest do
     assert {:ok, _} = Selecto.Executor.prepare_read(Selecto.select(bound, ["id"]))
   end
 
+  test "a raw CTE with params inside a nested query binds in the statement's dialect" do
+    inner =
+      configure("pa", [:pid])
+      |> Selecto.with_ctes([{:raw_cte, "pa AS (SELECT $1::int AS pid)", [1]}])
+      |> Selecto.select(["pid"])
+
+    query =
+      configure("p", [:id])
+      |> Selecto.DynamicJoin.join_subquery(:sq, inner, on: [%{left: "id", right: "pid"}])
+      |> Selecto.select(["id", "sq.pid"])
+
+    assert {:ok, _} = Selecto.Executor.prepare_read(query)
+    {sql, params} = Selecto.to_sql(query)
+    assert sql =~ "pa AS (SELECT $1::int AS pid)"
+    assert params == [1]
+  end
+
+  test "a raw CTE placeholder that would bind the statement's own values refuses" do
+    root = configure("pa", [:pid])
+
+    for {text, params} <- [
+          {"pa AS (SELECT $1::int AS pid, $2::text AS label)", [5]},
+          {"pa AS (SELECT 7 AS pid, $1::text AS label)", []},
+          {["pa AS (SELECT ", {:param, 5}, "::int AS pid)"], [6]}
+        ] do
+      query =
+        root
+        |> Selecto.with_ctes([{:raw_cte, text, params}])
+        |> Selecto.select(["pid"])
+        |> Selecto.filter({"pid", 9})
+
+      assert {:error, %Selecto.Error{details: %{reason: :raw_cte_params_mismatch}}} =
+               Selecto.Executor.prepare_read(query),
+             inspect(text)
+    end
+
+    twice =
+      root
+      |> Selecto.with_ctes([{:raw_cte, "pa AS (SELECT $1::int AS pid, $1::int AS q)", [5]}])
+      |> Selecto.select(["pid"])
+
+    assert {:ok, _} = Selecto.Executor.prepare_read(twice)
+    assert {_sql, [5, 5]} = Selecto.to_sql(twice)
+  end
+
   test "a query member the query does not use is no query of the statement" do
     member =
       configure("r", [:id, :tenant_id]).domain
@@ -713,6 +758,36 @@ defmodule Selecto.ExecutorDomainRelationsTest do
     assert refusal(query) == :ok
     refute member in Selecto.Executor.read_queries(query)
     assert refusal(Selecto.with_values(query, [[1]], columns: ["id"], as: "r")) == :ok
+  end
+
+  test "on PostgreSQL a reserved-only name is written folded in its definition and every reference" do
+    domain = configure("Rank", [:id]).domain
+
+    rooted =
+      Selecto.configure(domain, nil, validate: false)
+      |> Selecto.with_values([[1]], columns: ["id"], as: "Rank")
+      |> Selecto.select(["id"])
+
+    {sql, _params} = Selecto.to_sql(rooted)
+    assert sql =~ ~S[WITH "rank" (]
+    assert sql =~ ~S[from "rank" selecto_root]
+    refute sql =~ ~S["Rank"]
+    assert Selecto.Executor.list_root_identifiers(rooted) == [{"Rank", ~S["rank"]}]
+
+    # A raw CTE's unquoted name is referenced as PostgreSQL folds it.
+    raw =
+      configure("p", [:id])
+      |> Selecto.with_ctes([{:raw_cte, "First AS (SELECT 1 AS id, 2 AS v)", []}])
+      |> Selecto.join(:mj,
+        source: "First",
+        owner_key: :id,
+        related_key: :id,
+        fields: %{"v" => %{type: :integer}}
+      )
+      |> Selecto.select(["id", "mj.v"])
+
+    {sql, _params} = Selecto.to_sql(raw)
+    assert sql =~ ~S[join "first" mj]
   end
 
   test "a plain list name is written unquoted in its definition and every reference" do

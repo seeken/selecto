@@ -142,41 +142,66 @@ defmodule Selecto.Builder.Sql.Helpers do
   def plain_name?(_name), do: false
 
   @doc false
-  # A CTE or VALUES list's name as `adapter` writes it in its definition:
-  # unquoted when plain_name?/1, quoted otherwise. Never raises: an embedded
+  # A CTE or VALUES list's name as `adapter` writes it in its definition and
+  # every reference: unquoted when plain_name?/1. A name of the plain pattern
+  # quoted only because some dialect reserves it is, on PostgreSQL (which folds
+  # unquoted names), quoted in its folded, lower-case form, so host text naming
+  # it unquoted still reads it; elsewhere quoting keeps case-insensitive names
+  # as they are. Anything else is quoted as written. Never raises: an embedded
   # quote is doubled.
   def list_identifier(adapter, name) do
     name = to_string(name)
 
     cond do
-      plain_name?(name) ->
-        name
-
-      Selecto.AdapterSupport.callback_available?(adapter, :quote_identifier, 1) ->
-        adapter.quote_identifier(name)
-
-      true ->
-        "\"" <> String.replace(name, "\"", "\"\"") <> "\""
+      plain_name?(name) -> name
+      folds?(adapter) and plain_word?(name) -> quoted(adapter, String.downcase(name))
+      true -> quoted(adapter, name)
     end
   end
 
   @doc false
-  # A relation a root or a join names: a CTE or VALUES list visible to the
-  # query is written as its definition is (list_identifier/2, or as a raw
-  # CTE's text quotes it); anything else as quote_identifier/2 writes it.
-  def relation_identifier(selecto, name) do
+  # A raw CTE's unquoted name, referenced as the raw text defines it: on
+  # PostgreSQL the database folds it, so it is quoted folded unless plain.
+  def raw_identifier(adapter, name) do
     name = to_string(name)
 
+    cond do
+      plain_name?(name) -> name
+      folds?(adapter) -> quoted(adapter, String.downcase(name))
+      true -> quoted(adapter, name)
+    end
+  end
+
+  defp plain_word?(name), do: Regex.match?(~r/\A[A-Za-z_][A-Za-z0-9_]*\z/, name)
+
+  defp folds?(adapter), do: Selecto.AdapterSupport.adapter_name(adapter) == :postgresql
+
+  defp quoted(adapter, name) do
+    if Selecto.AdapterSupport.callback_available?(adapter, :quote_identifier, 1),
+      do: adapter.quote_identifier(name),
+      else: "\"" <> String.replace(name, "\"", "\"\"") <> "\""
+  end
+
+  @doc false
+  # A relation a root or a join names: a CTE or VALUES list visible to the
+  # query is written as its definition is (list_identifier/2), a raw CTE's
+  # name as its text defines it (raw_identifier/2, or as the text quotes it);
+  # anything else as quote_identifier/2 writes it.
+  def relation_identifier(selecto, name) do
+    name = to_string(name)
+    adapter = Map.get(selecto, :adapter)
+
     case list_kind(selecto, name) do
-      :list -> if plain_name?(name), do: name, else: quote_identifier(selecto, name)
+      :list -> list_identifier(adapter, name)
+      :raw -> raw_identifier(adapter, name)
       _other -> quote_identifier(selecto, name)
     end
   end
 
   @doc false
   # How a list of `name` visible to `selecto` is defined: :list (a Selecto
-  # CTE or VALUES list, or a raw CTE's unquoted name), :quoted_raw (a raw CTE
-  # quoting it), or nil when no list of that name is visible.
+  # CTE or VALUES list), :raw (a raw CTE's unquoted name), :quoted_raw (a raw
+  # CTE quoting it), or nil when no list of that name is visible.
   def list_kind(selecto, name) do
     set = Map.get(selecto, :set) || %{}
     dialect = Selecto.Executor.dialect(selecto)
@@ -186,7 +211,7 @@ defmodule Selecto.Builder.Sql.Helpers do
         {tag, sql, _params} when tag in [:raw_cte, :raw_recursive_cte] ->
           case Selecto.Builder.RawCte.entries(sql, dialect) do
             {:ok, entries} ->
-              for {n, quoted?} <- entries, do: {n, if(quoted?, do: :quoted_raw, else: :list)}
+              for {n, quoted?} <- entries, do: {n, if(quoted?, do: :quoted_raw, else: :raw)}
 
             :error ->
               []

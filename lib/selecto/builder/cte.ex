@@ -315,16 +315,6 @@ defmodule Selecto.Builder.CteSql do
     end
   end
 
-  @doc false
-  # Whether a raw CTE's params bind to its text's placeholders the way the
-  # WITH clause binds them (normalize_raw_cte_definition/3).
-  def raw_params_bind?(cte_definition, params, adapter) do
-    _ = normalize_raw_cte_definition(cte_definition, params, adapter)
-    true
-  rescue
-    ArgumentError -> false
-  end
-
   defp normalize_raw_cte_definition(cte_definition, [], _adapter), do: cte_definition
 
   defp normalize_raw_cte_definition(cte_definition, params, adapter) do
