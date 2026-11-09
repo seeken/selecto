@@ -639,6 +639,21 @@ defmodule Selecto.ExecutorDomainRelationsTest do
              Selecto.Executor.prepare_read(unreadable)
   end
 
+  test "a raw CTE whose params do not match its placeholders refuses typed" do
+    root = configure("p", [:id])
+
+    for {text, params} <- [{"x AS (SELECT 1 AS v)", [5]}, {"x AS (SELECT 1 AS v)", [5, 6]}] do
+      query = root |> Selecto.with_ctes([{:raw_cte, text, params}]) |> Selecto.select(["id"])
+
+      assert {:error, %Selecto.Error{details: %{reason: :raw_cte_params_mismatch}}} =
+               Selecto.Executor.prepare_read(query),
+             inspect(params)
+    end
+
+    bound = root |> Selecto.with_ctes([{:raw_cte, "x AS (SELECT 1 AS v)", []}])
+    assert {:ok, _} = Selecto.Executor.prepare_read(Selecto.select(bound, ["id"]))
+  end
+
   test "a query member the query does not use is no query of the statement" do
     member =
       configure("r", [:id, :tenant_id]).domain

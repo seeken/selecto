@@ -651,6 +651,7 @@ defmodule Selecto.Executor do
     scopes = read_scopes(selecto)
 
     with :ok <- raw_ctes_parse(scopes),
+         :ok <- raw_ctes_params_bind(scopes),
          :ok <- list_roots_quotable(scopes),
          :ok <- no_nested_recursive_with(scopes),
          :ok <- no_redefined_name(scopes),
@@ -686,6 +687,35 @@ defmodule Selecto.Executor do
              "A raw CTE's text is not plain `name [(columns)] AS (...)` definitions; " <>
                "Selecto cannot tell which names it defines",
            details: %{code: :query_rule_not_evaluable, reason: :raw_cte_unparsed}
+         }}
+    end
+  end
+
+  # A raw CTE's params must bind to its text's placeholders: a count that does
+  # not match refuses typed rather than raise while compiling.
+  defp raw_ctes_params_bind(scopes) do
+    scopes
+    |> Enum.flat_map(fn %{query: query} ->
+      adapter = Map.get(query, :adapter, Selecto.AdapterSupport.default_adapter())
+      for list <- List.wrap(Map.get(Map.get(query, :set) || %{}, :ctes)), do: {list, adapter}
+    end)
+    |> Enum.reject(fn
+      {{tag, sql, params}, adapter} when tag in [:raw_cte, :raw_recursive_cte] ->
+        Selecto.Builder.CteSql.raw_params_bind?(sql, params, adapter)
+
+      _spec ->
+        true
+    end)
+    |> case do
+      [] ->
+        :ok
+
+      _unbound ->
+        {:error,
+         %Selecto.Error{
+           type: :query_enforcement,
+           message: "A raw CTE's params do not match the placeholders in its text",
+           details: %{code: :query_rule_not_evaluable, reason: :raw_cte_params_mismatch}
          }}
     end
   end
