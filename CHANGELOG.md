@@ -3,6 +3,15 @@
 
 ## Unreleased
 
+- A read resolves and checks only the relations its compiled statement names
+  (`Selecto.Executor.prepare_read/1`). A domain's declared joins the query does
+  not use (association joins, non-association `source:` joins, through,
+  junction and closure tables) are no longer resolved by the adapter nor
+  counted by the CTE/VALUES name rule: a join to a table missing from this
+  environment, or named like a list the query defines, no longer refuses a
+  read that does not use it. A join the query selects, filters, orders or
+  groups on, or that a subselect reads, still counts. `prepare_read/1` compiles
+  the statement once more before the adapter prepares it.
 - One rule decides CTE and VALUES names on every adapter, checked once per
   statement before it compiles (`Selecto.Executor.prepare_read/1`). A name a
   query reads is a reference to a CTE or VALUES list at two places only: a
