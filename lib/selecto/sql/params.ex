@@ -77,6 +77,7 @@ defmodule Selecto.SQL.Params do
       pattern = numbered_pattern(placeholders)
       finder = fn code -> Regex.scan(pattern, code, return: :index) |> Enum.map(&hd/1) end
       pieces = pieces(sql, Selecto.AdapterSupport.adapter_name(adapter), finder)
+      no_odd_numbers!(pieces)
       rebind_numbered(pieces, params, placeholders, pattern)
     end
   end
@@ -133,15 +134,27 @@ defmodule Selecto.SQL.Params do
   defguardp my?(d) when d in [:mysql, :mariadb, :mysql_ansi, :mysql_nbe]
   defguardp pg?(d) when d in [:postgresql, :pg_bs]
 
-  defp scan("", _d, code, out), do: Enum.reverse(code_piece(out, code))
+  defp scan("", _d, code, out) do
+    out
+    |> code_piece(code)
+    |> Enum.reverse()
+    |> Enum.map(fn
+      {:etext, text} -> {:text, text}
+      piece -> piece
+    end)
+  end
 
+  # An escape string (`E'...'`, or on PostgreSQL and DuckDB a segment that
+  # continues one across whitespace holding a newline) is kept as :etext while
+  # scanning, so the next segment knows it continues one.
   defp scan("'" <> rest, d, code, out) do
     escapes? =
       d in [:mysql, :mariadb, :mysql_ansi, :pg_bs] or
-        (d in [:postgresql, :duckdb] and escape_prefix?(code))
+        (d in [:postgresql, :duckdb] and (escape_prefix?(code) or continues_escape?(code, out)))
 
     {text, rest} = quoted_end(rest, ?', escapes?, "'")
-    scan(rest, d, "", [{:text, text} | code_piece(out, code)])
+    tag = if escapes? and (pg?(d) or d == :duckdb), do: :etext, else: :text
+    scan(rest, d, "", [{tag, text} | code_piece(out, code)])
   end
 
   defp scan("\"" <> rest, d, code, out) do
@@ -178,7 +191,7 @@ defmodule Selecto.SQL.Params do
     if my?(d) and (match?("!" <> _, rest) or match?("M!" <> _, rest)) do
       scan(rest, d, code <> "/*", out)
     else
-      {text, rest} = block(rest, pg?(d), 1, "/*")
+      {text, rest} = block(rest, pg?(d) or d == :duckdb, 1, "/*")
       scan(rest, d, "", [{:text, text} | code_piece(out, code)])
     end
   end
@@ -204,6 +217,24 @@ defmodule Selecto.SQL.Params do
 
   defp code_piece(out, ""), do: out
   defp code_piece(out, code), do: [{:code, code} | out]
+
+  # PostgreSQL and DuckDB join string segments separated by whitespace that
+  # holds a newline (`--` comments included); a segment continuing an escape
+  # string is read with escapes too.
+  defp continues_escape?(code, out),
+    do: blank?(code) and escape_before?(out, String.contains?(code, ["\n", "\r"]))
+
+  defp escape_before?([{:etext, _text} | _rest], newline?), do: newline?
+
+  defp escape_before?([{:code, code} | rest], newline?),
+    do: blank?(code) and escape_before?(rest, newline? or String.contains?(code, ["\n", "\r"]))
+
+  defp escape_before?([{:text, "--" <> _comment} | rest], _newline?),
+    do: escape_before?(rest, true)
+
+  defp escape_before?(_out, _newline?), do: false
+
+  defp blank?(code), do: Regex.match?(~r/\A[ \t\n\r\f\v]*\z/, code)
 
   defp after_word?(""), do: false
   defp after_word?(code), do: word_byte?(:binary.last(code))
@@ -374,6 +405,30 @@ defmodule Selecto.SQL.Params do
       rebound
     else
       count_mismatch()
+    end
+  end
+
+  # `$01` (PostgreSQL reads it as `$1`) and `$1_0` (PostgreSQL 16 reads it as
+  # `$10`) are not rebound by their spelling: refused typed.
+  defp no_odd_numbers!(pieces) do
+    odd? =
+      Enum.any?(pieces, fn
+        {:code, code} ->
+          Regex.match?(
+            ~r/(?<![A-Za-z0-9_$\x80-\xff])\$(?:0[0-9_]*[0-9]|[0-9][0-9_]*_[0-9])/,
+            code
+          )
+
+        _text ->
+          false
+      end)
+
+    if odd? do
+      raise Selecto.Builder.ScopeRefusal,
+        reason: :placeholder_unsupported,
+        message:
+          "A nested SQL fragment numbers a placeholder with a leading zero or an " <>
+            "underscore; write it as $n"
     end
   end
 

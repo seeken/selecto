@@ -73,6 +73,8 @@ defmodule Selecto.ViewPublisher do
          }}
       end
     end
+  rescue
+    refusal in Selecto.Builder.ScopeRefusal -> {:error, [Exception.message(refusal)]}
   end
 
   def build_sql(_domain, _spec),

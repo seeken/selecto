@@ -364,7 +364,11 @@ defmodule Selecto.Builder.RawCte do
             balanced(rest, depth, d)
 
           {{number, rest}, _text} ->
-            note({:dollar, String.to_integer(number)})
+            # `$01` and `$1_0` are numbered unlike the binding writes them.
+            if String.starts_with?(number, "0") or String.starts_with?(rest, "_"),
+              do: note({:dollar_odd, number}),
+              else: note({:dollar, String.to_integer(number)})
+
             balanced(rest, depth, d)
         end
     end

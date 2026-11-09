@@ -95,4 +95,37 @@ defmodule Selecto.ParameterPlaceholderTest do
       Params.rebind_finalized("SELECT 1", [5], SelectoDBMySQL.Adapter)
     end
   end
+
+  test "DuckDB nests block comments and continues E'' strings across a newline" do
+    duck = SelectoDBDuckDB.Adapter
+
+    # A placeholder after a nested comment's inner close is still inside it.
+    nested = "SELECT $1 AS c0 /* /* */ ' */, $1 AS c1 --'\n"
+    assert Enum.count(Params.rebind_finalized(nested, [5], duck), &is_tuple/1) == 2
+
+    # A segment continuing E'' across a newline reads escapes: its $1 is text.
+    continued = "SELECT E'a'\n'\\' $1 ' AS c0 -- '\n, $1 AS c1"
+    rebound = Params.rebind_finalized(continued, [5], duck)
+    assert Enum.filter(rebound, &is_tuple/1) == [{:param, 5}]
+
+    assert IO.iodata_to_binary(Enum.map(rebound, &if(is_tuple(&1), do: "#", else: &1))) ==
+             "SELECT E'a'\n'\\' $1 ' AS c0 -- '\n, # AS c1"
+  end
+
+  test "PostgreSQL continues E'' strings, so a mode-dependent continuation refuses" do
+    sql = "SELECT $1::text AS c00, E'a'\n'\\' A' AS c0, 'Y\\' , $1::text AS c1 --'"
+
+    assert_raise Selecto.Builder.ScopeRefusal, ~r/backslash/, fn ->
+      Params.rebind_finalized(sql, [5], SelectoDBPostgreSQL.Adapter)
+    end
+  end
+
+  test "zero-padded and underscored placeholders refuse typed" do
+    for adapter <- [SelectoDBPostgreSQL.Adapter, SelectoDBDuckDB.Adapter],
+        sql <- ["SELECT $1, $01", "SELECT $1, $1_0"] do
+      assert_raise Selecto.Builder.ScopeRefusal, ~r/leading zero or an underscore/, fn ->
+        Params.rebind_finalized(sql, [5], adapter)
+      end
+    end
+  end
 end
