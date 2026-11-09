@@ -177,6 +177,7 @@ defmodule Selecto.Builder.Sql.Where do
 
   defp do_build(selecto, {field, {:subquery, :in, query}}) do
     Selecto.Builder.Provenance.mark()
+    query = verbatim_fragment(selecto, query)
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
 
@@ -225,6 +226,7 @@ defmodule Selecto.Builder.Sql.Where do
 
   defp do_build(selecto, {field, comp, {:subquery, agg, query}}) when agg in [:any, :all] do
     Selecto.Builder.Provenance.mark()
+    query = verbatim_fragment(selecto, query)
     conf = field_conf(selecto, field)
     {sel, join, param} = Select.prep_selector(selecto, field)
     operator = subquery_operator!(comp)
@@ -252,9 +254,9 @@ defmodule Selecto.Builder.Sql.Where do
     {[], [" exists (", query_iodata, ") "], params}
   end
 
-  defp do_build(_selecto, {:exists, query}) do
+  defp do_build(selecto, {:exists, query}) do
     Selecto.Builder.Provenance.mark()
-    {[], [" exists (", query, ") "], []}
+    {[], [" exists (", verbatim_fragment(selecto, query), ") "], []}
   end
 
   # A scope filter (marked by provenance in Selecto.Builder.Sql): its
@@ -1896,6 +1898,20 @@ defmodule Selecto.Builder.Sql.Where do
 
   # Ensure `IN` subqueries are wrapped in parentheses.
   # If caller already provides parentheses, keep them as-is.
+  # A host fragment given without params is kept as written, once no session
+  # mode reads a placeholder in its code (Selecto.SQL.Params.rebind_finalized/3):
+  # one would bind a value of the statement around it.
+  defp verbatim_fragment(selecto, query) when is_binary(query),
+    do: Selecto.SQL.Params.rebind_finalized(query, [], selecto.adapter)
+
+  defp verbatim_fragment(selecto, query) when is_list(query) do
+    verbatim_fragment(selecto, IO.iodata_to_binary(query))
+  rescue
+    ArgumentError -> query
+  end
+
+  defp verbatim_fragment(_selecto, query), do: query
+
   defp in_subquery_fragment(query) when is_binary(query) do
     trimmed = String.trim(query)
 

@@ -55,7 +55,13 @@ defmodule Selecto.SQL.Params do
   end
 
   @doc false
-  def rebind_finalized(sql, [], adapter) when is_binary(sql) and is_atom(adapter), do: sql
+  # A nested fragment without params is kept as written, once no session
+  # mode reads a placeholder in its code: one would bind a value of the
+  # statement around it.
+  def rebind_finalized(sql, [], adapter) when is_binary(sql) and is_atom(adapter) do
+    _pieces = pieces(sql, Selecto.AdapterSupport.adapter_name(adapter), fn _code -> [] end, 0)
+    sql
+  end
 
   def rebind_finalized(sql, params, adapter)
       when is_binary(sql) and is_list(params) and is_atom(adapter) do
@@ -71,12 +77,12 @@ defmodule Selecto.SQL.Params do
     if IO.iodata_to_binary(placeholder.(1, hd(params))) ==
          IO.iodata_to_binary(placeholder.(2, hd(params))) do
       finder = fn code -> :binary.matches(code, hd(placeholders)) end
-      pieces = pieces(sql, Selecto.AdapterSupport.adapter_name(adapter), finder)
+      pieces = pieces(sql, Selecto.AdapterSupport.adapter_name(adapter), finder, length(params))
       rebind_repeated(pieces, params, hd(placeholders))
     else
       pattern = numbered_pattern(placeholders)
       finder = fn code -> Regex.scan(pattern, code, return: :index) |> Enum.map(&hd/1) end
-      pieces = pieces(sql, Selecto.AdapterSupport.adapter_name(adapter), finder)
+      pieces = pieces(sql, Selecto.AdapterSupport.adapter_name(adapter), finder, length(params))
       rebind_numbered(pieces, params, placeholders, pattern)
     end
   end
@@ -88,11 +94,11 @@ defmodule Selecto.SQL.Params do
   # ANSI_QUOTES), the text is read under each mode: the placeholders must sit
   # at the same places under all of them, or the fragment is refused typed
   # rather than leave a placeholder unbound or rebind a literal.
-  defp pieces(sql, dialect, finder) do
+  defp pieces(sql, dialect, finder, count) do
     [first | others] =
       for mode <- string_modes(dialect) do
         pieces = scan(sql, mode, "", [])
-        no_odd_placeholders!(pieces, dialect)
+        bindable_placeholders!(pieces, dialect, count)
         {pieces, placeholder_offsets(pieces, finder)}
       end
 
@@ -409,33 +415,67 @@ defmodule Selecto.SQL.Params do
   end
 
   # Placeholders the binding does not rewrite, which would bind the
-  # statement's own values: a `$` number not spelled `[1-9][0-9]*` (`$0`,
-  # `$01`, which PostgreSQL reads as `$1`; `$1_0`, PostgreSQL 16's `$10`), and
-  # on DuckDB a `?` (the next parameter after the largest seen). Refused typed
-  # when any session mode reads one as code.
-  defp no_odd_placeholders!(pieces, dialect) when dialect in [:postgresql, :duckdb] do
-    odd? =
-      Enum.any?(pieces, fn
-        {:code, code} ->
-          Regex.match?(
-            ~r/(?<![A-Za-z0-9_$\x80-\xff])\$(?:0[0-9_]*|[0-9][0-9_]*_[0-9_]*)(?![0-9_])/,
-            code
-          ) or (dialect == :duckdb and String.contains?(code, "?"))
+  # statement's own values, refused typed when any session mode reads one as
+  # code:
+  # - PostgreSQL and DuckDB: a `$` number not spelled `[1-9][0-9]*` (`$0`,
+  #   `$01`, which PostgreSQL reads as `$1`; `$1_0`, PostgreSQL 16's `$10`),
+  #   or above the fragment's own param count; on DuckDB also a `?` (the next
+  #   parameter after the largest seen) or a `$name`;
+  # - SQLite: a numbered or named parameter (`?NNN`, `:x`, `@x`, `$x`, `#x`);
+  # - SQLite and the MySQL family: a `?` in a fragment without params.
+  defp bindable_placeholders!(pieces, dialect, count) do
+    codes = for {:code, code} <- pieces, do: code
 
-        _text ->
-          false
-      end)
+    case Enum.find_value(codes, &unbindable(&1, dialect, count)) do
+      nil ->
+        :ok
 
-    if odd? do
-      raise Selecto.Builder.ScopeRefusal,
-        reason: :placeholder_unsupported,
-        message:
-          "A nested SQL fragment holds a placeholder the binding cannot number " <>
-            "($0, a leading zero or an underscore, or ? on DuckDB); write it as $n"
+      reason ->
+        raise Selecto.Builder.ScopeRefusal,
+          reason: reason,
+          message:
+            "A nested SQL fragment holds a placeholder its own params do not bind " <>
+              "($0, a leading zero or an underscore, a number above its params, a " <>
+              "named or numbered parameter, or one in a fragment without params)"
     end
   end
 
-  defp no_odd_placeholders!(_pieces, _dialect), do: :ok
+  @dollar_number ~r/(?<![A-Za-z0-9_$\x80-\xff])\$([0-9][0-9_]*)/
+  @sqlite_named ~r/\?[0-9]|[:@$#][A-Za-z_\x80-\xff]/
+
+  defp unbindable(code, dialect, count) when dialect in [:postgresql, :duckdb] do
+    numbers = for [_all, number] <- Regex.scan(@dollar_number, code), do: number
+
+    cond do
+      Enum.any?(numbers, &(not Regex.match?(~r/\A[1-9][0-9]*\z/, &1))) ->
+        :placeholder_unsupported
+
+      Enum.any?(numbers, &(String.to_integer(&1) > count)) ->
+        :placeholder_count_mismatch
+
+      dialect == :duckdb and
+          (String.contains?(code, "?") or
+             Regex.match?(~r/(?<![A-Za-z0-9_$\x80-\xff])\$[A-Za-z_]/, code)) ->
+        :placeholder_unsupported
+
+      true ->
+        nil
+    end
+  end
+
+  defp unbindable(code, :sqlite, count) do
+    cond do
+      Regex.match?(@sqlite_named, code) -> :placeholder_unsupported
+      count == 0 and String.contains?(code, "?") -> :placeholder_count_mismatch
+      true -> nil
+    end
+  end
+
+  defp unbindable(code, dialect, 0) when dialect in [:mysql, :mariadb] do
+    if String.contains?(code, "?"), do: :placeholder_count_mismatch
+  end
+
+  defp unbindable(_code, _dialect, _count), do: nil
 
   defp numbered_pattern(placeholders) do
     placeholders
