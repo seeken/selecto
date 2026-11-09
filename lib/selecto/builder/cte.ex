@@ -127,7 +127,7 @@ defmodule Selecto.Builder.CteSql do
     # Generate SQL from the Selecto query
     {sql_iodata, _aliases} = Sql.build_iodata(selecto_query, [])
     sql_iodata = rewrite_cte_root_alias(sql_iodata, spec.name)
-    {_sql, params} = Selecto.SQL.Params.finalize(sql_iodata, adapter: selecto_query.adapter)
+    {sql_iodata, params} = rebound_body(sql_iodata, selecto_query.adapter)
 
     # Build CTE definition
     cte_name = Selecto.Builder.Sql.Helpers.list_identifier(selecto_query.adapter, spec.name)
@@ -162,11 +162,10 @@ defmodule Selecto.Builder.CteSql do
     base_sql_iodata = rewrite_cte_root_alias(base_sql_iodata, spec.name)
     recursive_sql_iodata = rewrite_cte_root_alias(recursive_sql_iodata, spec.name)
 
-    {_base_sql, base_params} =
-      Selecto.SQL.Params.finalize(base_sql_iodata, adapter: base_selecto.adapter)
+    {base_sql_iodata, base_params} = rebound_body(base_sql_iodata, base_selecto.adapter)
 
-    {_recursive_sql, recursive_params} =
-      Selecto.SQL.Params.finalize(recursive_sql_iodata, adapter: recursive_selecto.adapter)
+    {recursive_sql_iodata, recursive_params} =
+      rebound_body(recursive_sql_iodata, recursive_selecto.adapter)
 
     # Build recursive CTE definition
     cte_name = Selecto.Builder.Sql.Helpers.list_identifier(base_selecto.adapter, spec.name)
@@ -200,6 +199,15 @@ defmodule Selecto.Builder.CteSql do
 
     combined_params = base_params ++ recursive_params
     {cte_definition, combined_params}
+  end
+
+  # A CTE body's own placeholders (a raw filter's `$1` naming its first param)
+  # are rebound as its params, and one it does not bind refuses, as for any
+  # nested query (Selecto.SQL.Params.rebind_finalized/3): left as text, it
+  # would bind the statement's earlier values.
+  defp rebound_body(iodata, adapter) do
+    {sql, params} = Selecto.SQL.Params.finalize(iodata, adapter: adapter)
+    {Selecto.SQL.Params.rebind_finalized(sql, params, adapter), params}
   end
 
   @depth_column "selecto_depth"

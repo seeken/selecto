@@ -172,9 +172,11 @@ defmodule Selecto.Integration.LateralJoinTest do
       |> Selecto.select(["title"])
       |> Selecto.lateral_join(:right, {:function, :generate_series, [1, 10]}, "numbers")
 
-    assert_raise RuntimeError, ~r/only supports :inner and :left lateral joins/, fn ->
-      Selecto.to_sql(selecto)
-    end
+    assert_raise Selecto.Builder.ScopeRefusal,
+                 ~r/only supports :inner and :left lateral joins/,
+                 fn ->
+                   Selecto.to_sql(selecto)
+                 end
   end
 
   test "mssql supports correlated top-n apply with pagination" do
