@@ -122,7 +122,7 @@ defmodule Selecto.Builder.LateralJoinTest do
       validated: true
     }
 
-    assert_raise RuntimeError, ~r/does not support JSON_TABLE joins/, fn ->
+    assert_raise Selecto.Builder.ScopeRefusal, ~r/does not support JSON_TABLE joins/, fn ->
       LateralJoin.build_lateral_join(spec, adapter: SelectoDBSQLite.Adapter)
     end
   end
@@ -181,9 +181,11 @@ defmodule Selecto.Builder.LateralJoinTest do
       validated: true
     }
 
-    assert_raise RuntimeError, ~r/does not support SQLite JSON rowset joins/i, fn ->
-      LateralJoin.build_lateral_join(spec, adapter: SelectoDBMySQL.Adapter)
-    end
+    assert_raise Selecto.Builder.ScopeRefusal,
+                 ~r/does not support SQLite JSON rowset joins/i,
+                 fn ->
+                   LateralJoin.build_lateral_join(spec, adapter: SelectoDBMySQL.Adapter)
+                 end
   end
 
   test "mssql lateral subquery compiles to apply and preserves params" do
@@ -342,9 +344,14 @@ defmodule Selecto.Builder.LateralJoinTest do
       validated: true
     }
 
-    assert_raise RuntimeError, ~r/does not support this collection operation/, fn ->
-      LateralJoin.build_lateral_join(spec, adapter: SelectoDBSQLite.Adapter)
-    end
+    refusal =
+      assert_raise Selecto.Builder.ScopeRefusal,
+                   ~r/does not support this collection operation/,
+                   fn ->
+                     LateralJoin.build_lateral_join(spec, adapter: SelectoDBSQLite.Adapter)
+                   end
+
+    assert refusal.reason == :lateral_unsupported
   end
 
   test "integrates lateral joins into base SQL" do

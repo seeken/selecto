@@ -65,7 +65,7 @@ defmodule Selecto.Builder.JsonOperations do
         |> add_alias(spec.alias, adapter, clause)
 
       {:error, %Error{} = error} ->
-        raise Error.to_exception(error)
+        Selecto.Builder.ScopeRefusal.unsupported!(error)
 
       {:error, reason} ->
         raise Error.to_exception(render_error(adapter, spec.operation, reason))

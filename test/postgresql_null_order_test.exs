@@ -137,7 +137,7 @@ defmodule Selecto.PostgreSQLNullOrderTest do
       |> Selecto.group_by(Selecto.Expr.rollup([{:upper, "name"}]))
       |> Selecto.order_by([{{:upper, "name"}, :asc}])
 
-    assert_raise RuntimeError, ~r/NULL placement cannot be expressed/, fn ->
+    assert_raise Selecto.Builder.ScopeRefusal, ~r/NULL placement cannot be expressed/, fn ->
       Selecto.gen_sql(query, [])
     end
   end
@@ -202,6 +202,8 @@ defmodule Selecto.PostgreSQLNullOrderTest do
       |> Selecto.lateral_join(:left, child, "matched")
       |> Selecto.select(["id"])
 
-    assert_raise RuntimeError, ~r/cannot contain '\?'/, fn -> Selecto.gen_sql(query, []) end
+    assert_raise Selecto.Builder.ScopeRefusal, ~r/cannot contain '\?'/, fn ->
+      Selecto.gen_sql(query, [])
+    end
   end
 end

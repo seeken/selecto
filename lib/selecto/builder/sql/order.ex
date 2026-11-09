@@ -237,12 +237,12 @@ defmodule Selecto.Builder.Sql.Order do
   end
 
   defp refuse_null_order(order) do
-    raise Selecto.Error.to_exception(
-            Selecto.Error.validation_error(
-              "PostgreSQL NULL placement cannot be expressed for this ordering",
-              %{order: inspect(order), unsupported_feature: :null_ordering}
-            )
-          )
+    Selecto.Builder.ScopeRefusal.unsupported!(
+      Selecto.Error.validation_error(
+        "PostgreSQL NULL placement cannot be expressed for this ordering",
+        %{order: inspect(order), unsupported_feature: :null_ordering}
+      )
+    )
   end
 
   defp grouped?(selecto), do: Map.get(selecto.set, :group_by, []) != []
@@ -352,17 +352,17 @@ defmodule Selecto.Builder.Sql.Order do
       version = sqlite_server_version(AdapterSQL.adapter(selecto), connection)
 
       unless sqlite_version_at_least?(version, {3, 30, 0}) do
-        raise Selecto.Error.to_exception(
-                Selecto.Error.validation_error(
-                  "SQLite provider does not support NULL ordering for set results",
-                  %{
-                    adapter: :sqlite,
-                    unsupported_feature: :null_ordering,
-                    minimum_server_version: "3.30.0",
-                    server_version: version
-                  }
-                )
-              )
+        Selecto.Builder.ScopeRefusal.unsupported!(
+          Selecto.Error.validation_error(
+            "SQLite provider does not support NULL ordering for set results",
+            %{
+              adapter: :sqlite,
+              unsupported_feature: :null_ordering,
+              minimum_server_version: "3.30.0",
+              server_version: version
+            }
+          )
+        )
       end
     end
   end

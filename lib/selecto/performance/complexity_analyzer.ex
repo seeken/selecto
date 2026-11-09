@@ -374,7 +374,14 @@ defmodule Selecto.Performance.ComplexityAnalyzer do
     rescue
       # Lightweight analyzer fixtures and partially constructed queries may not
       # be SQL-compilable yet. Retain the conservative legacy count for them.
-      RuntimeError -> count_configured_joins(selecto.config.joins)
+      RuntimeError ->
+        count_configured_joins(selecto.config.joins)
+
+      # A shape the adapter cannot render, as it was before it raised typed.
+      refusal in Selecto.Builder.ScopeRefusal ->
+        if match?(%Selecto.Error{}, refusal.error),
+          do: count_configured_joins(selecto.config.joins),
+          else: reraise(refusal, __STACKTRACE__)
     end
   end
 

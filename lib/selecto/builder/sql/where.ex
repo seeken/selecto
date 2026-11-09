@@ -104,7 +104,7 @@ defmodule Selecto.Builder.Sql.Where do
         {List.wrap(conf.requires_join) ++ List.wrap(joins), [" ", rendered, " "], params}
 
       {:error, %Error{} = error} ->
-        raise Error.to_exception(error)
+        Selecto.Builder.ScopeRefusal.unsupported!(error)
 
       {:error, _} ->
         raise ArgumentError, "Unsupported exact instant comparison"
@@ -1252,7 +1252,7 @@ defmodule Selecto.Builder.Sql.Where do
         {iodata, []}
 
       {:error, %Error{} = error} ->
-        raise Error.to_exception(error)
+        Selecto.Builder.ScopeRefusal.unsupported!(error)
 
       {:error, reason} ->
         ExactCompare.refuse(:datetime_part, "unsupported datetime predicate: #{inspect(reason)}")
@@ -1268,7 +1268,7 @@ defmodule Selecto.Builder.Sql.Where do
         {iodata, []}
 
       {:error, %Error{} = error} ->
-        raise Error.to_exception(error)
+        Selecto.Builder.ScopeRefusal.unsupported!(error)
 
       {:error, reason} ->
         raise ArgumentError, "unsupported text normalization: #{inspect(reason)}"
@@ -1281,7 +1281,7 @@ defmodule Selecto.Builder.Sql.Where do
         iodata
 
       {:error, %Error{} = error} ->
-        raise Error.to_exception(error)
+        Selecto.Builder.ScopeRefusal.unsupported!(error)
 
       {:error, reason} ->
         raise ArgumentError, "unsupported case-insensitive comparison: #{inspect(reason)}"
@@ -1778,7 +1778,7 @@ defmodule Selecto.Builder.Sql.Where do
         {joins, predicate, []}
 
       {:error, %Error{} = error} ->
-        raise Error.to_exception(error)
+        Selecto.Builder.ScopeRefusal.unsupported!(error)
 
       {:error, reason} ->
         raise_text_search_error(
@@ -1798,7 +1798,7 @@ defmodule Selecto.Builder.Sql.Where do
         unsupported_feature: unsupported_feature
       })
 
-    raise Error.to_exception(error)
+    Selecto.Builder.ScopeRefusal.unsupported!(error)
   end
 
   defp normalize_text_search_spec(default_fields, opts) when is_list(opts) do
@@ -1922,7 +1922,9 @@ defmodule Selecto.Builder.Sql.Where do
     |> Enum.map(fn
       {:param, _value} -> " NULL "
       list when is_list(list) -> neutral_text(list)
-      text when is_binary(text) or (is_integer(text) and text in 0..255) -> text
+      text when is_binary(text) -> text
+      # Rendered as SQL text the way Selecto.SQL.Params.finalize/2 renders it.
+      number when is_integer(number) or is_float(number) -> to_string(number)
       _other -> " NULL "
     end)
     |> IO.iodata_to_binary()

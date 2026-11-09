@@ -83,7 +83,7 @@ defmodule Selecto.SQL.Params do
       pattern = numbered_pattern(placeholders)
       finder = fn code -> Regex.scan(pattern, code, return: :index) |> Enum.map(&hd/1) end
       pieces = pieces(sql, Selecto.AdapterSupport.adapter_name(adapter), finder, length(params))
-      rebind_numbered(pieces, params, placeholders, pattern)
+      rebind_numbered(pieces, params, placeholders, dollar_numbered?(adapter), pattern)
     end
   end
 
@@ -485,7 +485,12 @@ defmodule Selecto.SQL.Params do
     |> then(&Regex.compile!("((?<![A-Za-z0-9_$\\x80-\\xff])(?:#{&1})(?![0-9]))"))
   end
 
-  defp rebind_numbered(pieces, params, placeholders, pattern) do
+  @stray_dollar ~r/(?<![A-Za-z0-9_$\x80-\xff])\$[0-9]/
+
+  defp dollar_numbered?(adapter),
+    do: IO.iodata_to_binary(adapter.placeholder(1)) == "$1"
+
+  defp rebind_numbered(pieces, params, placeholders, dollar_numbered?, pattern) do
     values = placeholders |> Enum.zip(params) |> Map.new()
 
     parts =
@@ -506,8 +511,19 @@ defmodule Selecto.SQL.Params do
           end
       end)
 
+    # A `$n` left in the code would bind a value of the statement around
+    # it: one past the params, or the bare index of a param the adapter
+    # renders wrapped (DuckDB's Decimal as `(SELECT CAST($n AS DECIMAL(..)))`),
+    # which DuckDB itself rejects when the fragment runs alone.
+    stray? =
+      dollar_numbered? and
+        Enum.any?(parts, fn
+          part when is_binary(part) -> not Map.has_key?(values, part) and part =~ @stray_dollar
+          {:text, _text} -> false
+        end)
+
     # Every parameter is bound at least once; a placeholder may repeat.
-    if Enum.all?(placeholders, &(&1 in parts)) do
+    if not stray? and Enum.all?(placeholders, &(&1 in parts)) do
       rebound
     else
       count_mismatch()

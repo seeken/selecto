@@ -182,12 +182,14 @@ defmodule Selecto.JsonTest do
   end
 
   test "mssql containment rejects array semantics explicitly" do
-    assert_raise RuntimeError, ~r/MSSQL JSON containment for arrays is not supported/, fn ->
-      Json.build_contains("attributes", %{"tags" => ["featured"]},
-        adapter: SelectoDBMSSQL.Adapter,
-        table_alias: "u"
-      )
-    end
+    assert_raise Selecto.Builder.ScopeRefusal,
+                 ~r/MSSQL JSON containment for arrays is not supported/,
+                 fn ->
+                   Json.build_contains("attributes", %{"tags" => ["featured"]},
+                     adapter: SelectoDBMSSQL.Adapter,
+                     table_alias: "u"
+                   )
+                 end
   end
 
   test "mysql contains and key existence use mysql json functions" do
@@ -248,7 +250,7 @@ defmodule Selecto.JsonTest do
     assert IO.iodata_to_binary(contains) =~
              ~s|json_extract("u"."attributes", '$.dimensions.length') = 5|
 
-    assert_raise RuntimeError,
+    assert_raise Selecto.Builder.ScopeRefusal,
                  ~r/SQLite JSON containment for arrays is not supported/,
                  fn ->
                    Json.build_contains("attributes", %{"tags" => ["featured"]},

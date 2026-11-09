@@ -484,7 +484,7 @@ defmodule Selecto.SQL.Functions do
     do: {iodata, List.wrap(joins), params}
 
   defp render_dialect_fragment({:error, %Selecto.Error{} = error}, _joins, _params),
-    do: raise(Selecto.Error.to_exception(error))
+    do: Selecto.Builder.ScopeRefusal.unsupported!(error)
 
   defp render_dialect_fragment({:error, reason}, _joins, _params),
     do: raise(ArgumentError, "unsupported dialect fragment: #{inspect(reason)}")
@@ -617,7 +617,7 @@ defmodule Selecto.SQL.Functions do
       {iodata, [], []}
     else
       {:error, %Selecto.Error{} = error} ->
-        raise Selecto.Error.to_exception(error)
+        Selecto.Builder.ScopeRefusal.unsupported!(error)
 
       {:error, reason} ->
         raise ArgumentError, "invalid or unsupported interval: #{inspect(reason)}"

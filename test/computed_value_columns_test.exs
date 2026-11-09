@@ -289,9 +289,11 @@ defmodule Selecto.ComputedValueColumnsTest do
     for selected <- ["buyer", "first_sku", "half_total"] do
       query = domain() |> Selecto.configure(:compile_only) |> Selecto.select([selected])
 
-      assert_raise RuntimeError, ~r/does not support the requested SQL fragment/, fn ->
-        sql(%{query | adapter: SelectoDBSQLite.Adapter})
-      end
+      assert_raise Selecto.Builder.ScopeRefusal,
+                   ~r/does not support the requested SQL fragment/,
+                   fn ->
+                     sql(%{query | adapter: SelectoDBSQLite.Adapter})
+                   end
     end
   end
 

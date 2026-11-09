@@ -278,4 +278,71 @@ defmodule Selecto.ParameterPlaceholderTest do
       Selecto.to_sql(Selecto.union(left, unbound, all: true))
     end
   end
+
+  test "a bare $n beside a value-aware wrapped placeholder refuses" do
+    price = Decimal.new("1.25")
+
+    # The wrapped form binds; the bare `$1` of the same param would bind a
+    # value of the statement around the fragment.
+    for sql <- ["x >= CAST($1 AS NUMERIC) AND $1 > 1", "$1 > 1", "CAST($1 AS NUMERIC) = $2"] do
+      assert_raise Selecto.Builder.ScopeRefusal, ~r/count does not match/, fn ->
+        Params.rebind_finalized(sql, [price], ExternalTypedAdapter)
+      end
+    end
+
+    # A bare `$1` of a param rendered bare still binds, beside a wrapped one.
+    rebound =
+      Params.rebind_finalized("CAST($1 AS NUMERIC) > $2", [price, 1], ExternalTypedAdapter)
+
+    assert Enum.filter(rebound, &is_tuple/1) == [{:param, price}, {:param, 1}]
+
+    # A `$1` in a literal stays text.
+    assert Params.rebind_finalized("CAST($1 AS NUMERIC) <> '$1'", [price], ExternalTypedAdapter)
+           |> Enum.filter(&is_tuple/1) == [{:param, price}]
+  end
+
+  test "an integer element of marker iodata is read as the text it renders" do
+    domain = %{
+      name: "p",
+      source: %{
+        source_table: "p",
+        primary_key: :id,
+        fields: [:id],
+        redact_fields: [],
+        columns: %{id: %{type: :integer}},
+        associations: %{}
+      },
+      schemas: %{},
+      joins: %{}
+    }
+
+    query = Selecto.configure(domain, nil, validate: false) |> Selecto.select(["id"])
+    held = ["SELECT 1 FROM p x WHERE CAST($", 1, " AS text) = ", {:param, "a"}]
+
+    assert_raise Selecto.Builder.ScopeRefusal, ~r/do not bind/, fn ->
+      Selecto.to_sql(Selecto.filter(query, {:exists, held}))
+    end
+
+    # A number that renders no placeholder stays as written.
+    plain = ["SELECT 1 FROM p x WHERE x.id = ", 1, " AND x.id <> ", {:param, 2}]
+    {sql, params} = Selecto.to_sql(Selecto.filter(query, {:exists, plain}))
+    assert params == [2]
+    assert sql =~ "x.id = 1 AND x.id <> $1"
+  end
+
+  test "an adapter's unsupported SQL shape refuses typed with its error" do
+    error =
+      Selecto.Error.validation_error("Adapter does not support this collection operation", %{
+        unsupported_feature: :collection
+      })
+
+    refusal = catch_error(Selecto.Builder.ScopeRefusal.unsupported!(error, :lateral_unsupported))
+    assert %Selecto.Builder.ScopeRefusal{reason: :lateral_unsupported} = refusal
+
+    assert %Selecto.Error{type: :validation_error, details: details} =
+             Selecto.Error.from_reason(refusal)
+
+    assert details.reason == :lateral_unsupported
+    assert details.unsupported_feature == :collection
+  end
 end

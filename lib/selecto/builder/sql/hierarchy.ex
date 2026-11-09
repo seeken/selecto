@@ -285,7 +285,7 @@ defmodule Selecto.Builder.Sql.Hierarchy do
     do: finalize_fragment(selecto, fragment)
 
   defp finalize_dialect_fragment({:error, %Error{} = error}, _selecto),
-    do: raise(Error.to_exception(error))
+    do: Selecto.Builder.ScopeRefusal.unsupported!(error)
 
   defp finalize_dialect_fragment({:error, reason}, _selecto),
     do: raise(ArgumentError, "unsupported hierarchy operation: #{inspect(reason)}")

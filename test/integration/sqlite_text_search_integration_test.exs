@@ -132,9 +132,11 @@ defmodule Selecto.Integration.SQLiteTextSearchTest do
       |> Selecto.select(["name"])
       |> Selecto.filter({"name", {:text_search, "wireless charger"}})
 
-    assert_raise RuntimeError, ~r/FTS5 is not available on the current connection/i, fn ->
-      Selecto.to_sql(query)
-    end
+    assert_raise Selecto.Builder.ScopeRefusal,
+                 ~r/FTS5 is not available on the current connection/i,
+                 fn ->
+                   Selecto.to_sql(query)
+                 end
   end
 
   test "sqlite to_sql still rejects unsupported query expansion mode", %{domain: domain} do
@@ -144,7 +146,7 @@ defmodule Selecto.Integration.SQLiteTextSearchTest do
       |> Selecto.select(["name"])
       |> Selecto.filter({"name", {:text_search, "wireless charger", [mode: :query_expansion]}})
 
-    assert_raise RuntimeError, ~r/does not support this text search mode/i, fn ->
+    assert_raise Selecto.Builder.ScopeRefusal, ~r/does not support this text search mode/i, fn ->
       Selecto.to_sql(query)
     end
   end

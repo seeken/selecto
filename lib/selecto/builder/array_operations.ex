@@ -26,7 +26,7 @@ defmodule Selecto.Builder.ArrayOperations do
         {add_alias(sql, spec.alias, selecto.adapter), params_list}
 
       {:error, %Error{} = error} ->
-        raise Error.to_exception(error)
+        Selecto.Builder.ScopeRefusal.unsupported!(error)
 
       {:error, reason} ->
         raise Error.to_exception(render_error(selecto, spec.operation, reason))
@@ -52,7 +52,7 @@ defmodule Selecto.Builder.ArrayOperations do
     case DialectSupport.render_collection_operation(selecto.adapter, fragment, selecto) do
       {:ok, {sql, params}} -> {sql, params}
       {:ok, sql} -> {sql, []}
-      {:error, %Error{} = error} -> raise Error.to_exception(error)
+      {:error, %Error{} = error} -> Selecto.Builder.ScopeRefusal.unsupported!(error)
       {:error, reason} -> raise Error.to_exception(render_error(selecto, operation, reason))
     end
   end
