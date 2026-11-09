@@ -1008,7 +1008,7 @@ defmodule Selecto.Builder.Sql do
       :selecto_root, {fc, p, ctes} ->
         root_table = Selecto.source_table(selecto)
         # Quote both the table name and alias for the adapter
-        quoted_table = quote_identifier(selecto, root_table)
+        quoted_table = relation_identifier(selecto, root_table)
         root_alias = build_join_string(selecto, "selecto_root")
         {fc ++ [[quoted_table, " ", root_alias]], p, ctes}
 
@@ -1050,7 +1050,7 @@ defmodule Selecto.Builder.Sql do
                 # Existing basic join logic
                 join_iodata = [
                   sql_join_keyword(config),
-                  quote_identifier(selecto, config.source),
+                  relation_identifier(selecto, config.source),
                   " ",
                   build_join_string(selecto, join),
                   " on ",
@@ -1069,7 +1069,7 @@ defmodule Selecto.Builder.Sql do
     |> Enum.reduce_while([], fn
       :selecto_root, acc ->
         root_table = Selecto.source_table(selecto)
-        quoted_table = quote_identifier(selecto, root_table)
+        quoted_table = relation_identifier(selecto, root_table)
         root_alias = build_join_string(selecto, "selecto_root")
         {:cont, [[quoted_table, " ", root_alias] | acc]}
 
@@ -1085,7 +1085,7 @@ defmodule Selecto.Builder.Sql do
             if detect_advanced_join_pattern(config) == :basic do
               join_iodata = [
                 sql_join_keyword(config),
-                quote_identifier(selecto, config.source),
+                relation_identifier(selecto, config.source),
                 " ",
                 build_join_string(selecto, join),
                 " on ",
@@ -1247,7 +1247,7 @@ defmodule Selecto.Builder.Sql do
         # Fallback to basic join if enhanced join fails
         join_iodata = [
           sql_join_keyword(config),
-          quote_identifier(selecto, config.source),
+          relation_identifier(selecto, config.source),
           " ",
           build_join_string(selecto, join),
           " on ",
@@ -1720,11 +1720,19 @@ defmodule Selecto.Builder.Sql do
   # before it, or any under WITH RECURSIVE), and the body's own CTE, are left to
   # the statement; any other copy the body emits itself.
   defp scoped_member_query(builder, root, seen) when is_function(builder, 0),
-    do: fn -> builder.() |> Selecto.QueryMembers.Data.scope_member(root) |> own_ctes(seen) end
+    do: fn ->
+      builder.()
+      |> Selecto.QueryMembers.Data.scope_member(root)
+      |> own_ctes(seen)
+      |> visible_lists(root, seen)
+    end
 
   defp scoped_member_query(builder, root, seen) when is_function(builder, 1),
     do: fn cte_ref ->
-      builder.(cte_ref) |> Selecto.QueryMembers.Data.scope_member(root) |> own_ctes(seen)
+      builder.(cte_ref)
+      |> Selecto.QueryMembers.Data.scope_member(root)
+      |> own_ctes(seen)
+      |> visible_lists(root, seen)
     end
 
   defp scoped_member_query(builder, _root, _seen), do: builder
@@ -1781,6 +1789,37 @@ defmodule Selecto.Builder.Sql do
   end
 
   @doc false
+  # The lists of the statement a body sees (`seen`, carried_ctes/2) and those
+  # its root saw, so a root or join naming one writes it as its definition is
+  # written (Selecto.Builder.Sql.Helpers.relation_identifier/2). A set-operation
+  # body is left as built.
+  defp visible_lists(%{set: %{set_operations: [_ | _]}} = body, _root, _seen), do: body
+
+  defp visible_lists(%{set: %{} = set} = body, root, seen) do
+    lists =
+      Enum.flat_map(seen, &list_entries(&1, root)) ++
+        List.wrap(Map.get(Map.get(root, :set) || %{}, :visible_lists))
+
+    %{body | set: Map.put(set, :visible_lists, lists)}
+  end
+
+  defp visible_lists(body, _root, _seen), do: body
+
+  defp list_entries(%{alias: name}, _root) when not is_nil(name), do: [{to_string(name), :list}]
+  defp list_entries(%{name: name}, _root) when not is_nil(name), do: [{to_string(name), :list}]
+
+  defp list_entries({tag, sql, _params}, root) when tag in [:raw_cte, :raw_recursive_cte] do
+    case Selecto.Builder.RawCte.entries(sql, Selecto.Executor.dialect(root)) do
+      {:ok, entries} ->
+        for {n, quoted?} <- entries, do: {n, if(quoted?, do: :quoted_raw, else: :list)}
+
+      :error ->
+        []
+    end
+  end
+
+  defp list_entries(_list, _root), do: []
+
   # A set-operation body is left as built: its members carry their own lists, and
   # its result must stay the left member's set (Selecto.Builder.SetOperations).
   # Otherwise only a list that loses a copy is rewritten.

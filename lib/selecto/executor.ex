@@ -411,22 +411,33 @@ defmodule Selecto.Executor do
     Enum.flat_map(List.wrap(Map.get(set, :lateral_joins)), &lateral_query(&1, query))
   end
 
-  defp cte_names(specs), do: Enum.flat_map(specs, &list_name/1)
+  defp cte_names(specs, dialect \\ :any), do: Enum.flat_map(specs, &list_name(&1, dialect))
 
   @doc false
   # A CTE spec's name; every name a raw CTE's text (`{:raw_cte, sql, params}`,
-  # the host's own, R68) defines (Selecto.Builder.RawCte); [] for raw text that
-  # does not parse, which prepare_read/1 refuses (`raw_cte_unparsed`).
-  def list_name(%{name: name}) when not is_nil(name), do: [to_string(name)]
+  # the host's own, R68) defines as `dialect` lexes it (Selecto.Builder.RawCte);
+  # [] for raw text that does not parse, which prepare_read/1 refuses
+  # (`raw_cte_unparsed`).
+  def list_name(spec, dialect \\ :any)
+  def list_name(%{name: name}, _dialect) when not is_nil(name), do: [to_string(name)]
 
-  def list_name({tag, sql, _params}) when tag in [:raw_cte, :raw_recursive_cte] do
-    case Selecto.Builder.RawCte.names(sql) do
+  def list_name({tag, sql, _params}, dialect) when tag in [:raw_cte, :raw_recursive_cte] do
+    case Selecto.Builder.RawCte.names(sql, dialect) do
       {:ok, names} -> names
       :error -> []
     end
   end
 
-  def list_name(_spec), do: []
+  def list_name(_spec, _dialect), do: []
+
+  @doc false
+  # The dialect raw CTE text of `query` is read in: its adapter's name.
+  def dialect(query) do
+    case Selecto.AdapterSupport.adapter_name(Map.get(query, :adapter)) do
+      name when name in [:postgresql, :mysql, :mariadb, :sqlite, :duckdb] -> name
+      _other -> :any
+    end
+  end
 
   defp cte_queries(%{type: :recursive, name: name, base_query: base, recursive_query: step})
        when is_function(base, 0) and is_function(step, 1) do
@@ -505,7 +516,7 @@ defmodule Selecto.Executor do
     set = Map.get(selecto, :set) || %{}
 
     values_names(selecto) ++
-      generated_cte_names(selecto) ++ cte_names(List.wrap(Map.get(set, :ctes)))
+      generated_cte_names(selecto) ++ cte_names(List.wrap(Map.get(set, :ctes)), dialect(selecto))
   end
 
   defp values_names(selecto) do
@@ -653,11 +664,12 @@ defmodule Selecto.Executor do
   defp raw_ctes_parse(scopes) do
     scopes
     |> Enum.flat_map(fn %{query: query} ->
-      List.wrap(Map.get(Map.get(query, :set) || %{}, :ctes))
+      for list <- List.wrap(Map.get(Map.get(query, :set) || %{}, :ctes)),
+          do: {list, dialect(query)}
     end)
     |> Enum.filter(fn
-      {tag, sql, _params} when tag in [:raw_cte, :raw_recursive_cte] ->
-        Selecto.Builder.RawCte.names(sql) == :error
+      {{tag, sql, _params}, dialect} when tag in [:raw_cte, :raw_recursive_cte] ->
+        Selecto.Builder.RawCte.names(sql, dialect) == :error
 
       _spec ->
         false
@@ -678,27 +690,13 @@ defmodule Selecto.Executor do
     end
   end
 
-  # A root read as a list is named in the SQL like any table: a name an
-  # identifier cannot hold refuses typed rather than raise while compiling.
-  # A root naming a raw CTE that its text leaves unquoted reads it only where
-  # the name needs no quoting: Selecto quotes a mixed-case or reserved root, and
-  # the database folds the raw text's unquoted name, so the two would differ.
+  # A root read as a list, and an ad-hoc join's source, is named in the SQL like
+  # any table: a name an identifier cannot hold refuses typed rather than raise
+  # while compiling.
   defp list_roots_quotable(scopes) do
-    unquoted_raw =
-      for %{query: query} <- scopes,
-          {tag, sql, _params} <- List.wrap(Map.get(Map.get(query, :set) || %{}, :ctes)),
-          tag in [:raw_cte, :raw_recursive_cte],
-          {:ok, entries} <- [Selecto.Builder.RawCte.entries(sql)],
-          {name, false} <- entries,
-          do: name
-
     scopes
-    |> Enum.map(&list_root/1)
-    |> Enum.reject(fn root ->
-      is_nil(root) or
-        (Selecto.Builder.Sql.Helpers.valid_identifier?(root) and
-           not (root in unquoted_raw and Selecto.Builder.Sql.Helpers.needs_quoting?(root)))
-    end)
+    |> Enum.flat_map(fn scope -> [list_root(scope) | dynamic_join_sources(scope.query)] end)
+    |> Enum.reject(&(is_nil(&1) or Selecto.Builder.Sql.Helpers.valid_identifier?(&1)))
     |> case do
       [] ->
         :ok
@@ -708,8 +706,7 @@ defmodule Selecto.Executor do
          %Selecto.Error{
            type: :query_enforcement,
            message:
-             "A CTE or VALUES list a root reads has a name an identifier cannot hold, " <>
-               "or a raw CTE leaves a name unquoted that the root must quote",
+             "A CTE or VALUES list or a joined relation has a name an identifier cannot hold",
            details: %{
              code: :query_rule_not_evaluable,
              reason: :invalid_identifier,
@@ -717,6 +714,12 @@ defmodule Selecto.Executor do
            }
          }}
     end
+  end
+
+  defp dynamic_join_sources(query) do
+    for {_id, %{join_type: :custom, source: source}} <- dynamic_joins(query),
+        is_binary(source) or (is_atom(source) and not is_nil(source)),
+        do: to_string(source)
   end
 
   # A query a filter or selection embeds compiles on its own (Selecto.to_sql/2),
@@ -864,8 +867,8 @@ defmodule Selecto.Executor do
     raw =
       for {tag, sql, params} = list <- List.wrap(Map.get(set, :ctes)),
           tag in [:raw_cte, :raw_recursive_cte],
-          name <- list_name(list),
-          do: {name, {:raw, IO.iodata_to_binary(sql), params}}
+          name <- list_name(list, dialect(query)),
+          do: {name, {:raw, sql, params}}
 
     ctes ++ values ++ generated ++ raw
   end
@@ -913,6 +916,33 @@ defmodule Selecto.Executor do
   end
 
   def list_root(_scope), do: nil
+
+  @doc false
+  # Each list root's name with the identifier the SQL names it by (unquoted when
+  # plain, as Selecto.Builder.Sql.Helpers.relation_identifier/2 writes it;
+  # "double quoted" otherwise, or where a raw CTE's text quotes it): what an
+  # adapter that resolves relations looks the name up as.
+  def list_root_identifiers(selecto) do
+    scopes = read_scopes(selecto)
+
+    quoted_raw =
+      for %{query: query} <- scopes,
+          {tag, sql, _params} <- List.wrap(Map.get(Map.get(query, :set) || %{}, :ctes)),
+          tag in [:raw_cte, :raw_recursive_cte],
+          {:ok, entries} <- [Selecto.Builder.RawCte.entries(sql, dialect(query))],
+          {name, true} <- entries,
+          do: name
+
+    scopes
+    |> Enum.map(&list_root/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+    |> Enum.map(fn name ->
+      if Selecto.Builder.Sql.Helpers.plain_name?(name) and name not in quoted_raw,
+        do: {name, name},
+        else: {name, "\"" <> String.replace(name, "\"", "\"\"") <> "\""}
+    end)
+  end
 
   @doc false
   # The names the statement's roots read as lists (list_root/1): an adapter
