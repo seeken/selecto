@@ -1904,13 +1904,29 @@ defmodule Selecto.Builder.Sql.Where do
   defp verbatim_fragment(selecto, query) when is_binary(query),
     do: Selecto.SQL.Params.rebind_finalized(query, [], selecto.adapter)
 
-  defp verbatim_fragment(selecto, query) when is_list(query) do
-    verbatim_fragment(selecto, IO.iodata_to_binary(query))
-  rescue
-    ArgumentError -> query
+  # Iodata with {:param, value} markers: the markers are its params, so its
+  # text may hold no placeholder of its own (one would bind a marker's or the
+  # statement's value); the text is checked with each marker as a neutral
+  # literal, then kept with its markers.
+  defp verbatim_fragment(%{adapter: adapter}, query)
+       when is_list(query) and not is_nil(adapter) do
+    _text = Selecto.SQL.Params.rebind_finalized(neutral_text(query), [], adapter)
+    query
   end
 
   defp verbatim_fragment(_selecto, query), do: query
+
+  defp neutral_text(query) do
+    query
+    |> List.wrap()
+    |> Enum.map(fn
+      {:param, _value} -> " NULL "
+      list when is_list(list) -> neutral_text(list)
+      text when is_binary(text) or (is_integer(text) and text in 0..255) -> text
+      _other -> " NULL "
+    end)
+    |> IO.iodata_to_binary()
+  end
 
   defp in_subquery_fragment(query) when is_binary(query) do
     trimmed = String.trim(query)

@@ -197,10 +197,21 @@ defmodule Selecto.Builder.LateralJoin do
     }
 
     case Selecto.DialectSupport.render_lateral_subquery(adapter, fragment, selecto) do
-      :not_implemented -> build_native_subquery_join(spec, adapter, selecto, subquery)
-      {:ok, sql} -> {sql, []}
-      {:error, %Error{} = error} -> raise Error.to_exception(error)
-      {:error, reason} -> raise ArgumentError, "unsupported lateral subquery: #{inspect(reason)}"
+      :not_implemented ->
+        build_native_subquery_join(spec, adapter, selecto, subquery)
+
+      {:ok, sql} ->
+        {sql, []}
+
+      # The adapter cannot render this LATERAL shape: refused typed through
+      # every execute entry point (Selecto.Builder.ScopeRefusal).
+      {:error, %Error{} = error} ->
+        raise Selecto.Builder.ScopeRefusal, reason: :lateral_unsupported, message: error.message
+
+      {:error, reason} ->
+        raise Selecto.Builder.ScopeRefusal,
+          reason: :lateral_unsupported,
+          message: "unsupported lateral subquery: #{inspect(reason)}"
     end
   end
 
@@ -401,11 +412,15 @@ defmodule Selecto.Builder.LateralJoin do
       {:ok, sql} ->
         sql
 
+      # The adapter cannot render this join shape: refused typed through every
+      # execute entry point (Selecto.Builder.ScopeRefusal).
       {:error, %Error{} = error} ->
-        raise Error.to_exception(error)
+        raise Selecto.Builder.ScopeRefusal, reason: :lateral_unsupported, message: error.message
 
       {:error, reason} ->
-        raise ArgumentError, "unsupported table-function join: #{inspect(reason)}"
+        raise Selecto.Builder.ScopeRefusal,
+          reason: :lateral_unsupported,
+          message: "unsupported table-function join: #{inspect(reason)}"
     end
   end
 

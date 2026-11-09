@@ -65,11 +65,16 @@
   (`placeholder_ambiguous`) rather than leave a placeholder unbound or rebind
   a literal. A nested fragment, given with params or without (`{:exists, sql}`,
   `{:subquery, :in, sql}`, `{field, comp, {:subquery, agg, sql}}`, a nested
-  query's raw filter), refuses typed (`placeholder_count_mismatch`) instead of
+  query's raw filter, a set-operation member, a `with_cte` or
+  `with_recursive_cte` body, iodata with `{:param, value}` markers, whose text
+  may then hold no placeholder of its own), refuses typed (`placeholder_count_mismatch`) instead of
   raising ArgumentError or binding a value of the statement around it when its
   code holds a placeholder its own params do not bind: on PostgreSQL and DuckDB
   a `$n` above its params; on SQLite, MySQL and MariaDB a `?` count that
-  differs from them, and any `?` without params. Block
+  differs from them, and any `?` without params. A set member's or CTE body's
+  own `$n` binds its own params, as when it runs alone. A LATERAL join the
+  adapter cannot render refuses typed (`lateral_unsupported`) instead of
+  raising RuntimeError. Block
   comments nest on DuckDB as on PostgreSQL, and on both a string segment that
   continues an `E'...'` across whitespace holding a newline reads escapes too.
   A placeholder the binding cannot number refuses typed

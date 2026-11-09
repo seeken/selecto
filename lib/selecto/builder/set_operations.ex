@@ -80,8 +80,12 @@ defmodule Selecto.Builder.SetOperations do
     {iodata, _aliases} =
       Sql.build_iodata(selecto, Keyword.take(opts, [:unique_projection_aliases]))
 
-    {_sql, params} = Selecto.SQL.Params.finalize(iodata, adapter: selecto.adapter)
-    {iodata, params}
+    # A member's own placeholders (a raw filter's `$1` naming its first param)
+    # are rebound as its params, and one it does not bind refuses, as for any
+    # nested query (Selecto.SQL.Params.rebind_finalized/3): left as text, it
+    # would bind the statement's earlier values.
+    {sql, params} = Selecto.SQL.Params.finalize(iodata, adapter: selecto.adapter)
+    {Selecto.SQL.Params.rebind_finalized(sql, params, selecto.adapter), params}
   end
 
   # SQLite compound terms must be SELECT statements. Derived tables preserve
