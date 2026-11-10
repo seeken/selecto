@@ -41,28 +41,50 @@ defmodule Selecto.ParamValuesTest do
     {refusal.reason, Selecto.Error.from_reason(refusal)}
   end
 
-  test "dialect rules: non-finite, out-of-range and over-precise decimals, years, float atoms" do
+  test "dialect rules refuse only values the database gets wrong" do
     assert {:error, _, :decimal_non_finite} = ParamValues.check(Decimal.new("NaN"), @mysql)
     assert {:error, _, :decimal_non_finite} = ParamValues.check(Decimal.new("-Infinity"), @double)
 
-    # DECIMAL(65,30): -1e400 has 401 digits, 1e-31 and -1e-50 too many after the point.
-    for value <- ["-1e400", "1e-31", "-1e-50"],
-        do: assert({:error, _, :decimal_range} = ParamValues.check(Decimal.new(value), @mysql))
+    assert {:error, _, :decimal_non_finite} =
+             ParamValues.check(Decimal.new("NaN"), decimal: :finite)
 
-    for value <- ["1.50", "1e-30", "1e64", "0", "-99999.99"],
+    # MySQL and MariaDB read a decimal into nine 9-digit words; one needing
+    # more compares as another number. Decimal.div results and the like fit.
+    digits = fn scale ->
+      coef =
+        String.to_integer(String.duplicate("1", 30) <> String.duplicate("0", scale - 1) <> "4")
+
+      %Decimal{sign: 1, coef: coef, exp: -scale}
+    end
+
+    over = digits.(46)
+
+    for value <- [Decimal.new("-1e400"), Decimal.new("1.5e81"), Decimal.new("1.5e-73"), over],
+        do: assert({:error, _, :decimal_range} = ParamValues.check(value, @mysql))
+
+    fits = digits.(45)
+
+    for value <- ["1.50", "1e-31", "-1e-50", "1e64", "1.5e-71", "0", "-99999.99"],
         do: assert(:ok = ParamValues.check(Decimal.new(value), @mysql))
 
-    # A double: fifteen significant digits, within its range.
+    assert :ok = ParamValues.check(fits, @mysql)
+
+    assert :ok = ParamValues.check(Decimal.div(1, 3), @mysql)
+    assert :ok = ParamValues.check(Decimal.new("-1e400"), decimal: :finite)
+
+    # SQLite: within the double range, however many digits.
     long = %Decimal{sign: 1, coef: 14_999_999_999_999_999_999_999_999_999_999_999_999, exp: -37}
-    assert {:error, _, :decimal_range} = ParamValues.check(long, @double)
+    assert :ok = ParamValues.check(long, @double)
 
     for value <- ["1e-400", "1e400"],
         do: assert({:error, _, :decimal_range} = ParamValues.check(Decimal.new(value), @double))
 
-    for value <- ["1.50", "123456789012345", "1e-300", "0.000"],
+    for value <- ["1.50", "1234567890123456789", "12345678901234567890.123", "1e-300", "0.000"],
         do: assert(:ok = ParamValues.check(Decimal.new(value), @double))
 
-    for value <- [~D[9999-12-31], ~N[0001-01-01 00:00:00]],
+    assert :ok = ParamValues.check(Decimal.from_float(0.1 + 0.2), @double)
+
+    for value <- [~D[9999-12-31], ~N[0001-01-01 00:00:00], ~D[0000-01-01]],
         do: assert(:ok = ParamValues.check(value, @mysql))
 
     for value <- [Date.new!(10_000, 1, 1), NaiveDateTime.new!(10_000, 1, 1, 0, 0, 0)],
@@ -111,12 +133,13 @@ defmodule Selecto.ParamValuesTest do
         |> Selecto.select(["id"])
       )
 
-    assert params == [Decimal.new("1.50")]
+    # Bound as given, as before (a TEXT column declared :decimal compares text).
+    assert params == [" 1.50 "]
 
     {_sql, params} =
       Selecto.to_sql(query() |> Selecto.filter({"score", "1.5"}) |> Selecto.select(["id"]))
 
-    assert params == [1.5]
+    assert params == ["1.5"]
   end
 
   test "a Decimal compared with a float field must be a double" do

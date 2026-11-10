@@ -1,17 +1,22 @@
 defmodule Selecto.SQL.ParamValues do
   @moduledoc false
 
-  # Values a dialect cannot bind faithfully. Bound anyway, the server stores or
-  # compares something else: MySQL and MariaDB take a NaN Decimal as 0, round a
-  # Decimal beyond DECIMAL(65,30), and MariaDB stores a year past 9999 as a zero
-  # date; SQLite keeps a NaN as text and a Decimal past fifteen significant
-  # digits as the nearest double. An adapter refuses such a value typed before
-  # it is bound, in reads (parameter_placeholder/2) and in writes alike.
+  # Values a dialect would get wrong. Bound anyway, the server stores or
+  # compares something else: MySQL and MariaDB take a NaN Decimal as 0, and
+  # compare a Decimal needing more than nine 9-digit words (more than 81 integer
+  # digits, or 72 after the point; measured live) as another number; MariaDB stores a year past 9999 as
+  # a zero date; SQLite keeps a NaN as text and takes a Decimal past the double
+  # range as an infinity or 0. Every other value binds as it always did: a
+  # Decimal.div result or a 20-digit decimal keeps working. An adapter refuses
+  # such a value typed before it is bound, in reads (parameter_placeholder/2)
+  # and in writes (where a server rounding a value to its column's scale is
+  # the column's own behaviour, so only :finite applies).
   #
   # Rules (keyword list):
-  #   decimal: :mysql   - finite, at most 65 digits and 30 of them after the point
-  #   decimal: :double  - finite, at most 15 significant digits, within the double range
-  #   years: true       - Date, NaiveDateTime and DateTime years in 1..9999
+  #   decimal: :finite  - finite
+  #   decimal: :mysql   - finite, its integer and fraction parts within nine 9-digit words
+  #   decimal: :double  - finite, within the double range (a nonzero value stays nonzero)
+  #   years: true       - Date, NaiveDateTime and DateTime years in 0..9999
   #   float_atoms: true - :nan, :inf and :"-inf" (PostgreSQL's float specials)
 
   alias Selecto.Builder.ScopeRefusal
@@ -24,14 +29,15 @@ defmodule Selecto.SQL.ParamValues do
     case Keyword.get(rules, :decimal) do
       nil -> :ok
       _rule when not is_integer(coef) -> non_finite()
+      :finite -> :ok
       :mysql -> mysql_decimal(decimal)
       :double -> double_decimal(decimal)
     end
   end
 
   def check(%module{year: year}, rules) when module in [Date, NaiveDateTime, DateTime] do
-    if Keyword.get(rules, :years, false) and year not in 1..9999,
-      do: {:error, "cannot bind a date or datetime outside the years 1 to 9999", :date_range},
+    if Keyword.get(rules, :years, false) and year not in 0..9999,
+      do: {:error, "cannot bind a date or datetime outside the years 0 to 9999", :date_range},
       else: :ok
   end
 
@@ -115,25 +121,31 @@ defmodule Selecto.SQL.ParamValues do
   defp adapter_label(adapter), do: to_string(adapter)
 
   # DECIMAL(65,30): at most 65 digits, 30 of them after the point.
+  # MySQL and MariaDB read a decimal into nine 9-digit words, its integer and
+  # fraction parts each in whole words (an integer part of at least one). A
+  # value that needs more is cut, and compares as another number (measured
+  # live: 30 integer digits hold 45 after the point, 20 hold 54, none 72; a
+  # large negative value compared as positive).
   defp mysql_decimal(decimal) do
     {precision, scale} = digits(decimal)
+    words = max(ceil_div(precision - scale, 9), 1) + ceil_div(scale, 9)
 
-    if precision > 65 or scale > 30,
-      do: {:error, "cannot bind a decimal outside DECIMAL(65,30)", :decimal_range},
+    if words > 9,
+      do: {:error, "cannot bind a decimal of that many digits", :decimal_range},
       else: :ok
   end
 
-  # A double keeps fifteen significant decimal digits exactly; past that, or
-  # past its range, the value becomes another number.
+  defp ceil_div(n, d), do: div(n + d - 1, d)
+
+  # Past the double range a value becomes an infinity, or 0.
   defp double_decimal(%Decimal{coef: 0}), do: :ok
 
   defp double_decimal(decimal) do
     {coefficient, exponent} = stripped(decimal)
-    significant = length(Integer.digits(coefficient))
-    adjusted = significant + exponent - 1
+    adjusted = length(Integer.digits(coefficient)) + exponent - 1
 
-    if significant > 15 or adjusted > 307 or adjusted < -307,
-      do: {:error, "cannot bind a decimal beyond double precision", :decimal_range},
+    if adjusted > 307 or adjusted < -307,
+      do: {:error, "cannot bind a decimal beyond the double range", :decimal_range},
       else: :ok
   end
 

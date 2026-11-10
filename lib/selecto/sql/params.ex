@@ -76,9 +76,12 @@ defmodule Selecto.SQL.Params do
     # are rebound by number, however often each appears.
     if IO.iodata_to_binary(placeholder.(1, hd(params))) ==
          IO.iodata_to_binary(placeholder.(2, hd(params))) do
-      finder = fn code -> :binary.matches(code, hd(placeholders)) end
+      # A nested fragment's text writes the bare marker (`?`), whatever the
+      # adapter renders around a value (MySQL's `(? + 0)` for a Decimal).
+      marker = IO.iodata_to_binary(adapter.placeholder(1))
+      finder = fn code -> :binary.matches(code, marker) end
       pieces = pieces(sql, Selecto.AdapterSupport.adapter_name(adapter), finder, length(params))
-      rebind_repeated(pieces, params, hd(placeholders))
+      rebind_repeated(pieces, params, marker)
     else
       pattern = numbered_pattern(placeholders)
       finder = fn code -> Regex.scan(pattern, code, return: :index) |> Enum.map(&hd/1) end

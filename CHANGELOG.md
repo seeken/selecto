@@ -3,6 +3,18 @@
 
 ## Unreleased
 
+- The bind rules refuse only values a database gets wrong, measured live; a
+  value main stored or compared correctly works as it did. MySQL and MariaDB
+  refuse a Decimal needing more than nine 9-digit words (past 81 integer
+  digits, or 72 after the point); Decimal.div results and other long
+  fractions bind and compare exactly. SQLite refuses only Decimals past the
+  double range (integral 19-digit values, shortest forms of doubles and
+  20-digit TEXT decimals work). Writes refuse only non-finite values (and
+  years past 9999): the server rounds to the column's scale as before. Years
+  0..9999 bind. A decimal or float field's numeric text, and a UUID field's
+  text, are checked and bind as given, so a TEXT column declared :decimal and
+  upper-case or 32-hex UUID storage compare as they did, in reads and writes
+  alike. A nested fragment's `?` is found however the adapter wraps a value.
 - A filter value its field cannot hold refuses `invalid_filter_value` instead
   of comparing as something else: text in a decimal or float field that is no
   finite number (NaN, Infinity, "abc"; MySQL and SQLite compared it as 0),

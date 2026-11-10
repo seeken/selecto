@@ -1224,8 +1224,11 @@ defmodule Selecto.Builder.Sql.Where do
         else: :error
 
     case parsed do
+      # It binds as given, as before: a TEXT column declared :decimal still
+      # compares it as text.
       {%Decimal{coef: coef} = decimal, ""} when is_integer(coef) ->
-        if type == :float, do: double_decimal!(decimal) |> Decimal.to_float(), else: decimal
+        if type == :float, do: double_decimal!(decimal)
+        value
 
       _other ->
         invalid_filter_value!(type, "Filter value is not a number")
@@ -1304,13 +1307,15 @@ defmodule Selecto.Builder.Sql.Where do
 
   defp date_like_type(conf), do: Selecto.Temporal.date_like_type(conf)
 
-  # A :uuid compared as stored text takes its canonical form (lowercase,
-  # dashed), whatever form it was given in; text that is no UUID refuses
-  # typed, as PostgreSQL's uuid type refuses it, rather than compare as text
-  # (MariaDB's padded compare would match it with trailing spaces).
+  # A :uuid compared as stored text must read as a UUID; it binds as given,
+  # as the stored text may be in any case or form (a case-sensitive column of
+  # upper-case UUIDs, 32-hex storage). Text that is no UUID refuses typed, as
+  # PostgreSQL's uuid type refuses it, rather than compare as text (MariaDB's
+  # padded compare would match it with trailing spaces).
   defp text_uuid(:uuid, value) do
     if String.valid?(value) and byte_size(value) != 16 do
-      value |> UUID.string_to_binary!() |> UUID.binary_to_string!()
+      _binary = UUID.string_to_binary!(value)
+      value
     else
       invalid_filter_value!(:uuid, "Filter value is not a UUID")
     end
