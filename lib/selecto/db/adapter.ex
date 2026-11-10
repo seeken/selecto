@@ -176,11 +176,14 @@ defmodule Selecto.DB.Adapter do
 
   @doc """
   Optional. The right operand of a comparison Selecto generates for a Decimal
-  `{:param, value}`, by operator class (`:equality` for =, != and IN lists;
-  `:range` for <, <=, >, >= and BETWEEN), when the bare placeholder would not
-  compare exactly. Host-written SQL text and markers are never passed here.
+  `{:param, value}`, by operator class (`:equality` for = and IN lists;
+  `:inequality` for <>, != and NOT IN lists; `:range` for <, <=, >, >= and
+  BETWEEN), when the bare placeholder would not compare exactly. It may raise
+  the adapter's typed parameter refusal for a value no rendering compares
+  exactly. Host-written SQL text and markers are never passed here.
   """
-  @callback comparison_operand({:param, Decimal.t()}, :equality | :range) :: iodata()
+  @callback comparison_operand({:param, Decimal.t()}, :equality | :inequality | :range) ::
+              iodata()
   @callback quote_identifier(String.t()) :: String.t()
   @callback format_datetime(iodata(), String.t()) :: iodata()
   @callback rollup_sql(iodata()) :: iodata()

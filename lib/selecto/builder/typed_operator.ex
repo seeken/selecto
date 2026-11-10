@@ -183,7 +183,7 @@ defmodule Selecto.Builder.TypedOperator do
       [" ", if(negate?, do: "NOT ", else: ""), "(", equalities, ") "]
     else
       operator = if negate?, do: " NOT IN (", else: " IN ("
-      rights = Enum.map(rights, &operand(selecto, "=", &1))
+      rights = Enum.map(rights, &operand(selecto, if(negate?, do: "<>", else: "="), &1))
       [" ", left, operator, Enum.intersperse(rights, ", "), ") "]
     end
   end
@@ -254,20 +254,21 @@ defmodule Selecto.Builder.TypedOperator do
     end
   end
 
-  @equality ["=", "!=", "<>"]
+  @inequality ["!=", "<>"]
   @range ["<", "<=", ">", ">="]
 
   @doc false
   # A Decimal param in a comparison Selecto generates, rendered as the
   # adapter compares it exactly for that operator class
   # (comparison_operand/2: MySQL wraps it for range comparisons only, MariaDB
-  # for every comparison). Host text and host markers are never touched.
+  # for every comparison it can). Host text and host markers are never touched.
   def operand(selecto, operator, {:param, %Decimal{}} = param) do
     adapter = Map.get(selecto || %{}, :adapter)
 
     class =
       cond do
-        operator in @equality -> :equality
+        operator == "=" -> :equality
+        operator in @inequality -> :inequality
         operator in @range -> :range
         true -> nil
       end

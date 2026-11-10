@@ -20,9 +20,11 @@
   `?` is found however the adapter wraps a value.
 - New optional adapter callback `comparison_operand/2`: the adapter renders
   the Decimal operand of Selecto's own generated comparisons by operator
-  class (`:equality` for `=`, `<>`, IN and NOT IN; `:range` for `<`, `<=`,
-  `>`, `>=` and BETWEEN). Host SQL text and `{:param, _}` markers are never
-  rewritten. MySQL renders ranges as `(? + 0)`; MariaDB every comparison.
+  class (`:equality` for `=` and IN; `:inequality` for `<>` and NOT IN;
+  `:range` for `<`, `<=`, `>`, `>=` and BETWEEN), and may refuse a value no
+  rendering compares exactly (`Selecto.SQL.ParamValues.refusal!/3`). Host SQL
+  text and `{:param, _}` markers are never rewritten. MySQL renders ranges as
+  `(? + 0)`; MariaDB every comparison of a value up to 38 fraction digits.
 - A filter value its field cannot hold refuses `invalid_filter_value` instead
   of comparing as something else: text in a decimal or float field that is no
   finite number (NaN, Infinity, "abc"; MySQL and SQLite compared it as 0),

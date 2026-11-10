@@ -156,7 +156,10 @@ defmodule Selecto.SQL.ParamValues do
     end
   end
 
-  defp refusal!(adapter, message, feature) do
+  @doc false
+  # The read-side refusal for a value an adapter finds unbindable itself
+  # (MariaDB's comparison_operand/2).
+  def refusal!(adapter, message, feature) do
     ScopeRefusal.unsupported!(
       Selecto.Error.validation_error(adapter_label(adapter) <> " " <> message, %{
         adapter: adapter,
