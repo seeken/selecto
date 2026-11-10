@@ -106,33 +106,33 @@ defmodule Selecto.ParamValuesTest do
     assert :ok = ParamValues.check(true, @mysql)
   end
 
-  test "SQLite refuses only a Decimal that overflows a double or underflows to 0" do
+  test "SQLite refuses only a Decimal its 19-digit read turns to an infinity or to 0" do
     max = %Decimal{sign: 1, coef: 17_976_931_348_623_157, exp: 292}
 
-    last = %Decimal{
+    # SQLite keeps 19 significant digits, cut: everything below
+    # 1.797693134862315808e308 stores the largest double (measured live).
+    band = %Decimal{
       sign: 1,
-      coef: 1_797_693_134_862_315_807_937_289_714_053_034_150_799_341_327_710_735,
+      coef: 1_797_693_134_862_315_807_999_999_999_999_999_999_999_999_999_999_999,
       exp: 257
     }
 
-    first_over = %Decimal{
-      sign: 1,
-      coef: 1_797_693_134_862_315_807_937_289_714_053_034_150_799_341_327_710_736,
-      exp: 257
-    }
-
+    first_over = %Decimal{sign: 1, coef: 1_797_693_134_862_315_808, exp: 290}
+    long_over = %Decimal{sign: 1, coef: 17_976_931_348_623_158_080_000_001, exp: 283}
     min = %Decimal{sign: 1, coef: 49, exp: -325}
-    half_min = %Decimal{sign: 1, coef: 2_470_328_229_206_232_720_882_538_326, exp: -351}
-    above_half_min = %Decimal{sign: 1, coef: 2_470_328_229_206_232_720_882_538_327, exp: -351}
+    first_kept = %Decimal{sign: 1, coef: 2_470_328_229_206_232_721, exp: -342}
+    # Cut to 2.470328229206232720e-324, which SQLite reads as 0.0.
+    last_zero = %Decimal{sign: 1, coef: 2_470_328_229_206_232_720_999, exp: -345}
 
     for value <- [
           Decimal.new("1e308"),
           max,
-          last,
+          band,
+          %Decimal{band | sign: -1},
           Decimal.negate(max),
           Decimal.new("1e-308"),
           min,
-          above_half_min,
+          first_kept,
           Decimal.negate(min),
           Decimal.new("0E-400")
         ],
@@ -140,9 +140,11 @@ defmodule Selecto.ParamValuesTest do
 
     for value <- [
           first_over,
+          long_over,
           Decimal.new("1.7976931348623159e308"),
           %Decimal{first_over | sign: -1},
-          half_min,
+          last_zero,
+          %Decimal{sign: 1, coef: 2_470_328_229_206_232_720_882_538_326, exp: -351},
           Decimal.new("2.4e-324"),
           Decimal.new("-1e-400")
         ],
@@ -173,7 +175,7 @@ defmodule Selecto.ParamValuesTest do
           "{9a3c1f7e-2b4d-4e8a-9c1b-7d2e3f4a5b6c}",
           " 9a3c1f7e-2b4d-4e8a-9c1b-7d2e3f4a5b6c",
           "not-a-uuid",
-          "0123456789abcdef",
+          "0123456789abcde",
           <<0xFF>>
         ] do
       assert {:error,
@@ -211,9 +213,33 @@ defmodule Selecto.ParamValuesTest do
           "9a3c1f7e-2b4d-4e8a-9c1b-7d2e3f4a5b6c",
           "9A3C1F7E-2B4D-4E8A-9C1B-7D2E3F4A5B6C",
           "9a3c1f7e2b4d4e8a9c1b7d2e3f4a5b6c",
-          "urn:uuid:9a3c1f7e-2b4d-4e8a-9c1b-7d2e3f4a5b6c"
+          "urn:uuid:9a3c1f7e-2b4d-4e8a-9c1b-7d2e3f4a5b6c",
+          # 16 bytes are a raw UUID (BINARY(16) or BLOB storage).
+          UUID.string_to_binary!("9a3c1f7e-2b4d-4e8a-9c1b-7d2e3f4a5b6c"),
+          "0123456789abcdef"
         ],
         do: assert(:ok = ParamValues.write_refusal(command.(value, types), rules, :mysql))
+
+    # A value from the write's context is checked as a literal is.
+    {:ok, from_context} =
+      Selecto.Write.Command.new(%{
+        operation: :insert,
+        relation: "p",
+        assignments: [%{field: :uid, value: {:context, :owner}}],
+        metadata: types
+      })
+
+    assert {:error, %Selecto.Write.Error{details: %{unsupported_feature: :uuid_text}}} =
+             ParamValues.write_refusal(from_context, rules, :mysql,
+               context: %{"owner" => "not-a-uuid"}
+             )
+
+    assert :ok =
+             ParamValues.write_refusal(from_context, rules, :mysql,
+               context: %{owner: "9a3c1f7e-2b4d-4e8a-9c1b-7d2e3f4a5b6c"}
+             )
+
+    assert :ok = ParamValues.write_refusal(from_context, rules, :mysql)
   end
 
   test "a write's first unbindable value refuses as a write error" do

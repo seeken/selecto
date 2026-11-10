@@ -24,6 +24,7 @@ defmodule Selecto.Builder.Sql do
   import Selecto.Builder.Sql.Helpers
   # import Selecto.Types - removed to avoid circular dependency
 
+  alias Selecto.Builder.TypedOperator
   alias Selecto.Builder.ExactCompare
   alias Selecto.AdapterSQL
   alias Selecto.SQL.Params
@@ -1516,34 +1517,31 @@ defmodule Selecto.Builder.Sql do
     [build_selector_string(selecto, join, field), " is null"]
   end
 
-  defp build_param_filter_clause(selecto, join, field, {:not_eq, value}) do
-    [build_selector_string(selecto, join, field), " != ", {:param, value}]
-  end
+  # A join's parameterized filter compares as a WHERE filter does: through
+  # TypedOperator, so the adapter renders a Decimal operand for its operator
+  # class (MySQL rounded a bare range operand to the column's scale, MariaDB
+  # rounded a bare value into an indexed key).
+  @param_filter_operators %{not_eq: "!=", gt: ">", gte: ">=", lt: "<", lte: "<="}
 
-  defp build_param_filter_clause(selecto, join, field, {:gt, value}) do
-    [build_selector_string(selecto, join, field), " > ", {:param, value}]
-  end
-
-  defp build_param_filter_clause(selecto, join, field, {:gte, value}) do
-    [build_selector_string(selecto, join, field), " >= ", {:param, value}]
-  end
-
-  defp build_param_filter_clause(selecto, join, field, {:lt, value}) do
-    [build_selector_string(selecto, join, field), " < ", {:param, value}]
-  end
-
-  defp build_param_filter_clause(selecto, join, field, {:lte, value}) do
-    [build_selector_string(selecto, join, field), " <= ", {:param, value}]
+  defp build_param_filter_clause(selecto, join, field, {op, value})
+       when is_map_key(@param_filter_operators, op) do
+    TypedOperator.compare(
+      selecto,
+      nil,
+      build_selector_string(selecto, join, field),
+      Map.fetch!(@param_filter_operators, op),
+      {:param, value}
+    )
   end
 
   defp build_param_filter_clause(selecto, join, field, {:between, min_value, max_value}) do
-    [
+    TypedOperator.between(
+      selecto,
+      nil,
       build_selector_string(selecto, join, field),
-      " between ",
       {:param, min_value},
-      " and ",
       {:param, max_value}
-    ]
+    )
   end
 
   defp build_param_filter_clause(selecto, join, field, {:in, values}) when is_list(values) do
@@ -1554,18 +1552,21 @@ defmodule Selecto.Builder.Sql do
       placeholders = Enum.map(values, fn value -> {:param, value} end)
 
       case ExactCompare.column?(selecto, field) do
-        false -> [selector, " in (", Enum.intersperse(placeholders, ", "), ")"]
+        false -> TypedOperator.in_list(selecto, nil, selector, placeholders, false)
         mode -> ExactCompare.in_list(selector, placeholders, mode)
       end
     end
   end
 
   defp build_param_filter_clause(selecto, join, field, value) do
-    ExactCompare.eq(
-      build_selector_string(selecto, join, field),
-      {:param, value},
-      ExactCompare.column?(selecto, field)
-    )
+    selector = build_selector_string(selecto, join, field)
+
+    mode = ExactCompare.column?(selecto, field)
+
+    # PostgreSQL's typed operators keep their explicit pg_catalog `=`.
+    if mode == false and not TypedOperator.enabled?(nil),
+      do: TypedOperator.compare(selecto, nil, selector, "=", {:param, value}),
+      else: ExactCompare.eq(selector, {:param, value}, mode)
   end
 
   defp resolve_on_side(selecto, default_join, field_ref) when is_binary(field_ref) do

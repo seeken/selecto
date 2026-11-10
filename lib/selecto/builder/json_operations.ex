@@ -61,7 +61,7 @@ defmodule Selecto.Builder.JsonOperations do
          }) do
       {:ok, sql} ->
         sql
-        |> add_filter_comparison(spec, clause)
+        |> add_filter_comparison(spec, clause, adapter)
         |> add_alias(spec.alias, adapter, clause)
 
       {:error, %Error{} = error} ->
@@ -107,17 +107,29 @@ defmodule Selecto.Builder.JsonOperations do
     end
   end
 
-  defp add_filter_comparison(sql, %Spec{options: options}, :filter) do
+  # A generated comparison: the adapter renders a Decimal operand for its
+  # operator class, as a field filter's (TypedOperator.operand/3).
+  defp add_filter_comparison(sql, %Spec{options: options}, :filter, adapter) do
     case Map.get(options || %{}, :comparison) do
       {operator, value} ->
-        ["(", sql, " ", comparison_operator(operator), " ", {:param, value}, ")"]
+        operator = comparison_operator(operator)
+
+        [
+          "(",
+          sql,
+          " ",
+          operator,
+          " ",
+          Selecto.Builder.TypedOperator.operand(%{adapter: adapter}, operator, {:param, value}),
+          ")"
+        ]
 
       nil ->
         sql
     end
   end
 
-  defp add_filter_comparison(sql, _spec, _clause), do: sql
+  defp add_filter_comparison(sql, _spec, _clause, _adapter), do: sql
 
   defp comparison_operator(operator) when operator in [:=, :==], do: "="
   defp comparison_operator(operator) when operator in [:!=, :<>], do: "<>"

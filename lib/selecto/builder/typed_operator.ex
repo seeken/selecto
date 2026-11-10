@@ -280,6 +280,47 @@ defmodule Selecto.Builder.TypedOperator do
 
   def operand(_selecto, _operator, right), do: right
 
+  @doc false
+  # A write predicate's operand text (`?`) for a single bound value, rendered
+  # as the adapter renders the same comparison in a read (comparison_operand/2
+  # by class), so a write touches the rows the read returns. A value the
+  # adapter refuses returns a write error.
+  @spec write_operand(module(), :equality | :inequality | :range, list(), String.t()) ::
+          {:ok, String.t()} | {:error, Selecto.Write.Error.t()}
+  def write_operand(adapter, class, [%Decimal{} = value], text) do
+    if Selecto.AdapterSupport.callback_available?(adapter, :comparison_operand, 2) do
+      rendered =
+        {:param, value}
+        |> adapter.comparison_operand(class)
+        |> List.wrap()
+        |> List.flatten()
+        |> Enum.map(fn
+          {:param, _} -> text
+          piece -> piece
+        end)
+        |> IO.iodata_to_binary()
+
+      {:ok, rendered}
+    else
+      {:ok, text}
+    end
+  rescue
+    refusal in Selecto.Builder.ScopeRefusal ->
+      error = Selecto.Error.from_reason(refusal)
+
+      {:error,
+       Selecto.Write.Error.new(:invalid_value, error.message,
+         details: Map.put(error.details, :reason, :parameter_unbindable)
+       )}
+  end
+
+  def write_operand(_adapter, _class, _params, text), do: {:ok, text}
+
+  @doc false
+  def write_class(operator) when operator in [:eq], do: :equality
+  def write_class(operator) when operator in [:neq], do: :inequality
+  def write_class(_operator), do: :range
+
   # R50: an operator in an extension's schema (commonly writable) takes
   # operands cast to the member's own type, the subquery's column included,
   # so nothing planted beside it over a domain can be chosen.

@@ -3,6 +3,27 @@
 
 ## Unreleased
 
+- SQLite's double rule models SQLite's own read of a number (19 significant
+  digits, cut, then converted): a Decimal refuses only when that read is an
+  infinity (its cut at or past 1.797693134862315808e308) or 0.0 for a nonzero
+  value (its cut at or below 2.470328229206232720e-324). Values just under
+  the overflow bound bind again and store the largest double, as before.
+- A :uuid filter or write value of 16 bytes is a raw UUID (BINARY(16) or
+  BLOB storage, as Ecto's MyXQL adapter keeps UUIDs) and binds as given, in
+  reads and writes, as before. The :uuid write rule also checks values the
+  write takes from its context.
+- An adapter declaring `:uuid_cast_compare` (DuckDB) compares a :uuid filter
+  as a UUID: the value binds as its canonical text inside
+  `Selecto.SQL.TypedParam`, whose placeholder the adapter renders with its
+  cast; the parameter list holds the plain text.
+- `join_parameterize` ON-clause filters compare through TypedOperator, as
+  WHERE filters do, so a Decimal operand renders for its operator class (MySQL
+  rounded a bare range operand to the column's scale, MariaDB rounded a bare
+  value into an indexed key; both before this branch too). A JSON operation's
+  filter comparison does the same.
+- `TypedOperator.write_operand/4`: write compilers render a write
+  predicate's Decimal operand as the adapter renders the same read
+  comparison, so a write touches the rows its read returns.
 - The bind rules refuse only values a database gets wrong, measured live; a
   value main stored or compared correctly works as it did. MySQL and MariaDB
   refuse a Decimal needing more than nine 9-digit words (past 81 integer
