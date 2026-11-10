@@ -883,6 +883,27 @@ defmodule Selecto.Builder.Sql.Where do
   end
 
   defp build_list_clause(selecto, selector, typed_values, negate?, _exact?, type) do
+    cond do
+      # DuckDB casts an IN list to the column's DECIMAL type, rounding a
+      # value of higher scale (1e-31 matched 0.00); each value is compared
+      # as `=` / `<>` compares it, which keeps its scale.
+      AdapterSupport.adapter_name(Map.get(selecto, :adapter)) == :duckdb and
+          Enum.any?(typed_values, &is_struct(&1, Decimal)) ->
+        {operator, joiner} = if negate?, do: {" <> ", ") AND ("}, else: {" = ", ") OR ("}
+
+        comparisons =
+          typed_values
+          |> Enum.map(&[selector, operator, {:param, &1}])
+          |> Enum.intersperse(joiner)
+
+        [" ((", comparisons, ")) "]
+
+      true ->
+        build_standard_list_clause(selecto, selector, typed_values, negate?, type)
+    end
+  end
+
+  defp build_standard_list_clause(selecto, selector, typed_values, negate?, type) do
     if AdapterSQL.array_any_comparison?(selecto) do
       TypedOperator.any_array(selecto, type, selector, {:param, typed_values}, negate?)
     else
@@ -1159,25 +1180,101 @@ defmodule Selecto.Builder.Sql.Where do
 
   defp to_type(:integer, value) when is_bitstring(value), do: parse_integer!(:integer, value)
 
+  # A decimal or float field's text value must read as a finite number; it
+  # binds as that number. NaN, infinity, other text and structured values
+  # refuse typed (MySQL and SQLite would otherwise compare them as 0).
+  defp to_type(type, value) when type in [:decimal, :float] and is_binary(value),
+    do: parse_number!(type, value)
+
+  defp to_type(:float, %Decimal{} = value), do: double_decimal!(value)
+
+  # A date field's text value must read as a date (as datetime fields' text
+  # does, Selecto.Temporal); it binds as that date.
+  defp to_type(:date, value) when is_binary(value) do
+    with true <- String.valid?(value),
+         {:ok, date} <- value |> String.trim() |> String.slice(0, 10) |> Date.from_iso8601() do
+      date
+    else
+      _other -> invalid_filter_value!(:date, "Filter value is not a valid date or datetime")
+    end
+  end
+
+  # A text field's value must be text: invalid UTF-8 or a NUL character
+  # (which MySQL and MariaDB compare as if absent, and PostgreSQL rejects)
+  # refuses typed.
+  defp to_type(type, value) when type in [:string, :text] and is_binary(value) do
+    if String.valid?(value) and not String.contains?(value, <<0>>),
+      do: value,
+      else: invalid_filter_value!(type, "Filter value is not valid text")
+  end
+
+  defp to_type(type, value)
+       when type in [:id, :integer, :decimal, :float] and
+              ((is_map(value) and not is_struct(value, Decimal)) or is_tuple(value)),
+       do: invalid_filter_value!(type, "Filter value is not a number")
+
   defp to_type(_t, val) do
     val
+  end
+
+  defp parse_number!(type, value) do
+    parsed =
+      if String.valid?(value),
+        do: Decimal.parse(String.trim(value)),
+        else: :error
+
+    case parsed do
+      {%Decimal{coef: coef} = decimal, ""} when is_integer(coef) ->
+        if type == :float, do: double_decimal!(decimal) |> Decimal.to_float(), else: decimal
+
+      _other ->
+        invalid_filter_value!(type, "Filter value is not a number")
+    end
+  end
+
+  # A finite Decimal compared with a float field must be a double: one beyond
+  # the double range, or a nonzero one that underflows to zero, would compare
+  # as infinity or 0.0.
+  defp double_decimal!(%Decimal{coef: coef} = decimal) when is_integer(coef) do
+    float =
+      try do
+        Decimal.to_float(decimal)
+      rescue
+        _error -> :out_of_range
+      end
+
+    cond do
+      float == :out_of_range ->
+        invalid_filter_value!(:float, "Filter value is outside the double range")
+
+      float == 0.0 and coef != 0 ->
+        invalid_filter_value!(:float, "Filter value is outside the double range")
+
+      true ->
+        decimal
+    end
+  end
+
+  defp double_decimal!(decimal), do: decimal
+
+  defp invalid_filter_value!(type, message) do
+    Selecto.Builder.ScopeRefusal.unsupported!(
+      Error.validation_error(message, %{type: type, unsupported_feature: :filter_value}),
+      :invalid_filter_value
+    )
   end
 
   # A filter value given as text for an integer field must read as one; one
   # that does not refuses typed rather than raise from the compile.
   defp parse_integer!(type, value) do
-    case value |> String.trim() |> Integer.parse() do
+    parsed = if String.valid?(value), do: value |> String.trim() |> Integer.parse(), else: :error
+
+    case parsed do
       {integer, ""} ->
         integer
 
       _other ->
-        Selecto.Builder.ScopeRefusal.unsupported!(
-          Error.validation_error("Filter value is not an integer", %{
-            type: type,
-            unsupported_feature: :filter_value
-          }),
-          :invalid_filter_value
-        )
+        invalid_filter_value!(type, "Filter value is not an integer")
     end
   end
 
@@ -1193,19 +1290,35 @@ defmodule Selecto.Builder.Sql.Where do
       type = Map.get(conf, :type)
 
       # Adapters that store UUIDs as text (MySQL and MariaDB map :uuid and
-      # :binary_id to CHAR(36)) bind the string form; the others bind the
-      # 16-byte binary.
+      # :binary_id to CHAR(36); SQLite and DuckDB compare text) bind the string
+      # form; the others bind the 16-byte binary.
       if type in [:uuid, :binary_id] and is_binary(value) and
            Selecto.AdapterSupport.supports_feature?(
              Map.get(selecto, :adapter),
              :uuid_text_storage
            ),
-         do: value,
+         do: text_uuid(type, value),
          else: to_type(type, value)
     end
   end
 
   defp date_like_type(conf), do: Selecto.Temporal.date_like_type(conf)
+
+  # A :uuid compared as stored text takes its canonical form (lowercase,
+  # dashed), whatever form it was given in; text that is no UUID refuses
+  # typed, as PostgreSQL's uuid type refuses it, rather than compare as text
+  # (MariaDB's padded compare would match it with trailing spaces).
+  defp text_uuid(:uuid, value) do
+    if String.valid?(value) and byte_size(value) != 16 do
+      value |> UUID.string_to_binary!() |> UUID.binary_to_string!()
+    else
+      invalid_filter_value!(:uuid, "Filter value is not a UUID")
+    end
+  rescue
+    ArgumentError -> invalid_filter_value!(:uuid, "Filter value is not a UUID")
+  end
+
+  defp text_uuid(_type, value), do: value
 
   defp raw_literal!(selecto, conf, value) when is_binary(value) and is_map(conf) do
     if ExactCompare.in_scope?() and not computed?(conf) and Map.get(conf, :field) do
@@ -1926,6 +2039,15 @@ defmodule Selecto.Builder.Sql.Where do
 
   defp verbatim_fragment(_selecto, query), do: query
 
+  defp element_text(element) do
+    to_string(element)
+  rescue
+    Protocol.UndefinedError ->
+      raise Selecto.Builder.ScopeRefusal,
+        reason: :placeholder_unsupported,
+        message: "A nested SQL fragment holds an element with no SQL text form"
+  end
+
   defp neutral_text(query) do
     query
     |> List.wrap()
@@ -1934,8 +2056,9 @@ defmodule Selecto.Builder.Sql.Where do
       list when is_list(list) -> neutral_text(list)
       text when is_binary(text) -> text
       # Anything else is SQL text the way Selecto.SQL.Params.finalize/2
-      # renders it (integers, atoms, nil, Decimals).
-      other -> to_string(other)
+      # renders it (integers, atoms, nil, Decimals); an element with no text
+      # form (a map, a tuple, a pid) refuses typed.
+      other -> element_text(other)
     end)
     |> IO.iodata_to_binary()
   end

@@ -170,7 +170,7 @@ defmodule Selecto.Temporal do
   defp to_datetime(value, :date) when is_binary(value) do
     case Date.from_iso8601(String.slice(value, 0, 10)) do
       {:ok, date} -> date
-      _ -> raise ArgumentError, "invalid date value #{inspect(value)}"
+      _ -> invalid_temporal!(:date)
     end
   end
 
@@ -197,11 +197,22 @@ defmodule Selecto.Temporal do
         to_datetime(date, type)
 
       true ->
-        raise ArgumentError, "invalid datetime value #{inspect(value)}"
+        invalid_temporal!(type)
     end
   end
 
   defp to_datetime(value, _type), do: value
+
+  # Text that reads as no date or datetime refuses typed, naming no value.
+  defp invalid_temporal!(type) do
+    Selecto.Builder.ScopeRefusal.unsupported!(
+      Selecto.Error.validation_error("Filter value is not a valid date or datetime", %{
+        type: type,
+        unsupported_feature: :filter_value
+      }),
+      :invalid_filter_value
+    )
+  end
 
   defp datetime_to_epoch(%Date{} = value, storage) do
     value

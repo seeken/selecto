@@ -3,6 +3,20 @@
 
 ## Unreleased
 
+- A filter value its field cannot hold refuses `invalid_filter_value` instead
+  of comparing as something else: text in a decimal or float field that is no
+  finite number (NaN, Infinity, "abc"; MySQL and SQLite compared it as 0),
+  a map or tuple in a numeric field, a Decimal no double holds compared with a
+  float field, text in a text field that is invalid UTF-8 or holds a NUL, and
+  date or datetime text that reads as no date (no longer an ArgumentError
+  quoting the value). A decimal, float or date field's text binds as the
+  number or date it reads as. On adapters that compare UUIDs as text, a UUID
+  in any text form binds its canonical form and text that is no UUID refuses.
+  `Selecto.SQL.ParamValues` holds the per-dialect rules adapters apply before
+  binding, in reads and writes. On DuckDB an IN / NOT IN list holding a
+  Decimal compares each value as `=` / `<>` does (the list cast rounded a
+  higher-scale value). Marker iodata holding an element with no SQL text form
+  (a map, tuple or pid) refuses typed.
 - A failure while an `execute_stream` stream is enumerated raises
   `Selecto.Error.Refused` carrying the type, message and details the
   non-stream entry points return for the same failure
