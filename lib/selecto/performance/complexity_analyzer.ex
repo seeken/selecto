@@ -377,9 +377,10 @@ defmodule Selecto.Performance.ComplexityAnalyzer do
       RuntimeError ->
         count_configured_joins(selecto.config.joins)
 
-      # A shape the adapter cannot render, as it was before it raised typed.
+      # A shape the adapter cannot render (an adapter error, or a LATERAL,
+      # unnest or table-function join), as it was before it raised typed.
       refusal in Selecto.Builder.ScopeRefusal ->
-        if match?(%Selecto.Error{}, refusal.error),
+        if match?(%Selecto.Error{}, refusal.error) or refusal.reason == :lateral_unsupported,
           do: count_configured_joins(selecto.config.joins),
           else: reraise(refusal, __STACKTRACE__)
     end

@@ -1145,11 +1145,7 @@ defmodule Selecto.Builder.Sql.Where do
     value
   end
 
-  defp to_type(:id, value) when is_bitstring(value) do
-    value
-    |> String.trim()
-    |> String.to_integer()
-  end
+  defp to_type(:id, value) when is_bitstring(value), do: parse_integer!(:id, value)
 
   defp to_type(type, value) when type in [:uuid, :binary_id] and is_binary(value) do
     UUID.string_to_binary!(value)
@@ -1161,14 +1157,28 @@ defmodule Selecto.Builder.Sql.Where do
     value
   end
 
-  defp to_type(:integer, value) when is_bitstring(value) do
-    value
-    |> String.trim()
-    |> String.to_integer()
-  end
+  defp to_type(:integer, value) when is_bitstring(value), do: parse_integer!(:integer, value)
 
   defp to_type(_t, val) do
     val
+  end
+
+  # A filter value given as text for an integer field must read as one; one
+  # that does not refuses typed rather than raise from the compile.
+  defp parse_integer!(type, value) do
+    case value |> String.trim() |> Integer.parse() do
+      {integer, ""} ->
+        integer
+
+      _other ->
+        Selecto.Builder.ScopeRefusal.unsupported!(
+          Error.validation_error("Filter value is not an integer", %{
+            type: type,
+            unsupported_feature: :filter_value
+          }),
+          :invalid_filter_value
+        )
+    end
   end
 
   defp to_field_value(selecto, conf, value) do
@@ -1923,9 +1933,9 @@ defmodule Selecto.Builder.Sql.Where do
       {:param, _value} -> " NULL "
       list when is_list(list) -> neutral_text(list)
       text when is_binary(text) -> text
-      # Rendered as SQL text the way Selecto.SQL.Params.finalize/2 renders it.
-      number when is_integer(number) or is_float(number) -> to_string(number)
-      _other -> " NULL "
+      # Anything else is SQL text the way Selecto.SQL.Params.finalize/2
+      # renders it (integers, atoms, nil, Decimals).
+      other -> to_string(other)
     end)
     |> IO.iodata_to_binary()
   end

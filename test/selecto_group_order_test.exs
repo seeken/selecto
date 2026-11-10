@@ -36,6 +36,17 @@ defmodule Selecto.GroupOrderTest do
              Selecto.Builder.Sql.build(query, [])
   end
 
+  test "the complexity analyzer reads a whole-query rollup's joins without a ROLLUP clause" do
+    query = rollup_dispatch_query()
+
+    # The adapter renders the statement itself (render_rollup/2) and has no
+    # rollup_sql/1: the analyzer's components group on the dimensions.
+    assert {:ok, %Selecto.Performance.ComplexityAnalyzer{}} =
+             Selecto.Performance.ComplexityAnalyzer.analyze(query)
+
+    assert %{joins_in_order: _} = Selecto.Builder.Sql.benchmark_components(query)
+  end
+
   test "whole-query rollup callback is skipped for ordinary grouping" do
     query = put_in(rollup_dispatch_query().set.group_by, ["region"])
     assert {sql, _, []} = Selecto.Builder.Sql.build(query, [])
@@ -154,9 +165,13 @@ defmodule Selecto.GroupOrderTest do
       |> Selecto.group_by(rollup: ["region"])
       |> Selecto.order_by([{"region", :asc}])
 
-    assert_raise ArgumentError,
-                 ~r/does not implement rollup rendering/,
-                 fn -> Selecto.gen_sql(selecto, []) end
+    refusal =
+      assert_raise Selecto.Builder.ScopeRefusal,
+                   ~r/does not implement rollup rendering/,
+                   fn -> Selecto.gen_sql(selecto, []) end
+
+    assert %Selecto.Error{type: :validation_error, details: %{unsupported_feature: :rollup}} =
+             Selecto.Error.from_reason(refusal)
   end
 
   test "ROLLUP supports linked grouping-set steps" do
