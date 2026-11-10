@@ -3,6 +3,12 @@
 
 ## Unreleased
 
+- DuckDB: an IN / NOT IN list of two or more members holding a Decimal renders
+  as one correlated subquery over a derived table that projects each Decimal
+  (`%Selecto.SQL.TypedParam{cast: :projected}`, when the adapter exports
+  `projected_parameters?/0`), not a scalar subquery per Decimal: a couple of
+  hundred of those overflowed DuckDB's planner and killed the VM. The
+  comparisons inside, and their three-valued answer, are unchanged.
 - SQLite's double rule models SQLite's own read of a number (19 significant
   digits, cut, then converted): a Decimal refuses only when that read is an
   infinity (its cut at or past 1.797693134862315808e308) or 0.0 for a nonzero

@@ -891,16 +891,76 @@ defmodule Selecto.Builder.Sql.Where do
           Enum.any?(typed_values, &is_struct(&1, Decimal)) ->
         {operator, joiner} = if negate?, do: {" <> ", ") AND ("}, else: {" = ", ") OR ("}
 
-        comparisons =
-          typed_values
-          |> Enum.map(&[selector, operator, {:param, &1}])
-          |> Enum.intersperse(joiner)
+        if projected_decimal_list?(selecto, selector, typed_values) do
+          projected_decimal_list(selector, typed_values, operator, joiner)
+        else
+          comparisons =
+            typed_values
+            |> Enum.map(&[selector, operator, {:param, &1}])
+            |> Enum.intersperse(joiner)
 
-        [" ((", comparisons, ")) "]
+          [" ((", comparisons, ")) "]
+        end
 
       true ->
         build_standard_list_clause(selecto, selector, typed_values, negate?, type)
     end
+  end
+
+  # A DuckDB list of two or more members holding a Decimal is one correlated
+  # subquery over a one-row derived table projecting each Decimal at its own
+  # type (the adapter's `%TypedParam{cast: :projected}`, a plain
+  # `CAST($n AS DECIMAL(38,s))` the projection keeps typed), instead of a
+  # scalar subquery per Decimal: DuckDB's planner overflowed its stack (and
+  # killed the VM) on a couple of hundred of those. The subquery returns
+  # exactly the comparisons' three-valued answer:
+  #
+  #     (SELECT ((sel = l.selecto_decimal_1) OR (sel = $2)) FROM (SELECT ...) AS l)
+  #
+  # Other members (NULL, integers) compare in place, as before. A single
+  # member keeps the plain comparison.
+  @decimal_list_alias "selecto_decimal_list"
+
+  defp projected_decimal_list?(selecto, selector, typed_values) do
+    adapter = Map.get(selecto, :adapter)
+
+    length(typed_values) > 1 and
+      AdapterSupport.callback_available?(adapter, :projected_parameters?, 0) and
+      adapter.projected_parameters?() and
+      not (selector
+           |> List.wrap()
+           |> List.flatten()
+           |> Enum.filter(&is_binary/1)
+           |> Enum.join()
+           |> String.downcase()
+           |> String.contains?("selecto_decimal"))
+  end
+
+  defp projected_decimal_list(selector, typed_values, operator, joiner) do
+    {comparisons, projected, _index} =
+      Enum.reduce(typed_values, {[], [], 1}, fn
+        %Decimal{} = value, {comparisons, projected, index} ->
+          name = "selecto_decimal_#{index}"
+
+          {[[selector, operator, @decimal_list_alias, ".", name] | comparisons],
+           [
+             [{:param, %Selecto.SQL.TypedParam{value: value, cast: :projected}}, " AS ", name]
+             | projected
+           ], index + 1}
+
+        value, {comparisons, projected, index} ->
+          {[[selector, operator, {:param, value}] | comparisons], projected, index}
+      end)
+
+    [
+      " (SELECT ((",
+      comparisons |> Enum.reverse() |> Enum.intersperse(joiner),
+      ")) FROM (SELECT ",
+      projected |> Enum.reverse() |> Enum.intersperse(", "),
+      ") AS ",
+      @decimal_list_alias,
+      ") "
+    ]
   end
 
   defp build_standard_list_clause(selecto, selector, typed_values, negate?, type) do
