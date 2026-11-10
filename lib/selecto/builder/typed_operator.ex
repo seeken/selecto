@@ -77,7 +77,7 @@ defmodule Selecto.Builder.TypedOperator do
 
     cond do
       not enabled?(selecto) or op == nil or type == nil ->
-        plain(left, operator, right, opts)
+        plain(left, operator, operand(selecto, operator, right), opts)
 
       true ->
         {schema, arg} = type
@@ -183,6 +183,7 @@ defmodule Selecto.Builder.TypedOperator do
       [" ", if(negate?, do: "NOT ", else: ""), "(", equalities, ") "]
     else
       operator = if negate?, do: " NOT IN (", else: " IN ("
+      rights = Enum.map(rights, &operand(selecto, "=", &1))
       [" ", left, operator, Enum.intersperse(rights, ", "), ") "]
     end
   end
@@ -241,9 +242,42 @@ defmodule Selecto.Builder.TypedOperator do
         ") "
       ]
     else
-      [" ", left, " between ", low, " and ", high, " "]
+      [
+        " ",
+        left,
+        " between ",
+        operand(selecto, ">=", low),
+        " and ",
+        operand(selecto, "<=", high),
+        " "
+      ]
     end
   end
+
+  @equality ["=", "!=", "<>"]
+  @range ["<", "<=", ">", ">="]
+
+  @doc false
+  # A Decimal param in a comparison Selecto generates, rendered as the
+  # adapter compares it exactly for that operator class
+  # (comparison_operand/2: MySQL wraps it for range comparisons only, MariaDB
+  # for every comparison). Host text and host markers are never touched.
+  def operand(selecto, operator, {:param, %Decimal{}} = param) do
+    adapter = Map.get(selecto || %{}, :adapter)
+
+    class =
+      cond do
+        operator in @equality -> :equality
+        operator in @range -> :range
+        true -> nil
+      end
+
+    if class && Selecto.AdapterSupport.callback_available?(adapter, :comparison_operand, 2),
+      do: adapter.comparison_operand(param, class),
+      else: param
+  end
+
+  def operand(_selecto, _operator, right), do: right
 
   # R50: an operator in an extension's schema (commonly writable) takes
   # operands cast to the member's own type, the subquery's column included,

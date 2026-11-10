@@ -173,6 +173,14 @@ defmodule Selecto.DB.Adapter do
   interpolate the value. The parameter list and ordering must remain unchanged.
   """
   @callback parameter_placeholder(pos_integer(), term()) :: iodata()
+
+  @doc """
+  Optional. The right operand of a comparison Selecto generates for a Decimal
+  `{:param, value}`, by operator class (`:equality` for =, != and IN lists;
+  `:range` for <, <=, >, >= and BETWEEN), when the bare placeholder would not
+  compare exactly. Host-written SQL text and markers are never passed here.
+  """
+  @callback comparison_operand({:param, Decimal.t()}, :equality | :range) :: iodata()
   @callback quote_identifier(String.t()) :: String.t()
   @callback format_datetime(iodata(), String.t()) :: iodata()
   @callback rollup_sql(iodata()) :: iodata()
@@ -191,6 +199,7 @@ defmodule Selecto.DB.Adapter do
   @optional_callbacks adapter_contract_version: 0,
                       execute_query: 4,
                       parameter_placeholder: 2,
+                      comparison_operand: 2,
                       stream: 4,
                       disconnect: 1,
                       normalize_execution_result: 1,
