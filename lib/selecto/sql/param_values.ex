@@ -62,11 +62,15 @@ defmodule Selecto.SQL.ParamValues do
   @doc false
   # The first value of a write (its assignments, predicate, batch commands or
   # graph nodes, walked through) the dialect cannot bind, as a write error.
-  @spec write_refusal(term(), keyword(), atom()) :: :ok | {:error, Selecto.Write.Error.t()}
-  def write_refusal(write, rules, adapter) do
+  # `opts[:context]` resolves `{:context, key}` assignments for the :uuid rule.
+  @spec write_refusal(term(), keyword(), atom(), keyword()) ::
+          :ok | {:error, Selecto.Write.Error.t()}
+  def write_refusal(write, rules, adapter, opts \\ []) do
     found =
       find(write, rules) ||
-        if(Keyword.get(rules, :uuid_text, false), do: uuid_refusal(write))
+        if(Keyword.get(rules, :uuid_text, false),
+          do: uuid_refusal(write, Keyword.get(opts, :context) || %{})
+        )
 
     case found do
       nil ->
@@ -85,17 +89,18 @@ defmodule Selecto.SQL.ParamValues do
   end
 
   # A :uuid field (by the command's metadata field_types, or its graph node's)
-  # written as text must read as a UUID, as a read filter's text must (it
-  # binds as given).
-  defp uuid_refusal(%Selecto.Write.Batch{commands: commands}),
-    do: Enum.find_value(commands, &uuid_refusal/1)
+  # written as text, literal or from the write's context, must read as a
+  # UUID, as a read filter's text must; 16 bytes are a raw UUID (BINARY(16)
+  # or BLOB storage) and bind as given.
+  defp uuid_refusal(%Selecto.Write.Batch{commands: commands}, context),
+    do: Enum.find_value(commands, &uuid_refusal(&1, context))
 
-  defp uuid_refusal(%Selecto.Write.Graph{nodes: nodes}) do
+  defp uuid_refusal(%Selecto.Write.Graph{nodes: nodes}, context) do
     Enum.find_value(nodes, fn
       %Selecto.Write.Graph.Node{rows: rows, field_types: types} when is_list(rows) ->
         Enum.find_value(rows, fn
           %Selecto.Write.Graph.Row{command: %Selecto.Write.Command{} = command} ->
-            uuid_refusal(command, types)
+            command_uuid_refusal(command, types, context)
 
           _row ->
             nil
@@ -106,22 +111,49 @@ defmodule Selecto.SQL.ParamValues do
     end)
   end
 
-  defp uuid_refusal(%Selecto.Write.Command{} = command), do: uuid_refusal(command, %{})
+  defp uuid_refusal(%Selecto.Write.Command{} = command, context),
+    do: command_uuid_refusal(command, %{}, context)
 
-  defp uuid_refusal(_write), do: nil
+  defp uuid_refusal(_write, _context), do: nil
 
-  defp uuid_refusal(%Selecto.Write.Command{assignments: assignments, metadata: metadata}, extra) do
+  defp command_uuid_refusal(
+         %Selecto.Write.Command{assignments: assignments, metadata: metadata},
+         extra,
+         context
+       ) do
     types = Map.merge(extra || %{}, Map.get(metadata || %{}, :field_types) || %{})
 
     Enum.find_value(assignments, fn
-      %{field: field, value: {:literal, value}} when is_binary(value) ->
-        if uuid_field?(types, field) and not uuid_text?(value),
-          do: {"cannot write text that is no UUID to a :uuid field", :uuid_text}
+      %{field: field, value: value} ->
+        case assigned_text(value, context) do
+          {:ok, text} ->
+            if uuid_field?(types, field) and not uuid_text?(text),
+              do: {"cannot write text that is no UUID to a :uuid field", :uuid_text}
+
+          :none ->
+            nil
+        end
 
       _assignment ->
         nil
     end)
   end
+
+  defp assigned_text({:literal, value}, _context) when is_binary(value), do: {:ok, value}
+
+  defp assigned_text({:context, key}, context) when is_map(context) and not is_struct(context) do
+    found =
+      Enum.find_value(context, fn {context_key, value} ->
+        if to_string(context_key) == to_string(key), do: {:found, value}
+      end)
+
+    case found do
+      {:found, value} when is_binary(value) -> {:ok, value}
+      _other -> :none
+    end
+  end
+
+  defp assigned_text(_value, _context), do: :none
 
   defp uuid_field?(types, field),
     do:
@@ -129,9 +161,10 @@ defmodule Selecto.SQL.ParamValues do
         to_string(key) == to_string(field) and type in [:uuid, "uuid"]
       end)
 
+  defp uuid_text?(value) when byte_size(value) == 16, do: true
+
   defp uuid_text?(value) do
-    String.valid?(value) and byte_size(value) != 16 and
-      match?({:ok, _}, UUID.info(value))
+    String.valid?(value) and match?({:ok, _}, UUID.info(value))
   end
 
   defp find(%Decimal{} = value, rules), do: found(value, rules)
@@ -195,22 +228,26 @@ defmodule Selecto.SQL.ParamValues do
 
   defp ceil_div(n, d), do: div(n + d - 1, d)
 
-  # A value a double cannot hold becomes an infinity (at or past the midpoint
-  # between the largest double and the next power) or 0.0 (a nonzero value at
-  # or below half the smallest subnormal). Every other value converts to a
-  # finite, nonzero double, as SQLite has always stored and compared it.
-  @double_overflow %Decimal{
-    sign: 1,
-    coef: 1_797_693_134_862_315_807_937_289_714_053_034_150_799_341_327_710_736,
-    exp: 257
-  }
-  @double_underflow %Decimal{sign: 1, coef: 2_470_328_229_206_232_720_882_538_326, exp: -351}
+  # SQLite reads a number's text keeping 19 significant digits (the rest is
+  # cut, not rounded) before it converts it to a double (measured live on
+  # 3.53: 1.7976931348623158079e308 stores the largest double,
+  # 1.797693134862315808e308 an infinity; 2.470328229206232721e-324 the
+  # smallest subnormal, 2.4703282292062327209e-324 0.0). The rule models that
+  # read: a value whose 19-digit cut reaches the overflow bound becomes an
+  # infinity, a nonzero one whose cut is at or below the underflow bound 0.0;
+  # every other value converts to a finite, nonzero double, as SQLite has
+  # always stored and compared it.
+  @sqlite_digits 19
+  @double_overflow %Decimal{sign: 1, coef: 1_797_693_134_862_315_808, exp: 290}
+  @double_underflow %Decimal{sign: 1, coef: 2_470_328_229_206_232_720, exp: -342}
 
   defp double_decimal(%Decimal{coef: 0}), do: :ok
 
-  defp double_decimal(%Decimal{} = decimal) do
+  defp double_decimal(%Decimal{coef: coef, exp: exp}) do
     # Exact: Decimal.abs/1 rounds to the context precision (28 digits).
-    magnitude = %{decimal | sign: 1}
+    count = length(Integer.digits(coef))
+    cut = max(count - @sqlite_digits, 0)
+    magnitude = %Decimal{sign: 1, coef: div(coef, Integer.pow(10, cut)), exp: exp + cut}
 
     cond do
       Decimal.compare(magnitude, @double_overflow) != :lt ->

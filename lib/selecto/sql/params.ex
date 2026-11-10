@@ -344,7 +344,7 @@ defmodule Selecto.SQL.Params do
 
         traverse_with_offset(
           t,
-          {[placeholder | acc_io], [v | acc_params], idx + 1},
+          {[placeholder | acc_io], [bound(v) | acc_params], idx + 1},
           placeholder_fun
         )
 
@@ -372,7 +372,7 @@ defmodule Selecto.SQL.Params do
     case h do
       {:param, v} ->
         placeholder = placeholder_fun.(idx + 1, v)
-        traverse(t, {[placeholder | acc_io], [v | acc_params], idx + 1}, placeholder_fun)
+        traverse(t, {[placeholder | acc_io], [bound(v) | acc_params], idx + 1}, placeholder_fun)
 
       list when is_list(list) ->
         {inner_io, inner_params, inner_idx} = traverse(list, {[], [], idx}, placeholder_fun)
@@ -393,6 +393,10 @@ defmodule Selecto.SQL.Params do
   end
 
   defp traverse([], state, _placeholder_fun), do: state
+
+  # A typed param binds its plain value; the adapter rendered its cast.
+  defp bound(%Selecto.SQL.TypedParam{value: value}), do: value
+  defp bound(value), do: value
 
   defp rebind_repeated(pieces, params, placeholder) do
     parts =

@@ -98,6 +98,31 @@ defmodule Selecto.JsonOperationsContractTest do
     assert params == ["active"]
   end
 
+  defmodule RangeOperandAdapter do
+    @moduledoc false
+    def dialect, do: SelectoDBPostgreSQL.Adapter.dialect()
+
+    def placeholder(index), do: "$#{index}"
+    def comparison_operand(param, :range), do: ["RANGE(", param, ")"]
+    def comparison_operand(param, _class), do: param
+  end
+
+  test "an extraction filter's Decimal comparison renders its operand by operator class" do
+    for {operator, wrapped?} <- [{:>, true}, {:<=, true}, {:=, false}, {:!=, false}] do
+      spec =
+        JsonOperations.create_json_operation(:json_extract_text, "metadata",
+          path: "$.price",
+          comparison: {operator, Decimal.new("-0.0000004")}
+        )
+
+      filter = Builder.build_json_filter(spec, adapter: RangeOperandAdapter)
+      {sql, params} = Params.finalize(filter, adapter: RangeOperandAdapter)
+
+      assert sql =~ "RANGE($1)" == wrapped?, inspect(operator)
+      assert params == [Decimal.new("-0.0000004")]
+    end
+  end
+
   test "object aggregation normalizes its key column" do
     spec =
       JsonOperations.create_json_operation(:json_object_agg, "product_id", value_field: "price")

@@ -876,7 +876,7 @@ defmodule Selecto.Builder.Sql.Where do
   # its stored bytes, not its collation (Selecto.Builder.ExactCompare).
   defp build_list_clause(_selecto, selector, typed_values, negate?, mode, _type)
        when mode in [true, :bytes, :server] do
-    placeholders = Enum.map(typed_values, fn value -> {:param, value} end)
+    placeholders = Enum.map(typed_values, fn value -> {:param, plain_value(value)} end)
     clause = ExactCompare.in_list(selector, placeholders, mode)
 
     if negate?, do: [" NOT ", clause, " "], else: [" ", clause, " "]
@@ -1300,7 +1300,7 @@ defmodule Selecto.Builder.Sql.Where do
              Map.get(selecto, :adapter),
              :uuid_text_storage
            ),
-         do: text_uuid(type, value),
+         do: text_uuid(selecto, type, value),
          else: to_type(type, value)
     end
   end
@@ -1309,21 +1309,39 @@ defmodule Selecto.Builder.Sql.Where do
 
   # A :uuid compared as stored text must read as a UUID; it binds as given,
   # as the stored text may be in any case or form (a case-sensitive column of
-  # upper-case UUIDs, 32-hex storage). Text that is no UUID refuses typed, as
-  # PostgreSQL's uuid type refuses it, rather than compare as text (MariaDB's
-  # padded compare would match it with trailing spaces).
-  defp text_uuid(:uuid, value) do
-    if String.valid?(value) and byte_size(value) != 16 do
-      _binary = UUID.string_to_binary!(value)
-      value
-    else
-      invalid_filter_value!(:uuid, "Filter value is not a UUID")
-    end
+  # upper-case UUIDs, 32-hex storage). 16 bytes are a raw UUID (BINARY(16)
+  # storage, as Ecto's MyXQL adapter keeps it) and bind as given too. Text
+  # that is no UUID refuses typed, as PostgreSQL's uuid type refuses it,
+  # rather than compare as text (MariaDB's padded compare would match it
+  # with trailing spaces).
+  #
+  # An adapter declaring :uuid_cast_compare (DuckDB) compares the UUID itself:
+  # the value binds as its canonical text, cast to UUID in the comparison
+  # (Selecto.SQL.TypedParam), which matches UUID, text and BLOB storage.
+  defp text_uuid(selecto, :uuid, value) do
+    raw = uuid_binary!(value)
+
+    if AdapterSupport.supports_feature?(Map.get(selecto, :adapter), :uuid_cast_compare),
+      do: %Selecto.SQL.TypedParam{value: UUID.binary_to_string!(raw), cast: :uuid},
+      else: value
+  end
+
+  defp text_uuid(_selecto, _type, value), do: value
+
+  defp uuid_binary!(value) when byte_size(value) == 16, do: value
+
+  defp uuid_binary!(value) do
+    if String.valid?(value),
+      do: UUID.string_to_binary!(value),
+      else: invalid_filter_value!(:uuid, "Filter value is not a UUID")
   rescue
     ArgumentError -> invalid_filter_value!(:uuid, "Filter value is not a UUID")
   end
 
-  defp text_uuid(_type, value), do: value
+  # The bound value of a param a comparison casts (its plain value for the
+  # exact host-scope comparisons, which compare bytes themselves).
+  defp plain_value(%Selecto.SQL.TypedParam{value: value}), do: value
+  defp plain_value(value), do: value
 
   defp raw_literal!(selecto, conf, value) when is_binary(value) and is_map(conf) do
     if ExactCompare.in_scope?() and not computed?(conf) and Map.get(conf, :field) do
@@ -1441,7 +1459,9 @@ defmodule Selecto.Builder.Sql.Where do
   # A host, trusted, required or tenant comparison on a column stored as
   # TIMESTAMP compiles zone-independently (ExactCompare.storage_kind/4,
   # item 62a); every other comparison renders as before.
-  defp comparison_clause(selecto, conf, field, sel, operator, {:param, value} = right) do
+  defp comparison_clause(selecto, conf, field, sel, operator, {:param, typed} = right) do
+    value = plain_value(typed)
+
     case identity_kind(selecto, conf, field) do
       :duck_text ->
         ExactCompare.bytes_compare(sel, operator, value)
@@ -1561,8 +1581,8 @@ defmodule Selecto.Builder.Sql.Where do
 
   # BETWEEN on an identity column, compiled exactly (or nil).
   defp identity_between(selecto, conf, field, selector, min, max) do
-    min = to_field_value(selecto, conf, min)
-    max = to_field_value(selecto, conf, max)
+    min = plain_value(to_field_value(selecto, conf, min))
+    max = plain_value(to_field_value(selecto, conf, max))
 
     case identity_kind(selecto, conf, field) do
       :duck_text ->
@@ -1642,6 +1662,8 @@ defmodule Selecto.Builder.Sql.Where do
   # IN lists on identity columns: DuckDB VARCHAR by bytes; a TIMESTAMP
   # scope list as exact epoch equalities (item 62a); nil otherwise.
   defp identity_list(selecto, conf, field, sel, values, negate?) do
+    values = Enum.map(values, &plain_value/1)
+
     case identity_kind(selecto, conf, field) do
       :duck_text ->
         placeholders =
