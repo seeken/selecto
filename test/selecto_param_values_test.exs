@@ -10,6 +10,7 @@ defmodule Selecto.ParamValuesTest do
     @moduledoc false
     def placeholder(index), do: "$#{index}"
     def comparison_operand(param, :equality), do: ["EQ(", param, ")"]
+    def comparison_operand(param, :inequality), do: ["NE(", param, ")"]
     def comparison_operand(param, :range), do: ["RANGE(", param, ")"]
   end
 
@@ -306,8 +307,8 @@ defmodule Selecto.ParamValuesTest do
       sql
     end
 
-    for op <- [:=, :!=],
-        do: assert(sql.({"price", {op, d}}) =~ ~r/price (=|!=|<>) EQ\(/, inspect(op))
+    assert sql.({"price", {:=, d}}) =~ ~r/price = EQ\(/
+    assert sql.({"price", {:!=, d}}) =~ ~r/price (!=|<>) NE\(/
 
     assert sql.({"price", d}) =~ ~r/price = EQ\(/
 
@@ -315,14 +316,15 @@ defmodule Selecto.ParamValuesTest do
         do: assert(sql.({"price", {op, d}}) =~ ~r/price #{op} RANGE\(/, inspect(op))
 
     assert sql.({"price", {:between, d, Decimal.new(3)}}) =~ ~r/between RANGE\(.* and RANGE\(/is
-    assert sql.({"price", {:in, [d, Decimal.new(3)]}}) =~ ~r/EQ\(.*EQ\(/s
+    assert sql.({"price", {:in, [d, Decimal.new(3)]}}) =~ ~r/ IN \(EQ\(.*, EQ\(/s
+    assert sql.({"price", {:not_in, [d, Decimal.new(3)]}}) =~ ~r/ NOT IN \(NE\(.*, NE\(/s
 
     # Text, integers and host fragments are never wrapped.
-    refute sql.({"price", {:>=, "1.5"}}) =~ ~r/RANGE|EQ\(/
-    refute sql.({"id", {:>=, 2}}) =~ ~r/RANGE|EQ\(/
+    refute sql.({"price", {:>=, "1.5"}}) =~ ~r/RANGE|EQ\(|NE\(/
+    refute sql.({"id", {:>=, 2}}) =~ ~r/RANGE|EQ\(|NE\(/
 
     host = ["SELECT 1 FROM p x WHERE x.price >= ", {:param, d}, " AND x.name LIKE ", {:param, d}]
-    refute sql.({:exists, host}) =~ ~r/RANGE|EQ\(/
+    refute sql.({:exists, host}) =~ ~r/RANGE|EQ\(|NE\(/
 
     assert Selecto.Builder.TypedOperator.operand(q, ">=", {:param, d}) == [
              "RANGE(",
