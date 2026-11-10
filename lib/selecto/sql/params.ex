@@ -538,10 +538,24 @@ defmodule Selecto.SQL.Params do
       message: "adapter placeholder count does not match the finalized parameter count"
   end
 
+  # A value the adapter cannot bind (its value-aware placeholder raises
+  # ArgumentError) refuses typed rather than raise from the compile.
+  defp bindable_placeholder(adapter, index, value) do
+    adapter.parameter_placeholder(index, value)
+  rescue
+    error in ArgumentError ->
+      Selecto.Builder.ScopeRefusal.unsupported!(
+        Selecto.Error.validation_error(Exception.message(error), %{
+          unsupported_feature: :parameter_value
+        }),
+        :parameter_unbindable
+      )
+  end
+
   defp placeholder_fun(adapter) when is_atom(adapter) do
     if Selecto.AdapterSupport.callback_available?(adapter, :placeholder, 1) do
       if Selecto.AdapterSupport.callback_available?(adapter, :parameter_placeholder, 2) do
-        &adapter.parameter_placeholder/2
+        &bindable_placeholder(adapter, &1, &2)
       else
         fn index, _value -> adapter.placeholder(index) end
       end

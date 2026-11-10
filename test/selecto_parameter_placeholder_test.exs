@@ -323,6 +323,15 @@ defmodule Selecto.ParameterPlaceholderTest do
       Selecto.to_sql(Selecto.filter(query, {:exists, held}))
     end
 
+    # Atoms, nil and Decimals render with to_string/1 too.
+    for element <- [:"1", [nil, "1"], Decimal.new(1)] do
+      fragment = ["SELECT 1 FROM p x WHERE CAST($", element, " AS text) = ", {:param, "a"}]
+
+      assert_raise Selecto.Builder.ScopeRefusal, ~r/do not bind/, fn ->
+        Selecto.to_sql(Selecto.filter(query, {:exists, fragment}))
+      end
+    end
+
     # A number that renders no placeholder stays as written.
     plain = ["SELECT 1 FROM p x WHERE x.id = ", 1, " AND x.id <> ", {:param, 2}]
     {sql, params} = Selecto.to_sql(Selecto.filter(query, {:exists, plain}))
@@ -350,5 +359,83 @@ defmodule Selecto.ParameterPlaceholderTest do
 
     assert %Selecto.Error{type: :query_enforcement, details: %{reason: :lateral_unsupported}} =
              Selecto.Error.from_reason(lateral)
+  end
+
+  defmodule UnbindableAdapter do
+    def placeholder(index), do: "$#{index}"
+    def parameter_placeholder(_index, :unbindable), do: raise(ArgumentError, "cannot bind")
+    def parameter_placeholder(index, _value), do: placeholder(index)
+  end
+
+  test "a value the adapter cannot bind refuses typed" do
+    refusal =
+      assert_raise Selecto.Builder.ScopeRefusal, ~r/cannot bind/, fn ->
+        Params.finalize(["x = ", {:param, 1}, " AND y = ", {:param, :unbindable}],
+          adapter: UnbindableAdapter
+        )
+      end
+
+    assert refusal.reason == :parameter_unbindable
+
+    assert %Selecto.Error{details: %{reason: :parameter_unbindable}} =
+             Selecto.Error.from_reason(refusal)
+
+    assert {"x = $1", [1]} = Params.finalize(["x = ", {:param, 1}], adapter: UnbindableAdapter)
+  end
+
+  test "an integer field's text value that is not an integer refuses typed" do
+    domain = %{
+      name: "p",
+      source: %{
+        source_table: "p",
+        primary_key: :id,
+        fields: [:id, :n],
+        redact_fields: [],
+        columns: %{id: %{type: :id}, n: %{type: :integer}},
+        associations: %{}
+      },
+      schemas: %{},
+      joins: %{}
+    }
+
+    query = Selecto.configure(domain, nil, validate: false) |> Selecto.select(["id"])
+
+    for filter <- [{"id", "abc"}, {"n", "1x"}, {"n", ["2", "x"]}, {"n", {:>=, "1.5"}}] do
+      refusal =
+        assert_raise Selecto.Builder.ScopeRefusal, ~r/not an integer/, fn ->
+          Selecto.to_sql(Selecto.filter(query, filter))
+        end
+
+      assert refusal.reason == :invalid_filter_value
+    end
+
+    assert {_sql, [7]} = Selecto.to_sql(Selecto.filter(query, {"n", " 7 "}))
+  end
+
+  test "the complexity analyzer counts joins for a lateral the adapter cannot render" do
+    domain = %{
+      name: "p",
+      source: %{
+        source_table: "p",
+        primary_key: :id,
+        fields: [:id, :data],
+        redact_fields: [],
+        columns: %{id: %{type: :integer}, data: %{type: :jsonb}},
+        associations: %{}
+      },
+      schemas: %{},
+      joins: %{}
+    }
+
+    query =
+      domain
+      |> Selecto.configure(nil, validate: false)
+      |> Selecto.json_table("data", as: "jt", columns: [{"v", "$"}])
+      |> Selecto.select(["id"])
+
+    assert {:ok, %Selecto.Performance.ComplexityAnalyzer{}} =
+             Selecto.Performance.ComplexityAnalyzer.analyze(query)
+
+    assert_raise Selecto.Builder.ScopeRefusal, fn -> Selecto.to_sql(query) end
   end
 end

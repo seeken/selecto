@@ -103,7 +103,7 @@ defmodule Selecto.Builder.Sql do
       Selecto.Builder.Window.build_window_functions(selecto)
 
     {filter_joins, where_iolist, _where_params} = build_where(selecto)
-    {group_by_joins, group_by_iodata, _group_by_params} = build_group_by(selecto)
+    {group_by_joins, group_by_iodata, _group_by_params} = benchmark_group_by(selecto)
     {order_by_joins, order_by_iodata, _order_by_params} = build_order_by(selecto)
 
     requested_joins =
@@ -885,6 +885,26 @@ defmodule Selecto.Builder.Sql do
            Selecto.Types.sql_params()}
   defp build_group_by(selecto) do
     Selecto.Builder.Sql.Group.build(selecto)
+  end
+
+  # An adapter that renders a ROLLUP statement itself (render_rollup/2) has no
+  # ROLLUP clause to give; its dimensions join what a plain grouping on them
+  # joins, which is all the components need.
+  defp benchmark_group_by(selecto) do
+    group_by = selecto.set.group_by
+
+    if Enum.any?(group_by, &match?({:rollup, _}, &1)) and
+         Selecto.AdapterSupport.callback_available?(selecto.adapter, :render_rollup, 2) do
+      dimensions =
+        Enum.flat_map(group_by, fn
+          {:rollup, groups} -> List.wrap(groups)
+          group -> [group]
+        end)
+
+      build_group_by(%{selecto | set: Map.put(selecto.set, :group_by, dimensions)})
+    else
+      build_group_by(selecto)
+    end
   end
 
   @spec build_order_by(Selecto.Types.t()) ::

@@ -17,8 +17,10 @@ defmodule Selecto.AdapterSQL do
     if AdapterSupport.callback_available?(adapter, :format_datetime, 2) do
       adapter.format_datetime(expression, format)
     else
-      raise ArgumentError,
-            "adapter #{inspect(adapter)} does not implement datetime formatting"
+      unsupported!(
+        "adapter #{inspect(adapter)} does not implement datetime formatting",
+        :datetime_format
+      )
     end
   end
 
@@ -30,9 +32,16 @@ defmodule Selecto.AdapterSQL do
         adapter.rollup_sql(grouped_clauses)
 
       true ->
-        raise ArgumentError,
-              "adapter #{inspect(adapter)} does not implement rollup rendering"
+        unsupported!("adapter #{inspect(adapter)} does not implement rollup rendering", :rollup)
     end
+  end
+
+  # A shape the adapter cannot render refuses typed through every execute
+  # entry point (Selecto.Builder.ScopeRefusal).
+  defp unsupported!(message, feature) do
+    Selecto.Builder.ScopeRefusal.unsupported!(
+      Selecto.Error.validation_error(message, %{unsupported_feature: feature})
+    )
   end
 
   def rollup_literal_order(selecto, index) when is_integer(index) do

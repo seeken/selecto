@@ -3,6 +3,17 @@
 
 ## Unreleased
 
+- `Selecto.Performance.ComplexityAnalyzer` counts joins again for a LATERAL,
+  unnest or table-function join the adapter cannot render, and for a ROLLUP an
+  adapter renders whole (`render_rollup/2`, as SQLite does), instead of raising;
+  so `execute_with_metadata` and the other guarded entry points answer a valid
+  SQLite rollup as `Selecto.execute` does. An adapter without rollup rendering
+  or datetime formatting refuses typed (`unsupported_feature`) instead of
+  raising `ArgumentError`. A value the adapter's `parameter_placeholder/2`
+  cannot bind refuses `parameter_unbindable`, and an integer field's text
+  value that is not an integer refuses `invalid_filter_value`, typed through
+  every execute entry point. Marker iodata is checked as the text `finalize`
+  renders for every element (atoms, nil and Decimals too).
 - A nested fragment's bare `$n` whose param the adapter renders wrapped
   (DuckDB's Decimal as `(SELECT CAST($n AS DECIMAL(38,s)))`) refuses
   `placeholder_count_mismatch` in a set member, CTE body or subquery, instead
