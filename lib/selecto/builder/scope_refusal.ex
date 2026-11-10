@@ -18,4 +18,10 @@ defmodule Selecto.Builder.ScopeRefusal do
     reason = reason || if(is_atom(detail) and detail, do: detail, else: :unsupported_feature)
     raise __MODULE__, message: error.message, reason: reason, error: error
   end
+
+  # A LATERAL, unnest or table-function join the adapter cannot render:
+  # refused as every lateral refusal is (query_enforcement,
+  # reason lateral_unsupported), with the adapter's message.
+  def lateral!(%Selecto.Error{message: message}),
+    do: raise(__MODULE__, message: message, reason: :lateral_unsupported)
 end

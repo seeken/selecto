@@ -11,8 +11,10 @@
   the adapter cannot render (unnest and table-function laterals, collection,
   JSON, window, text-search and aggregate-FILTER fragments, NULL placement
   that cannot be expressed) raises `Selecto.Builder.ScopeRefusal` carrying the
-  adapter's error, typed through every execute entry point; unnest and
-  table-function laterals with reason `lateral_unsupported`. Direct builder
+  adapter's error (its type and details, plus `reason`), typed through every
+  execute entry point; an unnest, table-function or JSON-table lateral refuses
+  as every lateral refusal does (`query_enforcement`, reason
+  `lateral_unsupported`). Direct builder
   calls that raised `RuntimeError` for these raise `ScopeRefusal` with the same
   message.
 - A read resolves and checks only the relations its compiled statement names
