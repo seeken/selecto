@@ -7,14 +7,22 @@
   value main stored or compared correctly works as it did. MySQL and MariaDB
   refuse a Decimal needing more than nine 9-digit words (past 81 integer
   digits, or 72 after the point); Decimal.div results and other long
-  fractions bind and compare exactly. SQLite refuses only Decimals past the
-  double range (integral 19-digit values, shortest forms of doubles and
+  fractions bind and compare exactly. SQLite refuses only a Decimal that
+  overflows a double or a nonzero one that underflows to 0 (1e308 and
+  4.9e-324 bind; integral 19-digit values, shortest forms of doubles and
   20-digit TEXT decimals work). Writes refuse only non-finite values (and
   years past 9999): the server rounds to the column's scale as before. Years
   0..9999 bind. A decimal or float field's numeric text, and a UUID field's
   text, are checked and bind as given, so a TEXT column declared :decimal and
   upper-case or 32-hex UUID storage compare as they did, in reads and writes
-  alike. A nested fragment's `?` is found however the adapter wraps a value.
+  alike; text written to a `:uuid` field must read as a UUID (rule
+  `uuid_text`, for adapters that store UUIDs as text). A nested fragment's
+  `?` is found however the adapter wraps a value.
+- New optional adapter callback `comparison_operand/2`: the adapter renders
+  the Decimal operand of Selecto's own generated comparisons by operator
+  class (`:equality` for `=`, `<>`, IN and NOT IN; `:range` for `<`, `<=`,
+  `>`, `>=` and BETWEEN). Host SQL text and `{:param, _}` markers are never
+  rewritten. MySQL renders ranges as `(? + 0)`; MariaDB every comparison.
 - A filter value its field cannot hold refuses `invalid_filter_value` instead
   of comparing as something else: text in a decimal or float field that is no
   finite number (NaN, Infinity, "abc"; MySQL and SQLite compared it as 0),
@@ -22,8 +30,9 @@
   float field, text in a text field that is invalid UTF-8 or holds a NUL, and
   date or datetime text that reads as no date (no longer an ArgumentError
   quoting the value). A decimal or float field's text binds as the number
-  it reads as; a date field's text must read as a date. On adapters that compare UUIDs as text, a UUID
-  in any text form binds its canonical form and text that is no UUID refuses.
+  it reads as; a date field's text must read as a date. On adapters that
+  compare UUIDs as text, a UUID in any text form binds as given and text that
+  is no UUID refuses.
   `Selecto.SQL.ParamValues` holds the per-dialect rules adapters apply before
   binding, in reads and writes. On DuckDB an IN / NOT IN list holding a
   Decimal compares each value as `=` / `<>` does (the list cast rounded a

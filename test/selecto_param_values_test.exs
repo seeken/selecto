@@ -6,6 +6,13 @@ defmodule Selecto.ParamValuesTest do
   @mysql [decimal: :mysql, years: true, float_atoms: true]
   @double [decimal: :double, years: true, float_atoms: true]
 
+  defmodule OperandAdapter do
+    @moduledoc false
+    def placeholder(index), do: "$#{index}"
+    def comparison_operand(param, :equality), do: ["EQ(", param, ")"]
+    def comparison_operand(param, :range), do: ["RANGE(", param, ")"]
+  end
+
   defp domain do
     %{
       name: "p",
@@ -98,6 +105,116 @@ defmodule Selecto.ParamValuesTest do
     assert :ok = ParamValues.check(true, @mysql)
   end
 
+  test "SQLite refuses only a Decimal that overflows a double or underflows to 0" do
+    max = %Decimal{sign: 1, coef: 17_976_931_348_623_157, exp: 292}
+
+    last = %Decimal{
+      sign: 1,
+      coef: 1_797_693_134_862_315_807_937_289_714_053_034_150_799_341_327_710_735,
+      exp: 257
+    }
+
+    first_over = %Decimal{
+      sign: 1,
+      coef: 1_797_693_134_862_315_807_937_289_714_053_034_150_799_341_327_710_736,
+      exp: 257
+    }
+
+    min = %Decimal{sign: 1, coef: 49, exp: -325}
+    half_min = %Decimal{sign: 1, coef: 2_470_328_229_206_232_720_882_538_326, exp: -351}
+    above_half_min = %Decimal{sign: 1, coef: 2_470_328_229_206_232_720_882_538_327, exp: -351}
+
+    for value <- [
+          Decimal.new("1e308"),
+          max,
+          last,
+          Decimal.negate(max),
+          Decimal.new("1e-308"),
+          min,
+          above_half_min,
+          Decimal.negate(min),
+          Decimal.new("0E-400")
+        ],
+        do: assert(:ok = ParamValues.check(value, @double), inspect(value))
+
+    for value <- [
+          first_over,
+          Decimal.new("1.7976931348623159e308"),
+          %Decimal{first_over | sign: -1},
+          half_min,
+          Decimal.new("2.4e-324"),
+          Decimal.new("-1e-400")
+        ],
+        do:
+          assert(
+            {:error, _, :decimal_range} = ParamValues.check(value, @double),
+            inspect(value)
+          )
+  end
+
+  test "text written to a :uuid field must read as a UUID" do
+    command = fn value, metadata ->
+      {:ok, command} =
+        Selecto.Write.Command.new(%{
+          operation: :insert,
+          relation: "p",
+          assignments: [%{field: :uid, value: {:literal, value}}],
+          metadata: metadata
+        })
+
+      command
+    end
+
+    types = %{field_types: %{uid: :uuid}}
+    rules = [uuid_text: true]
+
+    for value <- [
+          "{9a3c1f7e-2b4d-4e8a-9c1b-7d2e3f4a5b6c}",
+          " 9a3c1f7e-2b4d-4e8a-9c1b-7d2e3f4a5b6c",
+          "not-a-uuid",
+          "0123456789abcdef",
+          <<0xFF>>
+        ] do
+      assert {:error,
+              %Selecto.Write.Error{
+                type: :invalid_value,
+                details: %{reason: :parameter_unbindable, unsupported_feature: :uuid_text}
+              }} = ParamValues.write_refusal(command.(value, types), rules, :mysql)
+
+      {:ok, batch} = Selecto.Write.Batch.new([command.(value, types)])
+      assert {:error, %Selecto.Write.Error{}} = ParamValues.write_refusal(batch, rules, :mysql)
+
+      # A graph row's command takes the field types of its node.
+      graph = %Selecto.Write.Graph{
+        root: "n",
+        nodes: [
+          %Selecto.Write.Graph.Node{
+            id: "n",
+            path: [],
+            relation: "p",
+            strategy: :ordered,
+            field_types: %{"uid" => "uuid"},
+            rows: [%Selecto.Write.Graph.Row{id: "r", path: [], command: command.(value, %{})}]
+          }
+        ]
+      }
+
+      assert {:error, %Selecto.Write.Error{}} = ParamValues.write_refusal(graph, rules, :sqlite)
+
+      # Without the rule, or for a field not declared :uuid, it writes as before.
+      assert :ok = ParamValues.write_refusal(command.(value, types), [], :postgresql)
+      assert :ok = ParamValues.write_refusal(command.(value, %{}), rules, :mysql)
+    end
+
+    for value <- [
+          "9a3c1f7e-2b4d-4e8a-9c1b-7d2e3f4a5b6c",
+          "9A3C1F7E-2B4D-4E8A-9C1B-7D2E3F4A5B6C",
+          "9a3c1f7e2b4d4e8a9c1b7d2e3f4a5b6c",
+          "urn:uuid:9a3c1f7e-2b4d-4e8a-9c1b-7d2e3f4a5b6c"
+        ],
+        do: assert(:ok = ParamValues.write_refusal(command.(value, types), rules, :mysql))
+  end
+
   test "a write's first unbindable value refuses as a write error" do
     {:ok, command} =
       Selecto.Write.Command.new(%{
@@ -178,6 +295,43 @@ defmodule Selecto.ParamValuesTest do
         Selecto.to_sql(query() |> Selecto.filter({:exists, fragment}) |> Selecto.select(["id"]))
       end
     end
+  end
+
+  test "an adapter renders the Decimal operand of Selecto's own comparisons by operator" do
+    q = %{query() | adapter: OperandAdapter}
+    d = Decimal.new("1.5")
+
+    sql = fn filter ->
+      {sql, _params} = Selecto.to_sql(q |> Selecto.filter(filter) |> Selecto.select(["id"]))
+      sql
+    end
+
+    for op <- [:=, :!=],
+        do: assert(sql.({"price", {op, d}}) =~ ~r/price (=|!=|<>) EQ\(/, inspect(op))
+
+    assert sql.({"price", d}) =~ ~r/price = EQ\(/
+
+    for op <- [:<, :<=, :>, :>=],
+        do: assert(sql.({"price", {op, d}}) =~ ~r/price #{op} RANGE\(/, inspect(op))
+
+    assert sql.({"price", {:between, d, Decimal.new(3)}}) =~ ~r/between RANGE\(.* and RANGE\(/is
+    assert sql.({"price", {:in, [d, Decimal.new(3)]}}) =~ ~r/EQ\(.*EQ\(/s
+
+    # Text, integers and host fragments are never wrapped.
+    refute sql.({"price", {:>=, "1.5"}}) =~ ~r/RANGE|EQ\(/
+    refute sql.({"id", {:>=, 2}}) =~ ~r/RANGE|EQ\(/
+
+    host = ["SELECT 1 FROM p x WHERE x.price >= ", {:param, d}, " AND x.name LIKE ", {:param, d}]
+    refute sql.({:exists, host}) =~ ~r/RANGE|EQ\(/
+
+    assert Selecto.Builder.TypedOperator.operand(q, ">=", {:param, d}) == [
+             "RANGE(",
+             {:param, d},
+             ")"
+           ]
+
+    assert Selecto.Builder.TypedOperator.operand(q, "LIKE", {:param, d}) == {:param, d}
+    assert Selecto.Builder.TypedOperator.operand(query(), "=", {:param, d}) == {:param, d}
   end
 
   test "DuckDB compares each Decimal of an IN list as = and <> compare it" do
