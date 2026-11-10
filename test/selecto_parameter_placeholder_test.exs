@@ -336,13 +336,19 @@ defmodule Selecto.ParameterPlaceholderTest do
         unsupported_feature: :collection
       })
 
-    refusal = catch_error(Selecto.Builder.ScopeRefusal.unsupported!(error, :lateral_unsupported))
-    assert %Selecto.Builder.ScopeRefusal{reason: :lateral_unsupported} = refusal
+    refusal = catch_error(Selecto.Builder.ScopeRefusal.unsupported!(error))
+    assert %Selecto.Builder.ScopeRefusal{reason: :unsupported_feature} = refusal
 
     assert %Selecto.Error{type: :validation_error, details: details} =
              Selecto.Error.from_reason(refusal)
 
-    assert details.reason == :lateral_unsupported
+    assert details.reason == :unsupported_feature
     assert details.unsupported_feature == :collection
+
+    # A lateral the adapter cannot render refuses as every lateral refusal does.
+    lateral = catch_error(Selecto.Builder.ScopeRefusal.lateral!(error))
+
+    assert %Selecto.Error{type: :query_enforcement, details: %{reason: :lateral_unsupported}} =
+             Selecto.Error.from_reason(lateral)
   end
 end

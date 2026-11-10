@@ -1649,7 +1649,7 @@ defmodule Selecto.Builder.Sql do
           {sql, []}
 
         {:error, %Selecto.Error{} = error} ->
-          Selecto.Builder.ScopeRefusal.unsupported!(error, :lateral_unsupported)
+          Selecto.Builder.ScopeRefusal.lateral!(error)
 
         {:error, reason} ->
           raise Selecto.Builder.ScopeRefusal,
@@ -1671,7 +1671,7 @@ defmodule Selecto.Builder.Sql do
           sql
 
         {:error, %Selecto.Error{} = error} ->
-          Selecto.Builder.ScopeRefusal.unsupported!(error, :lateral_unsupported)
+          Selecto.Builder.ScopeRefusal.lateral!(error)
 
         {:error, reason} ->
           raise Selecto.Builder.ScopeRefusal,

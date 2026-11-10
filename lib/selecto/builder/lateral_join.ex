@@ -117,7 +117,7 @@ defmodule Selecto.Builder.LateralJoin do
             unsupported_feature: :json_table
           })
 
-        Selecto.Builder.ScopeRefusal.unsupported!(error, :lateral_unsupported)
+        Selecto.Builder.ScopeRefusal.lateral!(error)
 
       spec.join_type not in [:inner, :left] ->
         error =
@@ -128,7 +128,7 @@ defmodule Selecto.Builder.LateralJoin do
             unsupported_feature: :json_table
           })
 
-        Selecto.Builder.ScopeRefusal.unsupported!(error, :lateral_unsupported)
+        Selecto.Builder.ScopeRefusal.lateral!(error)
 
       true ->
         {function_sql, params} = build_table_function_sql(spec.table_function)
@@ -150,7 +150,7 @@ defmodule Selecto.Builder.LateralJoin do
             unsupported_feature: :json_rowset
           })
 
-        Selecto.Builder.ScopeRefusal.unsupported!(error, :lateral_unsupported)
+        Selecto.Builder.ScopeRefusal.lateral!(error)
 
       spec.join_type not in [:inner, :left] ->
         error =
@@ -161,7 +161,7 @@ defmodule Selecto.Builder.LateralJoin do
             unsupported_feature: :json_rowset
           })
 
-        Selecto.Builder.ScopeRefusal.unsupported!(error, :lateral_unsupported)
+        Selecto.Builder.ScopeRefusal.lateral!(error)
 
       true ->
         {function_sql, params} = build_table_function_sql(spec.table_function)
@@ -206,7 +206,7 @@ defmodule Selecto.Builder.LateralJoin do
       # The adapter cannot render this LATERAL shape: refused typed through
       # every execute entry point (Selecto.Builder.ScopeRefusal).
       {:error, %Error{} = error} ->
-        Selecto.Builder.ScopeRefusal.unsupported!(error, :lateral_unsupported)
+        Selecto.Builder.ScopeRefusal.lateral!(error)
 
       {:error, reason} ->
         raise Selecto.Builder.ScopeRefusal,
@@ -249,11 +249,10 @@ defmodule Selecto.Builder.LateralJoin do
     {_iodata, aliases} = Selecto.Builder.Sql.build_iodata(subquery, [])
 
     if Enum.any?(aliases, &(is_binary(&1) and String.contains?(&1, "?"))) do
-      Selecto.Builder.ScopeRefusal.unsupported!(
+      Selecto.Builder.ScopeRefusal.lateral!(
         Error.validation_error("Lateral output aliases cannot contain '?'", %{
           unsupported_feature: :lateral_projection_alias
-        }),
-        :lateral_unsupported
+        })
       )
     end
   end
@@ -276,7 +275,7 @@ defmodule Selecto.Builder.LateralJoin do
         {sql, []}
 
       {:error, %Error{} = error} ->
-        Selecto.Builder.ScopeRefusal.unsupported!(error, :lateral_unsupported)
+        Selecto.Builder.ScopeRefusal.lateral!(error)
 
       {:error, reason} ->
         raise Selecto.Builder.ScopeRefusal,
@@ -425,7 +424,7 @@ defmodule Selecto.Builder.LateralJoin do
       # The adapter cannot render this join shape: refused typed through every
       # execute entry point (Selecto.Builder.ScopeRefusal).
       {:error, %Error{} = error} ->
-        Selecto.Builder.ScopeRefusal.unsupported!(error, :lateral_unsupported)
+        Selecto.Builder.ScopeRefusal.lateral!(error)
 
       {:error, reason} ->
         raise Selecto.Builder.ScopeRefusal,
