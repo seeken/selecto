@@ -285,6 +285,33 @@ defmodule Selecto.Error do
 
   def from_reason(reason), do: from_driver(reason)
 
+  @doc false
+  # The error a non-stream entry point returns for an adapter failure
+  # (Selecto.Executor normalizes it the same way), for an adapter to raise as
+  # Selecto.Error.Refused while a stream is enumerated, where no
+  # {:error, _} can be returned. `reason` is the raw failure, as the adapter's
+  # non-stream path would return it, or {:adapter_raised, exception} for one
+  # the non-stream path raises.
+  def stream_failure(adapter, {:adapter_raised, exception}),
+    do: adapter_raised(adapter, exception)
+
+  def stream_failure(adapter, reason),
+    do: from_driver(reason, Selecto.AdapterSupport.normalize_error(adapter, reason))
+
+  @doc false
+  # What an execute entry point returns when the adapter raised: the
+  # exception's kind, never its message or fields (they can quote values).
+  def adapter_raised(adapter, exception) do
+    connection_error("Adapter execution failed", %{
+      adapter: adapter,
+      reason: reason_kind(exception)
+    })
+  end
+
+  @doc false
+  def raise_stream_failure!(adapter, reason),
+    do: raise(Selecto.Error.Refused, stream_failure(adapter, reason))
+
   @doc """
   Builds the caller-facing error for a failure the database or its driver
   reported. `reason` is the raw driver reason and `normalized` the adapter's
