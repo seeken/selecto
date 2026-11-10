@@ -9,8 +9,8 @@
   a map or tuple in a numeric field, a Decimal no double holds compared with a
   float field, text in a text field that is invalid UTF-8 or holds a NUL, and
   date or datetime text that reads as no date (no longer an ArgumentError
-  quoting the value). A decimal, float or date field's text binds as the
-  number or date it reads as. On adapters that compare UUIDs as text, a UUID
+  quoting the value). A decimal or float field's text binds as the number
+  it reads as; a date field's text must read as a date. On adapters that compare UUIDs as text, a UUID
   in any text form binds its canonical form and text that is no UUID refuses.
   `Selecto.SQL.ParamValues` holds the per-dialect rules adapters apply before
   binding, in reads and writes. On DuckDB an IN / NOT IN list holding a

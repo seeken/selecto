@@ -1189,11 +1189,11 @@ defmodule Selecto.Builder.Sql.Where do
   defp to_type(:float, %Decimal{} = value), do: double_decimal!(value)
 
   # A date field's text value must read as a date (as datetime fields' text
-  # does, Selecto.Temporal); it binds as that date.
+  # does, Selecto.Temporal); it binds as given.
   defp to_type(:date, value) when is_binary(value) do
     with true <- String.valid?(value),
-         {:ok, date} <- value |> String.trim() |> String.slice(0, 10) |> Date.from_iso8601() do
-      date
+         {:ok, _date} <- value |> String.trim() |> String.slice(0, 10) |> Date.from_iso8601() do
+      value
     else
       _other -> invalid_filter_value!(:date, "Filter value is not a valid date or datetime")
     end
