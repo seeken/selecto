@@ -1247,6 +1247,11 @@ defmodule Selecto do
   - Streaming requires `adapter.stream/4` support.
   - The configured adapter owns cursor, transaction, pool, and repository
     semantics and returns structured errors for unsupported runtime contexts.
+  - A failure before the stream is returned comes back as `{:error, error}`.
+    Once `{:ok, stream}` is returned, a failure while the stream is enumerated
+    (a parameter the driver cannot encode, a server error, a timeout) raises
+    `Selecto.Error.Refused`, whose `type`, `message` and `details` are those of
+    the `Selecto.Error` the non-stream entry points return for the same failure.
   """
   @spec execute_stream(Selecto.Types.t(), keyword()) :: Selecto.Types.safe_execute_stream_result()
   def execute_stream(selecto, opts \\ []) do

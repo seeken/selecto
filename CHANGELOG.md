@@ -3,6 +3,12 @@
 
 ## Unreleased
 
+- A failure while an `execute_stream` stream is enumerated raises
+  `Selecto.Error.Refused` carrying the type, message and details the
+  non-stream entry points return for the same failure
+  (`Selecto.Error.stream_failure/2`, used by the adapters); a failure while
+  the stream opens (a parameter the driver cannot encode) returns that same
+  error instead of one quoting the driver's message.
 - `Selecto.Performance.ComplexityAnalyzer` counts joins again for a LATERAL,
   unnest or table-function join the adapter cannot render, and for a ROLLUP an
   adapter renders whole (`render_rollup/2`, as SQLite does), instead of raising;

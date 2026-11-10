@@ -2009,12 +2009,7 @@ defmodule Selecto.Executor do
           {:error, driver_error(adapter, reason)}
       end
     rescue
-      error ->
-        {:error,
-         Selecto.Error.connection_error("Adapter execution failed", %{
-           adapter: adapter,
-           reason: Selecto.Error.reason_kind(error)
-         })}
+      error -> {:error, Selecto.Error.adapter_raised(adapter, error)}
     catch
       :exit, reason ->
         {:error,
@@ -2216,8 +2211,9 @@ defmodule Selecto.Executor do
                  %{adapter: adapter}
                )}
 
+            # Normalized as the non-stream path normalizes the same failure.
             {:error, reason} ->
-              {:error, driver_error(adapter, reason)}
+              {:error, Selecto.Error.stream_failure(adapter, reason)}
           end
         rescue
           FunctionClauseError ->
@@ -2233,6 +2229,11 @@ defmodule Selecto.Executor do
                "Adapter stream callback is unavailable",
                %{adapter: adapter, stream_context: :adapter, adapter_contract: :stream_callback}
              )}
+
+          # Raised while the stream opens (a parameter the driver cannot
+          # encode): returned as the non-stream path returns it.
+          error ->
+            {:error, Selecto.Error.adapter_raised(adapter, error)}
         end
     end
   end
