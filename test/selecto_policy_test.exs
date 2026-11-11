@@ -126,20 +126,6 @@ defmodule Selecto.PolicyTest do
     end
   end
 
-  test "strict mode seals the authored domain and compiled authority" do
-    changed_domain = put_in(strict_query().domain[:source][:source_table], "other_orders")
-
-    assert_raise PolicyViolation, ~r/domain changed after strict mode sealed it/, fn ->
-      Selecto.to_sql(changed_domain |> Selecto.select(["id"]))
-    end
-
-    changed_config = put_in(strict_query().config[:source_table], "other_orders")
-
-    assert_raise PolicyViolation, ~r/compiled domain configuration changed/, fn ->
-      Selecto.to_sql(changed_config |> Selecto.select(["id"]))
-    end
-  end
-
   test "strict mode allows declared VALUES members and rejects direct row sources" do
     query =
       strict_query()

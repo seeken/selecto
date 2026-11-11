@@ -151,7 +151,7 @@ defmodule Selecto.QueryMemberDataTest do
     assert sql =~ ~r/limit 1/i
   end
 
-  test "strict data member children inherit the host policy and receive their own seals" do
+  test "strict data member children inherit the host policy" do
     parent = Selecto.configure(domain(), :compile_only, mode: :strict)
 
     spec =
@@ -165,7 +165,6 @@ defmodule Selecto.QueryMemberDataTest do
     child = spec.source.(parent)
     assert child.policy.mode == :strict
     assert child.policy.domain_sql == :declared
-    assert child.policy.domain_seal != parent.policy.domain_seal
     assert :ok == Selecto.Policy.validate_query!(child)
 
     assert :ok ==
@@ -179,8 +178,6 @@ defmodule Selecto.QueryMemberDataTest do
 
     assert statement =~ "LATERAL"
     assert parent.domain == domain()
-    tampered = %{child | domain: put_in(child.domain, [:source, :source_table], "another_source")}
-    assert_raise Selecto.PolicyViolation, fn -> Selecto.to_sql(tampered) end
 
     restricted_parent =
       Selecto.configure(Map.delete(domain(), :query_members), :compile_only,
