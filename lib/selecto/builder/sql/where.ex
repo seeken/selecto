@@ -893,16 +893,13 @@ defmodule Selecto.Builder.Sql.Where do
 
         adapter = Map.get(selecto, :adapter)
 
-        # An integer member compares as the exact Decimal it is: in place
-        # (`col = $n`) DuckDB would type its parameter as the column, and an
-        # integer the column cannot hold (-1 on UBIGINT, 3000000000 on
-        # INTEGER, any number on VARCHAR) would fail to bind, where an IN
-        # list unified the members' types.
-        typed_values =
-          Enum.map(typed_values, fn
-            value when is_integer(value) -> Decimal.new(value)
-            value -> value
-          end)
+        # A number member (an integer, a float, a string that reads as a
+        # finite decimal) compares as the exact Decimal it is, as an IN list
+        # unified the members into the list's DECIMAL type: in place
+        # (`col = $n`) DuckDB would type its parameter as the column, and one
+        # the column cannot hold (-1 on UBIGINT, 2.0 on INTEGER, "2" on
+        # BOOLEAN) would fail to bind. Other members compare in place.
+        typed_values = Enum.map(typed_values, &decimal_member/1)
 
         if projected_decimal_list?(selecto, selector, typed_values) do
           projected_decimal_list(adapter, selector, typed_values, operator, joiner)
@@ -933,6 +930,20 @@ defmodule Selecto.Builder.Sql.Where do
   # Other members (NULL, integers) compare in place, as before. A single
   # member keeps the plain comparison.
   @decimal_list_alias "selecto_decimal_list"
+
+  defp decimal_member(value) when is_integer(value), do: Decimal.new(value)
+  defp decimal_member(value) when is_float(value), do: Decimal.from_float(value)
+
+  defp decimal_member(value) when is_binary(value) do
+    case Decimal.parse(value) do
+      {%Decimal{coef: coef} = decimal, ""} when is_integer(coef) -> decimal
+      _ -> value
+    end
+  rescue
+    _ -> value
+  end
+
+  defp decimal_member(value), do: value
 
   defp projected_decimal_list?(selecto, selector, typed_values) do
     adapter = Map.get(selecto, :adapter)
