@@ -103,4 +103,35 @@ defmodule Selecto.DuckDBDecimalListTest do
     assert sql =~ "selecto_root.d = (SELECT CAST($2 AS DECIMAL(38,1)))"
     refute sql =~ "selecto_decimal_list"
   end
+
+  test "a projected list in a nested query rebinds its projected Decimals" do
+    list = [Decimal.new("1.5"), Decimal.new("2")]
+
+    base =
+      @domain
+      |> Selecto.configure(:mock_connection, adapter: ProjectingDuck, validate: false)
+      |> Selecto.filter({"d", {:in, list}})
+      |> Selecto.select(["id"])
+
+    other =
+      @domain
+      |> Selecto.configure(:mock_connection, adapter: ProjectingDuck, validate: false)
+      |> Selecto.filter({"id", 4})
+      |> Selecto.select(["id"])
+
+    for query <- [
+          Selecto.union(base, other),
+          @domain
+          |> Selecto.configure(:mock_connection, adapter: ProjectingDuck, validate: false)
+          |> Selecto.with_cte("w", fn -> base end, columns: ["id"])
+          |> Selecto.filter({"d", {:not_in, list}})
+          |> Selecto.select(["id"])
+        ] do
+      {sql, params} = Selecto.to_sql(query)
+      assert Enum.all?(list, &(&1 in params))
+
+      assert sql =~ ~r/CAST\(\$\d+ AS DECIMAL\(38,1\)\) AS selecto_decimal_1/
+      refute sql =~ ~r/\(SELECT CAST\(\$\d+ AS DECIMAL\(38,\d+\)\)\)/
+    end
+  end
 end

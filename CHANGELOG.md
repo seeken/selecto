@@ -9,6 +9,12 @@
   `projected_parameters?/0`), not a scalar subquery per Decimal: a couple of
   hundred of those overflowed DuckDB's planner and killed the VM. The
   comparisons inside, and their three-valued answer, are unchanged.
+  - A nested query (set member, CTE body, retarget, subquery join, lateral,
+    subquery filter) rebinds a projected Decimal by its projected spelling
+    too, so such a list no longer refuses `placeholder_count_mismatch`.
+  - On an adapter exporting `decimal_list_comparisons/3`, the Decimal
+    members' comparisons are rendered by the adapter (DuckDB guards a member
+    the column's type cannot hold beside it).
 - SQLite's double rule models SQLite's own read of a number (19 significant
   digits, cut, then converted): a Decimal refuses only when that read is an
   infinity (its cut at or past 1.797693134862315808e308) or 0.0 for a nonzero
