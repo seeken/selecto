@@ -893,6 +893,17 @@ defmodule Selecto.Builder.Sql.Where do
 
         adapter = Map.get(selecto, :adapter)
 
+        # An integer member compares as the exact Decimal it is: in place
+        # (`col = $n`) DuckDB would type its parameter as the column, and an
+        # integer the column cannot hold (-1 on UBIGINT, 3000000000 on
+        # INTEGER, any number on VARCHAR) would fail to bind, where an IN
+        # list unified the members' types.
+        typed_values =
+          Enum.map(typed_values, fn
+            value when is_integer(value) -> Decimal.new(value)
+            value -> value
+          end)
+
         if projected_decimal_list?(selecto, selector, typed_values) do
           projected_decimal_list(adapter, selector, typed_values, operator, joiner)
         else

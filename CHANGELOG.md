@@ -15,6 +15,10 @@
   - On an adapter exporting `decimal_list_comparisons/3`, the Decimal
     members' comparisons are rendered by the adapter (DuckDB guards a member
     the column's type cannot hold beside it).
+  - On DuckDB, an integer member of a list holding a Decimal compares as the
+    exact Decimal it is: in place (`col = $n`) DuckDB typed its parameter as
+    the column, and an integer the column cannot hold (-1 on UBIGINT,
+    3000000000 on INTEGER, any number on VARCHAR) failed to bind.
 - SQLite's double rule models SQLite's own read of a number (19 significant
   digits, cut, then converted): a Decimal refuses only when that read is an
   infinity (its cut at or past 1.797693134862315808e308) or 0.0 for a nonzero
