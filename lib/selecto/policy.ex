@@ -39,22 +39,14 @@ defmodule Selecto.Policy do
   @internal_origin_key :__selecto_policy_origin__
 
   defstruct mode: :permissive,
-            domain_sql: :declared,
-            domain_seal: nil,
-            config_seal: nil,
-            base_column_ids: [],
-            base_join_ids: []
+            domain_sql: :declared
 
   @type mode :: :permissive | :strict
   @type domain_sql_mode :: :declared | :forbid
 
   @type t :: %__MODULE__{
           mode: mode(),
-          domain_sql: domain_sql_mode(),
-          domain_seal: String.t() | nil,
-          config_seal: String.t() | nil,
-          base_column_ids: [term()],
-          base_join_ids: [term()]
+          domain_sql: domain_sql_mode()
         }
 
   @spec ensure_configuration_options!(keyword()) :: :ok
@@ -71,7 +63,7 @@ defmodule Selecto.Policy do
   end
 
   @spec new!(map(), map(), keyword()) :: t()
-  def new!(domain, config, opts) do
+  def new!(domain, _config, opts) do
     mode = Keyword.get(opts, :mode, :permissive)
     domain_sql = Keyword.get(opts, :domain_sql, :declared)
 
@@ -96,16 +88,9 @@ defmodule Selecto.Policy do
       ensure_domain_sql_forbidden!(domain)
     end
 
-    base_column_ids = config |> Map.get(:columns, %{}) |> Map.keys()
-    base_join_ids = config |> Map.get(:joins, %{}) |> Map.keys()
-
     %__MODULE__{
       mode: mode,
-      domain_sql: domain_sql,
-      domain_seal: seal(domain),
-      config_seal: seal(config_authority(config, base_column_ids, base_join_ids)),
-      base_column_ids: base_column_ids,
-      base_join_ids: base_join_ids
+      domain_sql: domain_sql
     }
   end
 
@@ -117,8 +102,6 @@ defmodule Selecto.Policy do
   @spec validate_query!(Selecto.t()) :: :ok
   def validate_query!(%Selecto{} = selecto) do
     if strict?(selecto) do
-      ensure_domain_sealed!(selecto)
-      ensure_config_sealed!(selecto)
       ensure_query_term_allowed!(selecto, selecto.set, [:set])
       ensure_dynamic_joins_declared!(selecto)
       ensure_recorded_sources!(selecto)
@@ -312,42 +295,6 @@ defmodule Selecto.Policy do
     validate_query!(nested)
   end
 
-  defp ensure_domain_sealed!(%Selecto{domain: domain, policy: policy}) do
-    if seal(domain) != policy.domain_seal do
-      violation!(
-        :domain_modified_after_configuration,
-        "the configured domain changed after strict mode sealed it"
-      )
-    end
-  end
-
-  defp ensure_config_sealed!(%Selecto{config: config, policy: policy}) do
-    authority = config_authority(config, policy.base_column_ids, policy.base_join_ids)
-
-    if seal(authority) != policy.config_seal do
-      violation!(
-        :domain_config_modified_after_configuration,
-        "the compiled domain configuration changed after strict mode sealed it"
-      )
-    end
-  end
-
-  defp config_authority(config, column_ids, join_ids) do
-    config
-    |> Map.take([
-      :source,
-      :source_table,
-      :primary_key,
-      :filters,
-      :functions,
-      :domain_data,
-      :extensions,
-      :rollup_sort_fix
-    ])
-    |> Map.put(:columns, Map.take(Map.get(config, :columns, %{}), column_ids))
-    |> Map.put(:joins, Map.take(Map.get(config, :joins, %{}), join_ids))
-  end
-
   defp ensure_dynamic_joins_declared!(selecto) do
     selecto.set
     |> Map.get(:dynamic_joins, %{})
@@ -489,13 +436,6 @@ defmodule Selecto.Policy do
     do: tuple |> Tuple.to_list() |> find_domain_sql(path)
 
   defp find_domain_sql(_term, _path), do: nil
-
-  defp seal(term) do
-    term
-    |> :erlang.term_to_binary([:deterministic])
-    |> then(&:crypto.hash(:sha256, &1))
-    |> Base.encode16(case: :lower)
-  end
 
   @spec violation!(atom(), String.t()) :: no_return()
   @spec violation!(atom(), String.t(), list()) :: no_return()
