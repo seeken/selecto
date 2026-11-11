@@ -17,6 +17,7 @@ defmodule Selecto.Domain do
   alias Selecto.Domain.Shorthand
   alias Selecto.Domain.Inspector
   alias Selecto.Domain.Projector
+  alias Selecto.Domain.SchemaV2
   alias Selecto.Domain.Compose
   alias Selecto.Domain.CompositionContract
   alias Selecto.Domain.ConsumerProjectionRelease
@@ -211,9 +212,51 @@ defmodule Selecto.Domain do
   Runtime configuration uses `Selecto.DomainValidator` for its authored-map
   checks. Domain producers should use this function as the portable contract
   boundary in addition to runtime validation.
+
+  A domain declaring `schema_version: 2` is checked against the domain schema 2
+  rules (`Selecto.Domain.SchemaV2.validate/1`, errors carry the rule code and
+  path) and then against the schema-v1 contract on its version 1 form
+  (`Selecto.Domain.SchemaV2.to_version_1/1`); the normalized domain is that
+  version 1 form and the diagnostics report `schema_version: 2`. A schema 1
+  domain validates exactly as before: `Selecto.Domain.SchemaV2.migrate/1`
+  reports `:domain_schema_deprecated` with its schema 2 form.
   """
   @spec validate(term()) :: {:ok, map(), Diagnostics.t()} | {:error, Diagnostics.t()}
   def validate(domain) do
+    if SchemaV2.version_2?(domain) do
+      validate_version_2(domain)
+    else
+      validate_version_1(domain)
+    end
+  end
+
+  # Schema 2: its own rules first, then the schema-v1 contract on the version 1
+  # form it maps to. The normalized domain is that version 1 form.
+  defp validate_version_2(domain) do
+    case SchemaV2.validate(domain) do
+      [] ->
+        case validate_version_1(SchemaV2.to_version_1(domain)) do
+          {:ok, normalized, diagnostics} -> {:ok, normalized, version_2_diagnostics(diagnostics)}
+          {:error, diagnostics} -> {:error, version_2_diagnostics(diagnostics)}
+        end
+
+      errors ->
+        {:error,
+         Diagnostics.new(
+           errors: Enum.map(errors, &schema_v2_error/1),
+           schema_version: 2,
+           schema_version_inferred: false
+         )}
+    end
+  end
+
+  defp version_2_diagnostics(diagnostics), do: %{diagnostics | schema_version: 2}
+
+  defp schema_v2_error(%{code: code, path: path}) do
+    %{code: code, path: path, message: "domain schema 2 rule #{code} failed at #{inspect(path)}"}
+  end
+
+  defp validate_version_1(domain) do
     with {:ok, normalized, diagnostics} <- normalize(domain) do
       case Selecto.Domain.Contract.errors(normalized) do
         [] ->
