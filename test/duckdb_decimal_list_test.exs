@@ -69,16 +69,18 @@ defmodule Selecto.DuckDBDecimalListTest do
           {{"d", {:not_in, list}}, "<>", "AND"}
         ] do
       {sql, params} = sql(ProjectingDuck, filter)
-      # Comparisons bind first, then the projected Decimals.
-      assert params == [nil, 3, Decimal.new("0"), Decimal.new("1.5")]
+      # Comparisons bind first, then the projected Decimals; the integer
+      # member projects as the exact Decimal it is.
+      assert params == [nil, Decimal.new("0"), Decimal.new("3"), Decimal.new("1.5")]
 
       assert String.replace(sql, ~r/\s+/, " ") =~
                "(SELECT ((selecto_root.d #{operator} selecto_decimal_list.selecto_decimal_1) " <>
                  "#{joiner} (selecto_root.d #{operator} $1) " <>
-                 "#{joiner} (selecto_root.d #{operator} $2) " <>
-                 "#{joiner} (selecto_root.d #{operator} selecto_decimal_list.selecto_decimal_2)) " <>
-                 "FROM (SELECT CAST($3 AS DECIMAL(38,0)) AS selecto_decimal_1, " <>
-                 "CAST($4 AS DECIMAL(38,1)) AS selecto_decimal_2) AS selecto_decimal_list)"
+                 "#{joiner} (selecto_root.d #{operator} selecto_decimal_list.selecto_decimal_2) " <>
+                 "#{joiner} (selecto_root.d #{operator} selecto_decimal_list.selecto_decimal_3)) " <>
+                 "FROM (SELECT CAST($2 AS DECIMAL(38,0)) AS selecto_decimal_1, " <>
+                 "CAST($3 AS DECIMAL(38,0)) AS selecto_decimal_2, " <>
+                 "CAST($4 AS DECIMAL(38,1)) AS selecto_decimal_3) AS selecto_decimal_list)"
 
       # No Decimal takes a scalar subquery of its own.
       refute sql =~ ~r/\(SELECT CAST\(\$\d+ AS DECIMAL\(38,\d+\)\)\)/
