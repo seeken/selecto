@@ -1200,7 +1200,7 @@ defmodule Selecto.Builder.Sql.Select do
     case Map.get(conf, :select) do
       nil ->
         # Use the database field name (field property) instead of display name (name property)
-        field_name = Map.get(conf, :field, conf.name)
+        field_name = Map.get(conf, :field) || Map.get(conf, :name)
 
         # For dynamic columns, use them directly without table qualification
         if Map.has_key?(dynamic_columns, selector) do
