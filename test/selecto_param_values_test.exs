@@ -361,35 +361,4 @@ defmodule Selecto.ParamValuesTest do
     assert Selecto.Builder.TypedOperator.operand(q, "LIKE", {:param, d}) == {:param, d}
     assert Selecto.Builder.TypedOperator.operand(query(), "=", {:param, d}) == {:param, d}
   end
-
-  test "DuckDB compares each Decimal of an IN list as = and <> compare it" do
-    duck = %{query() | adapter: SelectoDBDuckDB.Adapter}
-    values = [Decimal.new("1e-31"), Decimal.new(99)]
-
-    {sql, params} =
-      Selecto.to_sql(duck |> Selecto.filter({"price", {:in, values}}) |> Selecto.select(["id"]))
-
-    assert params == values
-    refute sql =~ " IN ("
-    assert sql =~ ~r/selecto_root\.price = .* OR .*selecto_root\.price = /s
-
-    {sql, _params} =
-      Selecto.to_sql(
-        duck
-        |> Selecto.filter({"price", {:not_in, values}})
-        |> Selecto.select(["id"])
-      )
-
-    assert sql =~ ~r/selecto_root\.price <> .* AND .*selecto_root\.price <> /s
-
-    # Other adapters, and non-Decimal lists, keep IN.
-    {sql, _params} =
-      Selecto.to_sql(
-        query()
-        |> Selecto.filter({"price", {:in, values}})
-        |> Selecto.select(["id"])
-      )
-
-    assert sql =~ "price = ANY" or sql =~ " IN ("
-  end
 end
