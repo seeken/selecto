@@ -72,4 +72,43 @@ defmodule Selecto.StaticCustomJoinOnTest do
     assert normalized =~
              "left join line_items line_items on selecto_root.id = line_items.order_id and selecto_root.tenant_id = line_items.tenant_id"
   end
+
+  test "a non-association join field with no display name selects its column" do
+    domain = %{
+      name: "Orders",
+      source: %{
+        source_table: "orders",
+        primary_key: "id",
+        fields: ["id"],
+        columns: %{"id" => %{type: :integer}},
+        associations: %{}
+      },
+      schemas: %{},
+      joins: %{
+        notes: %{
+          non_assoc: true,
+          source: "line_notes",
+          type: :left,
+          owner_key: "id",
+          related_key: "order_id",
+          fields: %{
+            "notes.order_id" => %{
+              colid: "notes.order_id",
+              field: "order_id",
+              requires_join: :notes,
+              type: :integer
+            }
+          }
+        }
+      }
+    }
+
+    {sql, []} =
+      domain
+      |> Selecto.configure(:mock_connection, validate: false)
+      |> Selecto.select(["id", "notes.order_id"])
+      |> Selecto.to_sql()
+
+    assert sql =~ "order_id"
+  end
 end
