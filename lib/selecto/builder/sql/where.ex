@@ -891,12 +891,14 @@ defmodule Selecto.Builder.Sql.Where do
           Enum.any?(typed_values, &is_struct(&1, Decimal)) ->
         {operator, joiner} = if negate?, do: {" <> ", ") AND ("}, else: {" = ", ") OR ("}
 
+        adapter = Map.get(selecto, :adapter)
+
         if projected_decimal_list?(selecto, selector, typed_values) do
-          projected_decimal_list(selector, typed_values, operator, joiner)
+          projected_decimal_list(adapter, selector, typed_values, operator, joiner)
         else
           comparisons =
-            typed_values
-            |> Enum.map(&[selector, operator, {:param, &1}])
+            adapter
+            |> member_comparisons(selector, operator, Enum.map(typed_values, &{{:param, &1}, &1}))
             |> Enum.intersperse(joiner)
 
           [" ((", comparisons, ")) "]
@@ -936,25 +938,43 @@ defmodule Selecto.Builder.Sql.Where do
            |> String.contains?("selecto_decimal"))
   end
 
-  defp projected_decimal_list(selector, typed_values, operator, joiner) do
-    {comparisons, projected, _index} =
+  # The members' comparisons: on an adapter that renders them
+  # (SelectoDBDuckDB.Adapter.decimal_list_comparisons/3), the Decimals grouped
+  # by shape so a member the column's DECIMAL type cannot hold beside it
+  # answers (false / true, NULL for a NULL row) instead of failing the read;
+  # the rest in place. `operand` gives a member's operand.
+  defp member_comparisons(adapter, selector, operator, members) do
+    if AdapterSupport.callback_available?(adapter, :decimal_list_comparisons, 3) do
+      {decimals, others} = Enum.split_with(members, &is_struct(elem(&1, 1), Decimal))
+
+      adapter.decimal_list_comparisons(selector, operator, decimals) ++
+        Enum.map(others, fn {operand, _value} -> [selector, operator, operand] end)
+    else
+      Enum.map(members, fn {operand, _value} -> [selector, operator, operand] end)
+    end
+  end
+
+  defp projected_decimal_list(adapter, selector, typed_values, operator, joiner) do
+    {members, projected, _index} =
       Enum.reduce(typed_values, {[], [], 1}, fn
-        %Decimal{} = value, {comparisons, projected, index} ->
+        %Decimal{} = value, {members, projected, index} ->
           name = "selecto_decimal_#{index}"
 
-          {[[selector, operator, @decimal_list_alias, ".", name] | comparisons],
+          {[{[@decimal_list_alias, ".", name], value} | members],
            [
              [{:param, %Selecto.SQL.TypedParam{value: value, cast: :projected}}, " AS ", name]
              | projected
            ], index + 1}
 
-        value, {comparisons, projected, index} ->
-          {[[selector, operator, {:param, value}] | comparisons], projected, index}
+        value, {members, projected, index} ->
+          {[{{:param, value}, value} | members], projected, index}
       end)
+
+    comparisons = member_comparisons(adapter, selector, operator, Enum.reverse(members))
 
     [
       " (SELECT ((",
-      comparisons |> Enum.reverse() |> Enum.intersperse(joiner),
+      Enum.intersperse(comparisons, joiner),
       ")) FROM (SELECT ",
       projected |> Enum.reverse() |> Enum.intersperse(", "),
       ") AS ",
