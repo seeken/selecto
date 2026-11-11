@@ -12,7 +12,7 @@
   BLOB storage, as Ecto's MyXQL adapter keeps UUIDs) and binds as given, in
   reads and writes, as before. The :uuid write rule also checks values the
   write takes from its context.
-- An adapter declaring `:uuid_cast_compare` (DuckDB) compares a :uuid filter
+- An adapter declaring `:uuid_cast_compare` (no shipped adapter declares it yet) compares a :uuid filter
   as a UUID: the value binds as its canonical text inside
   `Selecto.SQL.TypedParam`, whose placeholder the adapter renders with its
   cast; the parameter list holds the plain text.
