@@ -3,24 +3,6 @@
 
 ## Unreleased
 
-- DuckDB: an IN / NOT IN list of two or more members holding a Decimal renders
-  as one correlated subquery over a derived table that projects each Decimal
-  (`%Selecto.SQL.TypedParam{cast: :projected}`, when the adapter exports
-  `projected_parameters?/0`), not a scalar subquery per Decimal: a couple of
-  hundred of those overflowed DuckDB's planner and killed the VM. The
-  comparisons inside, and their three-valued answer, are unchanged.
-  - A nested query (set member, CTE body, retarget, subquery join, lateral,
-    subquery filter) rebinds a projected Decimal by its projected spelling
-    too, so such a list no longer refuses `placeholder_count_mismatch`.
-  - On an adapter exporting `decimal_list_comparisons/3`, the Decimal
-    members' comparisons are rendered by the adapter (DuckDB guards a member
-    the column's type cannot hold beside it).
-  - On DuckDB, a number member of a list holding a Decimal (an integer, a
-    float, a string that reads as a finite decimal) compares as the exact
-    Decimal it is, as main's IN list unified members into its DECIMAL type:
-    in place (`col = $n`) DuckDB typed its parameter as the column, and one
-    the column cannot hold (-1 on UBIGINT, 2.0 on INTEGER, "2" on BOOLEAN)
-    failed to bind.
 - SQLite's double rule models SQLite's own read of a number (19 significant
   digits, cut, then converted): a Decimal refuses only when that read is an
   infinity (its cut at or past 1.797693134862315808e308) or 0.0 for a nonzero
@@ -75,9 +57,7 @@
   compare UUIDs as text, a UUID in any text form binds as given and text that
   is no UUID refuses.
   `Selecto.SQL.ParamValues` holds the per-dialect rules adapters apply before
-  binding, in reads and writes. On DuckDB an IN / NOT IN list holding a
-  Decimal compares each value as `=` / `<>` does (the list cast rounded a
-  higher-scale value). Marker iodata holding an element with no SQL text form
+  binding, in reads and writes. Marker iodata holding an element with no SQL text form
   (a map, tuple or pid) refuses typed.
 - A failure while an `execute_stream` stream is enumerated raises
   `Selecto.Error.Refused` carrying the type, message and details the

@@ -83,38 +83,11 @@ defmodule Selecto.SQL.Params do
       pieces = pieces(sql, Selecto.AdapterSupport.adapter_name(adapter), finder, length(params))
       rebind_repeated(pieces, params, marker)
     else
-      spellings = spellings(adapter, placeholder, params, placeholders)
-      pattern = spellings |> Enum.map(&elem(&1, 0)) |> numbered_pattern()
+      pattern = numbered_pattern(placeholders)
       finder = fn code -> Regex.scan(pattern, code, return: :index) |> Enum.map(&hd/1) end
       pieces = pieces(sql, Selecto.AdapterSupport.adapter_name(adapter), finder, length(params))
-      rebind_numbered(pieces, spellings, dollar_numbered?(adapter), pattern)
+      rebind_numbered(pieces, params, placeholders, dollar_numbered?(adapter), pattern)
     end
-  end
-
-  # Each param's spellings in finalized text: {text, index, value to rebind}.
-  # A Decimal the adapter projected in a derived table's select list (DuckDB's
-  # Decimal IN lists, `%TypedParam{cast: :projected}`) was rendered without
-  # the scalar subquery its plain placeholder takes; that spelling rebinds as
-  # the projected param again.
-  defp spellings(adapter, placeholder, params, placeholders) do
-    projects? =
-      Selecto.AdapterSupport.callback_available?(adapter, :projected_parameters?, 0) and
-        adapter.projected_parameters?()
-
-    params
-    |> Enum.zip(placeholders)
-    |> Enum.with_index(1)
-    |> Enum.flat_map(fn {{value, text}, index} ->
-      plain = [{text, index, value}]
-
-      if projects? and is_struct(value, Decimal) do
-        projected = %Selecto.SQL.TypedParam{value: value, cast: :projected}
-        spelled = placeholder.(index, projected) |> IO.iodata_to_binary()
-        if spelled == text, do: plain, else: [{spelled, index, projected} | plain]
-      else
-        plain
-      end
-    end)
   end
 
   # Only the code is rebound: a placeholder-like sequence in a string, a
@@ -524,9 +497,8 @@ defmodule Selecto.SQL.Params do
   defp dollar_numbered?(adapter),
     do: IO.iodata_to_binary(adapter.placeholder(1)) == "$1"
 
-  defp rebind_numbered(pieces, spellings, dollar_numbered?, pattern) do
-    values = Map.new(spellings, fn {text, _index, value} -> {text, value} end)
-    indexes = Map.new(spellings, fn {text, index, _value} -> {text, index} end)
+  defp rebind_numbered(pieces, params, placeholders, dollar_numbered?, pattern) do
+    values = placeholders |> Enum.zip(params) |> Map.new()
 
     parts =
       Enum.flat_map(pieces, fn
@@ -557,18 +529,8 @@ defmodule Selecto.SQL.Params do
           {:text, _text} -> false
         end)
 
-    # Every parameter is bound at least once (in any of its spellings); a
-    # placeholder may repeat.
-    bound_indexes =
-      for part <- parts,
-          is_binary(part),
-          Map.has_key?(indexes, part),
-          into: MapSet.new(),
-          do: indexes[part]
-
-    if not stray? and
-         MapSet.size(bound_indexes) ==
-           spellings |> Enum.map(&elem(&1, 1)) |> Enum.uniq() |> length() do
+    # Every parameter is bound at least once; a placeholder may repeat.
+    if not stray? and Enum.all?(placeholders, &(&1 in parts)) do
       rebound
     else
       count_mismatch()
