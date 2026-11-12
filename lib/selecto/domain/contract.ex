@@ -6,7 +6,7 @@ defmodule Selecto.Domain.Contract do
   including relations, joins, query metadata, query members, published views,
   detail actions, writes, capabilities, actions, source relationships, choice
   sources, co-domains, domain dependencies, consumer operation and experience
-  registries, and field bindings. Runtime configuration separately validates
+  registries, field bindings, and field descriptions. Runtime configuration separately validates
   the authored map unless a caller explicitly requests normalized validation.
   """
 
@@ -14,6 +14,7 @@ defmodule Selecto.Domain.Contract do
 
   alias Selecto.Domain.Contract.Actions
   alias Selecto.Domain.Contract.Capabilities
+  alias Selecto.Domain.Contract.Components
   alias Selecto.Domain.Contract.ChoiceSources
   alias Selecto.Domain.Contract.CoDomains
   alias Selecto.Domain.Contract.ConsumerRegistries
@@ -75,6 +76,7 @@ defmodule Selecto.Domain.Contract do
     detail_actions = Map.get(normalized_domain, :detail_actions, %{})
     editors = Map.get(normalized_domain, :editors, %{})
     imports = Map.get(normalized_domain, :imports, %{})
+    components = Map.get(normalized_domain, :components, %{})
     field_index = Core.field_index(source, schemas, projection, joins)
 
     []
@@ -101,6 +103,7 @@ defmodule Selecto.Domain.Contract do
     |> ConsumerRegistries.validate(:operations, operations)
     |> ConsumerRegistries.validate(:experiences, experiences)
     |> FieldBindings.validate(source, schemas, projection, choice_sources, field_index)
+    |> Components.validate(components)
     |> Enum.reverse()
   end
 
