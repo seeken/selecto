@@ -235,7 +235,14 @@ defmodule Selecto.Domain do
   defp validate_version_2(domain) do
     case SchemaV2.validate(domain) do
       [] ->
-        case validate_version_1(SchemaV2.to_version_1(domain)) do
+        # The computed fingerprint is the domain's identity, so the version 1
+        # form carries it as domain_fingerprint.
+        version_1 =
+          domain
+          |> SchemaV2.to_version_1()
+          |> Map.put("domain_fingerprint", SchemaV2.fingerprint(domain))
+
+        case validate_version_1(version_1) do
           {:ok, normalized, diagnostics} -> {:ok, normalized, version_2_diagnostics(diagnostics)}
           {:error, diagnostics} -> {:error, version_2_diagnostics(diagnostics)}
         end
@@ -461,6 +468,12 @@ defmodule Selecto.Domain do
     do: MapHelpers.put_section(domain, :domain_version, domain_version)
 
   def domain_fingerprint(domain) do
+    if SchemaV2.version_2?(domain),
+      do: SchemaV2.computed_fingerprint(domain),
+      else: declared_domain_fingerprint(domain)
+  end
+
+  defp declared_domain_fingerprint(domain) do
     case MapHelpers.fetch_section(domain, :domain_fingerprint) do
       {:ok, fingerprint} when is_binary(fingerprint) ->
         case String.trim(fingerprint) do

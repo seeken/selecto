@@ -189,6 +189,27 @@ defmodule Selecto.DomainSchemaV2Test do
 
       refute :domain_schema_deprecated in Enum.map(diagnostics.warnings, & &1.code)
     end
+
+    test "the computed fingerprint is a schema 2 domain's identity" do
+      computed = SchemaV2.fingerprint(v2_domain())
+      assert Domain.domain_fingerprint(v2_domain()) == computed
+      assert {:ok, normalized, _diagnostics} = Domain.validate(v2_domain())
+      assert Domain.domain_fingerprint(normalized) == computed
+    end
+
+    test "only the number 2 is schema 2" do
+      refute SchemaV2.version_2?(%{"schema_version" => "2"})
+      assert SchemaV2.version_2?(%{"schema_version" => 2})
+    end
+
+    test "a value the fingerprint cannot represent refuses" do
+      document =
+        put_in(v2_domain(), ["source", "columns", "id", "default"], 9_007_199_254_740_993)
+
+      assert Domain.domain_fingerprint(document) == nil
+      assert {:error, diagnostics} = Domain.validate(document)
+      assert [%{code: :domain_fingerprint_unrepresentable}] = diagnostics.errors
+    end
   end
 
   defp v2_domain do
