@@ -318,13 +318,32 @@ defmodule Selecto.Domain.SchemaV2 do
 
   defp valid_pin?(_pin, _columns), do: false
 
-  defp check_fingerprint(errors, %{"domain_fingerprint" => declared} = document) do
-    if is_binary(declared) and declared == fingerprint(document),
-      do: errors,
-      else: err(errors, :domain_fingerprint_mismatch, ["domain_fingerprint"])
+  defp check_fingerprint(errors, document) do
+    case {computed_fingerprint(document), Map.fetch(document, "domain_fingerprint")} do
+      {nil, _declared} ->
+        err(errors, :domain_fingerprint_unrepresentable, [])
+
+      {_computed, :error} ->
+        errors
+
+      {computed, {:ok, computed}} ->
+        errors
+
+      {_computed, {:ok, _declared}} ->
+        err(errors, :domain_fingerprint_mismatch, ["domain_fingerprint"])
+    end
   end
 
-  defp check_fingerprint(errors, _document), do: errors
+  @doc """
+  The fingerprint, or `nil` when the document holds a value RFC 8785 cannot
+  represent (an integer beyond ±2^53).
+  """
+  @spec computed_fingerprint(map()) :: String.t() | nil
+  def computed_fingerprint(document) when is_map(document) do
+    fingerprint(document)
+  rescue
+    ArgumentError -> nil
+  end
 
   defp source_columns(document) do
     with %{} = source <- Map.get(document, "source"),
