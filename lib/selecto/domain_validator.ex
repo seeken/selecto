@@ -153,6 +153,7 @@ defmodule Selecto.DomainValidator do
           :invalid_columns,
           :invalid_column_definition,
           :invalid_column_storage,
+          :invalid_column_description,
           :invalid_primary_key,
           :invalid_root_values,
           :invalid_relation_source,
