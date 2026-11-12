@@ -94,6 +94,61 @@ defmodule Selecto.Domain do
   """
   @spec normalize(term()) :: {:ok, map(), Diagnostics.t()} | {:error, Diagnostics.t()}
   def normalize(domain) when is_map(domain) do
+    # Schema 2 goes through validate/1: Elixir domains used schema_version 2
+    # for their own projection sections before specification 3.0, so
+    # normalize/1 keeps reading them as before.
+    if not SchemaV2.version_2?(domain) and top_level_tenant?(domain),
+      do: {:error, top_level_tenant_diagnostics()},
+      else: normalize_version_1(domain)
+  end
+
+  def normalize(_domain) do
+    diagnostics =
+      Diagnostics.new(
+        errors: [
+          %{
+            code: :invalid_domain,
+            message: "Selecto domains must be maps"
+          }
+        ]
+      )
+
+    {:error, diagnostics}
+  end
+
+  defp version_1_form(domain) do
+    domain
+    |> SchemaV2.to_version_1()
+    |> Map.put("domain_fingerprint", SchemaV2.fingerprint(domain))
+  end
+
+  # A top-level tenant is schema 2's; on any other document it would be
+  # ignored and the domain loaded without its tenant, so it refuses.
+  defp top_level_tenant?(domain),
+    do: Map.has_key?(domain, "tenant") or Map.has_key?(domain, :tenant)
+
+  defp top_level_tenant_diagnostics do
+    Diagnostics.new(
+      errors: [
+        %{
+          code: :unknown_domain_key,
+          path: ["tenant"],
+          keys: ["tenant"],
+          message: "a top-level tenant needs schema_version 2"
+        }
+      ]
+    )
+  end
+
+  defp schema_v2_diagnostics(errors) do
+    Diagnostics.new(
+      errors: Enum.map(errors, &schema_v2_error/1),
+      schema_version: 2,
+      schema_version_inferred: false
+    )
+  end
+
+  defp normalize_version_1(domain) do
     {schema_version, schema_version_inferred, schema_version_warnings} = schema_version(domain)
     domain_version = domain_version(domain)
     domain_fingerprint = domain_fingerprint(domain)
@@ -127,20 +182,6 @@ defmodule Selecto.Domain do
        domain_fingerprint,
        sections
      ), diagnostics}
-  end
-
-  def normalize(_domain) do
-    diagnostics =
-      Diagnostics.new(
-        errors: [
-          %{
-            code: :invalid_domain,
-            message: "Selecto domains must be maps"
-          }
-        ]
-      )
-
-    {:error, diagnostics}
   end
 
   @doc "Applies a declared string field's text_case to a scalar write or import value."
@@ -237,23 +278,13 @@ defmodule Selecto.Domain do
       [] ->
         # The computed fingerprint is the domain's identity, so the version 1
         # form carries it as domain_fingerprint.
-        version_1 =
-          domain
-          |> SchemaV2.to_version_1()
-          |> Map.put("domain_fingerprint", SchemaV2.fingerprint(domain))
-
-        case validate_version_1(version_1) do
+        case validate_version_1(version_1_form(domain)) do
           {:ok, normalized, diagnostics} -> {:ok, normalized, version_2_diagnostics(diagnostics)}
           {:error, diagnostics} -> {:error, version_2_diagnostics(diagnostics)}
         end
 
       errors ->
-        {:error,
-         Diagnostics.new(
-           errors: Enum.map(errors, &schema_v2_error/1),
-           schema_version: 2,
-           schema_version_inferred: false
-         )}
+        {:error, schema_v2_diagnostics(errors)}
     end
   end
 
