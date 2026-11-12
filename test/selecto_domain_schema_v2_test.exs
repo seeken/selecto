@@ -197,6 +197,27 @@ defmodule Selecto.DomainSchemaV2Test do
       assert Domain.domain_fingerprint(normalized) == computed
     end
 
+    test "a document that is not schema 2 refuses a top-level tenant" do
+      for version <- [1, "2", nil] do
+        document =
+          v2_domain()
+          |> SchemaV2.to_version_1()
+          |> Map.put("tenant", %{"field" => "org_id"})
+          |> then(
+            &if(version,
+              do: Map.put(&1, "schema_version", version),
+              else: Map.delete(&1, "schema_version")
+            )
+          )
+
+        assert {:error, diagnostics} = Domain.validate(document)
+        assert [%{code: :unknown_domain_key, keys: ["tenant"]}] = diagnostics.errors
+        assert {:error, _diagnostics} = Domain.normalize(document)
+      end
+
+      assert {:ok, _normalized, _diagnostics} = Domain.validate(v2_domain())
+    end
+
     test "only the number 2 is schema 2" do
       refute SchemaV2.version_2?(%{"schema_version" => "2"})
       assert SchemaV2.version_2?(%{"schema_version" => 2})
