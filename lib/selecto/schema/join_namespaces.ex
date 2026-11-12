@@ -74,7 +74,7 @@ defmodule Selecto.Schema.JoinNamespaces do
       |> Enum.filter(fn {_, column} -> Map.has_key?(column, :field) end)
       |> Map.new(fn {_key, column} ->
         key = namespace <> "." <> to_string(column.field)
-        {key, Map.put(column, :colid, key)}
+        {key, column |> Map.put(:colid, key) |> Map.put(:requires_join, id)}
       end)
 
     join
