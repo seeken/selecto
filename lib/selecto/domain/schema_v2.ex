@@ -615,32 +615,29 @@ defmodule Selecto.Domain.SchemaV2 do
 
     doc = Map.put(doc, "source", Map.put(source, "tenant_field", field))
 
-    doc =
-      if Map.has_key?(tenant, "write_field") or Map.has_key?(tenant, "satisfied_by") do
-        scope =
-          %{"required" => true, "field" => Map.get(tenant, "write_field") || field}
-          |> then(fn scope ->
-            if Map.has_key?(tenant, "satisfied_by"),
-              do: Map.put(scope, "satisfied_by", tenant["satisfied_by"]),
-              else: scope
-          end)
+    # The one tenant declaration bounds writes too, so it always restores
+    # writes.scope.tenant: the explicit public write authority of version 1.
+    scope =
+      %{"required" => true, "field" => Map.get(tenant, "write_field") || field}
+      |> then(fn scope ->
+        if Map.has_key?(tenant, "satisfied_by"),
+          do: Map.put(scope, "satisfied_by", tenant["satisfied_by"]),
+          else: scope
+      end)
 
-        writes =
-          case Map.get(doc, "writes") do
-            %{} = writes -> writes
-            _ -> %{}
-          end
-
-        writes_scope =
-          case Map.get(writes, "scope") do
-            %{} = writes_scope -> writes_scope
-            _ -> %{}
-          end
-
-        Map.put(doc, "writes", Map.put(writes, "scope", Map.put(writes_scope, "tenant", scope)))
-      else
-        doc
+    writes =
+      case Map.get(doc, "writes") do
+        %{} = writes -> writes
+        _ -> %{}
       end
+
+    writes_scope =
+      case Map.get(writes, "scope") do
+        %{} = writes_scope -> writes_scope
+        _ -> %{}
+      end
+
+    doc = Map.put(doc, "writes", Map.put(writes, "scope", Map.put(writes_scope, "tenant", scope)))
 
     # Pins lead, as tenant pins usually do in version 1.
     case Map.get(tenant, "pins") do

@@ -133,6 +133,26 @@ defmodule Selecto.DomainSchemaV2Test do
       assert v1_form["source"]["tenant_field"] == "org_id"
       assert v1_form["source"]["fields"] == ["org_id", "id", "region"]
       assert v1_form["required_filters"] == [["org_id", 7], ["region", "eu"]]
+
+      assert v1_form["writes"]["scope"]["tenant"] == %{
+               "required" => true,
+               "field" => "org_id",
+               "satisfied_by" => ["prefix"]
+             }
+    end
+
+    test "a plain tenant declaration authorizes tenant-bounded writes in version 1" do
+      v2 = %{
+        "schema_version" => 2,
+        "tenant" => %{"field" => "org_id"},
+        "source" => %{"columns" => %{"id" => %{}, "org_id" => %{}}}
+      }
+
+      assert SchemaV2.validate(v2) == []
+
+      assert SchemaV2.to_version_1(v2)["writes"] == %{
+               "scope" => %{"tenant" => %{"required" => true, "field" => "org_id"}}
+             }
     end
 
     test "refuses fields that do not name the columns" do
