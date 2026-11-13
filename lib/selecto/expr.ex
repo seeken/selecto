@@ -24,7 +24,12 @@ defmodule Selecto.Expr do
   @spec normalize(expr()) :: term()
   def normalize(expr) when is_list(expr) do
     if Keyword.keyword?(expr) do
-      Enum.map(expr, fn {key, value} -> {key, normalize(value)} end)
+      # [{:not_null, "field"}] is keyword-shaped, but a null check is unary
+      # here as it is anywhere else in a list.
+      Enum.map(expr, fn
+        {key, _field} = check when key == :is_null or key == :not_null -> normalize(check)
+        {key, value} -> {key, normalize(value)}
+      end)
     else
       Enum.map(expr, &normalize/1)
     end

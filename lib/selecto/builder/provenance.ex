@@ -115,6 +115,19 @@ defmodule Selecto.Builder.Provenance do
   """
   def generated_filter(filter), do: {:selecto_generated, secret(), filter}
 
+  @doc """
+  A segment filter whose values its domain fixed: it may name a redacted source
+  field (segments give safe access to withheld fields). It carries the same
+  secret as generated_filter/1, so filter data cannot claim it.
+  """
+  def domain_filter(filter), do: {:selecto_domain_filter, secret(), filter}
+
+  @doc "`selecto` resolving its source's redacted fields, for a domain filter."
+  def unredacted(%{config: %{source: source} = config} = selecto) when is_map(source),
+    do: %{selecto | config: %{config | source: Map.put(source, :redact_fields, [])}}
+
+  def unredacted(selecto), do: selecto
+
   @doc "Whether `tag` is the secret of generated_filter/1."
   def generated_tag?(tag), do: tag == secret()
 

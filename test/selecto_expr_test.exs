@@ -28,6 +28,16 @@ defmodule Selecto.ExprTest do
     Selecto.configure(domain, :mock_connection)
   end
 
+  test "a lone null check in a list is unary, not a keyword pair" do
+    assert X.normalize([{:not_null, "name"}]) == [{"name", :not_null}]
+    assert X.normalize([{:is_null, "name"}]) == [{"name", nil}]
+
+    assert X.normalize([{:not_null, "name"}, {:is_null, "nickname"}]) ==
+             [{"name", :not_null}, {"nickname", nil}]
+
+    assert X.normalize(status: "active") == [status: "active"]
+  end
+
   test "builds filter helpers and compact boolean groups" do
     assert X.eq("status", "active") == {"status", "active"}
     assert X.neq("status", "archived") == {"status", {:ne, "archived"}}

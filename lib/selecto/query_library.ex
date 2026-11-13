@@ -172,7 +172,12 @@ defmodule Selecto.QueryLibrary do
   def apply_segments(selecto, segment_ids, params) when is_list(segment_ids) do
     resolved = resolve_segments(selecto, segment_ids)
     values = normalize_parameters!(resolved.parameters, params)
-    filters = substitute_parameters(resolved.filters, values)
+    redacted = redacted_source_fields(selecto)
+
+    filters =
+      resolved.filters
+      |> Enum.map(&domain_filter(&1, redacted))
+      |> substitute_parameters(values)
 
     selecto =
       case filters do
@@ -186,6 +191,94 @@ defmodule Selecto.QueryLibrary do
   def apply_segments(_selecto, segment_ids, _params) do
     raise ArgumentError, "view segments must be a list, got: #{inspect(segment_ids)}"
   end
+
+  @doc """
+  The fields the named segments (and the segments they reference) compare with
+  a caller parameter: each filter's field when its value takes a
+  `{:param, id}`. A segment's fixed filters are its domain's own; only these
+  let a caller probe a value. A host that withholds fields admits the rest.
+  """
+  @spec parameterized_fields(Selecto.t() | map(), [definition_id()]) :: [String.t()]
+  def parameterized_fields(selecto_or_domain, segment_ids) when is_list(segment_ids) do
+    selecto_or_domain
+    |> segment_filters(segment_ids)
+    |> Selecto.Expr.normalize()
+    |> Enum.flat_map(&(filter_field_uses(&1, 0) |> elem(1)))
+    |> Enum.uniq()
+  end
+
+  # Segments give safe access to withheld fields: a segment filter that names a
+  # redacted source field resolves it when the values the filter compares it
+  # with are fixed by the definition. One that compares a redacted field with a
+  # parameter stays unresolvable, since the parameter could probe the value.
+  defp domain_filter(filter, redacted) when map_size(redacted) == 0, do: filter
+
+  defp domain_filter(filter, redacted) do
+    normalized = Selecto.Expr.normalize(filter)
+    {referenced, parameterized} = filter_field_uses(normalized, 0)
+
+    if Enum.any?(referenced, &Map.has_key?(redacted, &1)) and
+         not Enum.any?(parameterized, &Map.has_key?(redacted, &1)),
+       do: Selecto.Builder.Provenance.domain_filter(normalized),
+       else: filter
+  end
+
+  defp redacted_source_fields(%Selecto{config: %{source: source}}) when is_map(source),
+    do: Map.new(Map.get(source, :redact_fields) || [], &{to_string(&1), true})
+
+  defp redacted_source_fields(_selecto), do: %{}
+
+  # {fields a normalized filter names, fields it compares with a parameter}
+  defp filter_field_uses(_filter, depth) when depth > 64,
+    do: raise(ArgumentError, "query-library segment filters exceed depth")
+
+  defp filter_field_uses({conjunction, filters}, depth)
+       when conjunction in [:and, :or] and is_list(filters) do
+    filters
+    |> Enum.map(&filter_field_uses(&1, depth + 1))
+    |> Enum.reduce({[], []}, fn {r, p}, {rs, ps} -> {rs ++ r, ps ++ p} end)
+  end
+
+  defp filter_field_uses({:not, filter}, depth), do: filter_field_uses(filter, depth + 1)
+
+  defp filter_field_uses({field, value}, depth) when is_binary(field) or is_atom(field) do
+    field = to_string(field)
+    parameterized = if takes_parameter?(value, depth + 1), do: [field], else: []
+    {[field | operand_fields(value, depth + 1)], parameterized}
+  end
+
+  defp filter_field_uses(_filter, _depth), do: {[], []}
+
+  defp operand_fields(_value, depth) when depth > 64,
+    do: raise(ArgumentError, "query-library segment filters exceed depth")
+
+  defp operand_fields({kind, field}, _depth)
+       when kind in [:ref, :field] and (is_binary(field) or is_atom(field)),
+       do: [to_string(field)]
+
+  defp operand_fields(value, depth) when is_tuple(value),
+    do: value |> Tuple.to_list() |> operand_fields(depth + 1)
+
+  defp operand_fields(value, depth) when is_list(value),
+    do: Enum.flat_map(value, &operand_fields(&1, depth + 1))
+
+  defp operand_fields(_value, _depth), do: []
+
+  defp takes_parameter?(_value, depth) when depth > 64,
+    do: raise(ArgumentError, "query-library segment filters exceed depth")
+
+  defp takes_parameter?({:param, _id}, _depth), do: true
+
+  defp takes_parameter?(value, depth) when is_tuple(value),
+    do: value |> Tuple.to_list() |> takes_parameter?(depth + 1)
+
+  defp takes_parameter?(value, depth) when is_list(value),
+    do: Enum.any?(value, &takes_parameter?(&1, depth + 1))
+
+  defp takes_parameter?(value, depth) when is_map(value) and not is_struct(value),
+    do: value |> Map.values() |> takes_parameter?(depth + 1)
+
+  defp takes_parameter?(_value, _depth), do: false
 
   defp resolve_segments(selecto_or_domain, segment_ids) do
     library = checked_library(selecto_or_domain)

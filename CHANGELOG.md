@@ -1,6 +1,17 @@
 
 # Selecto Library Changelog
 
+## Unreleased
+
+- Segments give safe access to withheld fields (certification specification
+  3.2): a segment filter may name a redacted source field when the values it
+  compares the field with are fixed by its definition (literals and field
+  references); one that compares a redacted field with a `{:param, id}` stays
+  unresolvable. `Selecto.QueryLibrary.parameterized_fields/2` lists the fields
+  segments compare with parameters, for hosts that withhold fields.
+- `Selecto.Expr.normalize/1` reads a lone `{:not_null, field}` or
+  `{:is_null, field}` in a keyword-shaped list as the unary null check.
+
 ## V 0.5.0 - Adapter-Neutral Governance and Event Contracts
 
 - **SelectoUpdato ships inside `selecto`.** The `SelectoUpdato.*` modules,

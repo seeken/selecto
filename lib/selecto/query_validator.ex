@@ -346,6 +346,13 @@ defmodule Selecto.QueryValidator do
     :ok
   end
 
+  defp validate_filter!(selecto, {:selecto_domain_filter, tag, filter}) do
+    unless Selecto.Builder.Provenance.generated_tag?(tag),
+      do: raise(ArgumentError, "selecto_domain_filter is internal to Selecto")
+
+    validate_filter!(Selecto.Builder.Provenance.unredacted(selecto), filter)
+  end
+
   defp validate_filter!(selecto, {:udf, function_id, args}) when is_list(args) do
     validate_udf_call!(selecto, function_id, args, :filter)
   end
