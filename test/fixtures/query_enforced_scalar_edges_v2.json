@@ -1,0 +1,4797 @@
+{
+  "format": "selecto.query-enforced-scalar-edges.v2",
+  "scope": "pure-candidate-comparison-not-live-write-certification",
+  "supersedes": "selecto.query-enforced-scalar-edges.v1",
+  "baseline": "E001-E489 keep the Perl-observed v1 outcome when the operand is a finite ASCII decimal; every other spelling is refused on a numeric column",
+  "comparison": "by-declared-column-type",
+  "cases": [
+    {
+      "id": "E001",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nan",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E002",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nan",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E003",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nan",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E004",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nan(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E005",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nan(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E006",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nan(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E007",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nan(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E008",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nan(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E009",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nan(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E010",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nan(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E011",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nan(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E012",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nan(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E013",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nan(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E014",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nan(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E015",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nan(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E016",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nan(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E017",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nan(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E018",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nan(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E019",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nan(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E020",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nan(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E021",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nan(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E022",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nan0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E023",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nan0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E024",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nan0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E025",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nan00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E026",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nan00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E027",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nan00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E028",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nan10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E029",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nan10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E030",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nan10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E031",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "NAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E032",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+NAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E033",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-NAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E034",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "NAN(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E035",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+NAN(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E036",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-NAN(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E037",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "NAN(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E038",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+NAN(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E039",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-NAN(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E040",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "NAN(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E041",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+NAN(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E042",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-NAN(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E043",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "NAN(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E044",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+NAN(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E045",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-NAN(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E046",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "NAN(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E047",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+NAN(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E048",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-NAN(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E049",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "NAN(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E050",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+NAN(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E051",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-NAN(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E052",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "NAN0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E053",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+NAN0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E054",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-NAN0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E055",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "NAN00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E056",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+NAN00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E057",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-NAN00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E058",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "NAN10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E059",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+NAN10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E060",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-NAN10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E061",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nanq",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E062",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nanq",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E063",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nanq",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E064",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nanq(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E065",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nanq(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E066",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nanq(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E067",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nanq(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E068",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nanq(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E069",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nanq(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E070",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nanq(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E071",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nanq(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E072",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nanq(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E073",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nanq(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E074",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nanq(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E075",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nanq(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E076",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nanq(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E077",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nanq(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E078",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nanq(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E079",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nanq(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E080",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nanq(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E081",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nanq(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E082",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nanq0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E083",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nanq0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E084",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nanq0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E085",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nanq00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E086",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nanq00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E087",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nanq00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E088",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nanq10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E089",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nanq10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E090",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nanq10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E091",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nans",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E092",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nans",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E093",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nans",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E094",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nans(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E095",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nans(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E096",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nans(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E097",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nans(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E098",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nans(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E099",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nans(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E100",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nans(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E101",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nans(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E102",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nans(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E103",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nans(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E104",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nans(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E105",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nans(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E106",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nans(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E107",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nans(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E108",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nans(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E109",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nans(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E110",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nans(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E111",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nans(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E112",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nans0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E113",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nans0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E114",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nans0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E115",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nans00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E116",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nans00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E117",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nans00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E118",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nans10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E119",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+nans10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E120",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-nans10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E121",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "qnan",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E122",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+qnan",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E123",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-qnan",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E124",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "qnan(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E125",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+qnan(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E126",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-qnan(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E127",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "qnan(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E128",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+qnan(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E129",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-qnan(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E130",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "qnan(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E131",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+qnan(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E132",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-qnan(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E133",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "qnan(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E134",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+qnan(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E135",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-qnan(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E136",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "qnan(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E137",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+qnan(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E138",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-qnan(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E139",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "qnan(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E140",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+qnan(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E141",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-qnan(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E142",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "qnan0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E143",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+qnan0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E144",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-qnan0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E145",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "qnan00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E146",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+qnan00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E147",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-qnan00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E148",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "qnan10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E149",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+qnan10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E150",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-qnan10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E151",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "snan",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E152",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+snan",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E153",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-snan",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E154",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "snan(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E155",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+snan(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E156",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-snan(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E157",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "snan(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E158",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+snan(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E159",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-snan(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E160",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "snan(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E161",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+snan(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E162",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-snan(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E163",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "snan(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E164",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+snan(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E165",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-snan(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E166",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "snan(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E167",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+snan(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E168",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-snan(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E169",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "snan(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E170",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+snan(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E171",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-snan(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E172",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "snan0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E173",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+snan0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E174",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-snan0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E175",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "snan00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E176",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+snan00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E177",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-snan00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E178",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "snan10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E179",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+snan10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E180",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-snan10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E181",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "inf",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E182",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+inf",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E183",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-inf",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E184",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "inf(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E185",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+inf(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E186",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-inf(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E187",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "inf(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E188",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+inf(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E189",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-inf(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E190",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "inf(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E191",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+inf(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E192",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-inf(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E193",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "inf(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E194",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+inf(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E195",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-inf(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E196",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "inf(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E197",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+inf(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E198",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-inf(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E199",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "inf(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E200",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+inf(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E201",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-inf(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E202",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "inf0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E203",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+inf0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E204",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-inf0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E205",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "inf00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E206",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+inf00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E207",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-inf00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E208",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "inf10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E209",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+inf10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E210",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-inf10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E211",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "infinity",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E212",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+infinity",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E213",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-infinity",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E214",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "infinity(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E215",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+infinity(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E216",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-infinity(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E217",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "infinity(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E218",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+infinity(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E219",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-infinity(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E220",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "infinity(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E221",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+infinity(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E222",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-infinity(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E223",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "infinity(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E224",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+infinity(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E225",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-infinity(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E226",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "infinity(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E227",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+infinity(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E228",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-infinity(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E229",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "infinity(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E230",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+infinity(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E231",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-infinity(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E232",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "infinity0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E233",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+infinity0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E234",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-infinity0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E235",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "infinity00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E236",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+infinity00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E237",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-infinity00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E238",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "infinity10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E239",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+infinity10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E240",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-infinity10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E241",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#INF",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E242",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#INF",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E243",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#INF",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E244",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#INF(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E245",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#INF(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E246",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#INF(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E247",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#INF(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E248",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#INF(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E249",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#INF(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E250",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#INF(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E251",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#INF(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E252",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#INF(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E253",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#INF(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E254",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#INF(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E255",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#INF(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E256",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#INF(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E257",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#INF(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E258",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#INF(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E259",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#INF(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E260",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#INF(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E261",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#INF(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E262",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#INF0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E263",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#INF0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E264",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#INF0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E265",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#INF00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E266",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#INF00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E267",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#INF00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E268",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#INF10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E269",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#INF10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E270",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#INF10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E271",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#IND",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E272",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#IND",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E273",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#IND",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E274",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#IND(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E275",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#IND(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E276",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#IND(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E277",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#IND(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E278",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#IND(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E279",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#IND(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E280",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#IND(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E281",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#IND(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E282",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#IND(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E283",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#IND(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E284",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#IND(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E285",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#IND(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E286",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#IND(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E287",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#IND(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E288",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#IND(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E289",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#IND(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E290",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#IND(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E291",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#IND(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E292",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#IND0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E293",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#IND0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E294",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#IND0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E295",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#IND00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E296",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#IND00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E297",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#IND00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E298",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#IND10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E299",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#IND10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E300",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#IND10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E301",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#NAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E302",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#NAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E303",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#NAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E304",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#NAN(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E305",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#NAN(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E306",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#NAN(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E307",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#NAN(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E308",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#NAN(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E309",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#NAN(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E310",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#NAN(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E311",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#NAN(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E312",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#NAN(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E313",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#NAN(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E314",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#NAN(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E315",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#NAN(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E316",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#NAN(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E317",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#NAN(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E318",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#NAN(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E319",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#NAN(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E320",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#NAN(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E321",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#NAN(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E322",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#NAN0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E323",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#NAN0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E324",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#NAN0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E325",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#NAN00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E326",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#NAN00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E327",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#NAN00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E328",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#NAN10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E329",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#NAN10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E330",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#NAN10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E331",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#QNAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E332",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#QNAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E333",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#QNAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E334",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#QNAN(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E335",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#QNAN(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E336",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#QNAN(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E337",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#QNAN(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E338",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#QNAN(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E339",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#QNAN(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E340",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#QNAN(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E341",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#QNAN(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E342",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#QNAN(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E343",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#QNAN(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E344",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#QNAN(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E345",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#QNAN(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E346",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#QNAN(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E347",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#QNAN(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E348",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#QNAN(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E349",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#QNAN(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E350",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#QNAN(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E351",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#QNAN(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E352",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#QNAN0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E353",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#QNAN0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E354",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#QNAN0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E355",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#QNAN00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E356",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#QNAN00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E357",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#QNAN00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E358",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#QNAN10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E359",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#QNAN10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E360",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#QNAN10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E361",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#SNAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E362",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#SNAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E363",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#SNAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E364",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#SNAN(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E365",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#SNAN(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E366",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#SNAN(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E367",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#SNAN(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E368",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#SNAN(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E369",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#SNAN(01)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E370",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#SNAN(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E371",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#SNAN(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E372",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#SNAN(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E373",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#SNAN(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E374",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#SNAN(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E375",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#SNAN(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E376",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#SNAN(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E377",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#SNAN(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E378",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#SNAN(0o1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E379",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#SNAN(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E380",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#SNAN(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E381",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#SNAN(foo)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E382",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#SNAN0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E383",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#SNAN0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E384",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#SNAN0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E385",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#SNAN00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E386",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#SNAN00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E387",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#SNAN00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E388",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#SNAN10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E389",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+1.#SNAN10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E390",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1.#SNAN10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E391",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0e-100",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E392",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0e-3",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E393",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0e-2",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E394",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0e-1",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E395",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0e0",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E396",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0e1",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E397",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0e2",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E398",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0e3",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E399",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0e100",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E400",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0e999999999999999999999999",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E401",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0e-999999999999999999999999",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E402",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1e-100",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E403",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1e-3",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E404",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1e-2",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E405",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1e-1",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E406",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1e0",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E407",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1e1",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E408",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1e2",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E409",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1e3",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E410",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1e100",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E411",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1e999999999999999999999999",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E412",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1e-999999999999999999999999",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E413",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1e-100",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E414",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1e-3",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E415",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1e-2",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E416",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1e-1",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E417",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1e0",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E418",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1e1",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E419",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1e2",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E420",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1e3",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E421",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1e100",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E422",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1e999999999999999999999999",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E423",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1e-999999999999999999999999",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E424",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+001e-100",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E425",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+001e-3",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E426",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+001e-2",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E427",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+001e-1",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E428",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+001e0",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E429",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+001e1",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E430",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+001e2",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E431",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+001e3",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E432",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+001e100",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E433",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+001e999999999999999999999999",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E434",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+001e-999999999999999999999999",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E435",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0.01e-100",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E436",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0.01e-3",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E437",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0.01e-2",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E438",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0.01e-1",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E439",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0.01e0",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E440",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0.01e1",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E441",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0.01e2",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E442",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0.01e3",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E443",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0.01e100",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E444",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0.01e999999999999999999999999",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E445",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0.01e-999999999999999999999999",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E446",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-0.01e-100",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E447",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-0.01e-3",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E448",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-0.01e-2",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E449",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-0.01e-1",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E450",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-0.01e0",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E451",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-0.01e1",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E452",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-0.01e2",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E453",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-0.01e3",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E454",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-0.01e100",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E455",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-0.01e999999999999999999999999",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E456",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-0.01e-999999999999999999999999",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E457",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": ".5e-100",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E458",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": ".5e-3",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E459",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": ".5e-2",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E460",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": ".5e-1",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E461",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": ".5e0",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E462",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": ".5e1",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E463",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": ".5e2",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E464",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": ".5e3",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E465",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": ".5e100",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E466",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": ".5e999999999999999999999999",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E467",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": ".5e-999999999999999999999999",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E468",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.e-100",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E469",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.e-3",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E470",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.e-2",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E471",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.e-1",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E472",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.e0",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E473",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.e1",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E474",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.e2",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E475",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.e3",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E476",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.e100",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E477",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.e999999999999999999999999",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E478",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.e-999999999999999999999999",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E479",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "123456789012345678901234567890e-100",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E480",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "123456789012345678901234567890e-3",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E481",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "123456789012345678901234567890e-2",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E482",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "123456789012345678901234567890e-1",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E483",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "123456789012345678901234567890e0",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E484",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "123456789012345678901234567890e1",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E485",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "123456789012345678901234567890e2",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E486",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "123456789012345678901234567890e3",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E487",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "123456789012345678901234567890e100",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E488",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "123456789012345678901234567890e999999999999999999999999",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E489",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "123456789012345678901234567890e-999999999999999999999999",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E490",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1E1",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E491",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "\t1\n",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E492",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "\u000b2\f",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E493",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "\r0.9\r",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E494",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "\u00a02",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E495",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "\u20072",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E496",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "\u30002",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E497",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "2\u2028",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E498",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "\u200b2",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E499",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "\uff12",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E500",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "\u0662",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E501",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "\u00b2",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E502",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "\ud835\udfd0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E503",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "2_0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E504",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "2,0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E505",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0x2",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E506",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0b10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E507",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0o2",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E508",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "2e",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E509",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "e2",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E510",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": ".",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E511",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E512",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E513",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E514",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": " ",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E515",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1..0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E516",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "--2",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E517",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+-2",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E518",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "2e+",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E519",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "2e1.5",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E520",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "2d0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E521",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "2f",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E522",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "\u22122",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E523",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "\uff0b2",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "E524",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "2.",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E525",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+.2e1",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E526",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-.2e1",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E527",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.0000000000000000000000001",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "E528",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0.99999999999999999999999999",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E529",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1e0",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E530",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "10e-1",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E531",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "100e-2",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "E532",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1000000000000000000000001e-24",
+      "expected": "1",
+      "outcome": "true"
+    }
+  ]
+}

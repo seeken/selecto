@@ -1,0 +1,6868 @@
+{
+  "format": "selecto.query-enforced-scalar.v2",
+  "scope": "pure-candidate-comparison-not-live-write-certification",
+  "supersedes": "selecto.query-enforced-scalar.v1",
+  "comparison": "by-declared-column-type",
+  "type_classes": {
+    "normalisation": "lowercase and trim; remove a CHARACTER SET/CHARSET clause; remove a COLLATE clause and keep its name (quotes removed); read the first (...) group as the parameters (comma-separated integers, or the single word max on a text base; anything else is an invalid parameter list) and remove every (...) group; collapse whitespace. The remainder is the base name.",
+    "text": [
+      "string",
+      "text",
+      "varchar",
+      "character varying",
+      "nvarchar",
+      "tinytext",
+      "mediumtext",
+      "longtext",
+      "clob"
+    ],
+    "unbounded_length": [
+      "max"
+    ],
+    "char_family": [
+      "char",
+      "character",
+      "nchar",
+      "bpchar"
+    ],
+    "integer": {
+      "tinyint": [
+        "-128",
+        "127"
+      ],
+      "smallint": [
+        "-32768",
+        "32767"
+      ],
+      "int2": [
+        "-32768",
+        "32767"
+      ],
+      "smallserial": [
+        "-32768",
+        "32767"
+      ],
+      "mediumint": [
+        "-8388608",
+        "8388607"
+      ],
+      "integer": [
+        "-2147483648",
+        "2147483647"
+      ],
+      "int": [
+        "-2147483648",
+        "2147483647"
+      ],
+      "int4": [
+        "-2147483648",
+        "2147483647"
+      ],
+      "serial": [
+        "-2147483648",
+        "2147483647"
+      ],
+      "bigint": [
+        "-9223372036854775808",
+        "9223372036854775807"
+      ],
+      "int8": [
+        "-9223372036854775808",
+        "9223372036854775807"
+      ],
+      "bigserial": [
+        "-9223372036854775808",
+        "9223372036854775807"
+      ]
+    },
+    "decimal": [
+      "decimal",
+      "numeric"
+    ],
+    "deterministic_collations": {
+      "any_backend": [
+        "c",
+        "posix",
+        "ucs_basic",
+        "pg_c_utf8"
+      ],
+      "mysql_family_only": {
+        "charsets": [
+          "armscii8",
+          "ascii",
+          "big5",
+          "binary",
+          "cp1250",
+          "cp1251",
+          "cp1256",
+          "cp1257",
+          "cp850",
+          "cp852",
+          "cp866",
+          "cp932",
+          "dec8",
+          "eucjpms",
+          "euckr",
+          "gb18030",
+          "gb2312",
+          "gbk",
+          "geostd8",
+          "greek",
+          "hebrew",
+          "hp8",
+          "keybcs2",
+          "koi8r",
+          "koi8u",
+          "latin1",
+          "latin2",
+          "latin5",
+          "latin7",
+          "macce",
+          "macroman",
+          "sjis",
+          "swe7",
+          "tis620",
+          "ucs2",
+          "ujis",
+          "utf16",
+          "utf16le",
+          "utf32",
+          "utf8",
+          "utf8mb3",
+          "utf8mb4"
+        ],
+        "forms": [
+          "<charset>_bin",
+          "<charset>_nopad_bin",
+          "<charset>_0900_bin"
+        ]
+      }
+    },
+    "temporal": [
+      "date",
+      "time",
+      "timetz",
+      "datetime",
+      "naive_datetime",
+      "naive_datetime_usec",
+      "utc_datetime",
+      "utc_datetime_usec",
+      "timestamp",
+      "timestamptz",
+      "timestamp with time zone",
+      "timestamp without time zone",
+      "time with time zone",
+      "time without time zone",
+      "epoch_datetime"
+    ],
+    "time_dependent_inputs": [
+      "now",
+      "today",
+      "tomorrow",
+      "yesterday"
+    ],
+    "identity": "every other base name (char_family, citext, uuid, boolean, temporal, real/float/double, enum, set, json, arrays, binary and custom names), any name with an invalid parameter list, any name with a COLLATE outside deterministic_collations, and an undeclared column (column_type null)",
+    "base_verified_identity": [
+      "uuid",
+      "citext",
+      "boolean",
+      "bool",
+      "enum"
+    ]
+  },
+  "ops": [
+    "eq",
+    "ne",
+    "gt",
+    "gte",
+    "lt",
+    "lte",
+    "in",
+    "not_in"
+  ],
+  "outcomes": [
+    "true",
+    "false",
+    "unknown",
+    "query_rule_not_evaluable"
+  ],
+  "forms": [
+    "absent_field",
+    "column_pair"
+  ],
+  "metadata": [
+    "verified",
+    "base_verified",
+    "unverified"
+  ],
+  "backends": [
+    "other",
+    "mysql_family"
+  ],
+  "cases": [
+    {
+      "id": "S001",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "S002",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "1",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "S003",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "S004",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "1",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "S005",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "1",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "S006",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "1",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "S007",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": ".5",
+      "expected": "0.50",
+      "outcome": "true"
+    },
+    {
+      "id": "S008",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": ".5",
+      "expected": "0.50",
+      "outcome": "false"
+    },
+    {
+      "id": "S009",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": ".5",
+      "expected": "0.50",
+      "outcome": "false"
+    },
+    {
+      "id": "S010",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": ".5",
+      "expected": "0.50",
+      "outcome": "true"
+    },
+    {
+      "id": "S011",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": ".5",
+      "expected": "0.50",
+      "outcome": "false"
+    },
+    {
+      "id": "S012",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": ".5",
+      "expected": "0.50",
+      "outcome": "true"
+    },
+    {
+      "id": "S013",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1.",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "S014",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "1.",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "S015",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "S016",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "1.",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "S017",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "1.",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "S018",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "1.",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "S019",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "  +001e1  ",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "S020",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "  +001e1  ",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "S021",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "  +001e1  ",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "S022",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "  +001e1  ",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "S023",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "  +001e1  ",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "S024",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "  +001e1  ",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "S025",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "-.5",
+      "expected": "-0.50",
+      "outcome": "true"
+    },
+    {
+      "id": "S026",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "-.5",
+      "expected": "-0.50",
+      "outcome": "false"
+    },
+    {
+      "id": "S027",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-.5",
+      "expected": "-0.50",
+      "outcome": "false"
+    },
+    {
+      "id": "S028",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "-.5",
+      "expected": "-0.50",
+      "outcome": "true"
+    },
+    {
+      "id": "S029",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "-.5",
+      "expected": "-0.50",
+      "outcome": "false"
+    },
+    {
+      "id": "S030",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "-.5",
+      "expected": "-0.50",
+      "outcome": "true"
+    },
+    {
+      "id": "S031",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "-0e999999999999999999999999",
+      "expected": "0",
+      "outcome": "true"
+    },
+    {
+      "id": "S032",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "-0e999999999999999999999999",
+      "expected": "0",
+      "outcome": "false"
+    },
+    {
+      "id": "S033",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-0e999999999999999999999999",
+      "expected": "0",
+      "outcome": "false"
+    },
+    {
+      "id": "S034",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "-0e999999999999999999999999",
+      "expected": "0",
+      "outcome": "true"
+    },
+    {
+      "id": "S035",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "-0e999999999999999999999999",
+      "expected": "0",
+      "outcome": "false"
+    },
+    {
+      "id": "S036",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "-0e999999999999999999999999",
+      "expected": "0",
+      "outcome": "true"
+    },
+    {
+      "id": "S037",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "9007199254740993",
+      "expected": "9007199254740992",
+      "outcome": "false"
+    },
+    {
+      "id": "S038",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "9007199254740993",
+      "expected": "9007199254740992",
+      "outcome": "true"
+    },
+    {
+      "id": "S039",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "9007199254740993",
+      "expected": "9007199254740992",
+      "outcome": "true"
+    },
+    {
+      "id": "S040",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "9007199254740993",
+      "expected": "9007199254740992",
+      "outcome": "true"
+    },
+    {
+      "id": "S041",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "9007199254740993",
+      "expected": "9007199254740992",
+      "outcome": "false"
+    },
+    {
+      "id": "S042",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "9007199254740993",
+      "expected": "9007199254740992",
+      "outcome": "false"
+    },
+    {
+      "id": "S043",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "999999999999999999999999999999999999.0002",
+      "expected": "999999999999999999999999999999999999.0001",
+      "outcome": "false"
+    },
+    {
+      "id": "S044",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "999999999999999999999999999999999999.0002",
+      "expected": "999999999999999999999999999999999999.0001",
+      "outcome": "true"
+    },
+    {
+      "id": "S045",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "999999999999999999999999999999999999.0002",
+      "expected": "999999999999999999999999999999999999.0001",
+      "outcome": "true"
+    },
+    {
+      "id": "S046",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "999999999999999999999999999999999999.0002",
+      "expected": "999999999999999999999999999999999999.0001",
+      "outcome": "true"
+    },
+    {
+      "id": "S047",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "999999999999999999999999999999999999.0002",
+      "expected": "999999999999999999999999999999999999.0001",
+      "outcome": "false"
+    },
+    {
+      "id": "S048",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "999999999999999999999999999999999999.0002",
+      "expected": "999999999999999999999999999999999999.0001",
+      "outcome": "false"
+    },
+    {
+      "id": "S049",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "-999999999999999999999999999999999999.0002",
+      "expected": "-999999999999999999999999999999999999.0001",
+      "outcome": "false"
+    },
+    {
+      "id": "S050",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "-999999999999999999999999999999999999.0002",
+      "expected": "-999999999999999999999999999999999999.0001",
+      "outcome": "true"
+    },
+    {
+      "id": "S051",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-999999999999999999999999999999999999.0002",
+      "expected": "-999999999999999999999999999999999999.0001",
+      "outcome": "false"
+    },
+    {
+      "id": "S052",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "-999999999999999999999999999999999999.0002",
+      "expected": "-999999999999999999999999999999999999.0001",
+      "outcome": "false"
+    },
+    {
+      "id": "S053",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "-999999999999999999999999999999999999.0002",
+      "expected": "-999999999999999999999999999999999999.0001",
+      "outcome": "true"
+    },
+    {
+      "id": "S054",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "-999999999999999999999999999999999999.0002",
+      "expected": "-999999999999999999999999999999999999.0001",
+      "outcome": "true"
+    },
+    {
+      "id": "S055",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1e999999999999999999999999",
+      "expected": "9e999999999999999999999998",
+      "outcome": "false"
+    },
+    {
+      "id": "S056",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "1e999999999999999999999999",
+      "expected": "9e999999999999999999999998",
+      "outcome": "true"
+    },
+    {
+      "id": "S057",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1e999999999999999999999999",
+      "expected": "9e999999999999999999999998",
+      "outcome": "true"
+    },
+    {
+      "id": "S058",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "1e999999999999999999999999",
+      "expected": "9e999999999999999999999998",
+      "outcome": "true"
+    },
+    {
+      "id": "S059",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "1e999999999999999999999999",
+      "expected": "9e999999999999999999999998",
+      "outcome": "false"
+    },
+    {
+      "id": "S060",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "1e999999999999999999999999",
+      "expected": "9e999999999999999999999998",
+      "outcome": "false"
+    },
+    {
+      "id": "S061",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1e-999999999999999999999999",
+      "expected": "9e-999999999999999999999998",
+      "outcome": "false"
+    },
+    {
+      "id": "S062",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "1e-999999999999999999999999",
+      "expected": "9e-999999999999999999999998",
+      "outcome": "true"
+    },
+    {
+      "id": "S063",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1e-999999999999999999999999",
+      "expected": "9e-999999999999999999999998",
+      "outcome": "false"
+    },
+    {
+      "id": "S064",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "1e-999999999999999999999999",
+      "expected": "9e-999999999999999999999998",
+      "outcome": "false"
+    },
+    {
+      "id": "S065",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "1e-999999999999999999999999",
+      "expected": "9e-999999999999999999999998",
+      "outcome": "true"
+    },
+    {
+      "id": "S066",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "1e-999999999999999999999999",
+      "expected": "9e-999999999999999999999998",
+      "outcome": "true"
+    },
+    {
+      "id": "S067",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "0",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "S068",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "0",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "S069",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "S070",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "0",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "S071",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "0",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "S072",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "0",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "S073",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "-1",
+      "expected": "0",
+      "outcome": "false"
+    },
+    {
+      "id": "S074",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "-1",
+      "expected": "0",
+      "outcome": "true"
+    },
+    {
+      "id": "S075",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-1",
+      "expected": "0",
+      "outcome": "false"
+    },
+    {
+      "id": "S076",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "-1",
+      "expected": "0",
+      "outcome": "false"
+    },
+    {
+      "id": "S077",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "-1",
+      "expected": "0",
+      "outcome": "true"
+    },
+    {
+      "id": "S078",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "-1",
+      "expected": "0",
+      "outcome": "true"
+    },
+    {
+      "id": "S079",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "12.01",
+      "expected": "12.001",
+      "outcome": "false"
+    },
+    {
+      "id": "S080",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "12.01",
+      "expected": "12.001",
+      "outcome": "true"
+    },
+    {
+      "id": "S081",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "12.01",
+      "expected": "12.001",
+      "outcome": "true"
+    },
+    {
+      "id": "S082",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "12.01",
+      "expected": "12.001",
+      "outcome": "true"
+    },
+    {
+      "id": "S083",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "12.01",
+      "expected": "12.001",
+      "outcome": "false"
+    },
+    {
+      "id": "S084",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "12.01",
+      "expected": "12.001",
+      "outcome": "false"
+    },
+    {
+      "id": "S085",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "Ada",
+      "expected": "Bob",
+      "outcome": "false"
+    },
+    {
+      "id": "S086",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "Ada",
+      "expected": "Bob",
+      "outcome": "true"
+    },
+    {
+      "id": "S087",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "Ada",
+      "expected": "Bob",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S088",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gte",
+      "actual": "Ada",
+      "expected": "Bob",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S089",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lt",
+      "actual": "Ada",
+      "expected": "Bob",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S090",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lte",
+      "actual": "Ada",
+      "expected": "Bob",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S091",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "(1)",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "S092",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "(1)",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "S093",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S094",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gte",
+      "actual": "(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S095",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lt",
+      "actual": "(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S096",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lte",
+      "actual": "(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S097",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "0x10",
+      "expected": "16",
+      "outcome": "false"
+    },
+    {
+      "id": "S098",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "0x10",
+      "expected": "16",
+      "outcome": "true"
+    },
+    {
+      "id": "S099",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "0x10",
+      "expected": "16",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S100",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gte",
+      "actual": "0x10",
+      "expected": "16",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S101",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lt",
+      "actual": "0x10",
+      "expected": "16",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S102",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lte",
+      "actual": "0x10",
+      "expected": "16",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S103",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "nan(foo)",
+      "expected": "nan(foo)",
+      "outcome": "true"
+    },
+    {
+      "id": "S104",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "nan(foo)",
+      "expected": "nan(foo)",
+      "outcome": "false"
+    },
+    {
+      "id": "S105",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "nan(foo)",
+      "expected": "nan(foo)",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S106",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gte",
+      "actual": "nan(foo)",
+      "expected": "nan(foo)",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S107",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lt",
+      "actual": "nan(foo)",
+      "expected": "nan(foo)",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S108",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lte",
+      "actual": "nan(foo)",
+      "expected": "nan(foo)",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S109",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "NaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S110",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "NaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S111",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "NaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S112",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "NaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S113",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "NaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S114",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "NaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S115",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "NaN",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S116",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "+NaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S117",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "+NaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S118",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "+NaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S119",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "+NaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S120",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "+NaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S121",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "+NaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S122",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "+NaN",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S123",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "-NaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S124",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "-NaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S125",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-NaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S126",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "-NaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S127",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "-NaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S128",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "-NaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S129",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "-NaN",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S130",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "sNaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S131",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "sNaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S132",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "sNaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S133",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "sNaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S134",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "sNaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S135",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "sNaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S136",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "sNaN",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S137",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "qNaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S138",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "qNaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S139",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "qNaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S140",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "qNaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S141",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "qNaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S142",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "qNaN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S143",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "qNaN",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S144",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "nanq",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S145",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "nanq",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S146",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nanq",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S147",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "nanq",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S148",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "nanq",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S149",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "nanq",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S150",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "nanq",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S151",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "nans",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S152",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "nans",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S153",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nans",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S154",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "nans",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S155",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "nans",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S156",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "nans",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S157",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "nans",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S158",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "nan(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S159",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "nan(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S160",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nan(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S161",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "nan(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S162",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "nan(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S163",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "nan(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S164",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "nan(1)",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S165",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "NaN(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S166",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "NaN(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S167",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "NaN(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S168",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "NaN(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S169",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "NaN(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S170",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "NaN(0x123)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S171",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "NaN(0x123)",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S172",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "nan(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S173",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "nan(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S174",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "nan(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S175",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "nan(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S176",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "nan(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S177",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "nan(0b1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S178",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "nan(0b1)",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S179",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "Inf",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S180",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "Inf",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S181",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "Inf",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S182",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "Inf",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S183",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "Inf",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S184",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "Inf",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S185",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "Inf",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S186",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "-Infinity",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S187",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "-Infinity",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S188",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "-Infinity",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S189",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "-Infinity",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S190",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "-Infinity",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S191",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "-Infinity",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S192",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "-Infinity",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S193",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1.#INF00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S194",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "1.#INF00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S195",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#INF00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S196",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "1.#INF00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S197",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "1.#INF00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S198",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "1.#INF00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S199",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "1.#INF00",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S200",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1.#IND0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S201",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "1.#IND0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S202",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#IND0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S203",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "1.#IND0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S204",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "1.#IND0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S205",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "1.#IND0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S206",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "1.#IND0",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S207",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1.#QNAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S208",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "1.#QNAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S209",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#QNAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S210",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "1.#QNAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S211",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "1.#QNAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S212",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "1.#QNAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S213",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "1.#QNAN",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S214",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1.#SNAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S215",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "1.#SNAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S216",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#SNAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S217",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "1.#SNAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S218",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "1.#SNAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S219",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "1.#SNAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S220",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "1.#SNAN",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S221",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1.#NAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S222",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "1.#NAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S223",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#NAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S224",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "1.#NAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S225",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "1.#NAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S226",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": "1.#NAN",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S227",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "1.#NAN",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S228",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "in",
+      "actual": "1",
+      "expected": [
+        "1",
+        "NaN"
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S229",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "in",
+      "actual": "1",
+      "expected": [
+        "NaN",
+        "1"
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "S230",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "in",
+      "actual": "1",
+      "expected": [
+        "1",
+        null
+      ],
+      "outcome": "true"
+    },
+    {
+      "id": "S231",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "in",
+      "actual": "1",
+      "expected": [
+        "2",
+        null
+      ],
+      "outcome": "unknown"
+    },
+    {
+      "id": "S232",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "in",
+      "actual": null,
+      "expected": [
+        "1"
+      ],
+      "outcome": "unknown"
+    },
+    {
+      "id": "S233",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "in",
+      "actual": "1",
+      "expected": [
+        null
+      ],
+      "outcome": "unknown"
+    },
+    {
+      "id": "S234",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": null,
+      "expected": "1",
+      "outcome": "unknown"
+    },
+    {
+      "id": "S235",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": null,
+      "expected": "1",
+      "outcome": "unknown"
+    },
+    {
+      "id": "S236",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": null,
+      "expected": "1",
+      "outcome": "unknown"
+    },
+    {
+      "id": "S237",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": null,
+      "expected": "1",
+      "outcome": "unknown"
+    },
+    {
+      "id": "S238",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": null,
+      "expected": "1",
+      "outcome": "unknown"
+    },
+    {
+      "id": "S239",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "lte",
+      "actual": null,
+      "expected": "1",
+      "outcome": "unknown"
+    },
+    {
+      "id": "T001",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "1e1",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "T002",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "1e1",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "T003",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "T004",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "T005",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": " 10",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "T006",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": " 10",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "T007",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "+10",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "T008",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "+10",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "T009",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "10.0",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "T010",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "10.0",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "T011",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "10 ",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "T012",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "10 ",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "T013",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "1E1",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "T014",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "1E1",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "T015",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "10",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "T016",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "10",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "T017",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "T018",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T019",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "T1",
+      "outcome": "false"
+    },
+    {
+      "id": "T020",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "t1",
+      "expected": "T1",
+      "outcome": "true"
+    },
+    {
+      "id": "T021",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1 ",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T022",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "t1 ",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "T023",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": " t1",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T024",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": " t1",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "T025",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1\u200b",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T026",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "t1\u200b",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "T027",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1\u00ad",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T028",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "t1\u00ad",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "T029",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1\u00a0",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T030",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "t1\u00a0",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "T031",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "T032",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T033",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "cafe\u0301",
+      "expected": "caf\u00e9",
+      "outcome": "false"
+    },
+    {
+      "id": "T034",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "cafe\u0301",
+      "expected": "caf\u00e9",
+      "outcome": "true"
+    },
+    {
+      "id": "T035",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "caf\u00e9",
+      "expected": "caf\u00e9",
+      "outcome": "true"
+    },
+    {
+      "id": "T036",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "caf\u00e9",
+      "expected": "caf\u00e9",
+      "outcome": "false"
+    },
+    {
+      "id": "T037",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t\u0131",
+      "expected": "ti",
+      "outcome": "false"
+    },
+    {
+      "id": "T038",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "t\u0131",
+      "expected": "ti",
+      "outcome": "true"
+    },
+    {
+      "id": "T039",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "T\u0130",
+      "expected": "TI",
+      "outcome": "false"
+    },
+    {
+      "id": "T040",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "T\u0130",
+      "expected": "TI",
+      "outcome": "true"
+    },
+    {
+      "id": "T041",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "\uff541",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T042",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "\uff541",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "T043",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "NaN",
+      "expected": "NaN",
+      "outcome": "true"
+    },
+    {
+      "id": "T044",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "NaN",
+      "expected": "NaN",
+      "outcome": "false"
+    },
+    {
+      "id": "T045",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "NaN",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "T046",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "NaN",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "T047",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "Infinity",
+      "expected": "Infinity",
+      "outcome": "true"
+    },
+    {
+      "id": "T048",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "Infinity",
+      "expected": "Infinity",
+      "outcome": "false"
+    },
+    {
+      "id": "T049",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "1.#INF00",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "T050",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "1.#INF00",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "T051",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "nan(1)",
+      "expected": "1",
+      "outcome": "false"
+    },
+    {
+      "id": "T052",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "nan(1)",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "T053",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "-0",
+      "expected": "0",
+      "outcome": "false"
+    },
+    {
+      "id": "T054",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "-0",
+      "expected": "0",
+      "outcome": "true"
+    },
+    {
+      "id": "T055",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "0",
+      "expected": "0",
+      "outcome": "true"
+    },
+    {
+      "id": "T056",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "0",
+      "expected": "0",
+      "outcome": "false"
+    },
+    {
+      "id": "T057",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "1e1",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T058",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "B",
+      "expected": "a",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T059",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "a",
+      "expected": "B",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T060",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T061",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "Ada",
+      "expected": "Bob",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T062",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "t1\u200b",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T063",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "10",
+      "expected": "9",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T064",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gte",
+      "actual": "1e1",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T065",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gte",
+      "actual": "B",
+      "expected": "a",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T066",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gte",
+      "actual": "a",
+      "expected": "B",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T067",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gte",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T068",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gte",
+      "actual": "Ada",
+      "expected": "Bob",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T069",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gte",
+      "actual": "t1\u200b",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T070",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gte",
+      "actual": "10",
+      "expected": "9",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T071",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lt",
+      "actual": "1e1",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T072",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lt",
+      "actual": "B",
+      "expected": "a",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T073",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lt",
+      "actual": "a",
+      "expected": "B",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T074",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lt",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T075",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lt",
+      "actual": "Ada",
+      "expected": "Bob",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T076",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lt",
+      "actual": "t1\u200b",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T077",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lt",
+      "actual": "10",
+      "expected": "9",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T078",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lte",
+      "actual": "1e1",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T079",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lte",
+      "actual": "B",
+      "expected": "a",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T080",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lte",
+      "actual": "a",
+      "expected": "B",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T081",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lte",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T082",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lte",
+      "actual": "Ada",
+      "expected": "Bob",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T083",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lte",
+      "actual": "t1\u200b",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T084",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lte",
+      "actual": "10",
+      "expected": "9",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T085",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": null,
+      "expected": "t1",
+      "outcome": "unknown"
+    },
+    {
+      "id": "T086",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": null,
+      "expected": "t1",
+      "outcome": "unknown"
+    },
+    {
+      "id": "T087",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gt",
+      "actual": null,
+      "expected": "t1",
+      "outcome": "unknown"
+    },
+    {
+      "id": "T088",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "gte",
+      "actual": null,
+      "expected": "t1",
+      "outcome": "unknown"
+    },
+    {
+      "id": "T089",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lt",
+      "actual": null,
+      "expected": "t1",
+      "outcome": "unknown"
+    },
+    {
+      "id": "T090",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "lte",
+      "actual": null,
+      "expected": "t1",
+      "outcome": "unknown"
+    },
+    {
+      "id": "T091",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "in",
+      "actual": "t1",
+      "expected": [
+        "t1"
+      ],
+      "outcome": "true"
+    },
+    {
+      "id": "T092",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "not_in",
+      "actual": "t1",
+      "expected": [
+        "t1"
+      ],
+      "outcome": "false"
+    },
+    {
+      "id": "T093",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "in",
+      "actual": "t1",
+      "expected": [
+        "t2",
+        "t1"
+      ],
+      "outcome": "true"
+    },
+    {
+      "id": "T094",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "not_in",
+      "actual": "t1",
+      "expected": [
+        "t2",
+        "t1"
+      ],
+      "outcome": "false"
+    },
+    {
+      "id": "T095",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "in",
+      "actual": "t1",
+      "expected": [
+        "T1",
+        "t1 "
+      ],
+      "outcome": "false"
+    },
+    {
+      "id": "T096",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "not_in",
+      "actual": "t1",
+      "expected": [
+        "T1",
+        "t1 "
+      ],
+      "outcome": "true"
+    },
+    {
+      "id": "T097",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "in",
+      "actual": "t1\u200b",
+      "expected": [
+        "t1"
+      ],
+      "outcome": "false"
+    },
+    {
+      "id": "T098",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "not_in",
+      "actual": "t1\u200b",
+      "expected": [
+        "t1"
+      ],
+      "outcome": "true"
+    },
+    {
+      "id": "T099",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "in",
+      "actual": "t1\u00ad",
+      "expected": [
+        "t1",
+        "t2"
+      ],
+      "outcome": "false"
+    },
+    {
+      "id": "T100",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "not_in",
+      "actual": "t1\u00ad",
+      "expected": [
+        "t1",
+        "t2"
+      ],
+      "outcome": "true"
+    },
+    {
+      "id": "T101",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "in",
+      "actual": "1e1",
+      "expected": [
+        "10"
+      ],
+      "outcome": "false"
+    },
+    {
+      "id": "T102",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "not_in",
+      "actual": "1e1",
+      "expected": [
+        "10"
+      ],
+      "outcome": "true"
+    },
+    {
+      "id": "T103",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "in",
+      "actual": "010",
+      "expected": [
+        "10",
+        "11"
+      ],
+      "outcome": "false"
+    },
+    {
+      "id": "T104",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "not_in",
+      "actual": "010",
+      "expected": [
+        "10",
+        "11"
+      ],
+      "outcome": "true"
+    },
+    {
+      "id": "T105",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "in",
+      "actual": "10",
+      "expected": [
+        "010",
+        "10.0",
+        "10"
+      ],
+      "outcome": "true"
+    },
+    {
+      "id": "T106",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "not_in",
+      "actual": "10",
+      "expected": [
+        "010",
+        "10.0",
+        "10"
+      ],
+      "outcome": "false"
+    },
+    {
+      "id": "T107",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "in",
+      "actual": "cafe\u0301",
+      "expected": [
+        "caf\u00e9"
+      ],
+      "outcome": "false"
+    },
+    {
+      "id": "T108",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "not_in",
+      "actual": "cafe\u0301",
+      "expected": [
+        "caf\u00e9"
+      ],
+      "outcome": "true"
+    },
+    {
+      "id": "T109",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "in",
+      "actual": "t1",
+      "expected": [
+        "t1",
+        null
+      ],
+      "outcome": "true"
+    },
+    {
+      "id": "T110",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "not_in",
+      "actual": "t1",
+      "expected": [
+        "t1",
+        null
+      ],
+      "outcome": "false"
+    },
+    {
+      "id": "T111",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "in",
+      "actual": "t1",
+      "expected": [
+        "T1",
+        null
+      ],
+      "outcome": "unknown"
+    },
+    {
+      "id": "T112",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "not_in",
+      "actual": "t1",
+      "expected": [
+        "T1",
+        null
+      ],
+      "outcome": "unknown"
+    },
+    {
+      "id": "T113",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "in",
+      "actual": "t1",
+      "expected": [
+        null
+      ],
+      "outcome": "unknown"
+    },
+    {
+      "id": "T114",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "not_in",
+      "actual": "t1",
+      "expected": [
+        null
+      ],
+      "outcome": "unknown"
+    },
+    {
+      "id": "T115",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "in",
+      "actual": null,
+      "expected": [
+        "t1"
+      ],
+      "outcome": "unknown"
+    },
+    {
+      "id": "T116",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "not_in",
+      "actual": null,
+      "expected": [
+        "t1"
+      ],
+      "outcome": "unknown"
+    },
+    {
+      "id": "T117",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "in",
+      "actual": null,
+      "expected": [
+        null
+      ],
+      "outcome": "unknown"
+    },
+    {
+      "id": "T118",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "not_in",
+      "actual": null,
+      "expected": [
+        null
+      ],
+      "outcome": "unknown"
+    },
+    {
+      "id": "T119",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "in",
+      "actual": "NaN",
+      "expected": [
+        "NaN"
+      ],
+      "outcome": "true"
+    },
+    {
+      "id": "T120",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "not_in",
+      "actual": "NaN",
+      "expected": [
+        "NaN"
+      ],
+      "outcome": "false"
+    },
+    {
+      "id": "T121",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "in",
+      "actual": "1",
+      "expected": [
+        "1",
+        "NaN"
+      ],
+      "outcome": "true"
+    },
+    {
+      "id": "T122",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "not_in",
+      "actual": "1",
+      "expected": [
+        "1",
+        "NaN"
+      ],
+      "outcome": "false"
+    },
+    {
+      "id": "T123",
+      "column_type": "string",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "T124",
+      "column_type": "string",
+      "type_class": "text",
+      "op": "ne",
+      "actual": " 10",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "T125",
+      "column_type": "string",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1\u200b",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T126",
+      "column_type": "string",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "1e1",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T127",
+      "column_type": "varchar(255)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "T128",
+      "column_type": "varchar(255)",
+      "type_class": "text",
+      "op": "ne",
+      "actual": " 10",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "T129",
+      "column_type": "varchar(255)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1\u200b",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T130",
+      "column_type": "varchar(255)",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "1e1",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T131",
+      "column_type": "VARCHAR(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin",
+      "backend": "mysql_family",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "T132",
+      "column_type": "VARCHAR(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin",
+      "backend": "mysql_family",
+      "type_class": "text",
+      "op": "ne",
+      "actual": " 10",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "T133",
+      "column_type": "VARCHAR(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin",
+      "backend": "mysql_family",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1\u200b",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T134",
+      "column_type": "VARCHAR(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin",
+      "backend": "mysql_family",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "1e1",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T135",
+      "column_type": "character varying",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "T136",
+      "column_type": "character varying",
+      "type_class": "text",
+      "op": "ne",
+      "actual": " 10",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "T137",
+      "column_type": "character varying",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1\u200b",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T138",
+      "column_type": "character varying",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "1e1",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T139",
+      "column_type": "Character Varying(64)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "T140",
+      "column_type": "Character Varying(64)",
+      "type_class": "text",
+      "op": "ne",
+      "actual": " 10",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "T141",
+      "column_type": "Character Varying(64)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1\u200b",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T142",
+      "column_type": "Character Varying(64)",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "1e1",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T143",
+      "column_type": "nvarchar(64)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "T144",
+      "column_type": "nvarchar(64)",
+      "type_class": "text",
+      "op": "ne",
+      "actual": " 10",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "T145",
+      "column_type": "nvarchar(64)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1\u200b",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T146",
+      "column_type": "nvarchar(64)",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "1e1",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T147",
+      "column_type": "longtext",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "T148",
+      "column_type": "longtext",
+      "type_class": "text",
+      "op": "ne",
+      "actual": " 10",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "T149",
+      "column_type": "longtext",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1\u200b",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T150",
+      "column_type": "longtext",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "1e1",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T151",
+      "column_type": "clob",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "T152",
+      "column_type": "clob",
+      "type_class": "text",
+      "op": "ne",
+      "actual": " 10",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "T153",
+      "column_type": "clob",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1\u200b",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T154",
+      "column_type": "clob",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "1e1",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T155",
+      "column_type": " TEXT ",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "T156",
+      "column_type": " TEXT ",
+      "type_class": "text",
+      "op": "ne",
+      "actual": " 10",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "T157",
+      "column_type": " TEXT ",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1\u200b",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T158",
+      "column_type": " TEXT ",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "1e1",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N001",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "N002",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": " 10",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "N003",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "+10",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "N004",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "N005",
+      "column_type": "bigint",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "9007199254740993",
+      "expected": "9007199254740992",
+      "outcome": "true"
+    },
+    {
+      "id": "N006",
+      "column_type": "smallint",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "-1",
+      "expected": "0",
+      "outcome": "true"
+    },
+    {
+      "id": "N007",
+      "column_type": "int4",
+      "type_class": "numeric",
+      "op": "gte",
+      "actual": "10",
+      "expected": "010",
+      "outcome": "true"
+    },
+    {
+      "id": "N008",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "10.0",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "N009",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1e1",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "N010",
+      "column_type": "decimal(12,2)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": ".5",
+      "expected": "0.50",
+      "outcome": "true"
+    },
+    {
+      "id": "N011",
+      "column_type": "numeric(20,3)",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "10.000",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "N012",
+      "column_type": "numeric",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1e1",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "N013",
+      "column_type": "float",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "1e1",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N014",
+      "column_type": "float8",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "10.0",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N015",
+      "column_type": "double precision",
+      "type_class": "identity",
+      "op": "gt",
+      "actual": "1E1",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N016",
+      "column_type": "real",
+      "type_class": "identity",
+      "op": "lte",
+      "actual": "-.5",
+      "expected": "-0.50",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N017",
+      "column_type": "INTEGER",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "N018",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "\t10\n",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "N019",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "0x10",
+      "expected": "16",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N020",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "Ada",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N021",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "(1)",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N022",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "nan(foo)",
+      "expected": "nan(foo)",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N023",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.#NAN00",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N024",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "\u00a010",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N025",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "\uff11\uff10",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N026",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "\u0661\u0660",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N027",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1_0",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N028",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1,0",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N029",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "",
+      "expected": "0",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N030",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": " ",
+      "expected": "0",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N031",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "10",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N032",
+      "column_type": "float",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "NaN",
+      "expected": "NaN",
+      "outcome": "true"
+    },
+    {
+      "id": "N033",
+      "column_type": "float",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "Infinity",
+      "expected": "Infinity",
+      "outcome": "true"
+    },
+    {
+      "id": "N034",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "in",
+      "actual": "1e1",
+      "expected": [
+        "10"
+      ],
+      "outcome": "true"
+    },
+    {
+      "id": "N035",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "not_in",
+      "actual": "1e1",
+      "expected": [
+        "10"
+      ],
+      "outcome": "false"
+    },
+    {
+      "id": "N036",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "in",
+      "actual": "010",
+      "expected": [
+        "9",
+        "10"
+      ],
+      "outcome": "true"
+    },
+    {
+      "id": "N037",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "not_in",
+      "actual": "11",
+      "expected": [
+        "10",
+        null
+      ],
+      "outcome": "unknown"
+    },
+    {
+      "id": "N038",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "not_in",
+      "actual": "10",
+      "expected": [
+        "010",
+        null
+      ],
+      "outcome": "false"
+    },
+    {
+      "id": "N039",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "not_in",
+      "actual": "11",
+      "expected": [
+        "10"
+      ],
+      "outcome": "true"
+    },
+    {
+      "id": "N040",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "in",
+      "actual": "1",
+      "expected": [
+        "1",
+        "NaN"
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N041",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "not_in",
+      "actual": "1",
+      "expected": [
+        "1",
+        "NaN"
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N042",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "in",
+      "actual": "1",
+      "expected": [
+        "Ada"
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N043",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "not_in",
+      "actual": null,
+      "expected": [
+        "1"
+      ],
+      "outcome": "unknown"
+    },
+    {
+      "id": "N044",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "op": "not_in",
+      "actual": "1",
+      "expected": [
+        null
+      ],
+      "outcome": "unknown"
+    },
+    {
+      "id": "I001",
+      "column_type": null,
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "10",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I002",
+      "column_type": null,
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "10",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I003",
+      "column_type": null,
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "1e1",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I004",
+      "column_type": null,
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "1e1",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I005",
+      "column_type": null,
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "T1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I006",
+      "column_type": null,
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "t1\u200b",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I007",
+      "column_type": null,
+      "type_class": "identity",
+      "op": "gt",
+      "actual": "10",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I008",
+      "column_type": null,
+      "type_class": "identity",
+      "op": "gte",
+      "actual": "10",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I009",
+      "column_type": null,
+      "type_class": "identity",
+      "op": "lt",
+      "actual": "1",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I010",
+      "column_type": null,
+      "type_class": "identity",
+      "op": "lte",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I011",
+      "column_type": null,
+      "type_class": "identity",
+      "op": "eq",
+      "actual": null,
+      "expected": "10",
+      "outcome": "unknown"
+    },
+    {
+      "id": "I012",
+      "column_type": null,
+      "type_class": "identity",
+      "op": "gt",
+      "actual": null,
+      "expected": "10",
+      "outcome": "unknown"
+    },
+    {
+      "id": "I013",
+      "column_type": null,
+      "type_class": "identity",
+      "op": "in",
+      "actual": "t1",
+      "expected": [
+        "t1"
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I014",
+      "column_type": null,
+      "type_class": "identity",
+      "op": "not_in",
+      "actual": "t1",
+      "expected": [
+        "t1"
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I015",
+      "column_type": null,
+      "type_class": "identity",
+      "op": "in",
+      "actual": "t1",
+      "expected": [
+        "t1",
+        "t2"
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I016",
+      "column_type": null,
+      "type_class": "identity",
+      "op": "not_in",
+      "actual": "t1",
+      "expected": [
+        "t2"
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I017",
+      "column_type": null,
+      "type_class": "identity",
+      "op": "in",
+      "actual": "t1",
+      "expected": [
+        "t1",
+        null
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I018",
+      "column_type": null,
+      "type_class": "identity",
+      "op": "in",
+      "actual": "t1",
+      "expected": [
+        null
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I019",
+      "column_type": null,
+      "type_class": "identity",
+      "op": "not_in",
+      "actual": null,
+      "expected": [
+        "t1"
+      ],
+      "outcome": "unknown"
+    },
+    {
+      "id": "I020",
+      "column_type": "uuid",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "expected": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "outcome": "true"
+    },
+    {
+      "id": "I021",
+      "column_type": "uuid",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "expected": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "outcome": "false"
+    },
+    {
+      "id": "I022",
+      "column_type": "uuid",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11",
+      "expected": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I023",
+      "column_type": "uuid",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11",
+      "expected": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I024",
+      "column_type": "uuid",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "{a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11}",
+      "expected": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I025",
+      "column_type": "uuid",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "a0eebc999c0b4ef8bb6d6bb9bd380a11",
+      "expected": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I026",
+      "column_type": "char(3)",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "I027",
+      "column_type": "char(3)",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "t1 ",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I028",
+      "column_type": "char(3)",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "t1 ",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I029",
+      "column_type": "character(36)",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "T1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I030",
+      "column_type": "bpchar",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "I031",
+      "column_type": "nchar(4)",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "t1 ",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I032",
+      "column_type": "citext",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "I033",
+      "column_type": "citext",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "T1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I034",
+      "column_type": "citext",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "t1",
+      "expected": "T1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I035",
+      "column_type": "charge_amount",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "10.0",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I036",
+      "column_type": "charge_amount",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "10",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "I037",
+      "column_type": "context_ts",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "2024-01-01 10:00:00",
+      "expected": "2024-01-01 10:00:00.000",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I038",
+      "column_type": "char_code",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "A1",
+      "expected": "a1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I039",
+      "column_type": "textual_id",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "t1 ",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I040",
+      "column_type": "enum",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "red",
+      "expected": "red",
+      "outcome": "true"
+    },
+    {
+      "id": "I041",
+      "column_type": "enum",
+      "type_class": "identity",
+      "op": "lt",
+      "actual": "red",
+      "expected": "blue",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I042",
+      "column_type": "json",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "{\"a\":1}",
+      "expected": "{\"a\": 1}",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I043",
+      "column_type": "varchar2",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "T1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T159",
+      "column_type": "varchar(2)",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "t1 ",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T160",
+      "column_type": "varchar(2)",
+      "type_class": "text",
+      "op": "not_in",
+      "actual": "t1   ",
+      "expected": [
+        "t1"
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T161",
+      "column_type": "varchar(2)",
+      "type_class": "text",
+      "op": "in",
+      "actual": "t1 ",
+      "expected": [
+        "t1"
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T162",
+      "column_type": "varchar(2)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1 ",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T163",
+      "column_type": "varchar(2)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t12",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T164",
+      "column_type": "varchar(2)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "T165",
+      "column_type": "varchar(2)",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "t2",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "T166",
+      "column_type": "varchar(2)",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "T1",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "T167",
+      "column_type": "varchar(2)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": null,
+      "expected": "t1",
+      "outcome": "unknown"
+    },
+    {
+      "id": "T168",
+      "column_type": "varchar(2)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1 ",
+      "outcome": "false"
+    },
+    {
+      "id": "T169",
+      "column_type": "varchar(36)",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11 ",
+      "expected": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T170",
+      "column_type": "varchar(36)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "expected": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "outcome": "true"
+    },
+    {
+      "id": "T171",
+      "column_type": "varchar(36)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11",
+      "expected": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "outcome": "false"
+    },
+    {
+      "id": "T172",
+      "column_type": "character varying(3)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "ab ",
+      "expected": "ab",
+      "outcome": "false"
+    },
+    {
+      "id": "T173",
+      "column_type": "character varying(3)",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "ab ",
+      "expected": "ab",
+      "outcome": "true"
+    },
+    {
+      "id": "T174",
+      "column_type": "varchar(2)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "\u00e9\u00e9",
+      "expected": "\u00e9\u00e9",
+      "outcome": "true"
+    },
+    {
+      "id": "T175",
+      "column_type": "nvarchar(2)",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "\u00e91",
+      "expected": "e1",
+      "outcome": "true"
+    },
+    {
+      "id": "T176",
+      "column_type": "varchar(2)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "e\u0301\u00e9",
+      "expected": "e\u0301\u00e9",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T177",
+      "column_type": "VARCHAR(4) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin",
+      "backend": "mysql_family",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "t1   ",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T178",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1\u0000",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T179",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "t1\u0000",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T180",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1\u0000",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T181",
+      "column_type": "text",
+      "type_class": "text",
+      "op": "in",
+      "actual": "t1",
+      "expected": [
+        "t1",
+        "t1\u0000"
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T182",
+      "column_type": "varchar(8) COLLATE \"C\"",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "T1",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T183",
+      "column_type": "text COLLATE \"POSIX\"",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "T1",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "T184",
+      "column_type": "text collate ucs_basic",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1\u200b",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T185",
+      "column_type": "text COLLATE pg_c_utf8",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "t\u0131",
+      "expected": "ti",
+      "outcome": "true"
+    },
+    {
+      "id": "T186",
+      "column_type": "text COLLATE \"C\"",
+      "type_class": "text",
+      "op": "gt",
+      "actual": "b",
+      "expected": "a",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N045",
+      "column_type": "numeric(20,3)",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "1.0004",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N046",
+      "column_type": "numeric(20,3)",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.0004",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N047",
+      "column_type": "numeric(20,3)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1.0004",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N048",
+      "column_type": "numeric(20,3)",
+      "type_class": "numeric",
+      "op": "not_in",
+      "actual": "0.9996",
+      "expected": [
+        "1"
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N049",
+      "column_type": "numeric(20,3)",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0.9996",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N050",
+      "column_type": "numeric(20,3)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1.0000",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "N051",
+      "column_type": "numeric(20,3)",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1.001",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "N052",
+      "column_type": "numeric(20,3)",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "1",
+      "expected": "1.0004",
+      "outcome": "true"
+    },
+    {
+      "id": "N053",
+      "column_type": "numeric(10,2)",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0.004",
+      "expected": "0",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N054",
+      "column_type": "numeric(10,2)",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0.01",
+      "expected": "0",
+      "outcome": "true"
+    },
+    {
+      "id": "N055",
+      "column_type": "numeric(10,2)",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0.0100",
+      "expected": "0",
+      "outcome": "true"
+    },
+    {
+      "id": "N056",
+      "column_type": "numeric(10,2)",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "4e-3",
+      "expected": "0",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N057",
+      "column_type": "numeric(4,2)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "123",
+      "expected": "123",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N058",
+      "column_type": "numeric(4,2)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "99.99",
+      "expected": "99.99",
+      "outcome": "true"
+    },
+    {
+      "id": "N059",
+      "column_type": "numeric(4,2)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "00012.5",
+      "expected": "12.5",
+      "outcome": "true"
+    },
+    {
+      "id": "N060",
+      "column_type": "numeric(4,2)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "-0.000",
+      "expected": "0",
+      "outcome": "true"
+    },
+    {
+      "id": "N061",
+      "column_type": "numeric(4,2)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "0.5e-1",
+      "expected": "0.05",
+      "outcome": "true"
+    },
+    {
+      "id": "N062",
+      "column_type": "numeric(4,2)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "0.5e-2",
+      "expected": "0.005",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N063",
+      "column_type": "numeric(5)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1.5",
+      "expected": "1.5",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N064",
+      "column_type": "numeric(5)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "12345",
+      "expected": "12345",
+      "outcome": "true"
+    },
+    {
+      "id": "N065",
+      "column_type": "numeric(5)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "123456",
+      "expected": "123456",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N066",
+      "column_type": "decimal(3,1)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1e1",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "N067",
+      "column_type": "decimal(3,1)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1e2",
+      "expected": "100",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N068",
+      "column_type": "DECIMAL(12, 2)",
+      "type_class": "numeric",
+      "op": "in",
+      "actual": "0.005",
+      "expected": [
+        "0.01",
+        "0"
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N069",
+      "column_type": "numeric(20,3)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1e-999999999999999999999999",
+      "expected": "0",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N070",
+      "column_type": "numeric(20,3)",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1e999999999999999999999999",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N071",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "10.4",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N072",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0.5",
+      "expected": "0",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N073",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1e-1",
+      "expected": "0",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N074",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "10.0",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "N075",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1e1",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "N076",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "2147483647",
+      "expected": "2147483647",
+      "outcome": "true"
+    },
+    {
+      "id": "N077",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "2147483648",
+      "expected": "2147483648",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N078",
+      "column_type": "int",
+      "type_class": "numeric",
+      "op": "lt",
+      "actual": "-2147483649",
+      "expected": "0",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N079",
+      "column_type": "smallint",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "99999",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N080",
+      "column_type": "smallint",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "32767",
+      "expected": "32767",
+      "outcome": "true"
+    },
+    {
+      "id": "N081",
+      "column_type": "int2",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "-32769",
+      "expected": "0",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N082",
+      "column_type": "bigint",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "-9223372036854775808",
+      "expected": "-9223372036854775808",
+      "outcome": "true"
+    },
+    {
+      "id": "N083",
+      "column_type": "bigint",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "9223372036854775808",
+      "expected": "9223372036854775808",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N084",
+      "column_type": "int8",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "1e999999999999999999999999",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N085",
+      "column_type": "tinyint",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "128",
+      "expected": "128",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N086",
+      "column_type": "int(11)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "N087",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "in",
+      "actual": "10.5",
+      "expected": [
+        "10",
+        "11"
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N088",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "10",
+      "expected": "10.4",
+      "outcome": "false"
+    },
+    {
+      "id": "I044",
+      "column_type": "real",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "0.1",
+      "expected": "0.10000000149",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I045",
+      "column_type": "float8",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "9007199254740993",
+      "expected": "9007199254740992",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I046",
+      "column_type": "float8",
+      "type_class": "identity",
+      "op": "gt",
+      "actual": "9007199254740993",
+      "expected": "9007199254740992",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I047",
+      "column_type": "real",
+      "type_class": "identity",
+      "op": "lt",
+      "actual": "16777217",
+      "expected": "16777217.5",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I048",
+      "column_type": "float8",
+      "type_class": "identity",
+      "op": "gt",
+      "actual": "1e-400",
+      "expected": "0",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I049",
+      "column_type": "float8",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "-0",
+      "expected": "0",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I050",
+      "column_type": "float8",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "0.1",
+      "expected": "0.1",
+      "outcome": "true"
+    },
+    {
+      "id": "I051",
+      "column_type": "double precision",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "1e1",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I052",
+      "column_type": "float(24)",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "0.5",
+      "expected": "0.5",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I053",
+      "column_type": "boolean",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "t",
+      "expected": "true",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I054",
+      "column_type": "boolean",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "true",
+      "expected": "true",
+      "outcome": "true"
+    },
+    {
+      "id": "I055",
+      "column_type": "bool",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "1",
+      "expected": "true",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I056",
+      "column_type": "boolean",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "false",
+      "expected": "false",
+      "outcome": "false"
+    },
+    {
+      "id": "I057",
+      "column_type": "timestamp",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "2024-01-01T10:00:00",
+      "expected": "2024-01-01 10:00:00",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I058",
+      "column_type": "timestamp",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "2024-01-01 10:00:00",
+      "expected": "2024-01-01 10:00:00",
+      "outcome": "true"
+    },
+    {
+      "id": "I059",
+      "column_type": "date",
+      "type_class": "identity",
+      "op": "gt",
+      "actual": "2024-1-5",
+      "expected": "2024-01-10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I060",
+      "column_type": "date",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "2024-1-5",
+      "expected": "2024-01-05",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I061",
+      "column_type": "timestamp(0)",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "2024-01-01 10:00:00.4",
+      "expected": "2024-01-01 10:00:00",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I062",
+      "column_type": "timestamp(0)",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "2024-01-01 10:00:00.4",
+      "expected": "2024-01-01 10:00:00.4",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I063",
+      "column_type": "timestamptz",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "2024-01-01 10:00:00+00",
+      "expected": "2024-01-01 10:00:00+00",
+      "outcome": "true"
+    },
+    {
+      "id": "I064",
+      "column_type": "utc_datetime",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "2024-01-01T10:00:00Z",
+      "expected": "2024-01-01 10:00:00Z",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I065",
+      "column_type": "time(3)",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "10:00:00.1234",
+      "expected": "10:00:00.1234",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I066",
+      "column_type": "text COLLATE ci",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "T1",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I067",
+      "column_type": "text COLLATE ci",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "I068",
+      "column_type": "text COLLATE \"und-x-icu\"",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "T1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I069",
+      "column_type": "varchar(16) collate utf8mb4_0900_ai_ci",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "T1",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I070",
+      "column_type": "text COLLATE \"en-US-x-icu\"",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "t1\u200b",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I071",
+      "column_type": "text COLLATE \"tr-TR-x-icu\"",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "t\u0131",
+      "expected": "ti",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I072",
+      "column_type": "varchar(2) COLLATE ci",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "t1 ",
+      "expected": "t1 ",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I073",
+      "column_type": "text COLLATE \"default\"",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "a",
+      "expected": "a",
+      "outcome": "true"
+    },
+    {
+      "id": "I074",
+      "column_type": "char(3)",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "t1 ",
+      "expected": "t1 ",
+      "outcome": "true"
+    },
+    {
+      "id": "I075",
+      "column_type": "char(3)",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "t1  ",
+      "expected": "t1  ",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I076",
+      "column_type": "character(2)",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "I077",
+      "column_type": "bit(4)",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "1010",
+      "expected": "1010",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I078",
+      "column_type": "citext",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "I079",
+      "column_type": "point",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "(1,1)",
+      "expected": "(1,1)",
+      "outcome": "true"
+    },
+    {
+      "id": "X001",
+      "column_type": "text",
+      "type_class": "text",
+      "form": "absent_field",
+      "op": "eq",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "X002",
+      "column_type": "text",
+      "type_class": "text",
+      "form": "absent_field",
+      "op": "ne",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "X003",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "form": "absent_field",
+      "op": "eq",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "X004",
+      "column_type": null,
+      "type_class": "identity",
+      "form": "absent_field",
+      "op": "in",
+      "expected": [
+        "t1"
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "X005",
+      "column_type": "text",
+      "type_class": "text",
+      "form": "absent_field",
+      "op": "not_in",
+      "expected": [
+        "t1"
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "X006",
+      "column_type": "text",
+      "type_class": "text",
+      "form": "column_pair",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "X007",
+      "column_type": "text",
+      "type_class": "text",
+      "form": "column_pair",
+      "op": "ne",
+      "actual": "t1",
+      "expected": "t2",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "X008",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "form": "column_pair",
+      "op": "eq",
+      "actual": "10",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "X009",
+      "column_type": null,
+      "type_class": "identity",
+      "form": "column_pair",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "X010",
+      "column_type": "text",
+      "type_class": "text",
+      "form": "column_pair",
+      "op": "gt",
+      "actual": "b",
+      "expected": "a",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T187",
+      "column_type": "text collate latin1_bin",
+      "backend": "mysql_family",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "T1",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "T188",
+      "column_type": "varchar(8) collate utf8mb4_0900_bin",
+      "backend": "mysql_family",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "T1",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T189",
+      "column_type": "varchar(8) collate utf8mb4_nopad_bin",
+      "backend": "mysql_family",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "t1 ",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "T190",
+      "column_type": "varchar(max)",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "t1",
+      "expected": "t2",
+      "outcome": "true"
+    },
+    {
+      "id": "T191",
+      "column_type": "nvarchar(max)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1 ",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T192",
+      "column_type": "VARCHAR(MAX)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "false"
+    },
+    {
+      "id": "T193",
+      "column_type": "VARCHAR ( 2 )",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "t1 ",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T194",
+      "column_type": "Character Varying ( 2 ) COLLATE \"C\"",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "t1 ",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T195",
+      "column_type": "varchar( 3 )",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "ab ",
+      "expected": "ab",
+      "outcome": "false"
+    },
+    {
+      "id": "T196",
+      "column_type": "varchar(2)",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "\u00e9 ",
+      "expected": "\u00e9",
+      "outcome": "true"
+    },
+    {
+      "id": "T197",
+      "column_type": "varchar(2)",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "\ud83d\ude00 ",
+      "expected": "\ud83d\ude00",
+      "outcome": "true"
+    },
+    {
+      "id": "T198",
+      "column_type": "varchar(1)",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "\ud83d\ude00",
+      "expected": "x",
+      "outcome": "true"
+    },
+    {
+      "id": "T199",
+      "column_type": "varchar(2,1)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T200",
+      "column_type": "text",
+      "type_class": "text",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "T201",
+      "column_type": "text",
+      "type_class": "text",
+      "metadata": "base_verified",
+      "op": "ne",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "T202",
+      "column_type": "text",
+      "type_class": "text",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "1e1",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T203",
+      "column_type": "text",
+      "type_class": "text",
+      "metadata": "base_verified",
+      "op": "ne",
+      "actual": "T1",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T204",
+      "column_type": "varchar",
+      "type_class": "text",
+      "metadata": "base_verified",
+      "op": "ne",
+      "actual": "t1 ",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T205",
+      "column_type": "string",
+      "type_class": "text",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "t1 ",
+      "expected": "t1 ",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T206",
+      "column_type": "string",
+      "type_class": "text",
+      "metadata": "base_verified",
+      "op": "in",
+      "actual": "t1",
+      "expected": [
+        "t1",
+        "t2"
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T207",
+      "column_type": "string",
+      "type_class": "text",
+      "metadata": "base_verified",
+      "op": "in",
+      "actual": "t1",
+      "expected": [
+        "t1"
+      ],
+      "outcome": "true"
+    },
+    {
+      "id": "T208",
+      "column_type": "string",
+      "type_class": "text",
+      "metadata": "base_verified",
+      "op": "not_in",
+      "actual": "t1",
+      "expected": [
+        "t1",
+        null
+      ],
+      "outcome": "false"
+    },
+    {
+      "id": "T209",
+      "column_type": "text",
+      "type_class": "text",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "t1\u0000",
+      "expected": "t1\u0000",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T210",
+      "column_type": "varchar(2)",
+      "type_class": "text",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "t12",
+      "expected": "t12",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T211",
+      "column_type": "text",
+      "type_class": "text",
+      "metadata": "base_verified",
+      "op": "gt",
+      "actual": "b",
+      "expected": "a",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "T212",
+      "column_type": "text",
+      "type_class": "text",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": null,
+      "expected": "t1",
+      "outcome": "unknown"
+    },
+    {
+      "id": "N089",
+      "column_type": "numeric(5,-2)",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "150",
+      "expected": "200",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N090",
+      "column_type": "numeric(5,-2)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "100",
+      "expected": "100",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N091",
+      "column_type": "numeric(2,5)",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "0.00012",
+      "expected": "0",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N092",
+      "column_type": "numeric(2,5)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "0.00099",
+      "expected": "0.00099",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N093",
+      "column_type": "numeric(0)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "0",
+      "expected": "0",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N094",
+      "column_type": "numeric(10,2,1)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N095",
+      "column_type": "NUMERIC ( 10 , 2 )",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0.004",
+      "expected": "0",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N096",
+      "column_type": "numeric(10, 2)",
+      "type_class": "numeric",
+      "op": "gt",
+      "actual": "0.01",
+      "expected": "0",
+      "outcome": "true"
+    },
+    {
+      "id": "N097",
+      "column_type": "numeric(4,2)",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "99.995",
+      "expected": "99.99",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N098",
+      "column_type": "numeric(4,2)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "9.999e1",
+      "expected": "99.99",
+      "outcome": "true"
+    },
+    {
+      "id": "N099",
+      "column_type": "numeric(1,1)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "0.5",
+      "expected": "0.5",
+      "outcome": "true"
+    },
+    {
+      "id": "N100",
+      "column_type": "numeric(1,1)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N101",
+      "column_type": "smallint",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "-32768",
+      "expected": "-32768",
+      "outcome": "true"
+    },
+    {
+      "id": "N102",
+      "column_type": "smallint",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "32768",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N103",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "-2147483648",
+      "expected": "-2147483648",
+      "outcome": "true"
+    },
+    {
+      "id": "N104",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "-2147483649",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N105",
+      "column_type": "bigint",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "9223372036854775807",
+      "expected": "9223372036854775807",
+      "outcome": "true"
+    },
+    {
+      "id": "N106",
+      "column_type": "bigint",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "-9223372036854775809",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N107",
+      "column_type": "tinyint",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "-128",
+      "expected": "-128",
+      "outcome": "true"
+    },
+    {
+      "id": "N108",
+      "column_type": "tinyint",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "127",
+      "expected": "127",
+      "outcome": "true"
+    },
+    {
+      "id": "N109",
+      "column_type": "tinyint",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "-129",
+      "expected": "-129",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N110",
+      "column_type": "mediumint",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "8388607",
+      "expected": "8388607",
+      "outcome": "true"
+    },
+    {
+      "id": "N111",
+      "column_type": "mediumint",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "8388608",
+      "expected": "8388608",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N112",
+      "column_type": "serial",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "0",
+      "expected": "0",
+      "outcome": "true"
+    },
+    {
+      "id": "N113",
+      "column_type": "smallserial",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "32768",
+      "expected": "32768",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N114",
+      "column_type": "bigint",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "9.223372036854775807e18",
+      "expected": "9223372036854775807",
+      "outcome": "true"
+    },
+    {
+      "id": "N115",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "metadata": "base_verified",
+      "op": "lt",
+      "actual": "15.999",
+      "expected": "16",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N116",
+      "column_type": "decimal",
+      "type_class": "numeric",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "16",
+      "expected": "16",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N117",
+      "column_type": "numeric(12,2)",
+      "type_class": "numeric",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "1",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "N118",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "N119",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "metadata": "base_verified",
+      "op": "ne",
+      "actual": "10.4",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I080",
+      "column_type": "text COLLATE ci_bin",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "T1",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I081",
+      "column_type": "text COLLATE ci_bin",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "I082",
+      "column_type": "text COLLATE \"my_bin\"",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "t1 ",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I083",
+      "column_type": "text COLLATE latin1_general_ci",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "T1",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I084",
+      "column_type": "varchar(2) COLLATE \"und_bin\"",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "t1 ",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I085",
+      "column_type": "enum('a','b')",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "a",
+      "expected": "a",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I086",
+      "column_type": "varchar(abc)",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I087",
+      "column_type": "char(max)",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "a",
+      "expected": "a",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I088",
+      "column_type": "numeric(10,x)",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "1",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I089",
+      "column_type": "timestamp",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "now",
+      "expected": "now",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I090",
+      "column_type": "date",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "today",
+      "expected": "today",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I091",
+      "column_type": "timestamptz",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": " Now ",
+      "expected": " Now ",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I092",
+      "column_type": "date",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "tomorrow",
+      "expected": "tomorrow",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I093",
+      "column_type": "date",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "2024-01-05",
+      "expected": "2024-01-05",
+      "outcome": "true"
+    },
+    {
+      "id": "I094",
+      "column_type": "uuid",
+      "type_class": "identity",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "expected": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "outcome": "true"
+    },
+    {
+      "id": "I095",
+      "column_type": "uuid",
+      "type_class": "identity",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11 ",
+      "expected": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11 ",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I096",
+      "column_type": "char(3)",
+      "type_class": "identity",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "t1 ",
+      "expected": "t1 ",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I097",
+      "column_type": "char(3)",
+      "type_class": "identity",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "I098",
+      "column_type": "boolean",
+      "type_class": "identity",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "true",
+      "expected": "true",
+      "outcome": "true"
+    },
+    {
+      "id": "I099",
+      "column_type": "citext",
+      "type_class": "identity",
+      "metadata": "base_verified",
+      "op": "ne",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "false"
+    },
+    {
+      "id": "I100",
+      "column_type": "timestamp",
+      "type_class": "identity",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "2024-01-01 10:00:00",
+      "expected": "2024-01-01 10:00:00",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I101",
+      "column_type": "charge_amount",
+      "type_class": "identity",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "10",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I102",
+      "column_type": "float8",
+      "type_class": "identity",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "0.5",
+      "expected": "0.5",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "I103",
+      "column_type": "text COLLATE ci",
+      "type_class": "identity",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "U015",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "metadata": "unverified",
+      "op": "eq",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U016",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "metadata": "unverified",
+      "op": "ne",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U017",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "metadata": "unverified",
+      "op": "ne",
+      "actual": "16777217",
+      "expected": "16777216",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U018",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "metadata": "unverified",
+      "op": "gt",
+      "actual": "16777217",
+      "expected": "16777216",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U019",
+      "column_type": "text",
+      "type_class": "text",
+      "metadata": "unverified",
+      "op": "eq",
+      "actual": "1.0004",
+      "expected": "1.0004",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U020",
+      "column_type": "text",
+      "type_class": "text",
+      "metadata": "unverified",
+      "op": "eq",
+      "actual": "2024-01-01 10:00:00.4",
+      "expected": "2024-01-01 10:00:00.4",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U029",
+      "column_type": "text COLLATE latin1_bin",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "T1",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U101",
+      "column_type": "VARCHAR(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U102",
+      "column_type": "text COLLATE utf8mb4_bin",
+      "type_class": "identity",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "U103",
+      "column_type": "text COLLATE utf8mb4_bin",
+      "backend": "mysql_family",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "T1",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "U104",
+      "column_type": "text COLLATE ci_bin",
+      "backend": "mysql_family",
+      "type_class": "identity",
+      "op": "ne",
+      "actual": "T1",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U105",
+      "column_type": "text COLLATE \"C\"",
+      "backend": "mysql_family",
+      "type_class": "text",
+      "op": "ne",
+      "actual": "T1",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "U106",
+      "column_type": "text",
+      "type_class": "text",
+      "metadata": "unverified",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U107",
+      "column_type": "text",
+      "type_class": "text",
+      "metadata": "unverified",
+      "op": "ne",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U108",
+      "column_type": "uuid",
+      "type_class": "identity",
+      "metadata": "unverified",
+      "op": "eq",
+      "actual": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "expected": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U109",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "metadata": "unverified",
+      "op": "in",
+      "actual": "10",
+      "expected": [
+        "10"
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U110",
+      "column_type": "text",
+      "type_class": "text",
+      "metadata": "unverified",
+      "op": "not_in",
+      "actual": "t1",
+      "expected": [
+        "t2"
+      ],
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U111",
+      "column_type": "text",
+      "type_class": "text",
+      "metadata": "unverified",
+      "op": "eq",
+      "actual": null,
+      "expected": "t1",
+      "outcome": "unknown"
+    },
+    {
+      "id": "U112",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "metadata": "unverified",
+      "op": "in",
+      "actual": null,
+      "expected": [
+        "10"
+      ],
+      "outcome": "unknown"
+    },
+    {
+      "id": "U113",
+      "column_type": "integer",
+      "type_class": "numeric",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "010",
+      "expected": "10",
+      "outcome": "true"
+    },
+    {
+      "id": "U114",
+      "column_type": "text",
+      "type_class": "text",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "U115",
+      "column_type": "org_key_domain",
+      "type_class": "identity",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "t1 ",
+      "expected": "t1 ",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U116",
+      "column_type": "amount_domain",
+      "type_class": "identity",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "1.4",
+      "expected": "1.4",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U117",
+      "column_type": "org_key_domain",
+      "type_class": "identity",
+      "metadata": "base_verified",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U118",
+      "column_type": "org_key_domain",
+      "type_class": "identity",
+      "metadata": "base_verified",
+      "op": "ne",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U119",
+      "column_type": "amount_domain",
+      "type_class": "identity",
+      "metadata": "unverified",
+      "op": "eq",
+      "actual": "1",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U120",
+      "column_type": "varchar(2)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1 ",
+      "expected": "t1 ",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U121",
+      "column_type": "varchar(2)",
+      "type_class": "text",
+      "op": "eq",
+      "actual": "t1",
+      "expected": "t1",
+      "outcome": "true"
+    },
+    {
+      "id": "U122",
+      "column_type": "numeric(10,0)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1.4",
+      "expected": "1.4",
+      "outcome": "query_rule_not_evaluable"
+    },
+    {
+      "id": "U123",
+      "column_type": "numeric(10,0)",
+      "type_class": "numeric",
+      "op": "eq",
+      "actual": "1",
+      "expected": "1",
+      "outcome": "true"
+    },
+    {
+      "id": "U124",
+      "column_type": "numeric(10,0)",
+      "type_class": "numeric",
+      "op": "ne",
+      "actual": "1.4",
+      "expected": "1",
+      "outcome": "query_rule_not_evaluable"
+    }
+  ]
+}

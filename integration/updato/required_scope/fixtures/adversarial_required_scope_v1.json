@@ -1,0 +1,901 @@
+{
+  "domain": {
+    "schema_version": 1,
+    "name": "AdversarialRequiredScopePeople",
+    "source": {
+      "source_table": "selecto_cert_required_people",
+      "primary_key": "id",
+      "tenant_field": "tenant_id",
+      "fields": [
+        "id",
+        "tenant_id",
+        "name",
+        "secret_score",
+        "ssn",
+        "amount",
+        "owner_id"
+      ],
+      "redact_fields": [
+        "ssn"
+      ],
+      "columns": {
+        "id": {
+          "type": "integer"
+        },
+        "tenant_id": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "secret_score": {
+          "type": "integer",
+          "internal": true
+        },
+        "ssn": {
+          "type": "string"
+        },
+        "amount": {
+          "type": "integer",
+          "filterable": false,
+          "sortable": false,
+          "groupable": false
+        },
+        "owner_id": {
+          "type": "integer"
+        }
+      },
+      "associations": {}
+    },
+    "schemas": {
+      "order": {
+        "source_table": "selecto_cert_required_orders",
+        "primary_key": "id",
+        "tenant_field": "tenant_id",
+        "fields": [
+          "id",
+          "tenant_id",
+          "person_id",
+          "total",
+          "state"
+        ],
+        "redact_fields": [],
+        "columns": {
+          "id": {
+            "type": "integer"
+          },
+          "tenant_id": {
+            "type": "integer"
+          },
+          "person_id": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "associations": {}
+      }
+    },
+    "joins": {},
+    "domain_version": "1.0.0",
+    "domain_fingerprint": "sha256:adversarial-required-scope-v1",
+    "writes": {
+      "operations": {
+        "update": {
+          "enabled": true,
+          "require_filter": true,
+          "bulk": true,
+          "returning": "count",
+          "expected_cardinality": "many"
+        },
+        "delete": {
+          "enabled": true,
+          "require_filter": true,
+          "bulk": true,
+          "returning": "count",
+          "expected_cardinality": "many"
+        }
+      },
+      "fields": {
+        "name": {
+          "updatable": true
+        },
+        "tenant_id": {
+          "updatable": true
+        }
+      },
+      "scope": {
+        "tenant": {
+          "required": true,
+          "field": "tenant_id",
+          "satisfied_by": [
+            "trusted_context"
+          ]
+        }
+      },
+      "relationships": {
+        "orders": {
+          "writable": true,
+          "cardinality": "many",
+          "ownership": "owned",
+          "allowed_ops": [
+            "insert",
+            "update",
+            "delete"
+          ],
+          "domain": {
+            "schema_version": 1,
+            "name": "AdversarialRequiredScopeOrders",
+            "domain_version": "1.0.0",
+            "domain_fingerprint": "sha256:adversarial-required-scope-orders-v1",
+            "source": {
+              "source_table": "selecto_cert_required_orders",
+              "primary_key": "id",
+              "tenant_field": "tenant_id",
+              "fields": [
+                "id",
+                "tenant_id",
+                "person_id",
+                "total",
+                "state"
+              ],
+              "redact_fields": [],
+              "columns": {
+                "id": {
+                  "type": "integer"
+                },
+                "tenant_id": {
+                  "type": "integer"
+                },
+                "person_id": {
+                  "type": "integer"
+                },
+                "total": {
+                  "type": "integer"
+                },
+                "state": {
+                  "type": "string"
+                }
+              },
+              "associations": {}
+            },
+            "schemas": {},
+            "joins": {},
+            "writes": {
+              "operations": {
+                "insert": {
+                  "enabled": true
+                },
+                "update": {
+                  "enabled": true
+                },
+                "delete": {
+                  "enabled": true
+                }
+              },
+              "fields": {
+                "id": {
+                  "insertable": true,
+                  "updatable": false
+                },
+                "tenant_id": {
+                  "insertable": true,
+                  "updatable": true
+                },
+                "person_id": {
+                  "insertable": true,
+                  "updatable": true
+                },
+                "total": {
+                  "insertable": true,
+                  "updatable": true
+                },
+                "state": {
+                  "insertable": true,
+                  "updatable": true
+                }
+              },
+              "scope": {
+                "tenant": {
+                  "required": true,
+                  "field": "tenant_id",
+                  "satisfied_by": [
+                    "trusted_context"
+                  ]
+                }
+              }
+            }
+          },
+          "parent_key": "id",
+          "child_key": "person_id",
+          "identity_fields": [
+            "id"
+          ],
+          "write": {
+            "modes": [
+              "delta"
+            ],
+            "create": true,
+            "update": true,
+            "delete": true,
+            "max_mutations": 20
+          }
+        }
+      }
+    },
+    "actions": {
+      "rename": {
+        "type": "detail_action",
+        "scope": "row",
+        "bulk": {
+          "enabled": true
+        },
+        "execution": {
+          "kind": "updato",
+          "operation": "update",
+          "set": {
+            "name": "required-action-renamed"
+          }
+        }
+      }
+    }
+  },
+  "dataset": {
+    "people": {
+      "columns": [
+        "id",
+        "tenant_id",
+        "name",
+        "secret_score",
+        "ssn",
+        "amount",
+        "owner_id"
+      ],
+      "rows": [
+        [
+          1,
+          7,
+          "alpha",
+          100,
+          "ssn-secret-1",
+          10,
+          42
+        ],
+        [
+          2,
+          7,
+          "beta",
+          101,
+          "ssn-secret-2",
+          20,
+          42
+        ],
+        [
+          3,
+          7,
+          "' OR 1=1 --",
+          102,
+          "ssn-secret-3",
+          15,
+          77
+        ],
+        [
+          4,
+          7,
+          "100%_[a]\\$1?@p1🙂‮ʼ",
+          103,
+          "ssn-secret-4",
+          40,
+          42
+        ],
+        [
+          8,
+          8,
+          "alpha",
+          808,
+          "ssn-secret-8",
+          15,
+          42
+        ],
+        [
+          9,
+          8,
+          "foreign-only",
+          909,
+          "ssn-secret-9",
+          100000,
+          42
+        ]
+      ]
+    },
+    "orders": {
+      "columns": [
+        "id",
+        "tenant_id",
+        "person_id",
+        "total",
+        "state"
+      ],
+      "rows": [
+        [
+          101,
+          7,
+          1,
+          10,
+          "open"
+        ],
+        [
+          102,
+          7,
+          1,
+          15,
+          "closed"
+        ],
+        [
+          103,
+          7,
+          2,
+          30,
+          "open"
+        ],
+        [
+          201,
+          8,
+          1,
+          9999,
+          "open"
+        ],
+        [
+          202,
+          8,
+          2,
+          8888,
+          "closed"
+        ]
+      ]
+    }
+  },
+  "trusted_tenant": 7,
+  "trusted_scope": {
+    "op": "and",
+    "args": [
+      {
+        "op": "eq",
+        "field": "owner_id",
+        "value": 42
+      },
+      {
+        "op": "lt",
+        "field": "amount",
+        "value": 25
+      }
+    ]
+  },
+  "variants": [
+    {
+      "variant": "out_of_scope_changed",
+      "dataset": {
+        "people": {
+          "columns": [
+            "id",
+            "tenant_id",
+            "name",
+            "secret_score",
+            "ssn",
+            "amount",
+            "owner_id"
+          ],
+          "rows": [
+            [
+              1,
+              7,
+              "alpha",
+              100,
+              "ssn-secret-1",
+              10,
+              42
+            ],
+            [
+              2,
+              7,
+              "beta",
+              101,
+              "ssn-secret-2",
+              20,
+              42
+            ],
+            [
+              3,
+              7,
+              "' OR 1=1 --",
+              102,
+              "ssn-secret-3",
+              15,
+              77
+            ],
+            [
+              4,
+              7,
+              "100%_[a]\\$1?@p1🙂‮ʼ",
+              103,
+              "ssn-secret-4",
+              40,
+              42
+            ],
+            [
+              8,
+              8,
+              "changed-foreign",
+              -808,
+              "changed-foreign-ssn",
+              15,
+              42
+            ],
+            [
+              10,
+              8,
+              "new-foreign",
+              -1010,
+              "new-foreign-ssn",
+              777777,
+              42
+            ]
+          ]
+        },
+        "orders": {
+          "columns": [
+            "id",
+            "tenant_id",
+            "person_id",
+            "total",
+            "state"
+          ],
+          "rows": [
+            [
+              101,
+              7,
+              1,
+              10,
+              "open"
+            ],
+            [
+              102,
+              7,
+              1,
+              15,
+              "closed"
+            ],
+            [
+              103,
+              7,
+              2,
+              30,
+              "open"
+            ],
+            [
+              301,
+              8,
+              1,
+              777777,
+              "closed"
+            ],
+            [
+              302,
+              8,
+              2,
+              555555,
+              "open"
+            ],
+            [
+              303,
+              8,
+              4,
+              666666,
+              "open"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "variant": "secrets_changed",
+      "dataset": {
+        "people": {
+          "columns": [
+            "id",
+            "tenant_id",
+            "name",
+            "secret_score",
+            "ssn",
+            "amount",
+            "owner_id"
+          ],
+          "rows": [
+            [
+              1,
+              7,
+              "alpha",
+              -100,
+              "replaced-1",
+              10,
+              42
+            ],
+            [
+              2,
+              7,
+              "beta",
+              -101,
+              "replaced-2",
+              20,
+              42
+            ],
+            [
+              3,
+              7,
+              "' OR 1=1 --",
+              -102,
+              "replaced-3",
+              15,
+              77
+            ],
+            [
+              4,
+              7,
+              "100%_[a]\\$1?@p1🙂‮ʼ",
+              -103,
+              "replaced-4",
+              40,
+              42
+            ],
+            [
+              8,
+              8,
+              "alpha",
+              -808,
+              "replaced-8",
+              15,
+              42
+            ],
+            [
+              9,
+              8,
+              "foreign-only",
+              -909,
+              "replaced-9",
+              100000,
+              42
+            ]
+          ]
+        },
+        "orders": {
+          "columns": [
+            "id",
+            "tenant_id",
+            "person_id",
+            "total",
+            "state"
+          ],
+          "rows": [
+            [
+              101,
+              7,
+              1,
+              10,
+              "open"
+            ],
+            [
+              102,
+              7,
+              1,
+              15,
+              "closed"
+            ],
+            [
+              103,
+              7,
+              2,
+              30,
+              "open"
+            ],
+            [
+              201,
+              8,
+              1,
+              9999,
+              "open"
+            ],
+            [
+              202,
+              8,
+              2,
+              8888,
+              "closed"
+            ]
+          ]
+        }
+      }
+    }
+  ],
+  "trusted_owner": 42,
+  "cases": {
+    "ARS001": [
+      {
+        "id": "wrong_owner",
+        "surface": "engine_graph",
+        "intent": {
+          "root": {
+            "operation": "update",
+            "assignments": {
+              "name": "required-graph-renamed"
+            },
+            "filters": [
+              {
+                "field": "id",
+                "op": "eq",
+                "value": 3
+              }
+            ],
+            "expected_count": 1
+          },
+          "relationship": "orders",
+          "mutation": {
+            "mode": "delta",
+            "create": [
+              {
+                "id": 901,
+                "total": 17,
+                "state": "required-graph-child"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "wrong_field",
+        "surface": "engine_graph",
+        "intent": {
+          "root": {
+            "operation": "update",
+            "assignments": {
+              "name": "required-graph-renamed"
+            },
+            "filters": [
+              {
+                "field": "id",
+                "op": "eq",
+                "value": 4
+              }
+            ],
+            "expected_count": 1
+          },
+          "relationship": "orders",
+          "mutation": {
+            "mode": "delta",
+            "create": [
+              {
+                "id": 901,
+                "total": 17,
+                "state": "required-graph-child"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "foreign_tenant",
+        "surface": "engine_graph",
+        "intent": {
+          "root": {
+            "operation": "update",
+            "assignments": {
+              "name": "required-graph-renamed"
+            },
+            "filters": [
+              {
+                "field": "id",
+                "op": "eq",
+                "value": 8
+              }
+            ],
+            "expected_count": 1
+          },
+          "relationship": "orders",
+          "mutation": {
+            "mode": "delta",
+            "create": [
+              {
+                "id": 901,
+                "total": 17,
+                "state": "required-graph-child"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "mixed_owner",
+        "surface": "engine_graph",
+        "intent": {
+          "root": {
+            "operation": "update",
+            "assignments": {
+              "name": "required-graph-renamed"
+            },
+            "filters": [
+              {
+                "field": "id",
+                "op": "in",
+                "value": [
+                  1,
+                  3
+                ]
+              }
+            ],
+            "expected_count": 2
+          },
+          "relationship": "orders",
+          "mutation": {
+            "mode": "delta",
+            "create": [
+              {
+                "id": 901,
+                "total": 17,
+                "state": "required-graph-child"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "mixed_tenant",
+        "surface": "engine_graph",
+        "intent": {
+          "root": {
+            "operation": "update",
+            "assignments": {
+              "name": "required-graph-renamed"
+            },
+            "filters": [
+              {
+                "field": "id",
+                "op": "in",
+                "value": [
+                  1,
+                  8
+                ]
+              }
+            ],
+            "expected_count": 2
+          },
+          "relationship": "orders",
+          "mutation": {
+            "mode": "delta",
+            "create": [
+              {
+                "id": 901,
+                "total": 17,
+                "state": "required-graph-child"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "inside_control",
+        "surface": "engine_graph",
+        "intent": {
+          "root": {
+            "operation": "update",
+            "assignments": {
+              "name": "required-graph-renamed"
+            },
+            "filters": [
+              {
+                "field": "id",
+                "op": "eq",
+                "value": 1
+              }
+            ],
+            "expected_count": 1
+          },
+          "relationship": "orders",
+          "mutation": {
+            "mode": "delta",
+            "create": [
+              {
+                "id": 901,
+                "total": 17,
+                "state": "required-graph-child"
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "ARS002": [
+      {
+        "id": "wrong_owner",
+        "surface": "engine_action",
+        "intent": {
+          "action": "rename",
+          "target": {
+            "id": 3
+          }
+        }
+      },
+      {
+        "id": "wrong_field",
+        "surface": "engine_action",
+        "intent": {
+          "action": "rename",
+          "target": {
+            "id": 4
+          }
+        }
+      },
+      {
+        "id": "foreign_tenant",
+        "surface": "engine_action",
+        "intent": {
+          "action": "rename",
+          "target": {
+            "id": 8
+          }
+        }
+      },
+      {
+        "id": "mixed_owner",
+        "surface": "engine_action",
+        "intent": {
+          "action": "rename",
+          "target": {
+            "ids": [
+              1,
+              3
+            ]
+          }
+        }
+      },
+      {
+        "id": "mixed_tenant",
+        "surface": "engine_action",
+        "intent": {
+          "action": "rename",
+          "target": {
+            "ids": [
+              1,
+              8
+            ]
+          }
+        }
+      },
+      {
+        "id": "inside_control",
+        "surface": "engine_action",
+        "intent": {
+          "action": "rename",
+          "target": {
+            "id": 1
+          }
+        }
+      },
+      {
+        "id": "inside_bulk",
+        "surface": "engine_action",
+        "intent": {
+          "action": "rename",
+          "target": {
+            "ids": [
+              1,
+              2
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

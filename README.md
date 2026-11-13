@@ -35,9 +35,8 @@ It gives you:
 
 Use `selecto` with companion packages when you need more than the core engine:
 
-- `selecto_components` for Phoenix LiveView query UI
+- `selecto_views` for the Phoenix LiveView Explorer UI
 - `selecto_mix` for domain generation and installation tasks
-- `selecto_updato` for write operations over Selecto domains
 - adapter packages such as `selecto_db_postgresql`, `selecto_db_mysql`, `selecto_db_sqlite`, and others
 - `selecto_db_postgresql_postgis` for spatial/map extension support
 
@@ -130,7 +129,8 @@ selecto = Selecto.configure(domain, Repo)
 
 ## Engine Tenant and Writes
 
-For governed writes, install `selecto_updato` and bind the authenticated tenant
+For governed writes, use the bundled `SelectoUpdato` modules (see
+`docs/updato/overview.md`) and bind the authenticated tenant
 once on the configured engine. The domain declares `source.tenant_field` and
 the write/action grants:
 
@@ -444,8 +444,7 @@ tracking issue and the exact condition for re-enabling the test.
 
 ## Related Repos
 
-- `selecto_components`
+- `selecto_views`
 - `selecto_mix`
-- `selecto_updato`
 - `selecto_db_postgresql_postgis`
 - `selecto_test`

@@ -1,7 +1,7 @@
 # Optional public Updato/native adapter proof. Load selected runtime dependencies
 # on ERL_LIBS before running: elixir scripts/sqlite_rule_resource_regression.exs
 ExUnit.start()
-{:ok, _} = Application.ensure_all_started(:selecto_updato)
+{:ok, _} = Application.ensure_all_started(:selecto)
 {:ok, _} = Application.ensure_all_started(:selecto_db_sqlite)
 
 defmodule Selecto.Rule.NativeSQLiteResourceTest do

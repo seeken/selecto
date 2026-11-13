@@ -1,8 +1,17 @@
 
 # Selecto Library Changelog
 
-## Unreleased
+## V 0.5.0 - Adapter-Neutral Governance and Event Contracts
 
+- **SelectoUpdato ships inside `selecto`.** The `SelectoUpdato.*` modules,
+  `mix selecto_updato.verify`, the write documentation (`docs/updato/`), and
+  the native integration suites (`integration/updato/`) moved here from the
+  `selecto_updato` package, with module names and telemetry events unchanged.
+  `Selecto.Application` now supervises `SelectoUpdato.ActionAuthorization`;
+  the `:selecto_updato` OTP application and `SelectoUpdato.Supervisor` are
+  gone. Remove `:selecto_updato` from a host's deps when upgrading: listing
+  both defines the modules twice. The package's earlier history is in
+  `docs/updato/changelog.md`.
 - SQLite's double rule models SQLite's own read of a number (19 significant
   digits, cut, then converted): a Decimal refuses only when that read is an
   infinity (its cut at or past 1.797693134862315808e308) or 0.0 for a nonzero
@@ -804,8 +813,7 @@
 - Selection eligibility is presentation metadata, not a replacement for
   atomic action preconditions. Lookup execution requires adapter support.
 
-## V 0.5.0 - Adapter-Neutral Governance and Event Contracts
-------------------------------------------------------------
+### 0.5.0 baseline
 
 #### Breaking
 - Raised the package version to `0.5.0` and the coordinated adapter baseline to
