@@ -67,6 +67,18 @@ defmodule Selecto.JoinNamespaceExecutionTest do
              Selecto.execute(query)
   end
 
+  test "a complete path joins when the association field differs from its id", %{db: db} do
+    d = put_in(domain(), [:source, :associations, :legs, :field], :leg)
+
+    query =
+      d
+      |> Selecto.configure(db, adapter: Adapter)
+      |> Selecto.select(["id", "legs.id"])
+      |> Selecto.order_by(["id", "legs.id"])
+
+    assert {:ok, {[[1, 100], [1, 101], [2, nil]], _, _}} = Selecto.execute(query)
+  end
+
   test "rebasing a computed child field changes references but preserves literal strings", %{
     db: db
   } do

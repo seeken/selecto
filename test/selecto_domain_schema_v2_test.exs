@@ -155,6 +155,20 @@ defmodule Selecto.DomainSchemaV2Test do
              }
     end
 
+    test "migrates an Elixir-authored domain whose fields are atoms" do
+      v1 = %{
+        source: %{
+          source_table: "orders",
+          fields: [:total, :id],
+          columns: %{id: %{type: :integer}, total: %{type: :decimal}}
+        }
+      }
+
+      assert {:ok, %{document: v2}} = SchemaV2.migrate(v1)
+      assert v2["source"]["field_order"] == ["total", "id"]
+      refute Map.has_key?(v2["source"], "fields")
+    end
+
     test "refuses fields that do not name the columns" do
       v1 = %{"source" => %{"fields" => ["id"], "columns" => %{"id" => %{}, "x" => %{}}}}
 
