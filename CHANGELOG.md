@@ -12,6 +12,16 @@
   gone. Remove `:selecto_updato` from a host's deps when upgrading: listing
   both defines the modules twice. The package's earlier history is in
   `docs/updato/changelog.md`.
+- `Selecto.configure/3` and `configure_registered/3` accept a domain schema 2
+  document (string keys, `"schema_version" => 2`). It must pass the schema 2
+  rules, even with `validate: false`, and is configured as its runtime form,
+  `Selecto.Domain.SchemaV2.to_runtime/1`: the version 1 form with atom
+  structural keys, `tenant` mapped to `source.tenant_field` and
+  `writes.scope.tenant`, tenant pins leading `required_filters`, column
+  descriptions kept, and the computed fingerprint as `domain_fingerprint` (a
+  registered domain's reference carries it). An Elixir-authored map with the
+  atom key `schema_version: 2` is read as authored, as before.
+
 - Field descriptions (certification specification 3.1): a column (root or a
   related schema's) and a `components.filter_choices` entry take an optional
   `description`, plain text of 1-1000 code points that is not only whitespace,
