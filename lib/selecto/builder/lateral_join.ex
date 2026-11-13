@@ -12,6 +12,8 @@ defmodule Selecto.Builder.LateralJoin do
   alias Selecto.Dialect.Collection.Operation, as: CollectionOperation
   alias Selecto.Dialect.TableFunction.Join, as: TableFunctionJoin
   alias Selecto.Error
+
+  @aggregate_names ~w(count count_distinct sum avg min max stddev variance array_agg json_agg jsonb_agg string_agg)a
   # alias Selecto.Builder.SQL
 
   @doc """
@@ -226,7 +228,14 @@ defmodule Selecto.Builder.LateralJoin do
       AdapterSupport.supports_feature?(adapter, :lateral_projection_aliases) or
         Map.get(subquery.config || %{}, :preserve_projection_aliases) == true
 
-    if preserve?, do: refuse_placeholder_aliases!(subquery)
+    subquery =
+      if preserve? do
+        named = name_lateral_projections(subquery)
+        validate_lateral_projection_aliases!(named)
+        named
+      else
+        subquery
+      end
 
     {subquery_sql, params} = Selecto.to_sql(subquery, preserve_projection_aliases: preserve?)
 
@@ -245,7 +254,7 @@ defmodule Selecto.Builder.LateralJoin do
   # The finalized child is re-bound by placeholder position, so a `?` inside
   # a quoted output alias would shift every parameter; refuse it as invalid
   # input before any SQL is produced.
-  defp refuse_placeholder_aliases!(subquery) do
+  defp validate_lateral_projection_aliases!(subquery) do
     {_iodata, aliases} = Selecto.Builder.Sql.build_iodata(subquery, [])
 
     if Enum.any?(aliases, &(is_binary(&1) and String.contains?(&1, "?"))) do
@@ -255,7 +264,72 @@ defmodule Selecto.Builder.LateralJoin do
         })
       )
     end
+
+    names = Enum.map(aliases, &to_string/1)
+
+    keys =
+      if AdapterSupport.adapter_name(subquery.adapter) in [:mysql, :mariadb],
+        do: Enum.map(names, &String.downcase/1),
+        else: names
+
+    if length(keys) != length(Enum.uniq(keys)) do
+      Selecto.Builder.ScopeRefusal.lateral!(
+        Error.validation_error("Lateral output aliases must be unique; use explicit aliases", %{
+          unsupported_feature: :lateral_projection_alias,
+          aliases: names
+        })
+      )
+    end
   end
+
+  # Generated result-metadata UUIDs are not published SQL column names. Name
+  # only this derived row's anonymous selectors, leaving ordinary projection
+  # metadata and every authored alias (even a UUID-shaped one) unchanged.
+  defp name_lateral_projections(subquery) do
+    selected =
+      subquery.set.selected
+      |> Enum.with_index(1)
+      |> Enum.map(fn {selector, position} -> name_lateral_selector(selector, position) end)
+
+    put_in(subquery.set.selected, selected)
+  end
+
+  defp name_lateral_selector(selector, _position) when is_binary(selector) or is_atom(selector),
+    do: selector
+
+  defp name_lateral_selector({:field, _selector, _alias} = selector, _position), do: selector
+  defp name_lateral_selector({:row, _fields, _alias} = selector, _position), do: selector
+
+  defp name_lateral_selector({:field, field}, _position)
+       when is_binary(field) or is_atom(field) do
+    {:field, field, field |> to_string() |> String.split(".") |> List.last()}
+  end
+
+  defp name_lateral_selector({:func, name, _args, opts} = selector, _position)
+       when is_list(opts) do
+    if Keyword.has_key?(opts, :as),
+      do: selector,
+      else: {:field, selector, function_projection_name(name)}
+  end
+
+  defp name_lateral_selector({:func, name, _args} = selector, _position),
+    do: {:field, selector, function_projection_name(name)}
+
+  defp name_lateral_selector({:func, name} = selector, _position),
+    do: {:field, selector, function_projection_name(name)}
+
+  defp name_lateral_selector(selector, _position)
+       when is_tuple(selector) and tuple_size(selector) > 0 and
+              elem(selector, 0) in @aggregate_names do
+    name = if elem(selector, 0) == :count_distinct, do: :count, else: elem(selector, 0)
+    {:field, selector, Atom.to_string(name)}
+  end
+
+  defp name_lateral_selector(selector, position),
+    do: {:field, selector, Selecto.Builder.Sql.projection_alias(position)}
+
+  defp function_projection_name(name),
+    do: name |> to_string() |> String.split(".") |> List.last() |> String.downcase()
 
   # Build table function SQL
   defp build_table_function_sql({:unnest, column_ref}, adapter, selecto) do
