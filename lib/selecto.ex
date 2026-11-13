@@ -169,10 +169,25 @@ defmodule Selecto do
 
     ## Parameters
 
-    - `domain` - Domain configuration map (see domain configuration docs)
+    - `domain` - Domain configuration map (see domain configuration docs), or a
+      domain schema 2 document (see below)
     - `connection_input` - Adapter-specific connection options, an Ecto repo,
       a live connection pid/name, or a pooled connection reference.
     - `opts` - Configuration options
+
+    ## Domain schema 2 documents
+
+    A schema 2 document is the JSON form of a domain: string keys and
+    `"schema_version" => 2` (certification specification 3.0). It is checked
+    against the schema 2 rules (`Selecto.Domain.SchemaV2.validate/1`) even with
+    `validate: false`, raising `Selecto.DomainValidator.ValidationError` with
+    the rule code and path, and configured as its runtime form
+    (`Selecto.Domain.SchemaV2.to_runtime/1`): its top-level `tenant` becomes
+    `source.tenant_field` and `writes.scope.tenant`, its tenant pins lead
+    `required_filters`, and the computed fingerprint is its
+    `domain_fingerprint`. A registry passed to `configure_registered/3` may
+    return one too. An Elixir-authored map with the atom key
+    `schema_version: 2` is not a schema 2 document and is read as authored.
 
     ## Options
 

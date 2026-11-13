@@ -15,6 +15,8 @@ defmodule Selecto.Domain.SchemaV2 do
   - `migrate/1` - a version 1 document to version 2
   - `to_version_1/1` - the version 1 form of a valid version 2 document, which
     the rest of Selecto's domain contract reads
+  - `document?/1` - whether a domain is a (string-keyed) schema 2 document
+  - `to_runtime/1` - the atom-keyed runtime form `Selecto.configure/3` reads
 
   Documents are JSON maps with string keys. Atom keys are read as their names;
   results use string keys.
@@ -687,6 +689,149 @@ defmodule Selecto.Domain.SchemaV2 do
   end
 
   defp restore_tenant(doc), do: Map.delete(doc, "tenant")
+
+  # ------------------------------------------------------------------ runtime form
+
+  @doc """
+  Whether a domain is a schema 2 document: a JSON-shaped map whose string key
+  `"schema_version"` is the number 2.
+
+  An Elixir-authored domain with the atom key `schema_version: 2` is not one:
+  before specification 3.0, Elixir domains used that atom-keyed version for
+  their own projection sections, and `Selecto.configure/3` keeps reading them
+  as authored.
+  """
+  @spec document?(term()) :: boolean()
+  def document?(%_{}), do: false
+
+  def document?(domain) when is_map(domain) do
+    version = Map.get(domain, "schema_version")
+    is_number(version) and version == 2
+  end
+
+  def document?(_domain), do: false
+
+  @doc """
+  Returns the runtime domain `Selecto.configure/3` reads for a valid schema 2
+  document: its version 1 form (`to_version_1/1`, so `tenant` becomes
+  `source.tenant_field` and `writes.scope.tenant`) with the atom structural
+  keys of an Elixir-authored domain, carrying the computed fingerprint as
+  `domain_fingerprint`.
+
+  Relations (`source`, `schemas`), their columns and associations, `joins` and
+  `writes` take atom keys, and their field, relation and type references
+  become atoms; `[column, value]` entries of `required_filters` become
+  `{column, value}`. Column metadata such as `description` is kept. Other
+  sections keep their authored content under an atom section key. Call
+  `validate/1` first: this does not check the document.
+
+  Field and section names become atoms, so pass only server-owned documents.
+  """
+  @spec to_runtime(map()) :: map()
+  def to_runtime(v2) when is_map(v2) do
+    fingerprint = fingerprint(v2)
+
+    v2
+    |> to_version_1()
+    |> Map.new(fn {key, value} -> runtime_section(key, value) end)
+    |> Map.put(:domain_fingerprint, fingerprint)
+  end
+
+  defp runtime_section("source", relation), do: {:source, runtime_relation(relation)}
+
+  # A joined relation's redact_fields is required at runtime; none is declared
+  # as an empty list, as Elixir-authored domains write it.
+  defp runtime_section("schemas", schemas) when is_map(schemas),
+    do:
+      {:schemas,
+       Map.new(schemas, fn {id, relation} ->
+         relation = runtime_relation(relation)
+
+         relation =
+           if is_map(relation), do: Map.put_new(relation, :redact_fields, []), else: relation
+
+         {atom(id), relation}
+       end)}
+
+  defp runtime_section("joins", joins), do: {:joins, runtime_joins(joins)}
+  defp runtime_section("writes", writes), do: {:writes, runtime_tree(writes)}
+
+  defp runtime_section("required_filters", filters) when is_list(filters),
+    do: {:required_filters, Enum.map(filters, &runtime_filter/1)}
+
+  defp runtime_section(key, value), do: {atom(key), value}
+
+  @relation_atom_lists ["fields", "redact_fields"]
+
+  defp runtime_relation(relation) when is_map(relation) do
+    Map.new(relation, fn
+      {"columns", columns} when is_map(columns) ->
+        {:columns, Map.new(columns, fn {name, spec} -> {atom(name), runtime_tree(spec)} end)}
+
+      {"associations", associations} when is_map(associations) ->
+        {:associations,
+         Map.new(associations, fn {name, spec} -> {atom(name), runtime_tree(spec)} end)}
+
+      {"primary_key", keys} when is_list(keys) ->
+        {:primary_key, Enum.map(keys, &atom/1)}
+
+      {key, value} ->
+        {atom(key), runtime_value(key, value)}
+    end)
+  end
+
+  defp runtime_relation(relation), do: relation
+
+  defp runtime_joins(joins) when is_map(joins),
+    do: Map.new(joins, fn {id, join} -> {atom(id), runtime_join(join)} end)
+
+  defp runtime_joins(joins), do: joins
+
+  defp runtime_join(join) when is_map(join) do
+    Map.new(join, fn
+      {"joins", joins} -> {:joins, runtime_joins(joins)}
+      {key, value} -> {atom(key), runtime_value(key, value)}
+    end)
+  end
+
+  defp runtime_join(join), do: join
+
+  # Structural keys become atoms; values naming a field, a relation or an
+  # Elixir enumeration (a column type, a join type) become atoms too.
+  @atom_values [
+    "cardinality",
+    "display_field",
+    "field",
+    "hierarchy_type",
+    "owner_key",
+    "primary_key",
+    "queryable",
+    "related_key",
+    "source_scope_key",
+    "tag_field",
+    "target_scope_key",
+    "tenant_field",
+    "type"
+  ]
+
+  defp runtime_tree(map) when is_map(map),
+    do: Map.new(map, fn {key, value} -> {atom(key), runtime_value(key, value)} end)
+
+  defp runtime_tree(value), do: value
+
+  defp runtime_value(key, value) when key in @atom_values and is_binary(value), do: atom(value)
+
+  defp runtime_value(key, values) when key in @relation_atom_lists and is_list(values),
+    do: Enum.map(values, &atom/1)
+
+  defp runtime_value(_key, value) when is_map(value), do: runtime_tree(value)
+  defp runtime_value(_key, value), do: value
+
+  defp runtime_filter([field, value]) when is_binary(field), do: {field, value}
+  defp runtime_filter(filter), do: filter
+
+  defp atom(value) when is_binary(value), do: String.to_atom(value)
+  defp atom(value), do: value
 
   defp restore_capabilities(%{"actions" => %{} = actions} = doc) do
     actions

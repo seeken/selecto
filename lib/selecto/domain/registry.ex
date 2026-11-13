@@ -77,8 +77,28 @@ defmodule Selecto.Domain.Registry do
          :ok <- validate_id(id, registry),
          :ok <- validate_context(context, registry, id),
          {:ok, domain, metadata} <- call_registry(registry, id, context),
+         {:ok, domain, metadata} <- runtime_form(domain, metadata, Ref.new(id, registry)),
          :ok <- validate_domain(domain, Ref.new(id, registry)) do
       {:ok, domain, build_ref(registry, id, domain, metadata)}
+    end
+  end
+
+  # A registry may return a schema 2 document. It passes the schema 2 rules and
+  # the portable contract as authored, then resolves to its runtime form, whose
+  # domain_fingerprint is the computed fingerprint: the domain's identity, so
+  # it also stands in for any fingerprint in the registry metadata.
+  defp runtime_form(domain, metadata, %Ref{} = ref) do
+    if Selecto.Domain.SchemaV2.document?(domain) do
+      case Selecto.Domain.validate(domain) do
+        {:ok, _normalized, _diagnostics} ->
+          {:ok, Selecto.Domain.SchemaV2.to_runtime(domain),
+           Map.drop(metadata, [:fingerprint, "fingerprint"])}
+
+        {:error, %{errors: errors}} ->
+          registry_error(ref.registry, ref.id, :invalid_domain_contract, %{errors: errors})
+      end
+    else
+      {:ok, domain, metadata}
     end
   end
 

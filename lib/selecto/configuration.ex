@@ -71,6 +71,8 @@ defmodule Selecto.Configuration do
     Selecto.OptionsValidator.validate_configure_opts!(opts)
     :ok = Selecto.Policy.ensure_configuration_options!(opts)
 
+    domain = runtime_domain!(domain)
+
     validate? = Keyword.get(opts, :validate, true)
     use_pool? = Keyword.get(opts, :pool, false)
     adapter = resolve_adapter!(opts, connection_input)
@@ -137,6 +139,32 @@ defmodule Selecto.Configuration do
         group_by: Map.get(domain, :required_group_by, [])
       }
     }
+  end
+
+  # A schema 2 document (string keys, "schema_version" => 2) is checked against
+  # the schema 2 rules, whatever :validate says, because its runtime form
+  # depends on them; it is then configured as its runtime form. Every other
+  # domain, including an Elixir-authored `schema_version: 2` map, is read as
+  # authored.
+  @doc false
+  @spec runtime_domain!(term()) :: term()
+  def runtime_domain!(domain) do
+    if Selecto.Domain.SchemaV2.document?(domain) do
+      case Selecto.Domain.SchemaV2.validate(domain) do
+        [] ->
+          Selecto.Domain.SchemaV2.to_runtime(domain)
+
+        errors ->
+          raise Selecto.DomainValidator.ValidationError,
+            message:
+              "Domain schema 2 validation failed:\n" <>
+                Enum.map_join(errors, "\n", fn %{code: code, path: path} ->
+                  "  - #{code} at #{inspect(path)}"
+                end)
+      end
+    else
+      domain
+    end
   end
 
   defp resolve_adapter!(opts, connection_input) do
