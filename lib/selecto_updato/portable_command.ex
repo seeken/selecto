@@ -1413,7 +1413,10 @@ defmodule SelectoUpdato.PortableCommand do
   defp same_identifier?(left, right), do: left == right
 
   defp map_value(map, key) when is_map(map) and is_atom(key) do
-    Map.get(map, key, Map.get(map, Atom.to_string(key)))
+    case Map.fetch(map, key) do
+      {:ok, value} -> value
+      :error -> Map.get(map, Atom.to_string(key))
+    end
   end
 
   defp map_value(_map, _key), do: nil

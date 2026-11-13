@@ -150,6 +150,10 @@ defmodule Selecto.Analytics.Pipeline do
 
   defp execute(%{type: :moving_average, parameters: parameters}, values) do
     with {:ok, window} <- integer_parameter(parameters, :window, 2, 365) do
+      # Index the series once: slicing a linked list at every point walks
+      # the entire prefix again, even for a small fixed window.
+      indexed = List.to_tuple(values)
+
       {:ok,
        values
        |> Enum.with_index()
@@ -159,7 +163,10 @@ defmodule Selecto.Analytics.Pipeline do
 
          {_value, index} ->
            sample =
-             values |> Enum.slice(max(0, index - window + 1)..index) |> Enum.reject(&is_nil/1)
+             for position <- max(0, index - window + 1)..index,
+                 value = elem(indexed, position),
+                 not is_nil(value),
+                 do: value
 
            Enum.sum(sample) / length(sample)
        end)}
@@ -223,18 +230,20 @@ defmodule Selecto.Analytics.Pipeline do
   end
 
   defp previous_change(values, percent?) do
-    values
-    |> Enum.with_index()
-    |> Enum.map(fn {value, index} ->
-      previous = if index == 0, do: nil, else: Enum.at(values, index - 1)
+    {result, _previous} =
+      Enum.map_reduce(values, nil, fn value, previous ->
+        change =
+          cond do
+            is_nil(value) or is_nil(previous) -> nil
+            percent? and previous == 0 -> nil
+            percent? -> (value - previous) / previous * 100
+            true -> value - previous
+          end
 
-      cond do
-        is_nil(value) or is_nil(previous) -> nil
-        percent? and previous == 0 -> nil
-        percent? -> (value - previous) / previous * 100
-        true -> value - previous
-      end
-    end)
+        {change, value}
+      end)
+
+    result
   end
 
   defp integer_parameter(parameters, key, minimum, maximum) do
