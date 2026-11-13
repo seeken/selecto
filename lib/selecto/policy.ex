@@ -2,7 +2,7 @@ defmodule Selecto.Policy do
   @moduledoc """
   Governance policy for configured Selecto queries.
 
-  Strict mode seals the fully composed domain at configuration time, rejects
+  Strict mode rejects
   query-authored SQL escape hatches, and limits runtime joins and row sources to
   capabilities declared by the domain.
   """

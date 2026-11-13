@@ -187,7 +187,7 @@ defmodule Selecto do
     - `:adapter` - Database adapter module. Pass it explicitly unless the host
       application configures a default adapter.
     - `:mode` - (`:permissive | :strict`, default: `:permissive`) governance mode.
-      Strict mode seals the configured domain, requires validation, rejects
+      Strict mode requires validation, rejects
       query-authored SQL, and limits runtime joins and row sources to declared
       domain capabilities.
     - `:domain_sql` - (`:declared | :forbid`, default: `:declared`) whether strict

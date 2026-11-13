@@ -2136,12 +2136,12 @@ An adapter MUST be supplied explicitly unless the host application configures a
 default. Before compilation, Selecto discovers domain extension specs and calls
 their domain-merge callbacks in declaration order. With validation enabled, it
 runs `Selecto.DomainValidator.validate_domain!/1`; it then compiles query fields
-and joins and seals the applicable policy state.
+and joins and records the applicable policy.
 
 The policy modes are:
 
 - `:permissive` — preserves the traditional dynamic query surface;
-- `:strict` — seals the composed domain and compiled authority, rejects
+- `:strict` — rejects
   query-authored raw SQL escape hatches, prohibits ad hoc or structurally
   overridden joins, and requires advanced row sources to originate in declared
   query members.
