@@ -1,0 +1,183 @@
+# SelectoUpdato Portable System Guide
+
+This Livebook demonstrates the current architecture: the domain governs write
+intent, SelectoUpdato validates and compiles it, and the configured Selecto
+database adapter owns preview and execution.
+
+There is no Ecto repository, schema, changeset, or application Ecto
+configuration in this flow.
+
+```mermaid
+flowchart LR
+  Domain["Selecto domain writes"] --> Updato["SelectoUpdato intent compiler"]
+  Updato --> Command["Selecto.Write.Command"]
+  Command --> Selecto["Configured Selecto"]
+  Selecto --> Adapter["Database write adapter"]
+```
+
+## Install local packages
+
+```elixir
+find_local_package = fn package ->
+  [
+    Path.expand("../#{package}", __DIR__),
+    Path.expand("../../#{package}", __DIR__),
+    Path.expand("../../../#{package}", __DIR__)
+  ]
+  |> Enum.find(&File.exists?(Path.join(&1, "mix.exs")))
+end
+
+selecto_path = find_local_package.("selecto")
+
+Mix.install([
+  if(selecto_path, do: {:selecto, path: selecto_path}, else: {:selecto, "~> 0.5.0"})
+])
+```
+
+## A database-neutral demonstration adapter
+
+Real applications select an adapter package such as the PostgreSQL, SQLite,
+MySQL, or SQL Server Selecto adapter. This small in-memory adapter makes the
+ownership boundary visible without requiring any database or Ecto setup.
+
+```elixir
+defmodule PortableGuide.Adapter do
+  @behaviour Selecto.DB.Adapter
+  @behaviour Selecto.DB.WriteAdapter
+
+  def name, do: :portable_guide
+  def connect(connection), do: {:ok, connection}
+  def execute(_connection, _query, _params, _opts), do: {:ok, %{rows: [], columns: []}}
+  def placeholder(index), do: ["$", Integer.to_string(index)]
+  def quote_identifier(identifier), do: [34, to_string(identifier), 34]
+  def supports?(_feature), do: false
+
+  def write_capabilities(_connection) do
+    %{
+      protocol_version: Selecto.Write.Capabilities.protocol_version(),
+      insert: true,
+      update: true,
+      upsert: true,
+      delete: true,
+      returning: true,
+      transactions: true
+    }
+  end
+
+  def preview_write(_connection, command, _opts) do
+    {:ok, %Selecto.Write.Preview{statements: [], metadata: %{command: command}}}
+  end
+
+  # Writes arrive only through SelectoUpdato, with an authorization for
+  # exactly this command. A real adapter refuses anything else.
+  def execute_write(_connection, command, opts) do
+    with :ok <- Selecto.Write.Authorization.require_for(command, opts) do
+      {:ok,
+       %Selecto.Write.Result{
+         operation: command.operation,
+         affected_rows: 1,
+         rows: [],
+         metadata: %{adapter: :portable_guide}
+       }}
+    end
+  end
+
+  def transaction(_connection, fun, _opts), do: fun.(:portable_guide)
+end
+```
+
+## The domain is the write authority
+
+The domain declares writable fields, mandatory tenant scope, and operation
+cardinality. Neither the UI nor the database adapter is allowed to invent
+these rules.
+
+```elixir
+domain = %{
+  name: "Portable work items",
+  source: %{
+    source_table: "work_items",
+    primary_key: :id,
+    fields: [:id, :tenant_id, :title, :state],
+    columns: %{
+      id: %{type: :integer},
+      tenant_id: %{type: :integer},
+      title: %{type: :string},
+      state: %{type: :string}
+    },
+    associations: %{}
+  },
+  schemas: %{},
+  joins: %{},
+  writes: %{
+    scope: %{tenant: %{required: true, field: :tenant_id}},
+    operations: %{
+      insert: %{enabled: true, expected_cardinality: {:exactly, 1}},
+      update: %{enabled: true, expected_cardinality: {:exactly, 1}}
+    },
+    fields: %{
+      id: %{insertable: false, updatable: false},
+      tenant_id: %{insertable: true, updatable: false, required_on: [:insert]},
+      title: %{insertable: true, updatable: true, required_on: [:insert]},
+      state: %{insertable: true, updatable: true, required_on: [:insert]}
+    }
+  }
+}
+
+:ok = SelectoUpdato.validate_domain(domain)
+```
+
+## Compile and preview a governed update
+
+The required tenant filter is expressed in the portable command. The adapter
+receives the command only after SelectoUpdato has enforced the domain contract.
+
+```elixir
+selecto = %Selecto{
+  adapter: PortableGuide.Adapter,
+  connection: :portable_guide,
+  domain: domain
+}
+
+operation =
+  domain
+  |> SelectoUpdato.new()
+  |> SelectoUpdato.with_tenant(%{tenant_id: 45})
+  |> SelectoUpdato.filter({"id", 9001})
+  |> SelectoUpdato.update(%{"state" => "done"})
+  |> SelectoUpdato.expected_cardinality({:exactly, 1})
+  |> SelectoUpdato.returning(:all)
+
+{:ok, command} = SelectoUpdato.Executor.build_write_plan(operation, selecto)
+{:ok, preview} = SelectoUpdato.preview(operation, selecto)
+
+%{
+  operation: command.operation,
+  predicate: command.predicate,
+  expected_cardinality: command.expected_cardinality,
+  preview_metadata: preview.metadata
+}
+```
+
+## Execute through the same adapter boundary
+
+```elixir
+{:ok, result} = SelectoUpdato.execute(operation, selecto)
+
+%{
+  operation: result.operation,
+  affected_rows: result.affected_rows,
+  adapter: result.metadata.adapter
+}
+```
+
+## Architecture rules
+
+- SelectoUpdato contains no database-driver or Ecto dependency.
+- Domains own writable fields, tenant filters, relationship sources,
+  transition rules, and expected cardinality.
+- `Selecto.Write.Command` is the portable handoff object.
+- Adapter packages own SQL dialect, placeholders, transactions, capability
+  discovery, preview, execution, and result normalization.
+- Unsupported nested or collection writes fail closed until an adapter declares
+  and implements the required capability.

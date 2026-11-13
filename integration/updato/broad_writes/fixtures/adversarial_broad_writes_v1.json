@@ -1,0 +1,1238 @@
+{
+  "domain": {
+    "schema_version": 1,
+    "name": "AdversarialBroadWrites",
+    "source": {
+      "source_table": "selecto_cert_adv_people",
+      "primary_key": "id",
+      "tenant_field": "tenant_id",
+      "fields": [
+        "id",
+        "tenant_id",
+        "name",
+        "secret_score",
+        "ssn",
+        "amount"
+      ],
+      "redact_fields": [
+        "ssn"
+      ],
+      "columns": {
+        "id": {
+          "type": "integer"
+        },
+        "tenant_id": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "secret_score": {
+          "type": "integer",
+          "internal": true
+        },
+        "ssn": {
+          "type": "string"
+        },
+        "amount": {
+          "type": "integer",
+          "filterable": false,
+          "sortable": false,
+          "groupable": false
+        }
+      },
+      "associations": {}
+    },
+    "schemas": {
+      "order": {
+        "source_table": "selecto_cert_adv_orders",
+        "primary_key": "id",
+        "tenant_field": "tenant_id",
+        "fields": [
+          "id",
+          "tenant_id",
+          "person_id",
+          "total",
+          "state"
+        ],
+        "redact_fields": [],
+        "columns": {
+          "id": {
+            "type": "integer"
+          },
+          "tenant_id": {
+            "type": "integer"
+          },
+          "person_id": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "associations": {}
+      }
+    },
+    "joins": {},
+    "domain_version": "1.0.0",
+    "domain_fingerprint": "sha256:adversarial-broad-writes-v1",
+    "writes": {
+      "operations": {
+        "insert": {
+          "enabled": true
+        },
+        "update": {
+          "enabled": true,
+          "bulk": true,
+          "expected_cardinality": "many",
+          "returning": "all"
+        },
+        "delete": {
+          "enabled": true,
+          "bulk": true,
+          "expected_cardinality": "many",
+          "returning": "all"
+        },
+        "upsert": {
+          "enabled": true,
+          "conflict_targets": [
+            [
+              "tenant_id",
+              "id"
+            ]
+          ]
+        }
+      },
+      "fields": {
+        "id": {
+          "insertable": true
+        },
+        "tenant_id": {
+          "insertable": true,
+          "updatable": true
+        },
+        "name": {
+          "insertable": true,
+          "updatable": true
+        },
+        "amount": {
+          "insertable": true,
+          "updatable": true
+        }
+      },
+      "scope": {
+        "tenant": {
+          "required": true,
+          "field": "tenant_id",
+          "satisfied_by": [
+            "trusted_context"
+          ]
+        }
+      }
+    }
+  },
+  "dataset": {
+    "people": {
+      "columns": [
+        "id",
+        "tenant_id",
+        "name",
+        "secret_score",
+        "ssn",
+        "amount"
+      ],
+      "rows": [
+        [
+          1,
+          7,
+          "alpha",
+          100,
+          "ssn-secret-1",
+          10
+        ],
+        [
+          2,
+          7,
+          "beta",
+          101,
+          "ssn-secret-2",
+          20
+        ],
+        [
+          3,
+          7,
+          "' OR 1=1 --",
+          102,
+          "ssn-secret-3",
+          30
+        ],
+        [
+          4,
+          7,
+          "100%_[a]\\$1?@p1🙂‮ʼ",
+          103,
+          "ssn-secret-4",
+          40
+        ],
+        [
+          8,
+          8,
+          "alpha",
+          808,
+          "ssn-secret-8",
+          90000
+        ],
+        [
+          9,
+          8,
+          "foreign-only",
+          909,
+          "ssn-secret-9",
+          100000
+        ]
+      ]
+    },
+    "orders": {
+      "columns": [
+        "id",
+        "tenant_id",
+        "person_id",
+        "total",
+        "state"
+      ],
+      "rows": [
+        [
+          101,
+          7,
+          1,
+          10,
+          "open"
+        ],
+        [
+          102,
+          7,
+          1,
+          15,
+          "closed"
+        ],
+        [
+          103,
+          7,
+          2,
+          30,
+          "open"
+        ],
+        [
+          201,
+          8,
+          1,
+          9999,
+          "open"
+        ],
+        [
+          202,
+          8,
+          2,
+          8888,
+          "closed"
+        ]
+      ]
+    }
+  },
+  "variants": [
+    {
+      "variant": "out_of_scope_changed",
+      "dataset": {
+        "people": {
+          "columns": [
+            "id",
+            "tenant_id",
+            "name",
+            "secret_score",
+            "ssn",
+            "amount"
+          ],
+          "rows": [
+            [
+              1,
+              7,
+              "alpha",
+              100,
+              "ssn-secret-1",
+              10
+            ],
+            [
+              2,
+              7,
+              "beta",
+              101,
+              "ssn-secret-2",
+              20
+            ],
+            [
+              3,
+              7,
+              "' OR 1=1 --",
+              102,
+              "ssn-secret-3",
+              30
+            ],
+            [
+              4,
+              7,
+              "100%_[a]\\$1?@p1🙂‮ʼ",
+              103,
+              "ssn-secret-4",
+              40
+            ],
+            [
+              8,
+              8,
+              "changed-foreign",
+              -808,
+              "changed-foreign-ssn",
+              1
+            ],
+            [
+              10,
+              8,
+              "new-foreign",
+              -1010,
+              "new-foreign-ssn",
+              777777
+            ]
+          ]
+        },
+        "orders": {
+          "columns": [
+            "id",
+            "tenant_id",
+            "person_id",
+            "total",
+            "state"
+          ],
+          "rows": [
+            [
+              101,
+              7,
+              1,
+              10,
+              "open"
+            ],
+            [
+              102,
+              7,
+              1,
+              15,
+              "closed"
+            ],
+            [
+              103,
+              7,
+              2,
+              30,
+              "open"
+            ],
+            [
+              301,
+              8,
+              1,
+              777777,
+              "closed"
+            ],
+            [
+              302,
+              8,
+              2,
+              555555,
+              "open"
+            ],
+            [
+              303,
+              8,
+              4,
+              666666,
+              "open"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "variant": "secrets_changed",
+      "dataset": {
+        "people": {
+          "columns": [
+            "id",
+            "tenant_id",
+            "name",
+            "secret_score",
+            "ssn",
+            "amount"
+          ],
+          "rows": [
+            [
+              1,
+              7,
+              "alpha",
+              -100,
+              "replaced-1",
+              10
+            ],
+            [
+              2,
+              7,
+              "beta",
+              -101,
+              "replaced-2",
+              20
+            ],
+            [
+              3,
+              7,
+              "' OR 1=1 --",
+              -102,
+              "replaced-3",
+              30
+            ],
+            [
+              4,
+              7,
+              "100%_[a]\\$1?@p1🙂‮ʼ",
+              -103,
+              "replaced-4",
+              40
+            ],
+            [
+              8,
+              8,
+              "alpha",
+              -808,
+              "replaced-8",
+              90000
+            ],
+            [
+              9,
+              8,
+              "foreign-only",
+              -909,
+              "replaced-9",
+              100000
+            ]
+          ]
+        },
+        "orders": {
+          "columns": [
+            "id",
+            "tenant_id",
+            "person_id",
+            "total",
+            "state"
+          ],
+          "rows": [
+            [
+              101,
+              7,
+              1,
+              10,
+              "open"
+            ],
+            [
+              102,
+              7,
+              1,
+              15,
+              "closed"
+            ],
+            [
+              103,
+              7,
+              2,
+              30,
+              "open"
+            ],
+            [
+              201,
+              8,
+              1,
+              9999,
+              "open"
+            ],
+            [
+              202,
+              8,
+              2,
+              8888,
+              "closed"
+            ]
+          ]
+        }
+      }
+    }
+  ],
+  "trusted_tenant": 7,
+  "trusted_scope": null,
+  "case_domains": {
+    "bulk_disabled": {
+      "schema_version": 1,
+      "name": "AdversarialBroadWrites",
+      "source": {
+        "source_table": "selecto_cert_adv_people",
+        "primary_key": "id",
+        "tenant_field": "tenant_id",
+        "fields": [
+          "id",
+          "tenant_id",
+          "name",
+          "secret_score",
+          "ssn",
+          "amount"
+        ],
+        "redact_fields": [
+          "ssn"
+        ],
+        "columns": {
+          "id": {
+            "type": "integer"
+          },
+          "tenant_id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "secret_score": {
+            "type": "integer",
+            "internal": true
+          },
+          "ssn": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "integer",
+            "filterable": false,
+            "sortable": false,
+            "groupable": false
+          }
+        },
+        "associations": {}
+      },
+      "schemas": {
+        "order": {
+          "source_table": "selecto_cert_adv_orders",
+          "primary_key": "id",
+          "tenant_field": "tenant_id",
+          "fields": [
+            "id",
+            "tenant_id",
+            "person_id",
+            "total",
+            "state"
+          ],
+          "redact_fields": [],
+          "columns": {
+            "id": {
+              "type": "integer"
+            },
+            "tenant_id": {
+              "type": "integer"
+            },
+            "person_id": {
+              "type": "integer"
+            },
+            "total": {
+              "type": "integer"
+            },
+            "state": {
+              "type": "string"
+            }
+          },
+          "associations": {}
+        }
+      },
+      "joins": {},
+      "domain_version": "1.0.0",
+      "domain_fingerprint": "sha256:adversarial-broad-writes-v1",
+      "writes": {
+        "operations": {
+          "insert": {
+            "enabled": true
+          },
+          "update": {
+            "enabled": true,
+            "bulk": false,
+            "expected_cardinality": "many",
+            "returning": "all"
+          },
+          "delete": {
+            "enabled": true,
+            "bulk": false,
+            "expected_cardinality": "many",
+            "returning": "all"
+          },
+          "upsert": {
+            "enabled": true,
+            "conflict_targets": [
+              [
+                "tenant_id",
+                "id"
+              ]
+            ]
+          }
+        },
+        "fields": {
+          "id": {
+            "insertable": true
+          },
+          "tenant_id": {
+            "insertable": true,
+            "updatable": true
+          },
+          "name": {
+            "insertable": true,
+            "updatable": true
+          },
+          "amount": {
+            "insertable": true,
+            "updatable": true
+          }
+        },
+        "scope": {
+          "tenant": {
+            "required": true,
+            "field": "tenant_id",
+            "satisfied_by": [
+              "trusted_context"
+            ]
+          }
+        }
+      }
+    },
+    "bulk_missing": {
+      "schema_version": 1,
+      "name": "AdversarialBroadWrites",
+      "source": {
+        "source_table": "selecto_cert_adv_people",
+        "primary_key": "id",
+        "tenant_field": "tenant_id",
+        "fields": [
+          "id",
+          "tenant_id",
+          "name",
+          "secret_score",
+          "ssn",
+          "amount"
+        ],
+        "redact_fields": [
+          "ssn"
+        ],
+        "columns": {
+          "id": {
+            "type": "integer"
+          },
+          "tenant_id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "secret_score": {
+            "type": "integer",
+            "internal": true
+          },
+          "ssn": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "integer",
+            "filterable": false,
+            "sortable": false,
+            "groupable": false
+          }
+        },
+        "associations": {}
+      },
+      "schemas": {
+        "order": {
+          "source_table": "selecto_cert_adv_orders",
+          "primary_key": "id",
+          "tenant_field": "tenant_id",
+          "fields": [
+            "id",
+            "tenant_id",
+            "person_id",
+            "total",
+            "state"
+          ],
+          "redact_fields": [],
+          "columns": {
+            "id": {
+              "type": "integer"
+            },
+            "tenant_id": {
+              "type": "integer"
+            },
+            "person_id": {
+              "type": "integer"
+            },
+            "total": {
+              "type": "integer"
+            },
+            "state": {
+              "type": "string"
+            }
+          },
+          "associations": {}
+        }
+      },
+      "joins": {},
+      "domain_version": "1.0.0",
+      "domain_fingerprint": "sha256:adversarial-broad-writes-v1",
+      "writes": {
+        "operations": {
+          "insert": {
+            "enabled": true
+          },
+          "update": {
+            "enabled": true,
+            "expected_cardinality": "many",
+            "returning": "all"
+          },
+          "delete": {
+            "enabled": true,
+            "expected_cardinality": "many",
+            "returning": "all"
+          },
+          "upsert": {
+            "enabled": true,
+            "conflict_targets": [
+              [
+                "tenant_id",
+                "id"
+              ]
+            ]
+          }
+        },
+        "fields": {
+          "id": {
+            "insertable": true
+          },
+          "tenant_id": {
+            "insertable": true,
+            "updatable": true
+          },
+          "name": {
+            "insertable": true,
+            "updatable": true
+          },
+          "amount": {
+            "insertable": true,
+            "updatable": true
+          }
+        },
+        "scope": {
+          "tenant": {
+            "required": true,
+            "field": "tenant_id",
+            "satisfied_by": [
+              "trusted_context"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "cases": {
+    "ABW001": [
+      {
+        "id": "missing-filter",
+        "surface": "write",
+        "intent": {
+          "operation": "update",
+          "filters": [],
+          "expected_count": 4,
+          "assignments": {
+            "name": "missing-filter"
+          }
+        }
+      },
+      {
+        "id": "all-gte-own",
+        "surface": "write",
+        "intent": {
+          "operation": "update",
+          "filters": [
+            {
+              "field": "id",
+              "op": "gte",
+              "value": 0
+            }
+          ],
+          "expected_count": 4,
+          "assignments": {
+            "name": "broad-gte"
+          }
+        }
+      },
+      {
+        "id": "all-not-null-own",
+        "surface": "write",
+        "intent": {
+          "operation": "update",
+          "filters": [
+            {
+              "field": "id",
+              "op": "not_null"
+            }
+          ],
+          "expected_count": 4,
+          "assignments": {
+            "name": "broad-not-null"
+          }
+        }
+      },
+      {
+        "id": "mixed-in-wrong-count",
+        "surface": "write",
+        "intent": {
+          "operation": "update",
+          "filters": [
+            {
+              "field": "id",
+              "op": "in",
+              "value": [
+                1,
+                2,
+                8
+              ]
+            }
+          ],
+          "expected_count": 3,
+          "assignments": {
+            "name": "mixed-in-wrong-count"
+          }
+        }
+      },
+      {
+        "id": "mixed-in-own-count",
+        "surface": "write",
+        "intent": {
+          "operation": "update",
+          "filters": [
+            {
+              "field": "id",
+              "op": "in",
+              "value": [
+                1,
+                2,
+                8
+              ]
+            }
+          ],
+          "expected_count": 2,
+          "assignments": {
+            "name": "broad-mixed-own"
+          }
+        }
+      },
+      {
+        "id": "too-many-expected",
+        "surface": "write",
+        "intent": {
+          "operation": "update",
+          "filters": [
+            {
+              "field": "id",
+              "op": "gte",
+              "value": 0
+            }
+          ],
+          "expected_count": 5,
+          "assignments": {
+            "name": "too-many-expected"
+          }
+        }
+      },
+      {
+        "id": "too-few-expected",
+        "surface": "write",
+        "intent": {
+          "operation": "update",
+          "filters": [
+            {
+              "field": "id",
+              "op": "gte",
+              "value": 0
+            }
+          ],
+          "expected_count": 1,
+          "assignments": {
+            "name": "too-few-expected"
+          }
+        }
+      }
+    ],
+    "ABW002": [
+      {
+        "id": "missing-filter-delete",
+        "surface": "write",
+        "intent": {
+          "operation": "delete",
+          "filters": [],
+          "expected_count": 4
+        }
+      },
+      {
+        "id": "broad-delete-wrong-count",
+        "surface": "write",
+        "intent": {
+          "operation": "delete",
+          "filters": [
+            {
+              "field": "id",
+              "op": "gte",
+              "value": 0
+            }
+          ],
+          "expected_count": 5
+        }
+      },
+      {
+        "id": "mixed-delete-wrong-count",
+        "surface": "write",
+        "intent": {
+          "operation": "delete",
+          "filters": [
+            {
+              "field": "id",
+              "op": "in",
+              "value": [
+                1,
+                2,
+                8
+              ]
+            }
+          ],
+          "expected_count": 3
+        }
+      },
+      {
+        "id": "mixed-delete-own-count",
+        "surface": "write",
+        "intent": {
+          "operation": "delete",
+          "filters": [
+            {
+              "field": "id",
+              "op": "in",
+              "value": [
+                1,
+                2,
+                8
+              ]
+            }
+          ],
+          "expected_count": 2
+        }
+      },
+      {
+        "id": "remaining-own-delete",
+        "surface": "write",
+        "intent": {
+          "operation": "delete",
+          "filters": [
+            {
+              "field": "id",
+              "op": "not_null"
+            }
+          ],
+          "expected_count": 2
+        }
+      }
+    ],
+    "ABW003": [
+      {
+        "id": "bulk-disabled",
+        "surface": "write",
+        "intent": {
+          "operation": "update",
+          "filters": [
+            {
+              "field": "id",
+              "op": "in",
+              "value": [
+                1,
+                2
+              ]
+            }
+          ],
+          "expected_count": 2,
+          "assignments": {
+            "name": "bulk-disabled"
+          }
+        },
+        "domain": "bulk_disabled"
+      },
+      {
+        "id": "bulk-missing",
+        "surface": "write",
+        "intent": {
+          "operation": "update",
+          "filters": [
+            {
+              "field": "id",
+              "op": "in",
+              "value": [
+                1,
+                2
+              ]
+            }
+          ],
+          "expected_count": 2,
+          "assignments": {
+            "name": "bulk-missing"
+          }
+        },
+        "domain": "bulk_missing"
+      },
+      {
+        "id": "matched-no-op",
+        "surface": "write",
+        "intent": {
+          "operation": "update",
+          "filters": [
+            {
+              "field": "id",
+              "op": "eq",
+              "value": 1
+            }
+          ],
+          "expected_count": 1,
+          "assignments": {
+            "name": "alpha"
+          }
+        },
+        "domain": "bulk_disabled"
+      },
+      {
+        "id": "inside-update",
+        "surface": "write",
+        "intent": {
+          "operation": "update",
+          "filters": [
+            {
+              "field": "id",
+              "op": "eq",
+              "value": 1
+            }
+          ],
+          "expected_count": 1,
+          "assignments": {
+            "name": "matched-updated"
+          }
+        },
+        "domain": "bulk_missing"
+      },
+      {
+        "id": "matched-no-op-after-update",
+        "surface": "write",
+        "intent": {
+          "operation": "update",
+          "filters": [
+            {
+              "field": "id",
+              "op": "eq",
+              "value": 1
+            }
+          ],
+          "expected_count": 1,
+          "assignments": {
+            "name": "matched-updated"
+          }
+        },
+        "domain": "bulk_missing"
+      }
+    ],
+    "ABW004": [
+      {
+        "id": "last-foreign-after-returning",
+        "surface": "engine_batch",
+        "intent": {
+          "commands": [
+            {
+              "operation": "update",
+              "assignments": {
+                "name": "batch-first"
+              },
+              "filters": [
+                {
+                  "field": "id",
+                  "op": "eq",
+                  "value": 1
+                }
+              ],
+              "expected_count": 1,
+              "returning": [
+                "id",
+                "name"
+              ]
+            },
+            {
+              "operation": "update",
+              "assignments": {
+                "name": "foreign-last"
+              },
+              "filters": [
+                {
+                  "field": "id",
+                  "op": "eq",
+                  "value": 8
+                }
+              ],
+              "expected_count": 1,
+              "returning": [
+                "id",
+                "name"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "last-count-after-returning",
+        "surface": "engine_batch",
+        "intent": {
+          "commands": [
+            {
+              "operation": "update",
+              "assignments": {
+                "name": "batch-first"
+              },
+              "filters": [
+                {
+                  "field": "id",
+                  "op": "eq",
+                  "value": 1
+                }
+              ],
+              "expected_count": 1,
+              "returning": [
+                "id",
+                "name"
+              ]
+            },
+            {
+              "operation": "update",
+              "assignments": {
+                "name": "batch-second"
+              },
+              "filters": [
+                {
+                  "field": "id",
+                  "op": "eq",
+                  "value": 2
+                }
+              ],
+              "expected_count": 2,
+              "returning": [
+                "id",
+                "name"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "matched-no-op-batch",
+        "surface": "engine_batch",
+        "intent": {
+          "commands": [
+            {
+              "operation": "update",
+              "assignments": {
+                "name": "alpha"
+              },
+              "filters": [
+                {
+                  "field": "id",
+                  "op": "eq",
+                  "value": 1
+                }
+              ],
+              "expected_count": 1,
+              "returning": [
+                "id",
+                "name"
+              ]
+            },
+            {
+              "operation": "update",
+              "assignments": {
+                "name": "beta"
+              },
+              "filters": [
+                {
+                  "field": "id",
+                  "op": "eq",
+                  "value": 2
+                }
+              ],
+              "expected_count": 1,
+              "returning": [
+                "id",
+                "name"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "inside-batch",
+        "surface": "engine_batch",
+        "intent": {
+          "commands": [
+            {
+              "operation": "update",
+              "assignments": {
+                "name": "batch-inside-one"
+              },
+              "filters": [
+                {
+                  "field": "id",
+                  "op": "eq",
+                  "value": 1
+                }
+              ],
+              "expected_count": 1,
+              "returning": [
+                "id",
+                "name"
+              ]
+            },
+            {
+              "operation": "update",
+              "assignments": {
+                "name": "batch-inside-two"
+              },
+              "filters": [
+                {
+                  "field": "id",
+                  "op": "eq",
+                  "value": 2
+                }
+              ],
+              "expected_count": 1,
+              "returning": [
+                "id",
+                "name"
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

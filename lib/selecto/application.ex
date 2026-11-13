@@ -2,7 +2,8 @@ defmodule Selecto.Application do
   @moduledoc """
   Selecto's OTP application.
 
-  Selecto starts only the task supervisor used for execution timeouts.
+  Selecto starts the task supervisor used for execution timeouts and the
+  `SelectoUpdato.ActionAuthorization` server used by governed writes.
   The optional connection pool runtime (`Selecto.ConnectionPool.Runtime`)
   and the performance query cache (`Selecto.Performance.QueryCache`) are
   started lazily on first use; hosts that prefer supervised lifecycle
@@ -22,7 +23,10 @@ defmodule Selecto.Application do
 
     children = [
       # Executor timeouts depend on this supervisor, so it stays supervised.
-      {Task.Supervisor, name: Selecto.TaskSupervisor}
+      {Task.Supervisor, name: Selecto.TaskSupervisor},
+      # Issues and redeems the single-use write authorizations SelectoUpdato
+      # hands to adapters.
+      SelectoUpdato.ActionAuthorization
     ]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Selecto.Supervisor)
