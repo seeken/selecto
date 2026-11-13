@@ -486,6 +486,67 @@ defmodule Selecto.QueryLibraryTest do
     end
   end
 
+  test "segments filter redacted fields with fixed values but not with parameters" do
+    domain =
+      domain()
+      |> put_in([:source, :redact_fields], [:priority])
+      |> put_in([:query_library], %{
+        segments: %{
+          urgent: %{filters: [{:gte, "priority", 5}]},
+          ranked: %{filters: [{:not_null, "priority"}]},
+          below: %{filters: [{:lt, "id", {:ref, "priority"}}]},
+          grouped: %{segment_groups: [%{operator: :or, segments: [:urgent, :named]}]},
+          named: %{
+            parameters: %{name: %{type: :string, required: true}},
+            filters: [{:eq, "name", {:param, "name"}}]
+          },
+          at_least: %{
+            parameters: %{minimum: %{type: :integer, required: true}},
+            filters: [{:gte, "priority", {:param, "minimum"}}]
+          },
+          probe_group: %{segment_groups: [%{operator: :or, segments: [:at_least, :urgent]}]}
+        }
+      })
+
+    query = Selecto.configure(domain, :mock_connection) |> Selecto.select(["id"])
+
+    for {segments, params, fragment} <- [
+          {["urgent"], %{}, "priority >="},
+          {["ranked"], %{}, "priority is not null"},
+          {["below"], %{}, "priority"},
+          {["grouped"], %{"name" => "Ada"}, "priority >="}
+        ] do
+      {sql, _params} =
+        query |> Selecto.QueryLibrary.apply_segments(segments, params) |> Selecto.to_sql()
+
+      assert String.downcase(sql) =~ fragment
+    end
+
+    # A parameter compared with a redacted field could probe its value.
+    for {segments, params} <- [
+          {["at_least"], %{"minimum" => 1}},
+          {["probe_group"], %{"minimum" => 1}}
+        ] do
+      assert_raise ArgumentError, ~r/priority/, fn ->
+        query |> Selecto.QueryLibrary.apply_segments(segments, params) |> Selecto.to_sql()
+      end
+    end
+
+    # Callers cannot claim a segment's resolution, nor filter the field directly.
+    assert_raise ArgumentError, ~r/internal to Selecto/, fn ->
+      Selecto.filter(query, {:selecto_domain_filter, "forged", {"priority", 5}})
+    end
+
+    assert_raise ArgumentError, ~r/priority/, fn ->
+      query |> Selecto.filter({"priority", 5}) |> Selecto.to_sql()
+    end
+
+    assert Selecto.QueryLibrary.parameterized_fields(query, ["probe_group", "named"]) ==
+             ["priority", "name"]
+
+    assert Selecto.QueryLibrary.parameterized_fields(domain, ["urgent", "below"]) == []
+  end
+
   defp configured do
     Selecto.configure(domain(), :mock_connection)
   end

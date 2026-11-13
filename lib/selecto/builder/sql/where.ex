@@ -292,6 +292,15 @@ defmodule Selecto.Builder.Sql.Where do
     end
   end
 
+  # A segment's fixed filter, which may name a redacted source field.
+  defp do_build(selecto, {:selecto_domain_filter, tag, filter}) do
+    if Selecto.Builder.Provenance.generated_tag?(tag) do
+      do_build(Selecto.Builder.Provenance.unredacted(selecto), filter)
+    else
+      raise ArgumentError, "selecto_domain_filter is internal to Selecto"
+    end
+  end
+
   # Prebuilt SQL filters (used by JSON and other advanced operations).
   defp do_build(_selecto, {:raw_sql_filter, filter_iodata}) do
     Selecto.Builder.Provenance.mark()
