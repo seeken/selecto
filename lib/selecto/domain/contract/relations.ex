@@ -244,7 +244,10 @@ defmodule Selecto.Domain.Contract.Relations do
       columns when is_map(columns) ->
         Enum.reduce(columns, errors, fn {field, definition}, acc ->
           if is_map(definition) do
-            acc = validate_column_storage(acc, relation_id, field, definition, path)
+            acc =
+              acc
+              |> validate_column_storage(relation_id, field, definition, path)
+              |> validate_column_description(relation_id, field, definition, path)
 
             case Unit.normalize_column(definition) do
               {:ok, _normalized} ->
@@ -285,6 +288,30 @@ defmodule Selecto.Domain.Contract.Relations do
           )
           | errors
         ]
+    end
+  end
+
+  # An optional description, for people choosing or reading the field
+  # (Selecto.Domain.Description).
+  defp validate_column_description(errors, relation_id, field, column, path) do
+    case Core.fetch_map_value(column, :description) do
+      :__missing__ ->
+        errors
+
+      description ->
+        if Selecto.Domain.Description.valid?(description),
+          do: errors,
+          else: [
+            Core.error(
+              :invalid_column_description,
+              path ++ [:columns, field, :description],
+              "domain relation #{inspect(relation_id)} column #{inspect(field)} description " <>
+                "must be a non-blank string of at most #{Selecto.Domain.Description.max_length()} " <>
+                "characters without control characters other than a line feed",
+              relation: relation_id
+            )
+            | errors
+          ]
     end
   end
 

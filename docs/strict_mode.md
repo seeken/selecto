@@ -1,8 +1,8 @@
 # Strict mode
 
 Strict mode is an opt-in governance boundary for Selecto query consumers. It
-allows a trusted application to assemble a domain dynamically and then seals
-that domain when the query is configured.
+allows a trusted application to assemble a domain dynamically and then limits
+what a query built on it may do.
 
 ```elixir
 selecto = Selecto.configure(domain, connection, mode: :strict)
@@ -18,9 +18,6 @@ succeeded.
 For a strict query, Selecto:
 
 - requires domain validation and rejects `validate: false`;
-- records a deterministic seal for the composed domain and compiled base
-  configuration;
-- checks those seals again at SQL-compilation and execution boundaries;
 - rejects `:raw_sql`, `:raw_sql_filter`, `:custom_sql`, and raw SQL subquery
   expressions supplied by the query caller;
 - allows a domain join to be enabled but rejects source, key, condition, field,
@@ -38,10 +35,14 @@ The policy is checked eagerly by public query APIs and again by the SQL builder.
 The final check catches manually modified query state that bypasses the normal
 functions.
 
+Strict mode does not fingerprint or re-verify the configured domain: a trusted
+host that edits the configuration after `configure/3` is outside the threat
+model (certification specification 2.38 removed case D022).
+
 ## Domain-owned SQL
 
 By default, `mode: :strict` uses `domain_sql: :declared`. Application-authored
-SQL already present in the sealed domain—such as a compatibility custom
+SQL already present in the domain—such as a compatibility custom
 column—remains usable through its governed field name. Query consumers still
 cannot provide SQL.
 

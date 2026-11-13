@@ -12,6 +12,15 @@
   gone. Remove `:selecto_updato` from a host's deps when upgrading: listing
   both defines the modules twice. The package's earlier history is in
   `docs/updato/changelog.md`.
+- Field descriptions (certification specification 3.1): a column (root or a
+  related schema's) and a `components.filter_choices` entry take an optional
+  `description`, plain text of 1-1000 code points that is not only whitespace,
+  with no control character other than a line feed. `Selecto.Domain.validate/1`
+  and the runtime domain validator refuse any other value
+  (`:invalid_column_description`, `:invalid_filter_choice_description`).
+  `Selecto.Domain.field_description/2` and `filter_choice_description/2` read
+  them by field path.
+
 - SQLite's double rule models SQLite's own read of a number (19 significant
   digits, cut, then converted): a Decimal refuses only when that read is an
   infinity (its cut at or past 1.797693134862315808e308) or 0.0 for a nonzero

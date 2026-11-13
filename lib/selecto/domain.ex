@@ -188,30 +188,7 @@ defmodule Selecto.Domain do
   @spec normalize_field_value(map(), atom() | String.t(), term()) :: term()
   def normalize_field_value(domain, field, value)
       when is_map(domain) and (is_atom(field) or is_binary(field)) and is_binary(value) do
-    path = field |> to_string() |> String.split(".")
-
-    column =
-      case path do
-        [name] ->
-          domain
-          |> MapHelpers.map_value(:source)
-          |> MapHelpers.map_value(:columns)
-          |> fetch_domain_entry(name)
-
-        [association, name] ->
-          root = MapHelpers.map_value(domain, :source)
-          association_spec = MapHelpers.relation_association(root, association)
-          schema_id = MapHelpers.map_value(association_spec, :queryable)
-          schemas = MapHelpers.map_value(domain, :schemas)
-
-          schemas
-          |> fetch_domain_entry(schema_id)
-          |> MapHelpers.map_value(:columns)
-          |> fetch_domain_entry(name)
-
-        _ ->
-          nil
-      end
+    column = field_column(domain, field)
 
     case MapHelpers.map_value(column, :text_case) do
       case_mode when case_mode in [:uppercase, "uppercase"] -> String.upcase(value)
@@ -221,6 +198,75 @@ defmodule Selecto.Domain do
   end
 
   def normalize_field_value(_domain, _field, value), do: value
+
+  @doc """
+  Returns a field's description by field path (`"total"`, `"customer.name"`),
+  or `nil` when its column declares none.
+
+  Accepts an authored domain (atom or string keys, schema 1 or 2) or a
+  normalized one. Like other field metadata, a caller showing the description
+  to someone should first check that the field is public.
+  """
+  @spec field_description(map(), atom() | String.t()) :: String.t() | nil
+  def field_description(domain, field)
+      when is_map(domain) and (is_atom(field) or is_binary(field)) do
+    domain
+    |> metadata_form()
+    |> field_column(field)
+    |> MapHelpers.map_value(:description)
+    |> description_text()
+  end
+
+  def field_description(_domain, _field), do: nil
+
+  @doc """
+  Returns the description of a `components.filter_choices` entry by its field
+  path, or `nil` when the entry declares none.
+  """
+  @spec filter_choice_description(map(), atom() | String.t()) :: String.t() | nil
+  def filter_choice_description(domain, field)
+      when is_map(domain) and (is_atom(field) or is_binary(field)) do
+    domain
+    |> MapHelpers.map_value(:components)
+    |> MapHelpers.map_value(:filter_choices)
+    |> fetch_domain_entry(to_string(field))
+    |> MapHelpers.map_value(:description)
+    |> description_text()
+  end
+
+  def filter_choice_description(_domain, _field), do: nil
+
+  defp description_text(description) when is_binary(description), do: description
+  defp description_text(_description), do: nil
+
+  defp metadata_form(domain) do
+    if SchemaV2.version_2?(domain), do: SchemaV2.to_version_1(domain), else: domain
+  end
+
+  # The column definition of a root field or a one-hop association field.
+  defp field_column(domain, field) do
+    case field |> to_string() |> String.split(".") do
+      [name] ->
+        domain
+        |> MapHelpers.map_value(:source)
+        |> MapHelpers.map_value(:columns)
+        |> fetch_domain_entry(name)
+
+      [association, name] ->
+        root = MapHelpers.map_value(domain, :source)
+        association_spec = MapHelpers.relation_association(root, association)
+        schema_id = MapHelpers.map_value(association_spec, :queryable)
+        schemas = MapHelpers.map_value(domain, :schemas)
+
+        schemas
+        |> fetch_domain_entry(schema_id)
+        |> MapHelpers.map_value(:columns)
+        |> fetch_domain_entry(name)
+
+      _ ->
+        nil
+    end
+  end
 
   @doc "Returns declared one-to-one inline-values foreign keys by owner field."
   @spec values_foreign_keys(map()) :: map()

@@ -216,8 +216,7 @@ selecto
 |> Selecto.execute()
 ```
 
-Strict mode requires domain validation, seals the fully composed domain and its
-compiled authority, rejects query-authored raw SQL, and prohibits structural or
+Strict mode requires domain validation, rejects query-authored raw SQL, and prohibits structural or
 ad-hoc joins. Domain joins may be enabled without overrides, and advanced row
 sources must be applied through named `domain.query_members` definitions.
 
@@ -432,7 +431,7 @@ Current `0.5.x` scope:
   component, write, projection, validation, and governance domain
   specification used by certification.
 - `docs/expression_dsl.md` for dynamic expression helpers, macros, and sigils.
-- `docs/strict_mode.md` for sealed domains and governed query construction.
+- `docs/strict_mode.md` for governed query construction.
 
 ## Testing
 
