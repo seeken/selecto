@@ -421,6 +421,7 @@ defmodule Selecto.Domain.SchemaV2 do
 
         {fields, relation} ->
           columns = Map.get(relation, "columns")
+          fields = field_names(fields)
 
           if is_map(columns) and names_of?(fields, columns) do
             relation =
@@ -435,6 +436,17 @@ defmodule Selecto.Domain.SchemaV2 do
       end
     end)
   end
+
+  # An Elixir-authored domain names its fields with atoms; keys are already
+  # strings (stringify_keys), so names compare as strings too.
+  defp field_names(fields) when is_list(fields) do
+    Enum.map(fields, fn
+      name when is_atom(name) and name not in [nil, true, false] -> Atom.to_string(name)
+      name -> name
+    end)
+  end
+
+  defp field_names(fields), do: fields
 
   defp migrate_tenancy({:refused, _refusal} = refused), do: refused
 
