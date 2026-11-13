@@ -141,6 +141,55 @@ defmodule Selecto.AnalyticsTest do
              )
   end
 
+  test "window and adjacent transforms preserve gaps, order and floating point sums" do
+    values = [nil, 0, 0.0, -0.0, 1.0e16, 1.0, -1.0e16, nil, -3, 2.5]
+    values = List.duplicate(values, 8) |> List.flatten()
+
+    for size <- [0, 1, 2, 10, length(values)], window <- [2, 7, 65, 365] do
+      input = Enum.take(values, size)
+
+      expected =
+        input
+        |> Enum.with_index()
+        |> Enum.map(fn
+          {nil, _index} ->
+            nil
+
+          {_value, index} ->
+            sample =
+              input |> Enum.slice(max(0, index - window + 1)..index) |> Enum.reject(&is_nil/1)
+
+            Enum.sum(sample) / length(sample)
+        end)
+
+      transform = %{type: :moving_average, parameters: %{window: window}}
+      assert {:ok, result} = Pipeline.apply(input, [transform], %{kind: :count}, :flow)
+      assert Enum.map(result.points, & &1.value) === expected
+
+      for {transform, unit} <- [
+            {:percent_change, %{kind: :count}},
+            {:percentage_point_change, %{kind: :percentage, scale: :fraction}}
+          ] do
+        expected =
+          input
+          |> Enum.with_index()
+          |> Enum.map(fn {value, index} ->
+            previous = if index == 0, do: nil, else: Enum.at(input, index - 1)
+
+            cond do
+              is_nil(value) or is_nil(previous) -> nil
+              transform == :percent_change and previous == 0 -> nil
+              transform == :percent_change -> (value - previous) / previous * 100
+              true -> value - previous
+            end
+          end)
+
+        assert {:ok, result} = Pipeline.apply(input, [transform], unit, :flow)
+        assert Enum.map(result.points, & &1.value) === expected
+      end
+    end
+  end
+
   defp domain(column) do
     %{
       name: "Quantitative",
