@@ -413,6 +413,68 @@ defmodule Selecto.Builder.Sql.Where do
     build_regular_between(selecto, field, min, max)
   end
 
+  # A format predicate with operation options (an instant's display zone).
+  defp do_build(selecto, {field, {:datetime_format, format, predicate, options}})
+       when is_map(options) do
+    build_datetime_predicate(
+      selecto,
+      field,
+      :format,
+      nil,
+      predicate,
+      Map.put(options, :format, format)
+    )
+  end
+
+  # Case-insensitive text predicates: the lower-cased value is matched
+  # literally (`%`, `_` and the escape character are escaped) against the
+  # lower-cased column, on every dialect.
+  defp do_build(selecto, {field, {operation, value}})
+       when operation in [:starts_with_ci, :text_contains_ci, :ends_with_ci] and
+              is_binary(value) do
+    escaped = escape_like_literal(String.downcase(value))
+
+    pattern =
+      case operation do
+        :starts_with_ci -> escaped <> "%"
+        :text_contains_ci -> "%" <> escaped <> "%"
+        :ends_with_ci -> "%" <> escaped
+      end
+
+    {sel, join, param} = Select.prep_selector(selecto, field)
+    {List.wrap(join), [" LOWER(", sel, ") LIKE ", {:param, pattern}, " ESCAPE '!' "], param}
+  end
+
+  # Case-sensitive literal text predicates. SQLite's LIKE folds ASCII case,
+  # so SQLite matches a GLOB pattern with its metacharacters bracketed; every
+  # other dialect uses the LIKE forms below, which compare exactly there.
+  defp do_build(selecto, {field, {operation, value}})
+       when operation in [:starts_with_exact, :text_contains_exact, :ends_with_exact] and
+              is_binary(value) do
+    plain =
+      %{
+        starts_with_exact: :starts_with,
+        text_contains_exact: :text_contains,
+        ends_with_exact: :ends_with
+      }[operation]
+
+    if Selecto.AdapterSupport.adapter_name(selecto.adapter) == :sqlite do
+      glob = String.replace(value, ~r/[\[\*\?]/u, fn character -> "[" <> character <> "]" end)
+
+      pattern =
+        case plain do
+          :starts_with -> glob <> "*"
+          :text_contains -> "*" <> glob <> "*"
+          :ends_with -> "*" <> glob
+        end
+
+      {sel, join, param} = Select.prep_selector(selecto, field)
+      {List.wrap(join), [" ", sel, " GLOB ", {:param, pattern}, " "], param}
+    else
+      do_build(selecto, {field, {plain, value}})
+    end
+  end
+
   defp do_build(selecto, {field, {:starts_with, value}}) when is_binary(value) do
     pattern = escape_like_literal(value) <> "%"
     {sel, join, param} = Select.prep_selector(selecto, field)
