@@ -191,6 +191,60 @@ defmodule Selecto.ExprTest do
     assert matches.(X.ends_with("name", "!")) == ["x!"]
   end
 
+  test "exact and case-insensitive literal text predicates" do
+    {sql, params} =
+      selecto()
+      |> Selecto.Query.select(["id"])
+      |> Selecto.Query.filter({"name", {:starts_with_exact, "A%"}})
+      |> Selecto.Query.filter({"name", {:text_contains_ci, "Wi_D%"}})
+      |> Selecto.to_sql()
+
+    assert sql =~ ~s(LIKE $1 ESCAPE '!')
+    assert sql =~ ~s[LOWER(selecto_root.name) LIKE $2 ESCAPE '!']
+    assert params == ["A!%%", "%wi!_d!%%"]
+
+    assert {:ok, connection} = SelectoDBSQLite.Adapter.connect(database: ":memory:")
+
+    assert {:ok, _} =
+             SelectoDBSQLite.Adapter.execute(
+               connection,
+               "CREATE TABLE products (id INTEGER, name TEXT, nickname TEXT, status TEXT, active INTEGER, price REAL)",
+               [],
+               []
+             )
+
+    for {name, id} <- Enum.with_index(["Gadget", "gadget_pro", "a*b", "a?b", "[x]", "50%"], 1) do
+      assert {:ok, _} =
+               SelectoDBSQLite.Adapter.execute(
+                 connection,
+                 "INSERT INTO products (id, name) VALUES (?, ?)",
+                 [id, name],
+                 []
+               )
+    end
+
+    matches = fn filter ->
+      {sql, _aliases, params} =
+        selecto()
+        |> Map.put(:adapter, SelectoDBSQLite.Adapter)
+        |> Selecto.Query.select(["name"])
+        |> Selecto.Query.filter(filter)
+        |> Selecto.Query.order_by(["id"])
+        |> Selecto.gen_sql([])
+
+      {:ok, %{rows: rows}} = SelectoDBSQLite.Adapter.execute(connection, sql, params, [])
+      List.flatten(rows)
+    end
+
+    assert matches.({"name", {:starts_with_exact, "Gadget"}}) == ["Gadget"]
+    assert matches.({"name", {:starts_with_ci, "GADGET"}}) == ["Gadget", "gadget_pro"]
+    assert matches.({"name", {:text_contains_exact, "*"}}) == ["a*b"]
+    assert matches.({"name", {:text_contains_exact, "?"}}) == ["a?b"]
+    assert matches.({"name", {:ends_with_exact, "[x]"}}) == ["[x]"]
+    assert matches.({"name", {:ends_with_ci, "0%"}}) == ["50%"]
+    assert matches.({"name", {:text_contains_ci, "_"}}) == ["gadget_pro"]
+  end
+
   test "builds selector helpers with aliases and case literals" do
     assert X.field("name") == {:field, "name"}
     assert X.lit("Open") == {:literal, "Open"}
