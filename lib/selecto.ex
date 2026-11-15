@@ -117,6 +117,14 @@ defmodule Selecto do
         }
       }
 
+  Configure the domain with a host-owned connection and the installed adapter
+  package. Pass the adapter module explicitly:
+
+      selecto = Selecto.configure(domain, connection, adapter: MyApp.SelectoAdapter)
+
+  The core does not install a driver or set an application default adapter.
+  See the README Quick Start for a complete runnable PostgreSQL example.
+
   ## Query Execution
 
   Selecto provides two execution patterns for better error handling and control flow:
@@ -143,11 +151,11 @@ defmodule Selecto do
           # Process single row
           extract_values(row, aliases)
 
-        {:error, :no_results} ->
+        {:error, %Selecto.Error{type: :no_results}} ->
           # Handle empty result set
           {:error, :not_found}
 
-        {:error, :multiple_results} ->
+        {:error, %Selecto.Error{type: :multiple_results}} ->
           # Handle unexpected multiple rows
           {:error, :ambiguous_result}
       end
@@ -222,22 +230,24 @@ defmodule Selecto do
 
     ## Examples
 
+        adapter = MyApp.SelectoAdapter
+
         # Basic usage (validation enabled by default)
-        selecto = Selecto.configure(domain, connection_input)
+        selecto = Selecto.configure(domain, connection_input, adapter: adapter)
 
         # With connection pooling
-        selecto = Selecto.configure(domain, connection_input, pool: true)
+        selecto = Selecto.configure(domain, connection_input, adapter: adapter, pool: true)
 
         # Custom pool configuration
         pool_opts = [pool_size: 20, max_overflow: 10]
-        selecto = Selecto.configure(domain, connection_input, pool: true, pool_options: pool_opts)
+        selecto = Selecto.configure(domain, connection_input, adapter: adapter, pool: true, pool_options: pool_opts)
 
         # Using existing pooled connection
-        {:ok, pool} = Selecto.ConnectionPool.start_pool(connection_input)
-        selecto = Selecto.configure(domain, {:pool, pool})
+        {:ok, pool} = Selecto.ConnectionPool.start_pool(connection_input, adapter: adapter)
+        selecto = Selecto.configure(domain, {:pool, pool}, adapter: adapter)
 
         # Disable validation for performance-critical scenarios
-        selecto = Selecto.configure(domain, connection_input, validate: false)
+        selecto = Selecto.configure(domain, connection_input, adapter: adapter, validate: false)
 
         # With Ecto repository and schema
         selecto =
@@ -247,7 +257,7 @@ defmodule Selecto do
 
         # Validation can also be called explicitly
         :ok = Selecto.DomainValidator.validate_domain!(domain)
-        selecto = Selecto.configure(domain, connection_input)
+        selecto = Selecto.configure(domain, connection_input, adapter: adapter)
   """
   @spec configure(term(), term(), keyword()) :: t()
   def configure(domain, connection_input, opts \\ []) do
@@ -868,7 +878,7 @@ defmodule Selecto do
 
   @doc """
   Start a governed write bound to this configured engine and its tenant.
-  Requires the optional `selecto_updato` package. Compose with its native
+  Uses the `SelectoUpdato` modules bundled with `selecto`. Compose with its native
   insert/update/delete/upsert helpers, then call `SelectoUpdato.execute/1`
   or `SelectoUpdato.preview/1` without repeating the engine.
   """
@@ -877,7 +887,7 @@ defmodule Selecto do
   @doc """
   Start a named domain action bound to this engine. Use Updato's `target/2`,
   `inputs/2`, `preview/1` and `execute/1`; authorization runs freshly per phase.
-  Requires the optional `selecto_updato` package.
+  Uses the `SelectoUpdato` modules bundled with `selecto`.
   """
   def action(%Selecto{} = selecto, name), do: updato_call(:action, [selecto, name])
 
@@ -1275,7 +1285,8 @@ defmodule Selecto do
   end
 
   @doc """
-    Execute a query expecting exactly one row, returning {:ok, row} or {:error, reason}.
+    Execute a query expecting exactly one row, returning `{:ok, {row, aliases}}`
+    or `{:error, %Selecto.Error{}}`.
 
     Useful for queries that should return a single record (e.g., with LIMIT 1 or aggregate functions).
     Returns an error if zero rows or multiple rows are returned.
@@ -1283,12 +1294,12 @@ defmodule Selecto do
     ## Examples
 
         case Selecto.execute_one(selecto) do
-          {:ok, row} ->
+          {:ok, {row, aliases}} ->
             # Handle single row result
-            process_single_result(row)
-          {:error, :no_results} ->
+            process_single_result(row, aliases)
+          {:error, %Selecto.Error{type: :no_results}} ->
             # Handle case where no rows were found
-          {:error, :multiple_results} ->
+          {:error, %Selecto.Error{type: :multiple_results}} ->
             # Handle case where multiple rows were found
           {:error, error} ->
             # Handle database or other errors

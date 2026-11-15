@@ -74,6 +74,31 @@ connection input explicitly.
 
 ## Quick Start
 
+In a fresh Mix project, add the two dependencies above and run `mix deps.get`.
+Set `PGHOST`, `PGPORT`, `PGUSER`, and `PGDATABASE` for a disposable PostgreSQL
+database (`PGPASSWORD` is optional), then run the following blocks in order in
+`iex -S mix` or save them together in a script and run `mix run script.exs`.
+No Ecto Repo or application default adapter is required.
+
+Open a host-owned connection and create synthetic temporary tables. These
+fixtures disappear when the connection closes:
+
+```elixir
+{:ok, connection} =
+  Postgrex.start_link(
+    hostname: System.fetch_env!("PGHOST"),
+    port: System.fetch_env!("PGPORT") |> String.to_integer(),
+    username: System.fetch_env!("PGUSER"),
+    password: System.get_env("PGPASSWORD"),
+    database: System.fetch_env!("PGDATABASE")
+  )
+
+Postgrex.query!(connection, "CREATE TEMP TABLE customers (id integer PRIMARY KEY, name text)", [])
+Postgrex.query!(connection, "CREATE TEMP TABLE orders (id integer PRIMARY KEY, total numeric(10,2), customer_id integer, created_at timestamp)", [])
+Postgrex.query!(connection, "INSERT INTO customers VALUES (1, 'Acme')", [])
+Postgrex.query!(connection, "INSERT INTO orders VALUES (1, 50.00, 1, '2026-01-01'), (2, 150.00, 1, '2026-01-02')", [])
+```
+
 Define a domain:
 
 ```elixir
@@ -83,6 +108,7 @@ domain = %{
   source: %{
     source_table: "orders",
     primary_key: :id,
+    redact_fields: [],
     fields: [:id, :total, :customer_id, :created_at],
     columns: %{
       id: %{type: :integer},
@@ -97,6 +123,9 @@ domain = %{
   schemas: %{
     customers: %{
       source_table: "customers",
+      primary_key: :id,
+      redact_fields: [],
+      associations: %{},
       fields: [:id, :name],
       columns: %{
         id: %{type: :integer},
@@ -117,7 +146,7 @@ of browser URLs.
 Build and run a query:
 
 ```elixir
-selecto = Selecto.configure(domain, Repo)
+selecto = Selecto.configure(domain, connection, adapter: SelectoDBPostgreSQL.Adapter)
 
 {:ok, {rows, columns, aliases}} =
   selecto
@@ -125,6 +154,9 @@ selecto = Selecto.configure(domain, Repo)
   |> Selecto.filter([{"total", {:gt, 100}}])
   |> Selecto.order_by(["created_at"])
   |> Selecto.execute()
+
+# rows is [[2, Decimal.new("150.00"), "Acme"]].
+GenServer.stop(connection)
 ```
 
 ## Engine Tenant and Writes
