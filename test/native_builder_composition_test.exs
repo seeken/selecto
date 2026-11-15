@@ -114,8 +114,18 @@ defmodule Selecto.NativeBuilderCompositionTest do
       assert {:ok, {rows, _, _}} =
                query |> Selecto.order_by("id") |> Selecto.execute(analyze_complexity: false)
 
-      assert Enum.map(rows, &hd/1) == [1, 4], "#{filter_mode}/#{select_mode}"
+      expected = if select_mode == :compose, do: [[1, 1], [4, 4]], else: [[1], [4]]
+      assert rows == expected, "#{filter_mode}/#{select_mode}"
     end
+
+    aliased =
+      original
+      |> Selecto.select(X.as("id", "left_id"))
+      |> Selecto.select(X.as("id", "right_id"))
+      |> Selecto.order_by("id")
+
+    assert {:ok, {[[1, 1], [4, 4]], _, ["left_id", "right_id"]}} =
+             Selecto.execute(aliased, analyze_complexity: false)
 
     host =
       original |> Selecto.Tenant.host_filter(X.eq("name", "A")) |> Selecto.filter(X.gte("id", 0))
