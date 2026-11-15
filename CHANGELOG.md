@@ -1,4 +1,15 @@
 
+
+## 0.6.0 - Unreleased (breaking native builder composition)
+
+- `select/2` appends in order and preserves duplicate selectors and aliases.
+  Its former `Enum.uniq` was convenience behavior, not a governance/SQL-validity
+  requirement; there is no Elixir exception to native builder contract 1.0.0.
+- `filter/2` keeps ordered AND composition, including repeated caller predicates.
+  Use `replace_select/2`, `clear_select/1`, `replace_filter/2`, `clear_filter/1`
+  for explicit caller-clause resets. Empty append is a no-op; clearing restores
+  the existing configured default. Required, host and tenant predicates survive.
+- Complete-intent, canned-page and member projections use explicit replacement.
 # Selecto Library Changelog
 
 ## Unreleased

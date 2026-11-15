@@ -793,7 +793,7 @@ defmodule Selecto do
   end
 
   @doc """
-  Add fields to the select list.
+  Append fields in order, preserving duplicates. Empty input is a no-op.
 
   For macro-free query composition, prefer importing `Selecto.Expr` and using
   string field paths plus runtime helper constructors.
@@ -814,6 +814,14 @@ defmodule Selecto do
   @spec select(t(), [Selecto.Types.selector()]) :: t()
   @spec select(t(), Selecto.Types.selector()) :: t()
   defdelegate select(selecto, fields_or_field), to: Selecto.Query
+
+  @doc "Replace selections explicitly; empty input restores the initial selection."
+  @spec replace_select(t(), [Selecto.Types.selector()] | Selecto.Types.selector()) :: t()
+  defdelegate replace_select(selecto, fields_or_field), to: Selecto.Query
+
+  @doc "Restore the initial selection without changing required predicates or tenant scope."
+  @spec clear_select(t()) :: t()
+  defdelegate clear_select(selecto), to: Selecto.Query
 
   @doc """
   Compile a nested selection shape and attach it to the query.
@@ -837,7 +845,7 @@ defmodule Selecto do
   defdelegate execute_shape(selecto, opts \\ []), to: Selecto.SelectionShape
 
   @doc """
-  Add filters to the query.
+  AND caller filters in call order. Empty input is a no-op; OR remains explicit.
 
   For macro-free query composition, prefer importing `Selecto.Expr` and using
   runtime filter helpers.
@@ -856,6 +864,14 @@ defmodule Selecto do
   @spec filter(t(), [Selecto.Types.filter()]) :: t()
   @spec filter(t(), Selecto.Types.filter()) :: t()
   defdelegate filter(selecto, filters_or_filter), to: Selecto.Query
+
+  @doc "Replace regular caller filters, preserving required, host and tenant authority."
+  @spec replace_filter(t(), [Selecto.Types.filter()] | Selecto.Types.filter()) :: t()
+  defdelegate replace_filter(selecto, filters_or_filter), to: Selecto.Query
+
+  @doc "Clear regular caller filters, preserving required, host and tenant authority."
+  @spec clear_filter(t()) :: t()
+  defdelegate clear_filter(selecto), to: Selecto.Query
 
   @doc """
   Return required filters currently attached to the query.

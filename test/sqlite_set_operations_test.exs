@@ -147,9 +147,9 @@ defmodule Selecto.SQLiteSetOperationsTest do
   } do
     left =
       cte_operand(query, [1, 2], {:gt, 1})
-      |> Selecto.select(["id", {:literal, "?'$1"}])
+      |> Selecto.replace_select(["id", {:literal, "?'$1"}])
 
-    right = ids(query, [3]) |> Selecto.select(["id", {:literal, "?'$1"}])
+    right = ids(query, [3]) |> Selecto.replace_select(["id", {:literal, "?'$1"}])
     result = Selecto.union(left, right, all: true) |> Selecto.order_by([{"id", :asc}])
 
     assert rows(result) == [[2, "?'$1"], [3, "?'$1"]]
@@ -199,7 +199,7 @@ defmodule Selecto.SQLiteSetOperationsTest do
     |> Selecto.with_cte(
       "picked",
       fn ->
-        ids(query, selected_ids) |> Selecto.select(["id", {:literal, "?"}])
+        ids(query, selected_ids) |> Selecto.replace_select(["id", {:literal, "?"}])
       end,
       columns: ["id", "marker"],
       join: [type: :inner, owner_key: :id, related_key: :id]

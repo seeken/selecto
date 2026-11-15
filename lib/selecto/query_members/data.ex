@@ -314,7 +314,7 @@ defmodule Selecto.QueryMembers.Data do
 
   defp apply_query(selecto, query, previous) do
     selecto
-    |> Selecto.select(Enum.map(get(query, :select), &selection(&1, previous)))
+    |> Selecto.replace_select(Enum.map(get(query, :select), &selection(&1, previous)))
     |> maybe(get(query, :filter), &member_filter(&1, filter(&2)))
     |> maybe(get(query, :group_by), &Selecto.group_by(&1, &2))
     |> maybe(get(query, :order_by), fn acc, orders ->

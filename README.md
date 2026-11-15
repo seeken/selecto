@@ -1,5 +1,12 @@
 # Selecto
 
+As of the breaking 0.6.0 alpha, `Selecto.select/2` appends in order and preserves
+duplicates; `Selecto.filter/2` ANDs filters in call order. Empty append is a no-op.
+Use `replace_select/2` / `clear_select/1` and `replace_filter/2` / `clear_filter/1`
+for explicit resets. Required domain filters, recorded host predicates and trusted
+tenant scope survive every reset. Clearing selection restores the configured
+initial selection. See [native builder migration](docs/native_builder_migration.md).
+
 Authored search pages with promoted filters and exact facet counts are described
 in the [canned-page guide](guides/canned_pages.md). Their reusable LiveView host
 lives in `selecto_views`.

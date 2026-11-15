@@ -25,14 +25,14 @@ defmodule Selecto.CannedPage.Planner do
 
       query =
         filtered
-        |> Selecto.select(view.selected)
+        |> Selecto.replace_select(view.selected)
         |> Selecto.group_by(Enum.uniq(groups))
         |> add_collections(view.collections)
         |> Selecto.order_by(Enum.uniq(orders))
         |> Selecto.limit(state["limit"] + 1)
         |> Selecto.offset((state["page"] - 1) * state["limit"])
 
-      total = Selecto.select(filtered, X.as(X.count_distinct(page.entity_key), "total"))
+      total = Selecto.replace_select(filtered, X.as(X.count_distinct(page.entity_key), "total"))
 
       facets =
         page.controls
@@ -109,7 +109,7 @@ defmodule Selecto.CannedPage.Planner do
     base =
       base
       |> apply_controls(page, state, control.id)
-      |> Selecto.select(selected ++ [count])
+      |> Selecto.replace_select(selected ++ [count])
       |> Selecto.group_by(groups)
 
     options = Selecto.filter(base, X.not_null(control.field))

@@ -834,11 +834,10 @@ defmodule Selecto.Builder.Sql do
     scoped =
       domain_required_filters ++ set_required_filters ++ Selecto.Tenant.engine_filters(selecto)
 
-    # Duplicates collapse on the filter itself (a caller filter equal to a
-    # scope filter is the scope filter), keeping the first position.
+    # Scope is admitted once; caller conjunctions retain call/parameter order,
+    # including repetitions. A predicate equal to authority keeps its provenance.
     regular_filters =
-      (scoped ++ set_filters)
-      |> Enum.uniq()
+      (Enum.uniq(scoped) ++ Enum.reject(set_filters, &(&1 in scoped)))
       |> Enum.map(fn filter ->
         if filter in scoped or filter in host_filtered, do: scope.(filter), else: filter
       end)

@@ -4,7 +4,7 @@ defmodule Selecto.MixProject do
   def project do
     [
       app: :selecto,
-      version: "0.5.0",
+      version: "0.6.0",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -40,6 +40,7 @@ defmodule Selecto.MixProject do
           "docs/telemetry.md",
           "docs/contexts.md",
           "docs/query_library.md",
+          "docs/native_builder_migration.md",
           "docs/document_shapes.md",
           "docs/governed-lookups.md",
           "docs/nested_composition_contract.md",
@@ -172,6 +173,7 @@ defmodule Selecto.MixProject do
         "docs/developer_contracts.md",
         "docs/formal_verification.md",
         "docs/query_library.md",
+        "docs/native_builder_migration.md",
         "docs/document_shapes.md",
         "docs/source_query_plans.md",
         "docs/strict_mode.md",

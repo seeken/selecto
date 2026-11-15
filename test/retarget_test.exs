@@ -93,6 +93,17 @@ defmodule Selecto.RetargetTest do
                Retarget.get_retarget_config(retargeted)
 
       assert Retarget.reset_retarget(retargeted) == origin
+
+      composed =
+        retargeted |> Selecto.filter({"total", {:gt, 1}}) |> Selecto.filter({"total", {:lt, 50}})
+
+      for reset <- [
+            Selecto.clear_filter(composed),
+            Selecto.replace_filter(composed, {"total", {:gt, 0}})
+          ] do
+        assert Retarget.get_retarget_config(reset).origin == origin
+        assert Selecto.pre_retarget_filters(reset) == Selecto.pre_retarget_filters(retargeted)
+      end
     end
 
     test "a join id resolves to its path in the join tree" do

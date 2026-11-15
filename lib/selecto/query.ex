@@ -7,7 +7,7 @@ defmodule Selecto.Query do
   """
 
   @doc """
-  Add fields to the select list.
+  Append fields in order, preserving duplicates and aliases. Empty input is a no-op.
 
   For macro-free query composition, prefer importing `Selecto.Expr` and passing
   string field paths plus runtime helper constructors.
@@ -25,7 +25,7 @@ defmodule Selecto.Query do
     :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :select)
     normalized_fields = Selecto.Expr.normalize(fields)
     Selecto.QueryValidator.validate_selectors!(selecto, normalized_fields)
-    put_in(selecto.set.selected, Enum.uniq(selecto.set.selected ++ normalized_fields))
+    put_in(selecto.set.selected, selecto.set.selected ++ normalized_fields)
   end
 
   @spec select(Selecto.Types.t(), Selecto.Types.selector()) :: Selecto.Types.t()
@@ -34,7 +34,27 @@ defmodule Selecto.Query do
   end
 
   @doc """
-  Add filters to the query.
+  Replace caller selections. Empty input restores the configured initial selection.
+  Required filters, host scope and trusted tenant bindings are unaffected.
+  """
+  @spec replace_select(Selecto.Types.t(), [Selecto.Types.selector()] | Selecto.Types.selector()) ::
+          Selecto.Types.t()
+  def replace_select(selecto, []), do: clear_select(selecto)
+
+  def replace_select(selecto, fields) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :select)
+    select(put_in(selecto.set.selected, []), fields)
+  end
+
+  @doc "Restore the configured initial selection, without changing read authority."
+  @spec clear_select(Selecto.Types.t()) :: Selecto.Types.t()
+  def clear_select(selecto) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :select)
+    put_in(selecto.set.selected, Map.get(Selecto.domain(selecto), :required_selected, []))
+  end
+
+  @doc """
+  AND caller filters in call order. Empty input is a no-op; OR is explicit.
 
   For macro-free query composition, prefer importing `Selecto.Expr` and using
   runtime filter constructors like `eq/2`, `gte/2`, and `compact_and/1`.
@@ -48,6 +68,11 @@ defmodule Selecto.Query do
       |> Selecto.Query.filter(compact_and([gte("age", 18), not_null("email")]))
   """
   @spec filter(Selecto.Types.t(), [Selecto.Types.filter()]) :: Selecto.Types.t()
+  def filter(selecto, []) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :filter)
+    selecto
+  end
+
   def filter(selecto, filters) when is_list(filters) do
     :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :filter)
     normalized_filters = Selecto.Expr.normalize(filters)
@@ -61,7 +86,8 @@ defmodule Selecto.Query do
       selecto.set
       |> Map.put(
         :filtered,
-        uniq_filters(selecto.set.filtered ++ normalized_filters ++ required_filters)
+        Enum.reject(selecto.set.filtered, &(&1 in required_filters)) ++
+          normalized_filters ++ required_filters
       )
       |> Map.put(:required_filters, required_filters)
 
@@ -71,6 +97,28 @@ defmodule Selecto.Query do
   @spec filter(Selecto.Types.t(), Selecto.Types.filter()) :: Selecto.Types.t()
   def filter(selecto, filter) do
     filter(selecto, [filter])
+  end
+
+  @doc """
+  Replace regular caller filters on the current query root. On a retargeted
+  query this is its target; origin context is retained. Required predicates,
+  host-recorded filters and trusted tenant scope cannot be replaced.
+  """
+  @spec replace_filter(Selecto.Types.t(), [Selecto.Types.filter()] | Selecto.Types.filter()) ::
+          Selecto.Types.t()
+  def replace_filter(selecto, filters), do: selecto |> clear_filter() |> filter(filters)
+
+  @doc "Clear regular caller filters while retaining required and host authority."
+  @spec clear_filter(Selecto.Types.t()) :: Selecto.Types.t()
+  def clear_filter(selecto) do
+    :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :filter)
+
+    authority =
+      uniq_filters(
+        required_filters(selecto) ++ List.wrap(Map.get(selecto.set, :host_filtered, []))
+      )
+
+    put_in(selecto.set.filtered, authority)
   end
 
   @doc """
@@ -101,16 +149,7 @@ defmodule Selecto.Query do
     pre_retarget_filter(selecto, [filter])
   end
 
-  defp root_filter(selecto, filters) do
-    normalized_filters = Selecto.Expr.normalize(filters)
-    Selecto.QueryValidator.validate_filters!(selecto, normalized_filters)
-    current_required = required_filters(selecto)
-
-    put_in(
-      selecto.set.filtered,
-      uniq_filters(selecto.set.filtered ++ normalized_filters ++ current_required)
-    )
-  end
+  defp root_filter(selecto, filters), do: filter(selecto, filters)
 
   @doc """
   Append filters to the target of a retargeted query.
