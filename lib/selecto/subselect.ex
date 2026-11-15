@@ -68,6 +68,11 @@ defmodule Selecto.Subselect do
   - `:order_by` - Default ordering for aggregated results
   - `:limit` - Per-parent JSON collection limit; requires explicit ordering and
     the PostgreSQL adapter
+  - `:guard` - Optional positive `:max_rows`, `:max_scalar_bytes` and
+    `:max_projected_bytes` limits for PostgreSQL/SQLite JSON collections.
+    Requires `limit: max_rows + 1`, no nested children or cursor. SQL NULL
+    signals overflow and MUST be refused by the caller; empty success is `[]`.
+  - `:text_fields` - Fields projected as JSON strings in guarded collections.
   - `:after` - Optional parent-bound keyset position, `%{parent_key: value,
     values: [...]}`. The values contain the complete ordering tuple, including
     the target primary-key tie breaker. The caller must reauthorize the parent
@@ -103,6 +108,7 @@ defmodule Selecto.Subselect do
          :ok <- validate_filters_exist(selecto, subselect_config),
          :ok <- validate_sum_config(selecto, subselect_config),
          :ok <- validate_collection_limit(subselect_config),
+         :ok <- validate_collection_guard(subselect_config),
          :ok <- validate_collection_cursor(selecto, subselect_config),
          :ok <- validate_relationship_path(selecto, subselect_config) do
       Enum.each(Map.get(subselect_config, :nested, []), fn nested ->
@@ -220,8 +226,29 @@ defmodule Selecto.Subselect do
       order_by: Map.get(config, :order_by, default_order_by),
       limit: Map.get(config, :limit),
       after: Map.get(config, :after),
+      guard: Map.get(config, :guard),
+      text_fields: Map.get(config, :text_fields, []),
       filters: Map.get(config, :filters, [])
     }
+  end
+
+  # Trusted bounded-collection policy. A NULL aggregate is an overflow sentinel;
+  # callers must refuse it, never interpret it as an empty collection.
+  defp validate_collection_guard(config) when not is_map_key(config, :guard), do: :ok
+  defp validate_collection_guard(%{guard: nil}), do: :ok
+
+  defp validate_collection_guard(%{guard: guard} = config) do
+    valid =
+      is_map(guard) and
+        Map.keys(guard) |> Enum.sort() ==
+          Enum.sort([:max_rows, :max_scalar_bytes, :max_projected_bytes])
+
+    if valid and Enum.all?(Map.values(guard), &(is_integer(&1) and &1 > 0)) and
+         config.format == :json_agg and config.limit == guard.max_rows + 1 and
+         config.nested == [] and config.after == nil and
+         is_list(config.text_fields) and Enum.all?(config.text_fields, &(&1 in config.fields)),
+       do: :ok,
+       else: {:error, "invalid guarded collection policy"}
   end
 
   defp validate_collection_limit(config) do

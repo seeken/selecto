@@ -130,7 +130,8 @@ defmodule Selecto.Builder.Subselect do
     {select_clause, select_params} =
       case subselect_config.format do
         :json_agg ->
-          if length(subselect_config.fields) == 1 and nested_subselects(subselect_config) == [] do
+          if length(subselect_config.fields) == 1 and nested_subselects(subselect_config) == [] and
+               is_nil(Map.get(subselect_config, :guard)) do
             [field] = subselect_config.fields
             field_name = adapter_quote_identifier(selecto, to_string(field))
 
@@ -238,8 +239,93 @@ defmodule Selecto.Builder.Subselect do
       windowed_aggregate_limit(selecto, subselect_config)
     ]
 
+    subselect_iodata =
+      if guard = Map.get(subselect_config, :guard) do
+        guarded_collection(
+          selecto,
+          subselect_config,
+          guard,
+          target_table,
+          target_alias,
+          where_clause,
+          select_clause
+        )
+      else
+        subselect_iodata
+      end
+
     all_params = select_params ++ correlation_params ++ additional_params ++ cursor_params
     {subselect_iodata, all_params}
+  end
+
+  # Materialize only cap+1 scalar rows. Count and byte checks precede every JSON
+  # constructor/aggregate in the CASE's selected branch. The native correlation
+  # renderer supplies association policy, tenant pairing and fixed predicates.
+  defp guarded_collection(selecto, config, guard, table, target_alias, where, aggregate) do
+    adapter = AdapterSupport.adapter_name(Map.get(selecto, :adapter))
+
+    unless adapter in [:postgresql, :sqlite],
+      do: raise(ArgumentError, "guarded collections require PostgreSQL or SQLite")
+
+    q = &adapter_quote_identifier(selecto, to_string(&1))
+
+    sizes =
+      Enum.map(config.fields, fn field ->
+        value = [target_alias, ".", q.(field)]
+
+        case adapter do
+          :postgresql -> ["COALESCE(octet_length(CAST(", value, " AS TEXT)),4)"]
+          :sqlite -> ["COALESCE(length(CAST(", value, " AS BLOB)),4)"]
+        end
+      end)
+
+    overhead = 2 + Enum.sum(Enum.map(config.fields, &(6 * byte_size(to_string(&1)) + 8)))
+    row_bytes = [Integer.to_string(overhead), " + 6 * (", Enum.intersperse(sizes, " + "), ")"]
+    too_large = Enum.map(sizes, &[&1, " > ", Integer.to_string(guard.max_scalar_bytes)])
+
+    order_fields =
+      Enum.map(stable_collection_order(selecto, config), fn
+        {_direction, field} -> field
+        field -> field
+      end)
+
+    fields =
+      Enum.map(
+        Enum.uniq(Enum.map(config.fields ++ order_fields, &to_string/1)),
+        &[target_alias, ".", q.(&1)]
+      )
+
+    {order, []} = build_subquery_order_by(selecto, config, target_alias)
+
+    [
+      "WITH __selecto_children AS MATERIALIZED (SELECT ",
+      Enum.intersperse(fields, ", "),
+      " FROM ",
+      table,
+      " ",
+      target_alias,
+      " WHERE ",
+      where,
+      " ORDER BY ",
+      order,
+      " LIMIT ",
+      Integer.to_string(config.limit),
+      "), __selecto_budget AS (SELECT COUNT(*) AS n, COALESCE(SUM(",
+      row_bytes,
+      "),0) + 2 AS b, COALESCE(MAX(CASE WHEN ",
+      Enum.intersperse(too_large, " OR "),
+      " THEN 1 ELSE 0 END),0) AS bad FROM __selecto_children ",
+      target_alias,
+      ") SELECT CASE WHEN n > ",
+      Integer.to_string(guard.max_rows),
+      " OR b > ",
+      Integer.to_string(guard.max_projected_bytes),
+      " OR bad > 0 THEN NULL ELSE COALESCE((SELECT ",
+      aggregate,
+      " FROM __selecto_children ",
+      target_alias,
+      "), '[]') END FROM __selecto_budget"
+    ]
   end
 
   defp build_json_object_pairs(selecto, subselect_config, target_alias) do
@@ -266,6 +352,14 @@ defmodule Selecto.Builder.Subselect do
     column = Map.get(columns, to_string(field)) || Map.get(columns, field)
     type = if is_map(column), do: Map.get(column, :type) || Map.get(column, "type")
 
+    if field in Map.get(subselect_config, :text_fields, []) do
+      ["CAST(", field_sql, " AS TEXT)"]
+    else
+      exact_json_field_value(selecto, type, field_sql)
+    end
+  end
+
+  defp exact_json_field_value(selecto, type, field_sql) do
     if type in [:decimal, :numeric, :number, "decimal", "numeric", "number"] and
          AdapterSupport.adapter_name(Map.get(selecto, :adapter)) == :postgresql do
       # JSON decoders commonly turn JSON numeric literals into IEEE floats.

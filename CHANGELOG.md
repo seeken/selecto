@@ -3,6 +3,13 @@
 
 ## Unreleased
 
+- Add an opt-in PostgreSQL/SQLite subselect guard that bounds child count, scalar
+  bytes and projected JSON before constructing or aggregating child JSON. A NULL
+  sentinel signals overflow; empty complete collections remain `[]`. Optional
+  text projections preserve declared integer/decimal codecs. Unguarded behavior
+  and native relationship/tenant policy are preserved.
+
+
 - Segments give safe access to withheld fields (certification specification
   3.2): a segment filter may name a redacted source field when the values it
   compares the field with are fixed by its definition (literals and field

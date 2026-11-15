@@ -447,3 +447,19 @@ tracking issue and the exact condition for re-enabling the test.
 - `selecto_mix`
 - `selecto_db_postgresql_postgis`
 - `selecto_test`
+
+### Guarded native JSON collections
+
+PostgreSQL and SQLite subselect maps may opt into a trusted `:guard` with
+`:max_rows`, `:max_scalar_bytes` and `:max_projected_bytes` positive integers.
+Use `format: :json_agg`, explicit primary-key ordering and `limit: max_rows + 1`.
+`:text_fields` can select declared collection fields as JSON strings for stable
+integer/decimal codecs. Nested children and cursors are excluded in this mode.
+
+The renderer materializes only cap+1 scalar rows, then a SQL CASE checks count,
+scalar UTF-8 byte sizes and a conservative six-times-source-bytes JSON projection
+before any JSON constructor or aggregation. Guard rejection returns SQL NULL;
+callers must refuse it, never treat it as an empty collection. A successful empty
+collection returns `[]`. Guarded single-field collections contain objects, like
+multi-field collections. Existing unguarded subselect behavior is unchanged.
+The canonical nested-detail API uses this option after scalar parent lookahead.
