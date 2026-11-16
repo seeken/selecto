@@ -144,12 +144,13 @@ defmodule Selecto.Builder.ValuesClause do
 
   # Generate CTE-style VALUES SQL
   defp generate_values_cte_sql(%Spec{} = spec, adapter) do
-    case AdapterSupport.adapter_name(adapter) do
-      name when name in [:mysql, :mariadb, :mssql] ->
-        generate_select_union_cte_sql(spec, adapter)
+    strategy = Selecto.DialectSupport.query_strategy(adapter, :values_cte, %{adapter: adapter})
 
-      _ ->
-        generate_values_only_cte_sql(spec, adapter)
+    if strategy == :select_union or
+         AdapterSupport.adapter_name(adapter) in [:mysql, :mariadb, :mssql] do
+      generate_select_union_cte_sql(spec, adapter)
+    else
+      generate_values_only_cte_sql(spec, adapter)
     end
   end
 

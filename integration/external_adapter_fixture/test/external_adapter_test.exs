@@ -75,4 +75,17 @@ defmodule ExternalAdapterTest do
     assert {:error, :external_collection_refusal} =
              Selecto.DialectSupport.render_collection_query(AcmeSelectoAdapter, collection, %{})
   end
+
+  test "normal query compilation invokes the installed external dialect" do
+    query =
+      @domain
+      |> Selecto.configure(:external_fixture_connection,
+        adapter: AcmeSelectoAdapter,
+        validate: false
+      )
+      |> Selecto.select([{:stddev, "id"}])
+
+    {sql, _aliases, []} = Selecto.gen_sql(query, [])
+    assert sql =~ "ACME_STDDEV("
+  end
 end

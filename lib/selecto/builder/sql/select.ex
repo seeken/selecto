@@ -1036,18 +1036,29 @@ defmodule Selecto.Builder.Sql.Select do
     filter = Selecto.Domain.Contract.ComputedPredicates.to_filter(expression)
     {joins, predicate, params} = Selecto.Builder.Sql.Where.build(selecto, filter)
 
-    if AdapterSupport.adapter_name(selecto.adapter) == :mssql do
-      scalar = [
-        "(CASE WHEN ",
-        predicate,
-        " THEN CAST(1 AS BIT) WHEN NOT (",
-        predicate,
-        ") THEN CAST(0 AS BIT) ELSE NULL END)"
-      ]
+    fragment = %Selecto.Dialect.Query.Predicate{expression: predicate, params: params}
 
-      {scalar, joins, params ++ params}
-    else
-      {["(", predicate, ")"], joins, params}
+    case Selecto.DialectSupport.render_scalar_predicate(selecto.adapter, fragment, selecto) do
+      {:ok, {scalar, bound_params}} ->
+        {scalar, joins, bound_params}
+
+      {:error, error} ->
+        Selecto.Builder.ScopeRefusal.unsupported!(error)
+
+      :not_implemented ->
+        if AdapterSupport.adapter_name(selecto.adapter) == :mssql do
+          scalar = [
+            "(CASE WHEN ",
+            predicate,
+            " THEN CAST(1 AS BIT) WHEN NOT (",
+            predicate,
+            ") THEN CAST(0 AS BIT) ELSE NULL END)"
+          ]
+
+          {scalar, joins, params ++ params}
+        else
+          {["(", predicate, ")"], joins, params}
+        end
     end
   end
 
@@ -1617,10 +1628,45 @@ defmodule Selecto.Builder.Sql.Select do
   defp build_filtered_aggregate_iodata(
          selecto,
          function_name,
+         args,
+         distinct,
+         filters,
+         fallback \\ nil
+       ) do
+    fragment = %Selecto.Dialect.Query.Aggregate{
+      function: function_name,
+      arguments: args,
+      distinct: distinct,
+      filter: filters,
+      fallback: fallback
+    }
+
+    case Selecto.DialectSupport.render_filtered_aggregate(selecto.adapter, fragment, selecto) do
+      {:ok, sql} ->
+        sql
+
+      {:error, error} ->
+        Selecto.Builder.ScopeRefusal.unsupported!(error)
+
+      :not_implemented ->
+        legacy_filtered_aggregate_iodata(
+          selecto,
+          function_name,
+          args,
+          distinct,
+          filters,
+          fallback
+        )
+    end
+  end
+
+  defp legacy_filtered_aggregate_iodata(
+         selecto,
+         function_name,
          arg_iodata_parts,
          distinct,
          filters_iodata,
-         fallback_iodata \\ nil
+         fallback_iodata
        ) do
     case AdapterSupport.adapter_name(Map.fetch!(selecto, :adapter)) do
       :mssql ->
@@ -1688,18 +1734,30 @@ defmodule Selecto.Builder.Sql.Select do
   defp to_boolean(_value), do: false
 
   defp sql_function_name(selecto, :stddev) do
-    case Map.fetch!(selecto, :adapter)
-         |> Selecto.AdapterSupport.adapter_name() do
-      :mssql -> "STDEV"
-      _ -> "stddev"
+    case Selecto.DialectSupport.aggregate_function_name(selecto.adapter, :stddev, selecto) do
+      name when is_binary(name) ->
+        check_string(name)
+
+      :not_implemented ->
+        case Map.fetch!(selecto, :adapter)
+             |> Selecto.AdapterSupport.adapter_name() do
+          :mssql -> "STDEV"
+          _ -> "stddev"
+        end
     end
   end
 
   defp sql_function_name(selecto, :variance) do
-    case Map.fetch!(selecto, :adapter)
-         |> Selecto.AdapterSupport.adapter_name() do
-      :mssql -> "VAR"
-      _ -> "variance"
+    case Selecto.DialectSupport.aggregate_function_name(selecto.adapter, :variance, selecto) do
+      name when is_binary(name) ->
+        check_string(name)
+
+      :not_implemented ->
+        case Map.fetch!(selecto, :adapter)
+             |> Selecto.AdapterSupport.adapter_name() do
+          :mssql -> "VAR"
+          _ -> "variance"
+        end
     end
   end
 
@@ -2079,7 +2137,7 @@ defmodule Selecto.Builder.Sql.Select do
   """
   def selected_position(selecto, selector, params) do
     with [_ | _] <- params,
-         false <- AdapterSupport.adapter_name(selecto.adapter) == :mssql,
+         false <- expression_grouping?(selecto),
          index when is_integer(index) <-
            Enum.find_index(
              List.wrap(get_in(selecto, [Access.key(:set), :selected])),
@@ -2088,6 +2146,13 @@ defmodule Selecto.Builder.Sql.Select do
       index + 1
     else
       _ -> nil
+    end
+  end
+
+  defp expression_grouping?(selecto) do
+    case Selecto.DialectSupport.query_strategy(selecto.adapter, :group_by_position, selecto) do
+      :expression -> true
+      _ -> AdapterSupport.adapter_name(selecto.adapter) == :mssql
     end
   end
 

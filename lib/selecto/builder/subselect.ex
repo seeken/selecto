@@ -90,6 +90,16 @@ defmodule Selecto.Builder.Subselect do
     end
 
     cond do
+      subselect_config.format in [:json_agg, :array_agg] and
+          Selecto.DialectSupport.query_hook?(Map.get(selecto, :adapter), :render_collection_query) ->
+        build_dialect_collection_query(
+          selecto,
+          subselect_config,
+          source_alias,
+          target_table,
+          target_alias
+        )
+
       adapter_name == :mssql and subselect_config.format == :json_agg ->
         build_mssql_json_agg_subselect(
           selecto,
@@ -830,6 +840,55 @@ defmodule Selecto.Builder.Subselect do
     |> to_string()
     |> String.split(".")
     |> List.last()
+  end
+
+  defp build_dialect_collection_query(selecto, config, source_alias, table, target_alias) do
+    {correlation, correlation_params} =
+      build_correlation_condition(selecto, config, target_alias, source_alias)
+
+    {additional, additional_params} = build_additional_filters(selecto, config, target_alias)
+
+    fields =
+      if config.format == :array_agg do
+        [field] = config.fields
+        [field]
+      else
+        config.fields
+      end
+
+    projections =
+      Enum.map(fields, fn field ->
+        field_string = to_string(field)
+        schema = get_target_schema_config(selecto, config.target_schema)
+
+        expression =
+          case Selecto.Json.parse_field_reference(field_string, schema) do
+            {:json_path, column, path} ->
+              Selecto.Json.build_extraction(column, path,
+                adapter: Map.get(selecto, :adapter),
+                table_alias: target_alias
+              )
+
+            {:regular, _} ->
+              [target_alias, ".", adapter_quote_identifier(selecto, field_string)]
+          end
+
+        alias_name = field_string |> String.split(".") |> List.last()
+        {expression, adapter_quote_identifier(selecto, alias_name)}
+      end)
+
+    fragment = %Selecto.Dialect.Query.Collection{
+      format: config.format,
+      fields: projections,
+      table: table,
+      table_alias: target_alias,
+      where: build_combined_where_clause(correlation, additional),
+      params: correlation_params ++ additional_params
+    }
+
+    selecto.adapter
+    |> Selecto.DialectSupport.render_collection_query(fragment, selecto)
+    |> unwrap_dialect_fragment!()
   end
 
   defp build_mssql_json_agg_subselect(

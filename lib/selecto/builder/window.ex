@@ -448,35 +448,60 @@ defmodule Selecto.Builder.Window do
   defp validate_nth_value_support!(selecto) do
     adapter = Map.get(selecto, :adapter, AdapterSupport.default_adapter())
 
-    case AdapterSupport.adapter_name(adapter) do
-      :mssql ->
-        error =
-          Error.validation_error("MSSQL window functions do not support nth_value yet", %{
-            adapter: :mssql,
-            function: :nth_value,
-            unsupported_feature: :window_nth_value
-          })
+    case Selecto.DialectSupport.validate_window_function(adapter, :nth_value, selecto) do
+      :ok ->
+        :ok
 
+      {:error, error} ->
         Selecto.Builder.ScopeRefusal.unsupported!(error)
 
-      _ ->
-        :ok
+      :not_implemented ->
+        case AdapterSupport.adapter_name(adapter) do
+          :mssql ->
+            error =
+              Error.validation_error("MSSQL window functions do not support nth_value yet", %{
+                adapter: :mssql,
+                function: :nth_value,
+                unsupported_feature: :window_nth_value
+              })
+
+            Selecto.Builder.ScopeRefusal.unsupported!(error)
+
+          _ ->
+            :ok
+        end
     end
   end
 
   defp aggregate_function_name(selecto, :stddev) do
-    case Map.get(selecto, :adapter, AdapterSupport.default_adapter())
-         |> AdapterSupport.adapter_name() do
-      :mssql -> "STDEV"
-      _ -> "STDDEV"
+    adapter = Map.get(selecto, :adapter, AdapterSupport.default_adapter())
+
+    case Selecto.DialectSupport.aggregate_function_name(adapter, :stddev, selecto) do
+      name when is_binary(name) ->
+        name
+
+      :not_implemented ->
+        case Map.get(selecto, :adapter, AdapterSupport.default_adapter())
+             |> AdapterSupport.adapter_name() do
+          :mssql -> "STDEV"
+          _ -> "STDDEV"
+        end
     end
   end
 
   defp aggregate_function_name(selecto, :variance) do
-    case Map.get(selecto, :adapter, AdapterSupport.default_adapter())
-         |> AdapterSupport.adapter_name() do
-      :mssql -> "VAR"
-      _ -> "VARIANCE"
+    adapter = Map.get(selecto, :adapter, AdapterSupport.default_adapter())
+
+    case Selecto.DialectSupport.aggregate_function_name(adapter, :variance, selecto) do
+      name when is_binary(name) ->
+        name
+
+      :not_implemented ->
+        case Map.get(selecto, :adapter, AdapterSupport.default_adapter())
+             |> AdapterSupport.adapter_name() do
+          :mssql -> "VAR"
+          _ -> "VARIANCE"
+        end
     end
   end
 

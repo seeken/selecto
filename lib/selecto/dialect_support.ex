@@ -101,6 +101,16 @@ defmodule Selecto.DialectSupport do
     render(adapter, callback, fragment, context, :view_publication)
   end
 
+  @doc false
+  def query_hook?(adapter, callback)
+      when callback in [:render_collection_query] do
+    with {:ok, dialect} <- dialect(adapter) do
+      AdapterSupport.callback_available?(dialect, callback, 2)
+    else
+      _ -> false
+    end
+  end
+
   @doc "Invokes a finite optional compiler strategy through the public dialect."
   def query_strategy(adapter, strategy, selecto)
       when strategy in [:recursive_cte, :values_cte, :group_by_position, :json_root_alias] do

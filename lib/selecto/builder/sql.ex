@@ -568,7 +568,10 @@ defmodule Selecto.Builder.Sql do
   defp json_builder_opts(selecto) do
     adapter = Map.get(selecto, :adapter, Selecto.AdapterSupport.default_adapter())
 
-    if Selecto.AdapterSupport.adapter_name(adapter) in [:mssql, :mysql, :mariadb, :sqlite] do
+    strategy = Selecto.DialectSupport.query_strategy(adapter, :json_root_alias, selecto)
+
+    if strategy == :qualified or
+         Selecto.AdapterSupport.adapter_name(adapter) in [:mssql, :mysql, :mariadb, :sqlite] do
       [adapter: adapter, table_alias: "selecto_root", selecto: selecto]
     else
       [adapter: adapter, selecto: selecto]

@@ -303,9 +303,15 @@ defmodule Selecto.Builder.CteSql do
   defp with_keyword(false, _adapter), do: "WITH "
 
   defp with_keyword(true, adapter) do
-    case AdapterSupport.adapter_name(adapter) do
-      :mssql -> "WITH "
-      _ -> "WITH RECURSIVE "
+    case Selecto.DialectSupport.query_strategy(adapter, :recursive_cte, %{adapter: adapter}) do
+      :plain ->
+        "WITH "
+
+      _ ->
+        case AdapterSupport.adapter_name(adapter) do
+          :mssql -> "WITH "
+          _ -> "WITH RECURSIVE "
+        end
     end
   end
 
