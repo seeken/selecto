@@ -47,31 +47,6 @@ defmodule Selecto.Integration.LateralJoinTest do
     assert is_list(params)
   end
 
-  test "mssql compiles left lateral joins to outer apply", %{domain: domain} do
-    subquery =
-      Selecto.configure(domain, :mock_connection,
-        adapter: SelectoDBMSSQL.Adapter,
-        validate: false
-      )
-      |> Selecto.select([{:count, "*"}])
-      |> Selecto.filter({"rating", "PG"})
-
-    selecto =
-      Selecto.configure(domain, :mock_connection,
-        adapter: SelectoDBMSSQL.Adapter,
-        validate: false
-      )
-      |> Selecto.select(["title"])
-      |> Selecto.lateral_join(:left, fn _ -> subquery end, "matching_films")
-
-    {sql, params} = Selecto.to_sql(selecto)
-
-    assert sql =~ "OUTER APPLY"
-    assert sql =~ "@p1"
-    refute sql =~ "JOIN LATERAL"
-    assert params == ["PG"]
-  end
-
   test "mysql json_table helper registers qualified columns and compiles json_table", %{
     domain: domain
   } do
@@ -161,87 +136,6 @@ defmodule Selecto.Integration.LateralJoinTest do
     assert params == ["$.items[0].sku"]
     assert sql =~ "item_tree.fullkey"
     assert sql =~ ~r/where.*item_tree\.fullkey\s*=\s*\?/i
-  end
-
-  test "mssql rejects unsupported lateral join types", %{domain: domain} do
-    selecto =
-      Selecto.configure(domain, :mock_connection,
-        adapter: SelectoDBMSSQL.Adapter,
-        validate: false
-      )
-      |> Selecto.select(["title"])
-      |> Selecto.lateral_join(:right, {:function, :generate_series, [1, 10]}, "numbers")
-
-    assert_raise Selecto.Builder.ScopeRefusal,
-                 ~r/only supports :inner and :left lateral joins/,
-                 fn ->
-                   Selecto.to_sql(selecto)
-                 end
-  end
-
-  test "mssql supports correlated top-n apply with pagination" do
-    customer_domain = customer_domain()
-    order_domain = order_domain()
-
-    recent_order_query =
-      Selecto.configure(order_domain, :mock_connection,
-        adapter: SelectoDBMSSQL.Adapter,
-        validate: false
-      )
-      |> Selecto.select(["id", "inserted_at"])
-      |> Selecto.filter({"customer_id", {:ref, "selecto_root.customer_id"}})
-      |> Selecto.order_by([{"inserted_at", :desc}])
-      |> Selecto.limit(1)
-
-    query =
-      Selecto.configure(customer_domain, :mock_connection,
-        adapter: SelectoDBMSSQL.Adapter,
-        validate: false
-      )
-      |> Selecto.select(["name"])
-      |> Selecto.lateral_join(:left, fn _ -> recent_order_query end, "recent_order")
-
-    {sql, params} = Selecto.to_sql(query)
-
-    assert params == []
-    assert sql =~ "OUTER APPLY"
-    assert sql =~ "from orders subq_root_orders"
-    assert sql =~ "subq_root_orders.customer_id = selecto_root.customer_id"
-    assert sql =~ "order by subq_root_orders.inserted_at desc"
-    assert String.downcase(sql) =~ "offset 0 rows fetch next 1 rows only"
-  end
-
-  test "mssql supports correlated top-n cross apply with pagination" do
-    customer_domain = customer_domain()
-    order_domain = order_domain()
-
-    latest_order_query =
-      Selecto.configure(order_domain, :mock_connection,
-        adapter: SelectoDBMSSQL.Adapter,
-        validate: false
-      )
-      |> Selecto.select(["id", "inserted_at"])
-      |> Selecto.filter({"customer_id", {:ref, "selecto_root.customer_id"}})
-      |> Selecto.order_by([{"inserted_at", :desc}])
-      |> Selecto.limit(1)
-
-    query =
-      Selecto.configure(customer_domain, :mock_connection,
-        adapter: SelectoDBMSSQL.Adapter,
-        validate: false
-      )
-      |> Selecto.select(["name"])
-      |> Selecto.lateral_join(:inner, fn _ -> latest_order_query end, "latest_order")
-
-    {sql, params} = Selecto.to_sql(query)
-
-    assert params == []
-    assert sql =~ "CROSS APPLY"
-    refute sql =~ "OUTER APPLY"
-    assert sql =~ "from orders subq_root_orders"
-    assert sql =~ "subq_root_orders.customer_id = selecto_root.customer_id"
-    assert sql =~ "order by subq_root_orders.inserted_at desc"
-    assert String.downcase(sql) =~ "offset 0 rows fetch next 1 rows only"
   end
 
   test "invalid reference raises correlation error", %{domain: domain} do

@@ -91,7 +91,7 @@ defmodule Selecto.DerivedTableProjectionTest do
     refute sql =~ "selecto_projection_"
   end
 
-  for adapter <- [SelectoDBMySQL.Adapter, SelectoDBMariaDB.Adapter, SelectoDBMSSQL.Adapter] do
+  for adapter <- [SelectoDBMySQL.Adapter, SelectoDBMariaDB.Adapter] do
     test "#{inspect(adapter)} derived source names every projected column uniquely" do
       query = duplicate_name_query(unquote(adapter))
 
@@ -153,18 +153,5 @@ defmodule Selecto.DerivedTableProjectionTest do
     assert sql == metadata.sql
     assert sql =~ "SUM(selecto_projection_source.`selecto_projection_3`)"
     assert sql =~ "selecto_root.price AS selecto_projection_3"
-  end
-
-  test "set operations alias each operand's projection" do
-    left = duplicate_name_query(SelectoDBMSSQL.Adapter)
-    right = duplicate_name_query(SelectoDBMSSQL.Adapter)
-
-    {sql, _aliases, params} =
-      left
-      |> Selecto.union(right, all: true)
-      |> Selecto.gen_sql(unique_projection_aliases: true)
-
-    assert length(projected_names(sql)) == 6
-    assert params == [3, 3]
   end
 end

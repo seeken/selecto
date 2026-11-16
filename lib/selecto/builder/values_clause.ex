@@ -147,7 +147,7 @@ defmodule Selecto.Builder.ValuesClause do
     strategy = Selecto.DialectSupport.query_strategy(adapter, :values_cte, %{adapter: adapter})
 
     if strategy == :select_union or
-         AdapterSupport.adapter_name(adapter) in [:mysql, :mariadb, :mssql] do
+         AdapterSupport.adapter_name(adapter) in [:mysql, :mariadb] do
       generate_select_union_cte_sql(spec, adapter)
     else
       generate_values_only_cte_sql(spec, adapter)

@@ -571,7 +571,7 @@ defmodule Selecto.Builder.Sql do
     strategy = Selecto.DialectSupport.query_strategy(adapter, :json_root_alias, selecto)
 
     if strategy == :qualified or
-         Selecto.AdapterSupport.adapter_name(adapter) in [:mssql, :mysql, :mariadb, :sqlite] do
+         Selecto.AdapterSupport.adapter_name(adapter) in [:mysql, :mariadb, :sqlite] do
       [adapter: adapter, table_alias: "selecto_root", selecto: selecto]
     else
       [adapter: adapter, selecto: selecto]

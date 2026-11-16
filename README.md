@@ -38,6 +38,19 @@ It gives you:
 - CTEs, lateral joins, and other advanced SQL shapes
 - expression helpers and a named-function registry for reusable query AST
 
+## Optional SQL Server adapter
+
+SQL Server and Azure SQL require the separate private, unreleased
+[`selecto_db_sqlserver`](https://github.com/seeken/selecto_db_sqlserver) package.
+Commercial terms for new work are undecided; no Hex release is available.
+Authorized hosts add its immutable Git commit and explicitly select
+`SelectoDBSQLServer.Adapter`. Backend identity remains `mssql`. Legacy
+`SelectoDBMSSQL` aliases are supplied only by that external package for its
+initial compatibility line; do not install the frozen old adapter alongside it.
+The core includes no SQL Server driver or vendor query renderer. An explicitly
+selected missing adapter raises an install-package error before connecting.
+
+
 ## Ecosystem
 
 Use `selecto` with companion packages when you need more than the core engine:

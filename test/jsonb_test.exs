@@ -68,28 +68,6 @@ defmodule Selecto.JsonTest do
              )
   end
 
-  test "build_extraction supports mssql json value and query functions" do
-    assert "JSON_VALUE([u].[attributes], '$.color')" ==
-             Json.build_extraction("attributes", ["color"],
-               adapter: SelectoDBMSSQL.Adapter,
-               table_alias: "u"
-             )
-
-    assert "JSON_QUERY([u].[attributes], '$.dimensions')" ==
-             Json.build_extraction("attributes", ["dimensions"],
-               adapter: SelectoDBMSSQL.Adapter,
-               table_alias: "u",
-               as_text: false
-             )
-
-    assert "CAST(JSON_VALUE([u].[attributes], '$.dimensions.length') AS decimal(38, 10))" ==
-             Json.build_extraction("attributes", ["dimensions", "length"],
-               adapter: SelectoDBMSSQL.Adapter,
-               table_alias: "u",
-               cast: :decimal
-             )
-  end
-
   test "build_extraction supports mysql json extract functions" do
     assert "JSON_UNQUOTE(JSON_EXTRACT(`u`.`attributes`, '$.color'))" ==
              Json.build_extraction("attributes", ["color"],
@@ -159,39 +137,6 @@ defmodule Selecto.JsonTest do
     assert String.contains?(nested, "->'dimensions'")
   end
 
-  test "mssql contains and key existence use json functions" do
-    contains =
-      Json.build_contains("attributes", %{"color" => "red", "dimensions" => %{"length" => 5}},
-        adapter: SelectoDBMSSQL.Adapter,
-        table_alias: "u"
-      )
-
-    assert IO.iodata_to_binary(contains) =~ "JSON_VALUE([u].[attributes], '$.color') = 'red'"
-
-    assert IO.iodata_to_binary(contains) =~
-             "JSON_VALUE([u].[attributes], '$.dimensions.length') = '5'"
-
-    exists =
-      Json.build_key_exists("attributes", ["dimensions", "length"],
-        adapter: SelectoDBMSSQL.Adapter,
-        table_alias: "u"
-      )
-
-    assert exists =~ "JSON_QUERY([u].[attributes], '$.dimensions.length') IS NOT NULL"
-    assert exists =~ "JSON_VALUE([u].[attributes], '$.dimensions.length') IS NOT NULL"
-  end
-
-  test "mssql containment rejects array semantics explicitly" do
-    assert_raise Selecto.Builder.ScopeRefusal,
-                 ~r/MSSQL JSON containment for arrays is not supported/,
-                 fn ->
-                   Json.build_contains("attributes", %{"tags" => ["featured"]},
-                     adapter: SelectoDBMSSQL.Adapter,
-                     table_alias: "u"
-                   )
-                 end
-  end
-
   test "mysql contains and key existence use mysql json functions" do
     contains =
       Json.build_contains("attributes", %{"color" => "red"},
@@ -258,26 +203,6 @@ defmodule Selecto.JsonTest do
                      table_alias: "u"
                    )
                  end
-  end
-
-  test "mssql json array helpers use openjson" do
-    one =
-      Json.build_array_contains("attributes", ["tags"], "featured",
-        adapter: SelectoDBMSSQL.Adapter,
-        table_alias: "u"
-      )
-
-    all =
-      Json.build_array_contains_all("attributes", ["tags"], ["featured", "new"],
-        adapter: SelectoDBMSSQL.Adapter,
-        table_alias: "u"
-      )
-
-    assert IO.iodata_to_binary(one) =~ "OPENJSON([u].[attributes], '$.tags')"
-    assert IO.iodata_to_binary(one) =~ "WHERE value = 'featured'"
-    assert IO.iodata_to_binary(all) =~ "OPENJSON([u].[attributes], '$.tags')"
-    assert IO.iodata_to_binary(all) =~ "WHERE value = 'featured'"
-    assert IO.iodata_to_binary(all) =~ "WHERE value = 'new'"
   end
 
   test "mysql json array helpers use json_contains" do

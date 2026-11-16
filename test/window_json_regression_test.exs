@@ -247,149 +247,6 @@ defmodule Selecto.WindowJsonRegressionTest do
     refute sql =~ "ORDER BY employees.salary"
   end
 
-  test "mssql window aliases use adapter quoting" do
-    query =
-      Selecto.configure(employee_domain(), :mock_connection,
-        adapter: SelectoDBMSSQL.Adapter,
-        validate: false
-      )
-      |> Selecto.select(["first_name", "department", "salary"])
-      |> Selecto.window_function(:row_number, [],
-        over: [partition_by: ["department"], order_by: [{"salary", :desc}]],
-        as: "department salary rank"
-      )
-
-    {sql, params} = Selecto.to_sql(query)
-    sql = normalize_sql(sql)
-
-    assert params == []
-
-    assert sql =~
-             "ROW_NUMBER() OVER (PARTITION BY selecto_root.department ORDER BY selecto_root.salary DESC) AS [department salary rank]"
-
-    refute sql =~ "AS department salary rank"
-  end
-
-  test "mssql rejects interval window frames explicitly" do
-    query =
-      Selecto.configure(employee_domain(), :mock_connection,
-        adapter: SelectoDBMSSQL.Adapter,
-        validate: false
-      )
-      |> Selecto.select(["first_name", "salary"])
-      |> Selecto.window_function(:avg, ["salary"],
-        over: [
-          order_by: ["salary"],
-          frame: {:range, {:interval, "1 day"}, :current_row}
-        ],
-        as: "rolling_avg"
-      )
-
-    assert_raise Selecto.Builder.ScopeRefusal,
-                 ~r/MSSQL window frames do not support interval boundaries/,
-                 fn ->
-                   Selecto.to_sql(query)
-                 end
-  end
-
-  test "mssql rejects nth_value explicitly" do
-    query =
-      Selecto.configure(employee_domain(), :mock_connection,
-        adapter: SelectoDBMSSQL.Adapter,
-        validate: false
-      )
-      |> Selecto.select(["first_name", "salary"])
-      |> Selecto.window_function(:nth_value, ["salary", 2],
-        over: [order_by: ["salary"]],
-        as: "second_salary"
-      )
-
-    assert_raise Selecto.Builder.ScopeRefusal,
-                 ~r/MSSQL window functions do not support nth_value yet/,
-                 fn ->
-                   Selecto.to_sql(query)
-                 end
-  end
-
-  test "mssql lag and lead compile with offset params and quoted aliases" do
-    query =
-      Selecto.configure(employee_domain(), :mock_connection,
-        adapter: SelectoDBMSSQL.Adapter,
-        validate: false
-      )
-      |> Selecto.select(["first_name", "department", "salary"])
-      |> Selecto.window_function(:lag, ["salary", 2],
-        over: [partition_by: ["department"], order_by: [{"salary", :desc}]],
-        as: "prev salary"
-      )
-      |> Selecto.window_function(:lead, ["salary", 3],
-        over: [partition_by: ["department"], order_by: [{"salary", :desc}]],
-        as: "next salary"
-      )
-
-    {sql, params} = Selecto.to_sql(query)
-    sql = normalize_sql(sql)
-
-    assert params == [2, 3]
-
-    assert sql =~
-             "LAG(selecto_root.salary, @p1) OVER (PARTITION BY selecto_root.department ORDER BY selecto_root.salary DESC) AS [prev salary]"
-
-    assert sql =~
-             "LEAD(selecto_root.salary, @p2) OVER (PARTITION BY selecto_root.department ORDER BY selecto_root.salary DESC) AS [next salary]"
-  end
-
-  test "mssql window aggregate names use sql server variants" do
-    query =
-      Selecto.configure(employee_domain(), :mock_connection,
-        adapter: SelectoDBMSSQL.Adapter,
-        validate: false
-      )
-      |> Selecto.select(["first_name", "department", "salary"])
-      |> Selecto.window_function(:stddev, ["salary"],
-        over: [partition_by: ["department"]],
-        as: "salary stdev"
-      )
-      |> Selecto.window_function(:variance, ["salary"],
-        over: [partition_by: ["department"]],
-        as: "salary variance"
-      )
-
-    {sql, params} = Selecto.to_sql(query)
-    sql = normalize_sql(sql)
-
-    assert params == []
-
-    assert sql =~
-             "STDEV(selecto_root.salary) OVER (PARTITION BY selecto_root.department) AS [salary stdev]"
-
-    assert sql =~
-             "VAR(selecto_root.salary) OVER (PARTITION BY selecto_root.department) AS [salary variance]"
-
-    refute sql =~ "STDDEV(selecto_root.salary)"
-    refute sql =~ "VARIANCE(selecto_root.salary)"
-  end
-
-  test "mssql non-window aggregate names use sql server variants" do
-    query =
-      Selecto.configure(employee_domain(), :mock_connection,
-        adapter: SelectoDBMSSQL.Adapter,
-        validate: false
-      )
-      |> Selecto.select([
-        {:func, :stddev, ["salary"], [as: "salary stdev"]},
-        {:func, :variance, ["salary"], [as: "salary variance"]}
-      ])
-
-    {sql, params} = Selecto.to_sql(query)
-    sql = normalize_sql(sql)
-
-    assert params == []
-    assert sql =~ "select STDEV(selecto_root.salary), VAR(selecto_root.salary)"
-    refute sql =~ "stddev(selecto_root.salary)"
-    refute sql =~ "variance(selecto_root.salary)"
-  end
-
   test "json_select + json_filter build valid SQL in SELECT and WHERE" do
     query =
       Selecto.configure(product_domain(), :mock_connection, validate: false)
@@ -416,93 +273,6 @@ defmodule Selecto.WindowJsonRegressionTest do
 
     assert sql =~
              "order by selecto_root.price desc, \"metadata\"#>>ARRAY['warehouse', 'zone'] asc"
-  end
-
-  test "mssql json_select + json_filter + json_order_by use json_value" do
-    query =
-      Selecto.configure(product_domain(), :mock_connection,
-        adapter: SelectoDBMSSQL.Adapter,
-        validate: false
-      )
-      |> Selecto.select(["name", "sku", "price"])
-      |> Selecto.json_select([
-        {:json_extract_text, "metadata", "$.price_band", as: "price_band"},
-        {:json_extract_text, "metadata", "$.warehouse.zone", as: "warehouse_zone"}
-      ])
-      |> Selecto.json_filter({:json_contains, "metadata", %{"price_band" => "premium"}})
-      |> Selecto.filter({"active", true})
-      |> Selecto.order_by({"price", :desc})
-      |> Selecto.json_order_by({:json_extract_text, "metadata", "$.warehouse.zone", :asc})
-
-    {sql, params} = Selecto.to_sql(query)
-    sql = normalize_sql(sql)
-    downcased = String.downcase(sql)
-
-    assert params == [true]
-    assert sql =~ "JSON_VALUE([selecto_root].[metadata], '$.price_band') AS [price_band]"
-
-    assert sql =~
-             "JSON_VALUE([selecto_root].[metadata], '$.warehouse.zone') AS [warehouse_zone]"
-
-    assert downcased =~
-             "where (( selecto_root.active = @p1 ) and ( json_value([selecto_root].[metadata], '$.price_band') = 'premium' ))"
-
-    assert downcased =~
-             "order by selecto_root.price desc, json_value([selecto_root].[metadata], '$.warehouse.zone') asc"
-  end
-
-  test "mssql dot-path json selectors and filters use json_value casts" do
-    query =
-      Selecto.configure(product_domain(), :mock_connection,
-        adapter: SelectoDBMSSQL.Adapter,
-        validate: false
-      )
-      |> Selecto.select(["name", "metadata.price_band"])
-      |> Selecto.filter({"metadata.price_band", "premium"})
-
-    {sql, params} = Selecto.to_sql(query)
-    sql = normalize_sql(sql)
-
-    assert params == ["premium"]
-    assert sql =~ "JSON_VALUE([selecto_root].[metadata], '$.price_band')"
-    assert sql =~ "where (( JSON_VALUE([selecto_root].[metadata], '$.price_band') = @p1 ))"
-  end
-
-  test "mssql json path exists uses json_value/json_query helpers" do
-    query =
-      Selecto.configure(product_domain(), :mock_connection,
-        adapter: SelectoDBMSSQL.Adapter,
-        validate: false
-      )
-      |> Selecto.select(["name"])
-      |> Selecto.json_filter({:json_path_exists, "metadata", "$.warehouse.zone"})
-
-    {sql, params} = Selecto.to_sql(query)
-    sql = normalize_sql(sql)
-
-    assert params == []
-
-    assert sql =~
-             "(JSON_QUERY([selecto_root].[metadata], '$.warehouse.zone') IS NOT NULL OR JSON_VALUE([selecto_root].[metadata], '$.warehouse.zone') IS NOT NULL)"
-  end
-
-  test "mssql json array filters use openjson" do
-    query =
-      Selecto.configure(product_domain(), :mock_connection,
-        adapter: SelectoDBMSSQL.Adapter,
-        validate: false
-      )
-      |> Selecto.select(["name"])
-      |> Selecto.filter({"metadata.tags", {:contains, "featured"}})
-      |> Selecto.filter({"metadata.tags", {:contains_all, ["featured", "new"]}})
-
-    {sql, params} = Selecto.to_sql(query)
-    sql = normalize_sql(sql)
-
-    assert params == []
-    assert sql =~ "OPENJSON([selecto_root].[metadata], '$.tags')"
-    assert sql =~ "WHERE value = 'featured'"
-    assert sql =~ "WHERE value = 'new'"
   end
 
   test "mysql json_select + json_filter + json_order_by use json_extract" do
@@ -810,34 +580,6 @@ defmodule Selecto.WindowJsonRegressionTest do
     assert sql =~ "left join order_chain order_chain on order_chain.id = selecto_root.id"
   end
 
-  test "with_recursive_cte omits RECURSIVE keyword for mssql adapter" do
-    query =
-      Selecto.configure(order_domain(), :mock_connection, validate: false)
-      |> Map.put(:adapter, SelectoDBMSSQL.Adapter)
-      |> Selecto.with_recursive_cte("order_chain",
-        base_query: fn ->
-          Selecto.configure(order_domain(), :mock_connection, validate: false)
-          |> Map.put(:adapter, SelectoDBMSSQL.Adapter)
-          |> Selecto.select(["id", "status"])
-          |> Selecto.filter({"status", "processing"})
-        end,
-        recursive_query: fn _cte_ref ->
-          Selecto.configure(order_domain(), :mock_connection, validate: false)
-          |> Map.put(:adapter, SelectoDBMSSQL.Adapter)
-          |> Selecto.select(["id", "status"])
-        end,
-        columns: ["id", "status"],
-        join: [owner_key: :id, related_key: :id, fields: :infer]
-      )
-      |> Selecto.select(["order_number", "order_chain.status"])
-
-    {sql, _params} = Selecto.to_sql(query)
-    sql = normalize_sql(sql)
-
-    refute sql =~ "WITH RECURSIVE"
-    assert sql =~ "WITH order_chain (id, status) AS ("
-  end
-
   test "list filters expand placeholders for non-array-any adapters" do
     query =
       Selecto.configure(order_domain(), :mock_connection, validate: false)
@@ -847,20 +589,15 @@ defmodule Selecto.WindowJsonRegressionTest do
 
     {mysql_sql, _params} = Selecto.to_sql(%{query | adapter: SelectoDBMySQL.Adapter})
     {sqlite_sql, _params} = Selecto.to_sql(%{query | adapter: SelectoDBSQLite.Adapter})
-    {mssql_sql, _params} = Selecto.to_sql(%{query | adapter: SelectoDBMSSQL.Adapter})
 
     mysql_sql = normalize_sql(mysql_sql)
     sqlite_sql = normalize_sql(sqlite_sql)
-    mssql_sql = normalize_sql(mssql_sql)
 
     assert mysql_sql =~ "status IN (?, ?, ?)"
     assert mysql_sql =~ "status NOT IN (?, ?)"
 
     assert sqlite_sql =~ "status IN (?, ?, ?)"
     assert sqlite_sql =~ "status NOT IN (?, ?)"
-
-    assert mssql_sql =~ "status IN (@p1, @p2, @p3)"
-    assert mssql_sql =~ "status NOT IN (@p4, @p5)"
   end
 
   test "with_ctes supports joins: [...] batch auto-join" do

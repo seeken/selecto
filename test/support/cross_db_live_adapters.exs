@@ -34,24 +34,3 @@ defmodule Selecto.TestLiveAdapter.MariaDB do
   defdelegate dialect(), to: SelectoDBMariaDB.Adapter
   def supports?(_feature), do: false
 end
-
-defmodule Selecto.TestLiveAdapter.MSSQL do
-  @behaviour Selecto.DB.Adapter
-
-  def name, do: :mssql
-  def connect(connection) when is_pid(connection), do: {:ok, connection}
-  def connect(opts), do: Tds.start_link(opts)
-
-  def execute(connection, query, params, opts) do
-    case Tds.query(connection, IO.iodata_to_binary(query), params, opts) do
-      {:ok, result} -> {:ok, %{rows: result.rows || [], columns: result.columns || []}}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defdelegate placeholder(index), to: SelectoDBMSSQL.Adapter
-  defdelegate quote_identifier(identifier), to: SelectoDBMSSQL.Adapter
-  defdelegate format_datetime(expression, format), to: SelectoDBMSSQL.Adapter
-  defdelegate dialect(), to: SelectoDBMSSQL.Adapter
-  def supports?(_feature), do: false
-end

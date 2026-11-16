@@ -98,7 +98,7 @@ defmodule Selecto.CoDomainComputedEligibilityTest do
     assert Enum.any?(diagnostics.errors, &(&1.code == :computed_predicate_cycle))
   end
 
-  test "nested predicates remain scalar expressions and SQL Server preserves unknown values" do
+  test "nested predicates remain scalar expressions on portable dialects" do
     nested =
       domain()
       |> update_in([:source, :fields], &(&1 ++ [:nested_eligibility]))
@@ -110,7 +110,6 @@ defmodule Selecto.CoDomainComputedEligibilityTest do
     for adapter <- [
           SelectoDBPostgreSQL.Adapter,
           SelectoDBMySQL.Adapter,
-          SelectoDBMSSQL.Adapter,
           SelectoDBSQLite.Adapter
         ] do
       query =
@@ -123,11 +122,6 @@ defmodule Selecto.CoDomainComputedEligibilityTest do
       refute sql =~ "selecto_root.nested_eligibility"
       refute sql =~ "selecto_root.ready_for_dispatch"
       assert Enum.any?(List.flatten(params), &(&1 == "A"))
-
-      if adapter == SelectoDBMSSQL.Adapter do
-        assert sql =~ "CASE WHEN"
-        assert sql =~ "ELSE NULL END"
-      end
     end
   end
 end

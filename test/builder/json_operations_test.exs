@@ -15,32 +15,6 @@ defmodule Selecto.Builder.JsonOperationsTest do
     end
   end
 
-  test "mssql rejects unsupported json aggregate and construction operations explicitly" do
-    agg_spec = JsonOperations.create_json_operation(:json_agg, "metadata", as: "metadata_items")
-
-    assert_raise Selecto.Builder.ScopeRefusal, ~r/does not support this JSON operation/, fn ->
-      BuilderJsonOperations.build_json_select(agg_spec, adapter: SelectoDBMSSQL.Adapter)
-    end
-
-    build_spec =
-      JsonOperations.create_json_operation(:json_build_object, nil, value: [{"color", "red"}])
-
-    assert_raise Selecto.Builder.ScopeRefusal, ~r/does not support this JSON operation/, fn ->
-      BuilderJsonOperations.build_json_select(build_spec, adapter: SelectoDBMSSQL.Adapter)
-    end
-  end
-
-  test "mssql rejects unsupported json containment direction explicitly" do
-    spec =
-      JsonOperations.create_json_operation(:json_contained, "metadata",
-        value: %{"price_band" => "premium"}
-      )
-
-    assert_raise Selecto.Builder.ScopeRefusal, ~r/does not support this JSON operation/, fn ->
-      BuilderJsonOperations.build_json_filter(spec, adapter: SelectoDBMSSQL.Adapter)
-    end
-  end
-
   test "sqlite renders native JSON containment and aggregation operations" do
     contains_spec =
       JsonOperations.create_json_operation(:json_contains, "metadata",

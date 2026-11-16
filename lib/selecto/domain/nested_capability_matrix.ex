@@ -51,13 +51,15 @@ defmodule Selecto.Domain.NestedCapabilityMatrix do
       "live_evidence" => ["selecto_db_duckdb:write_adapter_test"],
       "proof_boundary" => "finite in-process DuckDB graph fixtures"
     },
+    # Published consumer-schema metadata, not adapter discovery or installation.
+    # Execution still requires the explicitly supplied external SQL Server adapter.
     {"selecto_updato", "mssql"} => %{
       "implementation_status" => "implemented",
       "implemented_features" => @execution_features,
       "maximum_compiler_depth" => 32,
       "live_certified_depth" => 1,
       "live_certified_graph_rows" => 2,
-      "live_evidence" => ["selecto_db_mssql:write_execution_integration_test"],
+      "live_evidence" => ["selecto_db_sqlserver:write_execution_integration_test"],
       "proof_boundary" => "finite opt-in SQL Server graph fixtures"
     },
     {"selecto_components", "web"} => %{

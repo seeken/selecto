@@ -1,5 +1,9 @@
 
 
+## Unreleased SQL Server extraction
+
+- Move SQL Server lowering and regressions to the optional private selecto_db_sqlserver package; retain public version1 dialect hooks and fail clearly for missing adapter modules.
+
 ## 0.6.0 - Unreleased (breaking native builder composition)
 
 - `select/2` appends in order and preserves duplicate selectors and aliases.

@@ -175,6 +175,12 @@ defmodule Selecto.Configuration do
 
     case configured_adapter do
       adapter when is_atom(adapter) and not is_nil(adapter) ->
+        unless Code.ensure_loaded?(adapter) do
+          raise ArgumentError,
+                "adapter #{inspect(adapter)} is unavailable; install its separate adapter package " <>
+                  "and select it explicitly"
+        end
+
         Selecto.DB.Adapter.validate_contract!(adapter)
         adapter
 

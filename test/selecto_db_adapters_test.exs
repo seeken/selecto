@@ -5,7 +5,6 @@ defmodule Selecto.DB.AdaptersTest do
     SelectoDBPostgreSQL.Adapter,
     SelectoDBMySQL.Adapter,
     SelectoDBMariaDB.Adapter,
-    SelectoDBMSSQL.Adapter,
     SelectoDBDuckDB.Adapter,
     SelectoDBSQLite.Adapter
   ]
@@ -35,7 +34,6 @@ defmodule Selecto.DB.AdaptersTest do
     assert SelectoDBMySQL.Adapter.placeholder(3) == "?"
     assert SelectoDBMariaDB.Adapter.placeholder(3) == "?"
     assert SelectoDBSQLite.Adapter.placeholder(3) == "?"
-    assert SelectoDBMSSQL.Adapter.placeholder(3) |> IO.iodata_to_binary() == "@p3"
     assert SelectoDBDuckDB.Adapter.placeholder(3) |> IO.iodata_to_binary() == "$3"
   end
 
@@ -44,14 +42,12 @@ defmodule Selecto.DB.AdaptersTest do
     assert SelectoDBMySQL.Adapter.quote_identifier("order") == "`order`"
     assert SelectoDBMariaDB.Adapter.quote_identifier("order") == "`order`"
     assert SelectoDBSQLite.Adapter.quote_identifier("order") == "\"order\""
-    assert SelectoDBMSSQL.Adapter.quote_identifier("order") == "[order]"
     assert SelectoDBDuckDB.Adapter.quote_identifier("order") == "\"order\""
   end
 
   test "non-postgresql adapters return dependency errors when driver is unavailable" do
     mysql_result = SelectoDBMySQL.Adapter.connect([])
     mariadb_result = SelectoDBMariaDB.Adapter.connect([])
-    mssql_result = SelectoDBMSSQL.Adapter.connect([])
     duckdb_result = SelectoDBDuckDB.Adapter.connect([])
     sqlite_result = SelectoDBSQLite.Adapter.connect([])
 
@@ -61,12 +57,6 @@ defmodule Selecto.DB.AdaptersTest do
     else
       assert mysql_result == {:error, {:adapter_dependency_missing, :myxql}}
       assert mariadb_result == {:error, {:adapter_dependency_missing, :myxql}}
-    end
-
-    if Code.ensure_loaded?(Tds) do
-      assert match?({:ok, _}, mssql_result) or match?({:error, _}, mssql_result)
-    else
-      assert mssql_result == {:error, {:adapter_dependency_missing, :tds}}
     end
 
     if Code.ensure_loaded?(Duckdbex) do

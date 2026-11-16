@@ -41,6 +41,19 @@ defmodule ExternalAdapterTest do
              Selecto.execute(selecto, analyze_complexity: false)
   end
 
+  test "an explicitly selected missing adapter fails before connecting" do
+    refute Code.ensure_loaded?(Tds)
+
+    assert_raise ArgumentError,
+                 ~r/adapter .* is unavailable; install its separate adapter package/,
+                 fn ->
+                   Selecto.configure(@domain, :compile_only,
+                     adapter: UninstalledCommercialAdapter,
+                     validate: false
+                   )
+                 end
+  end
+
   test "an explicitly incompatible adapter fails at injection time" do
     assert_raise ArgumentError, ~r/declares contract version 2.*requires 1/, fn ->
       Selecto.configure(@domain, :must_not_connect,
