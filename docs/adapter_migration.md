@@ -98,3 +98,28 @@ do not allow native rendering or exempt an entire source file. Runtime identifie
 interning has a separately documented one-line atom-audit exception: its validated
 creation site is serialized with process-specific global-lock requesters and
 charged against a fixed VM-lifetime budget.
+
+## Optional compiler dialect hooks (contract version 1)
+
+`Selecto.DB.Dialect.contract_version/0` identifies the public fragment contract.
+External adapters return their own dialect module from `dialect/0` and may
+implement the optional query hooks without a driver dependency in Selecto:
+
+- `query_strategy/2` selects finite recursive-CTE, VALUES-CTE, positional
+  grouping and JSON-root-qualification strategies. `:default` retains the
+  portable behavior. Strategy values are syntax choices, not caller SQL.
+- `aggregate_function_name/2` maps `:stddev` and `:variance` names;
+  `validate_window_function/2` returns `:ok` or a structured refusal.
+- `render_filtered_aggregate/2` receives `Selecto.Dialect.Query.Aggregate`.
+- `render_scalar_predicate/2` receives `Selecto.Dialect.Query.Predicate` and
+  returns the rendered expression and its ordered bindings. A lowering that
+  repeats a predicate must repeat its bindings in the same order.
+- `render_collection_query/2` receives `Selecto.Dialect.Query.Collection` and
+  returns the rendered query plus ordered bindings, or a structured refusal.
+
+Core owns domain/governance validation, field resolution, correlation and bind
+accounting. These fragments contain compiler-generated expressions; they do
+not add a caller-controlled SQL API. Returning an error fails closed; an
+absent optional callback retains existing portable behavior. The independently
+packaged adapter fixture exercises the new types through the installed core
+artifact. This packaging proof does not certify a database or a driver.

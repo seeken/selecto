@@ -101,6 +101,36 @@ defmodule Selecto.DialectSupport do
     render(adapter, callback, fragment, context, :view_publication)
   end
 
+  @doc "Invokes a finite optional compiler strategy through the public dialect."
+  def query_strategy(adapter, strategy, selecto)
+      when strategy in [:recursive_cte, :values_cte, :group_by_position, :json_root_alias] do
+    optional_query_hook(adapter, :query_strategy, strategy, selecto)
+  end
+
+  def aggregate_function_name(adapter, function, selecto) when function in [:stddev, :variance],
+    do: optional_query_hook(adapter, :aggregate_function_name, function, selecto)
+
+  def validate_window_function(adapter, function, selecto),
+    do: optional_query_hook(adapter, :validate_window_function, function, selecto)
+
+  def render_filtered_aggregate(adapter, %Selecto.Dialect.Query.Aggregate{} = fragment, selecto),
+    do: optional_query_hook(adapter, :render_filtered_aggregate, fragment, selecto)
+
+  def render_scalar_predicate(adapter, %Selecto.Dialect.Query.Predicate{} = fragment, selecto),
+    do: optional_query_hook(adapter, :render_scalar_predicate, fragment, selecto)
+
+  def render_collection_query(adapter, %Selecto.Dialect.Query.Collection{} = fragment, selecto),
+    do: optional_query_hook(adapter, :render_collection_query, fragment, selecto)
+
+  defp optional_query_hook(adapter, callback, fragment, selecto) do
+    with {:ok, dialect} <- dialect(adapter),
+         true <- AdapterSupport.callback_available?(dialect, callback, 2) do
+      apply(dialect, callback, [fragment, selecto])
+    else
+      _ -> :not_implemented
+    end
+  end
+
   defp render(adapter, callback, fragment, selecto, feature) do
     with {:ok, dialect} <- dialect(adapter),
          true <- AdapterSupport.callback_available?(dialect, callback, 2) do

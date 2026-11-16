@@ -8,6 +8,9 @@ defmodule Selecto.DB.Dialect do
   back to another database's SQL.
   """
 
+  @doc "Version of the optional public dialect fragment contract."
+  def contract_version, do: 1
+
   alias Selecto.Dialect.TextSearch.{Predicate, Rank}
   alias Selecto.Dialect.Text.Normalization, as: TextNormalization
   alias Selecto.Dialect.Predicate.Comparison
@@ -67,7 +70,27 @@ defmodule Selecto.DB.Dialect do
   @callback render_view_refresh(Refresh.t(), Selecto.t() | map()) :: render_result()
   @callback render_view_index(Index.t(), Selecto.t() | map()) :: render_result()
 
-  @optional_callbacks render_text_search_predicate: 2,
+  @typedoc "Finite compiler strategies; :default retains portable core behavior."
+  @type query_strategy :: :recursive_cte | :values_cte | :group_by_position | :json_root_alias
+  @type strategy_result :: :default | :plain | :select_union | :expression | :qualified
+
+  @callback query_strategy(query_strategy(), Selecto.t() | map()) :: strategy_result()
+  @callback aggregate_function_name(:stddev | :variance, Selecto.t() | map()) :: String.t()
+  @callback validate_window_function(atom(), Selecto.t() | map()) :: :ok | {:error, term()}
+  @callback render_filtered_aggregate(Selecto.Dialect.Query.Aggregate.t(), Selecto.t() | map()) ::
+              render_result()
+  @callback render_scalar_predicate(Selecto.Dialect.Query.Predicate.t(), Selecto.t() | map()) ::
+              {:ok, {iodata(), list()}} | {:error, term()}
+  @callback render_collection_query(Selecto.Dialect.Query.Collection.t(), Selecto.t() | map()) ::
+              {:ok, {iodata(), list()}} | {:error, term()}
+
+  @optional_callbacks query_strategy: 2,
+                      aggregate_function_name: 2,
+                      validate_window_function: 2,
+                      render_filtered_aggregate: 2,
+                      render_scalar_predicate: 2,
+                      render_collection_query: 2,
+                      render_text_search_predicate: 2,
                       render_text_search_rank: 2,
                       render_interval: 2,
                       render_computed_value: 2,

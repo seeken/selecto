@@ -7,6 +7,9 @@ defmodule AcmeSelectoAdapter do
   def adapter_contract_version, do: Selecto.DB.Adapter.contract_version()
 
   @impl true
+  def dialect, do: AcmeSelectoDialect
+
+  @impl true
   def name, do: :acme_external_fixture
 
   @impl true

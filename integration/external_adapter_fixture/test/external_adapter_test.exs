@@ -49,4 +49,30 @@ defmodule ExternalAdapterTest do
       )
     end
   end
+
+  test "installed dialect hooks use only public compiled fragments and ordered binds" do
+    assert Selecto.DB.Dialect.contract_version() == 1
+
+    assert Selecto.DialectSupport.query_strategy(AcmeSelectoAdapter, :recursive_cte, %{}) ==
+             :plain
+
+    fragment = %Selecto.Dialect.Query.Predicate{expression: "@acme1 = @acme2", params: [7, 9]}
+
+    assert {:ok, {rendered, [7, 9]}} =
+             Selecto.DialectSupport.render_scalar_predicate(AcmeSelectoAdapter, fragment, %{})
+
+    assert IO.iodata_to_binary(rendered) == "TRUTH(@acme1 = @acme2)"
+
+    collection = %Selecto.Dialect.Query.Collection{
+      format: :json_agg,
+      fields: [],
+      table: "widgets",
+      table_alias: "w",
+      where: "1=1",
+      params: []
+    }
+
+    assert {:error, :external_collection_refusal} =
+             Selecto.DialectSupport.render_collection_query(AcmeSelectoAdapter, collection, %{})
+  end
 end
