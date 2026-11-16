@@ -63,6 +63,18 @@ defmodule ExternalAdapterTest do
     end
   end
 
+  test "the installed core is driver-free and an absent SQL Server selection fails clearly" do
+    refute Code.ensure_loaded?(Tds)
+    refute Code.ensure_loaded?(SelectoDBSQLServer.Adapter)
+
+    assert_raise ArgumentError, ~r/unavailable; install its separate adapter package/, fn ->
+      Selecto.configure(@domain, :must_not_connect,
+        adapter: SelectoDBSQLServer.Adapter,
+        validate: false
+      )
+    end
+  end
+
   test "installed dialect hooks use only public compiled fragments and ordered binds" do
     assert Selecto.DB.Dialect.contract_version() == 1
 
