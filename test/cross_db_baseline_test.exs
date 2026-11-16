@@ -3,7 +3,7 @@ Code.require_file("support/cross_db_live_adapters.exs", __DIR__)
 defmodule Selecto.CrossDBBaselineTest do
   use ExUnit.Case, async: false
 
-  alias Selecto.TestLiveAdapter.{MySQL, MariaDB, MSSQL}
+  alias Selecto.TestLiveAdapter.{MySQL, MariaDB}
 
   @moduletag :requires_db
   @moduletag timeout: 120_000
@@ -50,21 +50,6 @@ defmodule Selecto.CrossDBBaselineTest do
     assert_query_shape_suite(MariaDB, conn)
     assert_duplicate_column_name_count(MariaDB, conn)
     assert_stream_capability_error(MariaDB, conn)
-  end
-
-  @tag :mssql
-  test "mssql adapter executes baseline query" do
-    assert {:ok, conn} =
-             connect_with_retry(fn -> MSSQL.connect(mssql_opts()) end)
-
-    on_exit(fn ->
-      close_connection(conn)
-    end)
-
-    assert_single_value_query(MSSQL, conn, "SELECT CAST(1 AS INT) AS value")
-    assert_query_shape_suite(MSSQL, conn)
-    assert_duplicate_column_name_count(MSSQL, conn)
-    assert_stream_capability_error(MSSQL, conn)
   end
 
   @tag :sqlite
@@ -256,20 +241,6 @@ defmodule Selecto.CrossDBBaselineTest do
     assert details[:adapter_contract] == :supports_stream
   end
 
-  defp query_shape_sql(MSSQL) do
-    """
-    SELECT id, name, bucket
-    FROM (
-      SELECT 1 AS id, 'bravo' AS name, 'x' AS bucket
-      UNION ALL SELECT 2 AS id, 'alpha' AS name, 'x' AS bucket
-      UNION ALL SELECT 3 AS id, 'charlie' AS name, 'y' AS bucket
-    ) AS sample
-    WHERE id >= 2
-    ORDER BY name ASC
-    OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
-    """
-  end
-
   defp query_shape_sql(_adapter) do
     """
     SELECT id, name, bucket
@@ -383,17 +354,6 @@ defmodule Selecto.CrossDBBaselineTest do
       username: env("SELECTO_MARIADB_USER", "root"),
       password: env("SELECTO_MARIADB_PASSWORD", "root"),
       database: env("SELECTO_MARIADB_DATABASE", "selecto_test")
-    ]
-  end
-
-  defp mssql_opts do
-    [
-      hostname: env("SELECTO_MSSQL_HOST", "localhost"),
-      port: env_int("SELECTO_MSSQL_PORT", 1433),
-      username: env("SELECTO_MSSQL_USER", "sa"),
-      password: env("SELECTO_MSSQL_PASSWORD", "StrongPass123!"),
-      database: env("SELECTO_MSSQL_DATABASE", "master"),
-      ssl: false
     ]
   end
 

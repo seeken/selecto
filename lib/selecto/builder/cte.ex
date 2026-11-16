@@ -12,7 +12,6 @@ defmodule Selecto.Builder.CteSql do
   """
 
   alias Selecto.Advanced.CTE.Spec
-  alias Selecto.AdapterSupport
   alias Selecto.Builder.Sql
 
   @doc """
@@ -308,10 +307,7 @@ defmodule Selecto.Builder.CteSql do
         "WITH "
 
       _ ->
-        case AdapterSupport.adapter_name(adapter) do
-          :mssql -> "WITH "
-          _ -> "WITH RECURSIVE "
-        end
+        "WITH RECURSIVE "
     end
   end
 

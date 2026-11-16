@@ -324,8 +324,7 @@ defmodule Selecto.ComputedValueColumnsTest do
     for adapter <- [
           SelectoDBPostgreSQL.Adapter,
           SelectoDBSQLite.Adapter,
-          SelectoDBMySQL.Adapter,
-          SelectoDBMSSQL.Adapter
+          SelectoDBMySQL.Adapter
         ] do
       {sql, []} = sql(%{query | adapter: adapter})
       assert sql =~ "LOWER("

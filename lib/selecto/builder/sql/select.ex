@@ -9,7 +9,6 @@ defmodule Selecto.Builder.Sql.Select do
 
   import Selecto.Builder.Sql.Helpers
 
-  alias Selecto.AdapterSupport
   alias Selecto.Dialect.Bucket.Expression, as: BucketExpression
   alias Selecto.Dialect.Collection.Operation, as: CollectionOperation
   alias Selecto.Dialect.DateTime.Operation, as: DateTimeOperation
@@ -1046,19 +1045,7 @@ defmodule Selecto.Builder.Sql.Select do
         Selecto.Builder.ScopeRefusal.unsupported!(error)
 
       :not_implemented ->
-        if AdapterSupport.adapter_name(selecto.adapter) == :mssql do
-          scalar = [
-            "(CASE WHEN ",
-            predicate,
-            " THEN CAST(1 AS BIT) WHEN NOT (",
-            predicate,
-            ") THEN CAST(0 AS BIT) ELSE NULL END)"
-          ]
-
-          {scalar, joins, params ++ params}
-        else
-          {["(", predicate, ")"], joins, params}
-        end
+        {["(", predicate, ")"], joins, params}
     end
   end
 
@@ -1649,7 +1636,7 @@ defmodule Selecto.Builder.Sql.Select do
         Selecto.Builder.ScopeRefusal.unsupported!(error)
 
       :not_implemented ->
-        legacy_filtered_aggregate_iodata(
+        standard_filtered_aggregate_iodata(
           selecto,
           function_name,
           args,
@@ -1660,75 +1647,17 @@ defmodule Selecto.Builder.Sql.Select do
     end
   end
 
-  defp legacy_filtered_aggregate_iodata(
-         selecto,
+  defp standard_filtered_aggregate_iodata(
+         _selecto,
          function_name,
          arg_iodata_parts,
-         distinct,
+         _distinct,
          filters_iodata,
          fallback_iodata
        ) do
-    case AdapterSupport.adapter_name(Map.fetch!(selecto, :adapter)) do
-      :mssql ->
-        build_mssql_filtered_aggregate_iodata(
-          function_name,
-          arg_iodata_parts,
-          distinct,
-          filters_iodata
-        )
-
-      _ ->
-        function_call_iodata = fallback_iodata || [function_name, "(", arg_iodata_parts, ")"]
-        [function_call_iodata, " FILTER (where ", filters_iodata, ")"]
-    end
+    function_call_iodata = fallback_iodata || [function_name, "(", arg_iodata_parts, ")"]
+    [function_call_iodata, " FILTER (where ", filters_iodata, ")"]
   end
-
-  defp build_mssql_filtered_aggregate_iodata(
-         function_name,
-         arg_iodata_parts,
-         distinct,
-         filters_iodata
-       ) do
-    normalized_name = function_name |> to_string() |> String.downcase()
-
-    case {normalized_name, arg_iodata_parts} do
-      {name, [arg_iodata]} when name in ["count", "sum", "avg", "min", "max", "stdev", "var"] ->
-        conditional_arg =
-          mssql_filtered_aggregate_arg(normalized_name, arg_iodata, filters_iodata)
-
-        [function_name, "(", maybe_distinct_prefix(distinct), conditional_arg, ")"]
-
-      {"string_agg", [value_iodata, separator_iodata]} when not distinct ->
-        conditional_arg = ["CASE WHEN ", filters_iodata, " THEN ", value_iodata, " END"]
-        [function_name, "(", conditional_arg, ", ", separator_iodata, ")"]
-
-      _ ->
-        error =
-          Error.validation_error("MSSQL does not support this aggregate FILTER shape yet", %{
-            adapter: :mssql,
-            function: function_name,
-            distinct: distinct,
-            argument_count: length(arg_iodata_parts),
-            unsupported_feature: :aggregate_filter
-          })
-
-        Selecto.Builder.ScopeRefusal.unsupported!(error)
-    end
-  end
-
-  defp mssql_filtered_aggregate_arg("count", arg_iodata, filters_iodata) do
-    value_iodata = if star_selector_iodata?(arg_iodata), do: "1", else: arg_iodata
-    ["CASE WHEN ", filters_iodata, " THEN ", value_iodata, " END"]
-  end
-
-  defp mssql_filtered_aggregate_arg(_function_name, arg_iodata, filters_iodata) do
-    ["CASE WHEN ", filters_iodata, " THEN ", arg_iodata, " END"]
-  end
-
-  defp maybe_distinct_prefix(true), do: "DISTINCT "
-  defp maybe_distinct_prefix(false), do: []
-
-  defp star_selector_iodata?(iodata), do: IO.iodata_to_binary(iodata) == "*"
 
   defp to_boolean(value) when value in [true, false], do: value
   defp to_boolean(_value), do: false
@@ -1739,11 +1668,7 @@ defmodule Selecto.Builder.Sql.Select do
         check_string(name)
 
       :not_implemented ->
-        case Map.fetch!(selecto, :adapter)
-             |> Selecto.AdapterSupport.adapter_name() do
-          :mssql -> "STDEV"
-          _ -> "stddev"
-        end
+        "stddev"
     end
   end
 
@@ -1753,11 +1678,7 @@ defmodule Selecto.Builder.Sql.Select do
         check_string(name)
 
       :not_implemented ->
-        case Map.fetch!(selecto, :adapter)
-             |> Selecto.AdapterSupport.adapter_name() do
-          :mssql -> "VAR"
-          _ -> "variance"
-        end
+        "variance"
     end
   end
 
@@ -2152,7 +2073,7 @@ defmodule Selecto.Builder.Sql.Select do
   defp expression_grouping?(selecto) do
     case Selecto.DialectSupport.query_strategy(selecto.adapter, :group_by_position, selecto) do
       :expression -> true
-      _ -> AdapterSupport.adapter_name(selecto.adapter) == :mssql
+      _ -> false
     end
   end
 

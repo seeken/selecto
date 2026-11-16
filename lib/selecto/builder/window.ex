@@ -456,20 +456,7 @@ defmodule Selecto.Builder.Window do
         Selecto.Builder.ScopeRefusal.unsupported!(error)
 
       :not_implemented ->
-        case AdapterSupport.adapter_name(adapter) do
-          :mssql ->
-            error =
-              Error.validation_error("MSSQL window functions do not support nth_value yet", %{
-                adapter: :mssql,
-                function: :nth_value,
-                unsupported_feature: :window_nth_value
-              })
-
-            Selecto.Builder.ScopeRefusal.unsupported!(error)
-
-          _ ->
-            :ok
-        end
+        :ok
     end
   end
 
@@ -481,11 +468,7 @@ defmodule Selecto.Builder.Window do
         name
 
       :not_implemented ->
-        case Map.get(selecto, :adapter, AdapterSupport.default_adapter())
-             |> AdapterSupport.adapter_name() do
-          :mssql -> "STDEV"
-          _ -> "STDDEV"
-        end
+        "STDDEV"
     end
   end
 
@@ -497,11 +480,7 @@ defmodule Selecto.Builder.Window do
         name
 
       :not_implemented ->
-        case Map.get(selecto, :adapter, AdapterSupport.default_adapter())
-             |> AdapterSupport.adapter_name() do
-          :mssql -> "VAR"
-          _ -> "VARIANCE"
-        end
+        "VARIANCE"
     end
   end
 
