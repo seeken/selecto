@@ -1355,6 +1355,15 @@ defmodule Selecto.Rule.Contract do
     do: ["rule:logic"] ++ Enum.flat_map(test["rules"], &test_features/1)
 
   defp test_features(%{"op" => "not", "rule" => rule}), do: ["rule:logic" | test_features(rule)]
+
+  defp test_features(%{"op" => "object.shape", "properties" => properties}),
+    do: [
+      "rule:object.shape" | Enum.flat_map(properties, fn {_key, rule} -> test_features(rule) end)
+    ]
+
+  defp test_features(%{"op" => "path.test", "test" => test}),
+    do: ["rule:path.test" | test_features(test)]
+
   defp test_features(%{"op" => op}), do: ["rule:#{op}"]
 
   defp known_keys(map, allowed, path) do
