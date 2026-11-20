@@ -18,6 +18,12 @@
 
 ## Unreleased
 
+- An adapter that enforces the read deadline itself (`supports?(:execute_timeout)`)
+  now also receives `selecto_default_timeout: true` when the caller gave no
+  `:timeout` and the remaining time is Selecto's 30 second default. Nothing
+  changes for callers; the PostgreSQL adapter uses it to send a server
+  `statement_timeout` only for reads that asked for a deadline (user ruling
+  2026-11-20).
 - Add an opt-in PostgreSQL/SQLite subselect guard that bounds child count, scalar
   bytes and projected JSON before constructing or aggregating child JSON. A NULL
   sentinel signals overflow; empty complete collections remain `[]`. Optional

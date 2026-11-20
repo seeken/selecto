@@ -40,7 +40,10 @@ defmodule Selecto.DB.Adapter do
     `{:error, reason}` instead of waiting. Selecto then runs the query in the
     calling process (when no performance hooks are registered there and
     `:cache` is off), passes the remaining time as `:timeout`, and returns
-    the same timeout error as the task would.
+    the same timeout error as the task would. When the caller gave no
+    `:timeout` and the time is Selecto's default, the options also carry
+    `selecto_default_timeout: true`, so an adapter can tell a deadline that was
+    asked for from one that was not.
   """
 
   @contract_version 1

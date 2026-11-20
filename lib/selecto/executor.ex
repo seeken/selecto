@@ -1414,6 +1414,12 @@ defmodule Selecto.Executor do
 
   defp effective_timeout(opts), do: min(opts[:timeout] || @default_timeout, @max_timeout)
 
+  # Whether the caller asked for this deadline (`:timeout`) or it is the
+  # default above. An adapter that enforces the deadline itself is told
+  # (`selecto_default_timeout: true`), so it can keep a server-side deadline
+  # for the reads that asked for one.
+  defp timeout_source(opts), do: if(is_nil(opts[:timeout]), do: :default, else: :caller)
+
   # Time an adapter that enforces the deadline itself has to end a read and undo
   # it before its task is shut down.
   @adapter_grace 5_000
@@ -1434,7 +1440,8 @@ defmodule Selecto.Executor do
     # Wrap execution in Task.async for timeout enforcement
     task =
       Selecto.TaskSupervisor.async(fn ->
-        if adapter_deadline?, do: Process.put(@task_deadline, started_at + timeout)
+        if adapter_deadline?,
+          do: Process.put(@task_deadline, {started_at + timeout, timeout_source(opts)})
 
         if restore_hooks? do
           Selecto.Performance.Hooks.restore_hooks(hook_snapshot)
@@ -1482,7 +1489,7 @@ defmodule Selecto.Executor do
         :not_started
       else
         try do
-          {:done, work.(started_at + timeout)}
+          {:done, work.({started_at + timeout, timeout_source(opts)})}
         catch
           :exit, reason -> {:exited, reason}
           :throw, value -> {:exited, {{:nocatch, value}, __STACKTRACE__}}
@@ -2081,8 +2088,9 @@ defmodule Selecto.Executor do
   defp runtime_connection(selecto), do: Selecto.Runtime.Context.connection(selecto)
   defp runtime_adapter(selecto), do: Selecto.Runtime.Context.adapter(selecto)
 
-  # `deadline` (monotonic milliseconds) is set when the adapter enforces the
-  # timeout itself; it then receives the time remaining as `:timeout`.
+  # `deadline` (`{monotonic milliseconds, :caller | :default}`) is set when the
+  # adapter enforces the timeout itself; it then receives the time remaining as
+  # `:timeout`, with `selecto_default_timeout: true` when the caller gave none.
   defp execute_with_hooks(selecto, hook_options, query_id, start_time, deadline) do
     Selecto.Performance.Hooks.with_hooks(
       selecto,
@@ -2118,7 +2126,10 @@ defmodule Selecto.Executor do
 
   defp deadline_options(nil), do: []
 
-  defp deadline_options(deadline),
+  defp deadline_options({deadline, :default}),
+    do: deadline_options({deadline, :caller}) ++ [selecto_default_timeout: true]
+
+  defp deadline_options({deadline, :caller}),
     do: [timeout: max(deadline - System.monotonic_time(:millisecond), 1)]
 
   defp hook_options(opts) do

@@ -155,6 +155,14 @@ defmodule Selecto.ExecuteEntryPointTest do
       assert_received {:adapter_execute, caller_pid, opts}
       assert caller_pid == self()
       assert opts[:timeout] in 1..1_000
+      # The caller asked for this deadline.
+      refute Keyword.has_key?(opts, :selecto_default_timeout)
+
+      # Without `:timeout` the adapter is told the deadline is Selecto's default.
+      assert {:ok, _result} = Selecto.execute(query(CallerAdapter))
+      assert_received {:adapter_execute, ^caller_pid, opts}
+      assert opts[:timeout] in 1..30_000
+      assert opts[:selecto_default_timeout] == true
     end
 
     test "in a task when performance hooks are registered or the cache is on" do
@@ -165,8 +173,14 @@ defmodule Selecto.ExecuteEntryPointTest do
 
       # The adapter enforces the deadline here too: a task killed in a read would
       # abandon it on a connection the host may hold.
-      assert_received {:adapter_execute, hooked_pid,
-                       [selecto_generated: true, selecto_read: true, timeout: timeout]}
+      assert_received {:adapter_execute, hooked_pid, hooked_opts}
+
+      assert [
+               selecto_default_timeout: true,
+               selecto_generated: true,
+               selecto_read: true,
+               timeout: timeout
+             ] = Enum.sort(hooked_opts)
 
       assert timeout > 0
 
@@ -179,8 +193,14 @@ defmodule Selecto.ExecuteEntryPointTest do
       assert {:ok, _result} =
                Selecto.execute(query(CallerAdapter), cache: true, cache_namespace: namespace)
 
-      assert_received {:adapter_execute, cached_pid,
-                       [selecto_generated: true, selecto_read: true, timeout: _]}
+      assert_received {:adapter_execute, cached_pid, cached_opts}
+
+      assert [
+               selecto_default_timeout: true,
+               selecto_generated: true,
+               selecto_read: true,
+               timeout: _
+             ] = Enum.sort(cached_opts)
 
       refute cached_pid == self()
     end
