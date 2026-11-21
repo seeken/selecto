@@ -1064,7 +1064,7 @@ defmodule Selecto.WindowJsonRegressionTest do
     sql = normalize_sql(sql)
 
     assert params == []
-    assert sql =~ "LEFT JOIN customers customer ON selecto_root.customer_id = customer.id"
+    assert sql =~ "left join customers customer on customer.id = selecto_root.customer_id"
     refute sql =~ "ON orders.customer_id = customer.id"
   end
 
@@ -1116,7 +1116,7 @@ defmodule Selecto.WindowJsonRegressionTest do
     assert params == []
 
     assert sql =~
-             "LEFT JOIN ref_load_statuses ref_load_status ON selecto_root.status = ref_load_status.id"
+             "left join ref_load_statuses ref_load_status on ref_load_status.id = selecto_root.status"
 
     refute sql =~ "selecto_root.ref_load_status_id = ref_load_status.id"
   end
@@ -1157,12 +1157,12 @@ defmodule Selecto.WindowJsonRegressionTest do
     assert params == []
 
     assert sql =~
-             "LEFT JOIN ref_load_statuses ref_load_status ON selecto_root.status = ref_load_status.id"
+             "left join ref_load_statuses ref_load_status on ref_load_status.id = selecto_root.status"
 
     refute sql =~ "selecto_root.ref_load_status_id = ref_load_status.id"
   end
 
-  test "snowflake_dimension with normalization chain keeps custom root keys" do
+  test "snowflake_dimension normalization lists are refused" do
     snowflake_domain =
       order_domain_with_status_dimension_join()
       |> put_in([:joins, :ref_load_status, :type], :snowflake_dimension)
@@ -1170,24 +1170,9 @@ defmodule Selecto.WindowJsonRegressionTest do
         %{table: "status_groups", key: "id", foreign_key: "status_group_id"}
       ])
 
-    query =
+    assert_raise ArgumentError, ~r/invalid_domain: .*normalization_joins were removed/, fn ->
       Selecto.configure(snowflake_domain, :mock_connection, validate: false)
-      |> Selecto.select(["ref_load_status.name", {:count, "*"}])
-      |> Selecto.group_by(["ref_load_status.name"])
-      |> Selecto.limit(5)
-
-    {sql, params} = Selecto.to_sql(query)
-    sql = normalize_sql(sql)
-
-    assert params == []
-
-    assert sql =~
-             "LEFT JOIN ref_load_statuses ref_load_status ON selecto_root.status = ref_load_status.id"
-
-    assert sql =~
-             "LEFT JOIN status_groups ref_load_status_status_groups ON ref_load_status.status_group_id = ref_load_status_status_groups.id"
-
-    refute sql =~ "selecto_root.ref_load_status_id = ref_load_status.id"
+    end
   end
 
   test "lateral subquery join includes subquery params and keeps global placeholder order" do

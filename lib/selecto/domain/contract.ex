@@ -84,6 +84,7 @@ defmodule Selecto.Domain.Contract do
     |> validate_tenant_requirement(authored_domain)
     |> Relations.validate(source, schemas)
     |> Kernel.++(Selecto.Domain.Values.validate(normalized_domain))
+    |> Kernel.++(Selecto.Domain.JoinConditions.errors(normalized_domain))
     |> Joins.validate(joins, source, schemas)
     |> Query.validate(query, field_index)
     |> QueryMembersValidator.validate(query)

@@ -245,131 +245,109 @@ joins: %{
 }
 ```
 
-#### Right Join
+#### Right and Full Joins
 ```elixir
 joins: %{
-  association_name: %{type: :right}
+  association_name: %{type: :right}   # or :full
 }
 ```
 
-### Advanced Join Types
+The target is read through a derived table that applies the association's
+`where` and, for a tenant-paired target, the query tenant. Only a direct
+association can be joined `right` or `full`.
 
-#### Star Dimension (OLAP)
-For business intelligence and analytics queries with optimized aggregation.
+### Star Dimension
+For business intelligence and analytics queries.
 
 ```elixir
 joins: %{
   dimension_name: %{
     type: :star_dimension,
-    display_field: :name,           # Primary display field
-    aggregation_friendly: true     # Optimize for GROUP BY
+    display_field: :name,           # default :name; must be a target field
+    alias: "dim"                    # optional authored alias
   }
 }
 ```
 
 **Generated Fields:**
 - `dimension_name_display` - Display field value
-- `dimension_name_id` - Foreign key value  
-- Additional fields from schema
+- `dimension_name_facet` - Facet filter over the display field
 
-#### Snowflake Dimension (Normalized OLAP)
-For normalized dimension tables requiring additional joins.
+Further normalised dimension tables (a snowflake) are nested associations
+joined under the dimension (`joins: %{dimension_name: %{type:
+:star_dimension, joins: %{region: %{type: :left}}}}`). `dimension` and
+`snowflake_dimension` are native aliases of `star_dimension`.
+
+### Association Conditions
+Owner/target field comparisons ANDed after the key equality in every join.
 
 ```elixir
-joins: %{
-  dimension_name: %{
-    type: :snowflake_dimension,
-    display_field: :name,
-    normalization_joins: [
-      %{table: "countries", alias: "co", join_field: :country_id},
-      %{table: "regions", alias: "re", join_field: :region_id}
+associations: %{
+  price: %{
+    queryable: :prices, field: :price,
+    owner_key: :product_id, related_key: :product_id,
+    conditions: [
+      %{left: :ordered_on, op: :gte, right: :valid_from},
+      %{left: :ordered_on, op: :lt, right: :valid_to, open: true}
     ]
   }
 }
 ```
 
-#### Hierarchical Joins
-For tree-structured data with multiple implementation patterns.
+See [Join Families](join_families.md) for the rules.
 
-##### Adjacency List Pattern
+### Hierarchical Join (Adjacency List, PostgreSQL only)
+
 ```elixir
 joins: %{
   parent_category: %{
     type: :hierarchical,
     hierarchy_type: :adjacency_list,
-    depth_limit: 5,                 # Maximum recursion depth
-    parent_field: :parent_id        # Self-reference field
+    depth_limit: 5,                 # 1..10000, default 5
+    parent_field: :parent_id        # default :parent_id; a target field
   }
 }
 ```
 
 **Generated Fields:**
-- `category_path` - Full path from root as string
-- `category_level` - Depth in hierarchy (0 = root)
-- `category_path_array` - Path as PostgreSQL array
+- `parent_category_path` - Full path from root as string
+- `parent_category_level` - Depth in hierarchy (0 = root)
+- `parent_category_path_array` - Path as PostgreSQL array
 
-##### Materialized Path Pattern
-```elixir
-joins: %{
-  parent_category: %{
-    type: :hierarchical,
-    hierarchy_type: :materialized_path,
-    path_field: :path,              # Field containing path
-    path_separator: "/",            # Path separator character
-    depth_limit: 10
-  }
-}
-```
+Other adapters refuse it with `unsupported_feature`. The portable way to walk
+a tree is a recursive query member (`query_members.ctes` with
+`kind: :recursive`). The `materialized_path` and `closure_table` hierarchy
+types were removed.
 
-**Generated Fields:**
-- `category_ancestors` - Array of ancestor IDs
-- `category_level` - Calculated depth from path
-- `category_path_components` - Split path components
-
-##### Closure Table Pattern
-```elixir
-joins: %{
-  parent_category: %{
-    type: :hierarchical,
-    hierarchy_type: :closure_table,
-    closure_table: "category_closure",
-    ancestor_field: :ancestor_id,
-    descendant_field: :descendant_id,
-    depth_field: :depth
-  }
-}
-```
-
-#### Many-to-Many Tagging
-For flexible tagging and categorization with aggregation support.
+### Many-to-Many Tagging
+A tagging join reads a `join_through` association; `join_keys` are required.
 
 ```elixir
-joins: %{
+associations: %{
   tags: %{
-    type: :tagging,
-    tag_field: :name,               # Field containing tag value
-    junction_table: "post_tags",    # Optional: explicit junction table
-    aggregation_separator: ", "     # Separator for string aggregation
+    queryable: :tags, field: :tags, cardinality: :many,
+    join_through: "post_tags",
+    join_keys: [{:post_id, :id}, {:tag_id, :id}],
+    # bridge scope: all three keys or none
+    source_scope_key: :tenant_id,
+    through_scope_key: :tenant_id,
+    target_scope_key: :tenant_id
   }
+}
+
+joins: %{
+  tags: %{type: :tagging, tag_field: :name}
 }
 ```
 
 **Generated Fields:**
 - `tags_list` - Comma-separated string of all tags
-- `tags_array` - PostgreSQL array of tag values
-- `tags_count` - Count of associated tags
-- `tags_filter` - Special filter field for faceted search
+- `tags_filter` - Multi-select facet filter over the tag field
 
-**Special Filtering:**
+**Filtering:**
 ```elixir
 # Filter by any tag
 {"tags.name", "programming"}
-
-# Filter by tag aggregation
-{"tags_filter", "elixir"}  # Has "elixir" tag
-
-# Filter by tag count
-{"tags_count", {:gte, 3}}  # Has 3+ tags
 ```
 
 ## Common Table Expression (CTE) API

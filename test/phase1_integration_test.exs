@@ -8,23 +8,17 @@ defmodule Selecto.Phase1IntegrationTest do
     assert function_exported?(Selecto.SQL.Params, :finalize_with_ctes, 1)
   end
 
-  test "hierarchy builders return iodata tuples" do
+  test "the adjacency hierarchy builder renders through the adapter dialect" do
+    selecto = %{adapter: SelectoDBPostgreSQL.Adapter}
+
     {adj_sql, adj_params} =
-      Selecto.Builder.Sql.Hierarchy.build_adjacency_list_cte(nil, :test, %{source: "tbl"})
+      Selecto.Builder.Sql.Hierarchy.build_adjacency_list_cte(selecto, :test, %{
+        source: "tbl",
+        my_key: :id,
+        parent_field: :parent_id
+      })
 
-    {mp_sql, mp_params} =
-      Selecto.Builder.Sql.Hierarchy.build_materialized_path_query(nil, :test, %{source: "tbl"})
-
-    {cl_sql, cl_params} =
-      Selecto.Builder.Sql.Hierarchy.build_closure_table_query(nil, :test, %{source: "tbl"})
-
-    assert byte_size(IO.iodata_to_binary(adj_sql)) > 0
-    assert is_list(adj_params)
-
-    assert byte_size(IO.iodata_to_binary(mp_sql)) > 0
-    assert is_list(mp_params)
-
-    assert byte_size(IO.iodata_to_binary(cl_sql)) > 0
-    assert is_list(cl_params)
+    assert IO.iodata_to_binary(adj_sql) =~ ~s(c."parent_id" = h."id")
+    assert adj_params == [5]
   end
 end

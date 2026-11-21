@@ -1058,10 +1058,7 @@ defmodule Selecto.Builder.Sql do
           if Map.get(config, :join_type) == :subquery do
             build_subquery_join(selecto, join, config, fc, p, ctes)
           else
-            pattern = detect_advanced_join_pattern(config)
-            ensure_boundary_renderable!(join, config, pattern)
-
-            case pattern do
+            case detect_advanced_join_pattern(config) do
               {:hierarchy, pattern} ->
                 Hierarchy.build_hierarchy_join_with_cte(
                   selecto,
@@ -1072,15 +1069,6 @@ defmodule Selecto.Builder.Sql do
                   p,
                   ctes
                 )
-
-              {:tagging, _} ->
-                build_tagging_join(selecto, join, config, fc, p, ctes)
-
-              {:olap, type} ->
-                build_olap_join(selecto, join, config, type, fc, p, ctes)
-
-              {:enhanced, join_type} ->
-                build_enhanced_join(selecto, join, config, join_type, fc, p, ctes)
 
               :basic ->
                 {fc ++ [basic_join_iodata(selecto, join, config)], p, ctes}
@@ -1203,6 +1191,8 @@ defmodule Selecto.Builder.Sql do
           {config, []}
       end
 
+    policy = policy ++ preserved_tenant_bound(selecto, target_alias, config)
+
     case Map.get(config, :carry_tenant_field) do
       nil ->
         {config, policy}
@@ -1225,6 +1215,41 @@ defmodule Selecto.Builder.Sql do
         end
     end
   end
+
+  # A tenant-paired target is bound by the pair in ON, which a preserved row
+  # escapes: the engine tenant binds the target's tenant field too (as Perl's
+  # derived table does).
+  defp preserved_tenant_bound(selecto, target_alias, config) do
+    relations = join_relations(selecto, config)
+
+    paired =
+      Map.get(config, :tenant_scope) ||
+        case {tenant_field(relations.source), tenant_field(relations.target)} do
+          {source, target} when not is_nil(source) and not is_nil(target) -> {source, target}
+          _ -> nil
+        end
+
+    case {paired, Selecto.Tenant.engine_filters(selecto)} do
+      {{_source_tenant, target_tenant}, [{_root_field, tenant_id}]} ->
+        type = ExactCompare.declared_type_of(relations.target, target_tenant)
+
+        [
+          ExactCompare.eq(
+            [target_alias, ".", selecto.adapter.quote_identifier(to_string(target_tenant))],
+            {:param, Selecto.Builder.Sql.Where.typed_value(type, tenant_id)},
+            ExactCompare.column?(selecto, target_tenant)
+          )
+        ]
+
+      _ ->
+        []
+    end
+  end
+
+  defp tenant_field(relation) when is_map(relation),
+    do: Map.get(relation, :tenant_field, Map.get(relation, "tenant_field"))
+
+  defp tenant_field(_relation), do: nil
 
   defp drop_policy(association),
     do: association |> Map.delete(:where) |> Map.delete("where")
@@ -1354,97 +1379,12 @@ defmodule Selecto.Builder.Sql do
     |> Enum.intersperse(" and ")
   end
 
-  # Only the basic and portable join renderers AND an association's scope keys
-  # and tenant pair into the join. An advanced join builder that would drop a
-  # resolved relation boundary is refused rather than reading across it.
-  defp ensure_boundary_renderable!(_join, _config, :basic), do: :ok
-
-  # The many-to-many builder ANDs the boundary into its target join.
-  defp ensure_boundary_renderable!(_join, %{join_type: :many_to_many}, {:tagging, _}), do: :ok
-
-  defp ensure_boundary_renderable!(join, config, pattern) do
-    if Enum.any?(
-         [:source_scope_key, :target_scope_key, :tenant_scope, :carry_tenant_field],
-         &Map.get(config, &1)
-       ) do
-      raise ArgumentError,
-            "invalid_domain: join #{inspect(join)} of kind #{inspect(pattern)} cannot apply " <>
-              "its association scope or tenant pair"
-    end
-
-    :ok
-  end
-
-  # Phase 1: Join pattern detection for advanced join types
+  # Every association join renders as one relation (basic_join_iodata/3)
+  # except an adjacency-list hierarchy, which joins its recursive CTE.
   defp detect_advanced_join_pattern(config) do
     case Map.get(config, :join_type) do
-      :hierarchical_adjacency ->
-        {:hierarchy, :adjacency_list}
-
-      :hierarchical_materialized_path ->
-        {:hierarchy, :materialized_path}
-
-      :hierarchical_closure_table ->
-        {:hierarchy, :closure_table}
-
-      :many_to_many ->
-        {:tagging, nil}
-
-      :star_dimension ->
-        {:olap, :star}
-
-      :snowflake_dimension ->
-        {:olap, :snowflake}
-
-      join_type
-      when join_type in [
-             :self_join,
-             :lateral_join,
-             :cross_join,
-             :full_outer_join,
-             :conditional_join
-           ] ->
-        {:enhanced, join_type}
-
-      _ ->
-        :basic
-    end
-  end
-
-  # Phase 3: Full many-to-many tagging implementation
-  defp build_tagging_join(selecto, join, config, fc, p, ctes) do
-    # Use the dedicated tagging builder for proper many-to-many handling
-    alias Selecto.Builder.Sql.Tagging
-    Tagging.build_tagging_join_with_aggregation(selecto, join, config, fc, p, ctes)
-  end
-
-  # Phase 4: Full OLAP dimension optimization implementation
-  defp build_olap_join(selecto, join, config, olap_type, fc, p, ctes) do
-    # Use the dedicated OLAP builder for star/snowflake schema optimization
-    alias Selecto.Builder.Sql.Olap
-    Olap.build_olap_join_with_optimization(selecto, join, config, olap_type, fc, p, ctes)
-  end
-
-  # Phase 3: Enhanced join builder implementation
-  defp build_enhanced_join(selecto, join, config, _join_type, fc, p, ctes) do
-    # Use the enhanced joins module to build SQL for new join types
-    case Selecto.EnhancedJoins.build_enhanced_join_sql(config, selecto) do
-      nil ->
-        # Fallback to basic join if enhanced join fails
-        join_iodata = [
-          sql_join_keyword(config),
-          relation_identifier(selecto, config.source),
-          " ",
-          build_join_string(selecto, join),
-          " on ",
-          build_join_on_clause(selecto, join, config)
-        ]
-
-        {fc ++ [join_iodata], p, ctes}
-
-      enhanced_join_iodata ->
-        # Use the enhanced join SQL
-        {fc ++ [enhanced_join_iodata], p, ctes}
+      :hierarchical_adjacency -> {:hierarchy, :adjacency_list}
+      _ -> :basic
     end
   end
 
@@ -1453,17 +1393,19 @@ defmodule Selecto.Builder.Sql do
 
   defp sql_join_keyword(config) do
     case Map.get(config, :type, :left) do
-      :inner -> " inner join "
-      :right -> " right join "
-      :full -> " full join "
-      :cross -> " cross join "
-      "inner" -> " inner join "
-      "right" -> " right join "
-      "full" -> " full join "
-      "cross" -> " cross join "
-      _ -> " left join "
+      type when type in [nil, :left, "left"] -> " left join "
+      type when type in [:inner, "inner"] -> " inner join "
+      type when type in [:right, "right"] -> " right join "
+      type when type in [:full, "full"] -> " full join "
+      other -> raise ArgumentError, "invalid_domain: unsupported join type #{inspect(other)}"
     end
   end
+
+  @doc false
+  # The ON conditions of association join `join`: its key equality,
+  # `conditions`, scope keys, tenant pair and `where` (the hierarchy builder
+  # joins its CTE on them).
+  def association_on(selecto, join, config), do: build_join_on_clause(selecto, join, config)
 
   defp build_join_on_clause(selecto, join, config) do
     base_on =
@@ -1517,9 +1459,33 @@ defmodule Selecto.Builder.Sql do
               host_read_pair(selecto, config)
             ])
           )
+          |> append_join_conditions(selecto, join, config)
       end
 
     append_association_scope_to_on_clause(selecto, join, base_on, config)
+  end
+
+  # The association's `conditions`, right after its key equality.
+  defp append_join_conditions(base_on, selecto, join, config) do
+    case Map.get(config, :conditions) do
+      conditions when is_list(conditions) and conditions != [] ->
+        Enum.intersperse(
+          [
+            base_on
+            | Selecto.Domain.JoinConditions.sql(
+                selecto,
+                conditions,
+                config.requires_join,
+                join,
+                join_relations(selecto, config).target
+              )
+          ],
+          " and "
+        )
+
+      _ ->
+        base_on
+    end
   end
 
   # A join whose owner-side key a host predicate reads (a required filter on

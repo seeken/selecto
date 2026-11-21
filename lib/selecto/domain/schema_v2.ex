@@ -799,10 +799,8 @@ defmodule Selecto.Domain.SchemaV2 do
   # Structural keys become atoms; values naming a field, a relation or an
   # Elixir enumeration (a column type, a join type) become atoms too.
   @atom_values [
-    "cardinality",
     "display_field",
     "field",
-    "hierarchy_type",
     "owner_key",
     "primary_key",
     "queryable",
@@ -810,14 +808,21 @@ defmodule Selecto.Domain.SchemaV2 do
     "source_scope_key",
     "tag_field",
     "target_scope_key",
-    "tenant_field",
-    "type"
+    "tenant_field"
   ]
+  @enum_values ["cardinality", "hierarchy_type", "type"]
 
   defp runtime_tree(map) when is_map(map),
     do: Map.new(map, fn {key, value} -> {atom(key), runtime_value(key, value)} end)
 
   defp runtime_tree(value), do: value
+
+  # An enumeration value (a join or column type, a hierarchy type, a
+  # cardinality) from an untrusted document never creates an atom: a name
+  # Selecto knows maps to its atom, anything else stays a string and is
+  # refused where it is read (an unknown join type, for one).
+  defp runtime_value(key, value) when key in @enum_values and is_binary(value),
+    do: known_atom(value)
 
   defp runtime_value(key, value) when key in @atom_values and is_binary(value), do: atom(value)
 
@@ -832,6 +837,12 @@ defmodule Selecto.Domain.SchemaV2 do
 
   defp atom(value) when is_binary(value), do: String.to_atom(value)
   defp atom(value), do: value
+
+  defp known_atom(value) do
+    String.to_existing_atom(value)
+  rescue
+    ArgumentError -> value
+  end
 
   defp restore_capabilities(%{"actions" => %{} = actions} = doc) do
     actions

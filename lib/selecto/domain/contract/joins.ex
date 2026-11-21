@@ -114,14 +114,22 @@ defmodule Selecto.Domain.Contract.Joins do
       ) do
     associations = relation_associations(parent_relation)
 
-    case Core.fetch_key(associations, join_id) do
-      {:ok, association} ->
+    case {Core.fetch_key(associations, join_id), JoinRules.normalize(join_config)} do
+      {_association, {:error, message}} ->
+        [
+          Core.error(:unsupported_join_type, path ++ [:type], message,
+            reason: :unsupported_join_type
+          )
+          | errors
+        ]
+
+      {{:ok, association}, {:ok, join_config}} ->
         errors
         |> validate_outer_join(join_config, association, path)
         |> validate_display_fallback(join_config, association, parent_relation, schemas, path)
         |> validate_join_target(join_id, join_config, association, schemas, path)
 
-      :error ->
+      {:error, _normalized} ->
         [
           Core.error(
             :join_missing_association,

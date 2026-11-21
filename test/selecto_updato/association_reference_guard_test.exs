@@ -172,6 +172,35 @@ defmodule SelectoUpdato.AssociationReferenceGuardTest do
       assert [] == guards(operation)
       assert [] == guards(update(orders_domain(), 1, %{id: 1, title: "renamed"}))
     end
+
+    test "a filtered lookup (where or conditions) is not guarded" do
+      # The association picks one of the rows its owner key matches (the
+      # customer in one site group, the one in effect for the order), not the
+      # row the key identifies.
+      for filter <- [
+            %{where: %{name: "active"}},
+            %{conditions: [%{left: :site_id, op: :eq, right: :scope_site}]}
+          ] do
+        domain =
+          update_in(
+            orders_domain(),
+            [:source, :associations, :customer],
+            &Map.merge(&1, filter)
+          )
+
+        assert [] == guards(insert(domain, %{customer_id: 2}))
+        assert [] == guards(update(domain, 1, %{customer_id: 2}))
+      end
+
+      unfiltered =
+        update_in(
+          orders_domain(),
+          [:source, :associations, :customer],
+          &Map.put(&1, :where, %{})
+        )
+
+      assert [@customer_guard] = guards(insert(unfiltered, %{customer_id: 2}))
+    end
   end
 
   defp guards(operation) do

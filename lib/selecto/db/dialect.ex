@@ -17,7 +17,7 @@ defmodule Selecto.DB.Dialect do
   alias Selecto.Dialect.Bucket.Expression, as: BucketExpression
   alias Selecto.Dialect.Collection.Operation, as: CollectionOperation
   alias Selecto.Dialect.DateTime.Operation, as: DateTimeOperation
-  alias Selecto.Dialect.Hierarchy.{Adjacency, MaterializedPath}
+  alias Selecto.Dialect.Hierarchy.Adjacency
   alias Selecto.Dialect.TableFunction.Join, as: TableFunctionJoin
   alias Selecto.Dialect.Window.FrameBoundary
   alias Selecto.Dialect.View.{Definition, Index, Refresh}
@@ -58,8 +58,6 @@ defmodule Selecto.DB.Dialect do
               render_result()
   @callback render_bucket(BucketExpression.t(), Selecto.t() | map()) :: render_result()
   @callback render_hierarchy_adjacency(Adjacency.t(), Selecto.t() | map()) :: render_result()
-  @callback render_hierarchy_materialized_path(MaterializedPath.t(), Selecto.t() | map()) ::
-              render_result()
   @callback render_table_function_join(TableFunctionJoin.t(), Selecto.t() | map()) ::
               render_result()
   @callback render_lateral_subquery(TableFunctionJoin.t(), Selecto.t() | map()) ::
@@ -107,7 +105,6 @@ defmodule Selecto.DB.Dialect do
                       render_instant_comparison: 2,
                       render_bucket: 2,
                       render_hierarchy_adjacency: 2,
-                      render_hierarchy_materialized_path: 2,
                       render_table_function_join: 2,
                       render_lateral_subquery: 2,
                       render_window_frame_boundary: 2,

@@ -92,13 +92,12 @@ defmodule ECommerceAnalytics do
         categories: %{
           name: "Category",
           source_table: "categories",
-          fields: [:id, :name, :parent_id, :path],
+          fields: [:id, :name, :parent_id],
           redact_fields: [],
           columns: %{
             id: %{type: :integer},
             name: %{type: :string},
-            parent_id: %{type: :integer},
-            path: %{type: :string}
+            parent_id: %{type: :integer}
           }
         },
         brands: %{
@@ -146,12 +145,12 @@ defmodule ECommerceAnalytics do
               type: :star_dimension,
               display_field: :name,
               joins: %{
-                # Hierarchical categories with materialized path
+                # Hierarchical categories (adjacency list, PostgreSQL only)
                 category: %{
                   type: :hierarchical,
-                  hierarchy_type: :materialized_path,
-                  path_field: :path,
-                  path_separator: "/"
+                  hierarchy_type: :adjacency_list,
+                  parent_field: :parent_id,
+                  depth_limit: 6
                 },
                 brand: %{type: :star_dimension, display_field: :name},
                 # Many-to-many product tagging

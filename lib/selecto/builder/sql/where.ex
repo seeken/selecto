@@ -1212,6 +1212,10 @@ defmodule Selecto.Builder.Sql.Where do
     end
   end
 
+  @doc false
+  # A scalar bound to a column of declared `type`, as a filter binds it.
+  def typed_value(type, value), do: to_type(type, value)
+
   defp to_type(:id, value) when is_integer(value) do
     value
   end

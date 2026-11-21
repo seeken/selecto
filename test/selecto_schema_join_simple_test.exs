@@ -122,12 +122,13 @@ defmodule Selecto.Schema.JoinSimpleTest do
       result = Join.recurse_joins(source, domain)
       join = result[:category]
 
-      # Check custom columns were created for dimension join
+      # A dimension join is a star dimension whose display field is its
+      # `dimension` key.
+      assert join.join_type == :star_dimension
+      assert join.display_field == :name
       custom_columns = join.config.custom_columns
-      assert Map.has_key?(custom_columns, "category")
-      assert custom_columns["category"].name == "Category"
-      assert custom_columns["category"].select == "category.name"
-      assert custom_columns["category"].group_by_filter == "category_id"
+      assert custom_columns["category_display"].name == "Category"
+      assert custom_columns["category_display"].select == "category.name"
     end
 
     test "tagging join creates aggregation columns and filters" do
@@ -136,9 +137,9 @@ defmodule Selecto.Schema.JoinSimpleTest do
           tags: %{
             name: "Tag",
             source_table: "tags",
-            fields: [],
+            fields: [:id, :name, :post_id],
             redact_fields: [],
-            columns: %{}
+            columns: %{id: %{type: :integer}, name: %{type: :string}, post_id: %{type: :integer}}
           }
         },
         joins: %{
@@ -155,7 +156,8 @@ defmodule Selecto.Schema.JoinSimpleTest do
       result = Join.recurse_joins(source, domain)
       join = result[:tags]
 
-      assert join.join_type == :many_to_many
+      assert join.join_type == :tagging
+      assert join.type == :left
 
       # Check custom columns for tag aggregation
       custom_columns = join.config.custom_columns
@@ -178,9 +180,13 @@ defmodule Selecto.Schema.JoinSimpleTest do
           categories: %{
             name: "Category",
             source_table: "categories",
-            fields: [],
+            fields: [:id, :parent_id, :name],
             redact_fields: [],
-            columns: %{}
+            columns: %{
+              id: %{type: :integer},
+              parent_id: %{type: :integer},
+              name: %{type: :string}
+            }
           }
         },
         joins: %{
@@ -223,9 +229,9 @@ defmodule Selecto.Schema.JoinSimpleTest do
           customers: %{
             name: "Customer",
             source_table: "customers",
-            fields: [],
+            fields: [:id, :full_name],
             redact_fields: [],
-            columns: %{}
+            columns: %{id: %{type: :integer}, full_name: %{type: :string}}
           }
         },
         joins: %{
@@ -264,24 +270,18 @@ defmodule Selecto.Schema.JoinSimpleTest do
       assert custom_filters["customer_facet"].filter_type == :select_facet
     end
 
-    test "snowflake dimension join handles normalization" do
+    test "snowflake dimension join is a star dimension; normalization lists refuse" do
       domain = %{
         schemas: %{
           regions: %{
             name: "Region",
             source_table: "regions",
-            fields: [],
+            fields: [:id, :name],
             redact_fields: [],
-            columns: %{}
+            columns: %{id: %{type: :integer}, name: %{type: :string}}
           }
         },
-        joins: %{
-          region: %{
-            type: :snowflake_dimension,
-            display_field: :name,
-            normalization_joins: [%{table: "countries", alias: "co"}]
-          }
-        }
+        joins: %{region: %{type: :snowflake_dimension, display_field: :name}}
       }
 
       source = %{
@@ -290,23 +290,18 @@ defmodule Selecto.Schema.JoinSimpleTest do
         }
       }
 
-      result = Join.recurse_joins(source, domain)
-      join = result[:region]
-
-      assert join.join_type == :snowflake_dimension
-      assert join.normalization_joins == [%{table: "countries", alias: "co"}]
+      join = Join.recurse_joins(source, domain)[:region]
+      assert join.join_type == :star_dimension
       assert join.display_field == :name
 
-      # Check custom columns with normalization support
-      custom_columns = join.config.custom_columns
-      assert Map.has_key?(custom_columns, "region_normalized")
+      listed =
+        put_in(domain, [:joins, :region, :normalization_joins], [
+          %{table: "countries", alias: "co"}
+        ])
 
-      assert custom_columns["region_normalized"].requires_normalization_joins == [
-               %{table: "countries", alias: "co"}
-             ]
-
-      # Check that build_snowflake_select handles the normalization join properly
-      assert custom_columns["region_normalized"].select == "co.name"
+      assert_raise ArgumentError, ~r/normalization_joins were removed/, fn ->
+        Join.recurse_joins(source, listed)
+      end
     end
   end
 
@@ -317,9 +312,9 @@ defmodule Selecto.Schema.JoinSimpleTest do
           categories: %{
             name: "Category",
             source_table: "categories",
-            fields: [],
+            fields: [:id, :parent_id],
             redact_fields: [],
-            columns: %{}
+            columns: %{id: %{type: :integer}, parent_id: %{type: :integer}}
           }
         },
         joins: %{
@@ -354,9 +349,9 @@ defmodule Selecto.Schema.JoinSimpleTest do
           customers: %{
             name: "Customer",
             source_table: "customers",
-            fields: [],
+            fields: [:id, :name],
             redact_fields: [],
-            columns: %{}
+            columns: %{id: %{type: :integer}, name: %{type: :string}}
           }
         },
         joins: %{
@@ -431,9 +426,9 @@ defmodule Selecto.Schema.JoinSimpleTest do
           tags: %{
             name: "Tag",
             source_table: "tags",
-            fields: [],
+            fields: [:id, :name, :post_id],
             redact_fields: [],
-            columns: %{}
+            columns: %{id: %{type: :integer}, name: %{type: :string}, post_id: %{type: :integer}}
           }
         },
         joins: %{
@@ -462,7 +457,7 @@ defmodule Selecto.Schema.JoinSimpleTest do
       # Nested join should reference parent
       tags_join = result[:tags]
       assert tags_join.requires_join == :posts
-      assert tags_join.join_type == :many_to_many
+      assert tags_join.join_type == :tagging
     end
   end
 
@@ -481,7 +476,7 @@ defmodule Selecto.Schema.JoinSimpleTest do
       }
 
       # Current implementation raises when it cannot dereference association config
-      assert_raise(BadMapError, fn ->
+      assert_raise(ArgumentError, ~r/invalid_domain/, fn ->
         Join.recurse_joins(source, domain)
       end)
     end
@@ -502,7 +497,7 @@ defmodule Selecto.Schema.JoinSimpleTest do
       }
 
       # Current implementation raises when queryable schema cannot be resolved
-      assert_raise(BadMapError, fn ->
+      assert_raise(ArgumentError, ~r/invalid_domain/, fn ->
         Join.recurse_joins(source, domain)
       end)
     end

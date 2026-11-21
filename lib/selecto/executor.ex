@@ -580,12 +580,6 @@ defmodule Selecto.Executor do
       {id, %{join_type: :hierarchical_adjacency} = join} ->
         [Selecto.Builder.GeneratedName.hierarchy(id, join)]
 
-      {id, %{join_type: :hierarchical_materialized_path} = join} ->
-        [Selecto.Builder.GeneratedName.materialized_path(id, join)]
-
-      {id, %{join_type: :hierarchical_closure_table} = join} ->
-        [Selecto.Builder.GeneratedName.closure(id, join)]
-
       _join ->
         []
     end)
@@ -598,25 +592,18 @@ defmodule Selecto.Executor do
     end
   end
 
-  # Relations a join's compile names beyond the domain's tables: a tagging
-  # join's junction table, a closure table, a snowflake's normalization chain.
+  # Relations a join's compile names beyond the domain's tables: the bridge
+  # of a many-to-many association (its join_through table, read as a
+  # `through` contract).
   defp generated_relations(selecto) do
     selecto
     |> Map.get(:config)
     |> Kernel.||(%{})
     |> Map.get(:joins, %{})
     |> Enum.flat_map(fn
-      {_id, %{join_type: :many_to_many} = join} ->
-        [to_string(Selecto.Builder.Sql.Tagging.join_table_name(join))]
-
-      {_id, %{join_type: :hierarchical_closure_table} = join} ->
-        [to_string(Selecto.Builder.Sql.Hierarchy.closure_table_name(join))]
-
-      {_id, %{join_type: :snowflake_dimension} = join} ->
-        join
-        |> Map.get(:normalization_joins, [])
-        |> Enum.flat_map(&List.wrap(Map.get(&1, :table)))
-        |> Enum.map(&to_string/1)
+      {_id, %{portable_association: %{through: %{table: table}}}}
+      when is_binary(table) ->
+        [table]
 
       _join ->
         []

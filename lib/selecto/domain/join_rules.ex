@@ -3,9 +3,21 @@ defmodule Selecto.Domain.JoinRules do
 
   # The join-entry rules the domain contract (Selecto.Domain.validate/1) and
   # the runtime join configuration (Selecto.Schema.Join) share, for
-  # `joins.<path>.type` `right` / `full` and `joins.<path>.alias`
-  # (docs: engine_direct_outer_joins).
+  # `joins.<path>.type` and `joins.<path>.alias` (docs: engine_direct_outer_joins).
   #
+  #   * `type` is one of the shared join types `left` (the default),
+  #     `inner`, `right`, `full` and `star_dimension`, or one of Selecto's
+  #     native spellings, each the shared form under another name
+  #     (normalize/1): `dimension` (a star dimension whose `dimension` key is
+  #     its display field), `snowflake_dimension` (a star dimension; its
+  #     normalization is nested `joins`), `self_join` (an association to the
+  #     same table), `full_outer_join` (`full`), `tagging` (an association
+  #     join that adds a tag-list column and a tag facet) and `hierarchical`
+  #     (`hierarchy_type: :adjacency_list` only). Anything else refuses:
+  #     unknown types never fall back to LEFT, and the removed families
+  #     (`cross_join`, `lateral_join`, `conditional_join`, normalization
+  #     lists, `materialized_path` and `closure_table` hierarchies) name what
+  #     replaces them.
   #   * `right` and `full` take a direct association only: never one with
   #     `through`, `join_through` or a `join_strategy`.
   #   * `alias` is an identifier naming the join's SQL correlation. SQL
@@ -17,12 +29,146 @@ defmodule Selecto.Domain.JoinRules do
   #     `selecto_root`; aliases are unique across the domain's join entries,
   #     nested ones included, ignoring case, and never equal to another join
   #     entry's name, which is that join's correlation.
-  #   * The native enhanced join types (`self_join`, `lateral_join`,
-  #     `cross_join`, `full_outer_join`, `conditional_join`) keep their own
-  #     `alias` key (Selecto.EnhancedJoins); these rules do not read it.
 
   @identifier ~r/\A[A-Za-z_][A-Za-z0-9_]{0,62}\z/
-  @enhanced_types ~w(self_join lateral_join cross_join full_outer_join conditional_join)
+
+  @shared_types ~w(left inner right full star_dimension)
+  @native_types ~w(dimension snowflake_dimension self_join full_outer_join tagging hierarchical)
+
+  @removed_types %{
+    "cross_join" =>
+      "cross_join was removed; declare an association join (a cartesian product is not a join " <>
+        "Selecto renders)",
+    "lateral_join" =>
+      "the raw-SQL lateral_join join type was removed; use query_members.laterals or the " <>
+        "association join_strategy lateral_lookup",
+    "conditional_join" =>
+      "conditional_join was removed; declare the comparisons as the association's conditions"
+  }
+
+  # Keys of the removed native forms, refused wherever they still appear.
+  @self_join_keys ~w(self_key target_key condition_type)
+  @full_outer_keys ~w(left_key right_key condition_type)
+
+  @doc false
+  # The shared and native join type names Selecto renders.
+  def types, do: @shared_types ++ @native_types
+
+  @doc false
+  # `{:ok, config}` with `type` normalized to an atom of the shared or native
+  # vocabulary and each native alias rewritten to the shared form it names,
+  # or `{:error, message}`.
+  #
+  #   * absent / nil / left -> :left; inner, right, full, star_dimension
+  #   * dimension -> :star_dimension with `display_field` from `dimension`
+  #   * snowflake_dimension -> :star_dimension (`normalization_joins` refuses)
+  #   * self_join -> :left; full_outer_join -> :full (their own key forms refuse)
+  #   * tagging -> :tagging; hierarchical -> :hierarchical (adjacency_list only)
+  def normalize(config) when is_map(config) do
+    case type_name(value(config, :type)) do
+      {:ok, nil} ->
+        {:ok, config}
+
+      {:ok, name} when name in @shared_types ->
+        {:ok, put_type(config, String.to_existing_atom(name))}
+
+      {:ok, "dimension"} ->
+        case value(config, :dimension) do
+          nil ->
+            {:error, "dimension joins require the dimension key (their display field)"}
+
+          dimension ->
+            {:ok,
+             config
+             |> drop(:dimension)
+             |> Map.put_new(:display_field, dimension)
+             |> put_type(:star_dimension)}
+        end
+
+      {:ok, "snowflake_dimension"} ->
+        if value(config, :normalization_joins) not in [nil, []],
+          do:
+            {:error,
+             "snowflake normalization_joins were removed; declare the normalized tables as " <>
+               "nested joins of the dimension"},
+          else: {:ok, config |> drop(:normalization_joins) |> put_type(:star_dimension)}
+
+      {:ok, "self_join"} ->
+        refuse_keys(config, @self_join_keys, "self_join", :left)
+
+      {:ok, "full_outer_join"} ->
+        refuse_keys(config, @full_outer_keys, "full_outer_join", :full)
+
+      {:ok, "tagging"} ->
+        {:ok, put_type(config, :tagging)}
+
+      {:ok, "hierarchical"} ->
+        case type_name(value(config, :hierarchy_type)) do
+          {:ok, name} when name in [nil, "adjacency_list"] ->
+            {:ok, config |> put_type(:hierarchical) |> Map.put(:hierarchy_type, :adjacency_list)}
+
+          {:ok, name} when name in ["materialized_path", "closure_table"] ->
+            {:error,
+             "#{name} hierarchies were removed; express the tree with a recursive query member " <>
+               "(query_members.ctes kind recursive)"}
+
+          _ ->
+            {:error, "unknown hierarchy_type #{inspect(value(config, :hierarchy_type))}"}
+        end
+
+      {:ok, name} ->
+        case Map.fetch(@removed_types, name) do
+          {:ok, message} -> {:error, message}
+          :error -> {:error, unknown_type_message(value(config, :type))}
+        end
+
+      :error ->
+        {:error, unknown_type_message(value(config, :type))}
+    end
+  end
+
+  def normalize(_config), do: {:error, "join configuration must be a map"}
+
+  @doc false
+  # `{:ok, type}` for a non-association (custom) join's keyword type, or
+  # `{:error, message}`.
+  def custom_type(config) do
+    case type_name(value(config, :type)) do
+      {:ok, nil} -> {:ok, :left}
+      {:ok, name} when name in ~w(left inner right full) -> {:ok, String.to_existing_atom(name)}
+      _ -> {:error, unknown_type_message(value(config, :type))}
+    end
+  end
+
+  defp unknown_type_message(type),
+    do:
+      "unsupported join type #{inspect(type)}; expected one of " <>
+        Enum.join(@shared_types ++ @native_types, ", ")
+
+  defp refuse_keys(config, keys, kind, type) do
+    case Enum.filter(keys, &present?(config, String.to_atom(&1))) do
+      [] ->
+        {:ok, put_type(config, type)}
+
+      found ->
+        {:error,
+         "#{kind} joins are association joins; #{Enum.join(found, ", ")} " <>
+           "#{if length(found) == 1, do: "is", else: "are"} no longer read (use the " <>
+           "association's owner_key / related_key and the join type)"}
+    end
+  end
+
+  defp type_name(nil), do: {:ok, nil}
+
+  defp type_name(type) when is_atom(type),
+    do: {:ok, type |> Atom.to_string() |> String.downcase()}
+
+  defp type_name(type) when is_binary(type), do: {:ok, String.downcase(type)}
+  defp type_name(_type), do: :error
+
+  defp put_type(config, type), do: config |> drop(:type) |> Map.put(:type, type)
+
+  defp drop(config, key), do: config |> Map.delete(key) |> Map.delete(Atom.to_string(key))
 
   @doc false
   # `:right` or `:full` when the join entry declares that type (atom or
@@ -71,18 +217,13 @@ defmodule Selecto.Domain.JoinRules do
   end
 
   @doc false
-  # The correlation an authored alias names (the alias in lower case), or
-  # nil: no alias, or an enhanced join's own `alias`.
+  # The correlation an authored alias names (the alias in lower case), or nil.
   def authored_alias(config) when is_map(config) do
-    if enhanced?(config) do
-      nil
-    else
-      case value(config, :alias) do
-        nil -> nil
-        alias_name when is_atom(alias_name) -> alias_name |> Atom.to_string() |> String.downcase()
-        alias_name when is_binary(alias_name) -> String.downcase(alias_name)
-        _other -> nil
-      end
+    case value(config, :alias) do
+      nil -> nil
+      alias_name when is_atom(alias_name) -> alias_name |> Atom.to_string() |> String.downcase()
+      alias_name when is_binary(alias_name) -> String.downcase(alias_name)
+      _other -> nil
     end
   end
 
@@ -99,7 +240,7 @@ defmodule Selecto.Domain.JoinRules do
 
     {problems, _seen} =
       Enum.reduce(entries, {[], %{}}, fn {path, config}, {problems, seen} ->
-        case if(enhanced?(config), do: :error, else: Map.fetch(config_map(config), :alias)) do
+        case Map.fetch(config_map(config), :alias) do
           :error ->
             {problems, seen}
 
@@ -190,14 +331,6 @@ defmodule Selecto.Domain.JoinRules do
   end
 
   defp config_map(_config), do: %{}
-
-  defp enhanced?(config) do
-    case value(config, :type) do
-      type when is_atom(type) and not is_nil(type) -> Atom.to_string(type) in @enhanced_types
-      type when is_binary(type) -> type in @enhanced_types
-      _ -> false
-    end
-  end
 
   defp present?(map, key), do: not is_nil(value(map, key))
 

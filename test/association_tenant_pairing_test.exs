@@ -170,17 +170,20 @@ defmodule Selecto.AssociationTenantPairingTest do
                    end
     end
 
-    test "an advanced join builder that cannot apply the tenant pair is refused" do
+    test "a star dimension applies the tenant pair like any association join" do
       domain =
         people_domain(%{queryable: :account, owner_key: :account_id, related_key: :id})
         |> Map.put(:joins, %{account: %{type: :star_dimension, display_field: :name}})
 
-      assert_raise ArgumentError, ~r/invalid_domain: join :account .* tenant pair/, fn ->
+      {sql, _params} =
         domain
         |> Selecto.configure(:mock_connection, validate: false)
         |> Selecto.select(["account.name"])
         |> Selecto.to_sql()
-      end
+
+      assert sql =~
+               "left join accounts account on account.id = selecto_root.account_id and " <>
+                 "selecto_root.tenant_id = account.tenant_id"
     end
   end
 

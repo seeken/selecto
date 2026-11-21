@@ -122,7 +122,9 @@ defmodule SelectoDBPostgreSQL.Adapter do
       :lateral_join,
       :prefix,
       :rollup,
-      :stream
+      :stream,
+      :right_join,
+      :full_join
     ]
   end
 

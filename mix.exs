@@ -46,6 +46,7 @@ defmodule Selecto.MixProject do
           "docs/nested_composition_contract.md",
           "docs/source_query_plans.md",
           "docs/strict_mode.md",
+          "docs/join_families.md",
           "docs/write_adapter_protocol.md",
           "docs/updato/overview.md",
           "docs/updato/developer_action_guide.md",
@@ -71,9 +72,7 @@ defmodule Selecto.MixProject do
             Selecto.Builder.Sql.Where,
             Selecto.Builder.Sql.Group,
             Selecto.Builder.Sql.Order,
-            Selecto.Builder.Sql.Hierarchy,
-            Selecto.Builder.Sql.Tagging,
-            Selecto.Builder.Sql.Olap
+            Selecto.Builder.Sql.Hierarchy
           ],
           Schema: [
             Selecto.Schema,

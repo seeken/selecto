@@ -1,282 +1,96 @@
 defmodule Selecto.Builder.Sql.Hierarchy do
   @moduledoc """
-  Hierarchical SQL pattern generation for self-referencing relationships.
+  The adjacency-list hierarchy join (`type: :hierarchical`,
+  `hierarchy_type: :adjacency_list`).
 
-  Supports adjacency lists, materialized paths, and closure table patterns
-  using recursive CTEs and specialized SQL constructs.
+  The target relation is joined through a recursive CTE that walks it from its
+  roots (rows whose `parent_field` is NULL) down `parent_field -> id_field`,
+  at most `depth_limit` levels. The CTE keeps every target column and adds
+  `level`, `path` and `path_array`. The association's `where` confines the
+  walk (anchor and step), the step stays inside one tenant when the target
+  declares `tenant_field`, and the join's ON is the association's own (key
+  equality, `conditions`, scope keys, tenant pair, carried tenant).
 
-  The module exposes concrete builders for each hierarchy strategy and a
-  deterministic fallback join for unrecognized patterns.
+  The recursive CTE's syntax is the adapter dialect's
+  (`render_hierarchy_adjacency/2`); only PostgreSQL renders it, every other
+  adapter refuses with `unsupported_feature` before any SQL is sent. The
+  portable way to walk a tree is a recursive query member
+  (`query_members.ctes` with `kind: :recursive`).
   """
 
   import Selecto.Builder.Sql.Helpers
-  alias Selecto.Dialect.Hierarchy.{Adjacency, MaterializedPath}
+  alias Selecto.Dialect.Hierarchy.Adjacency
   alias Selecto.Error
   alias Selecto.SQL.Params
-  # Hierarchy CTE definitions are emitted as raw CTE entries consumed by Selecto.Builder.CteSql.
 
   @doc """
-  Build hierarchical join with appropriate CTE pattern.
+  Build the hierarchy join and its recursive CTE.
 
   Returns: `{from_clause_iodata, params, ctes}`.
   """
-  def build_hierarchy_join_with_cte(selecto, join, config, pattern, fc, p, ctes) do
-    case pattern do
-      :adjacency_list ->
-        build_adjacency_list_join(selecto, join, config, fc, p, ctes)
-
-      :materialized_path ->
-        build_materialized_path_join(selecto, join, config, fc, p, ctes)
-
-      :closure_table ->
-        build_closure_table_join(selecto, join, config, fc, p, ctes)
-
-      _ ->
-        # Fallback for unrecognized patterns
-        build_basic_hierarchy_fallback(selecto, join, config, fc, p, ctes)
-    end
-  end
-
-  # Phase 2: Adjacency List - Full Implementation
-  defp build_adjacency_list_join(selecto, join, config, fc, p, ctes) do
-    # Build recursive CTE for adjacency list pattern
+  def build_hierarchy_join_with_cte(selecto, join, config, :adjacency_list, fc, p, ctes) do
     {hierarchy_cte, cte_params} = build_adjacency_list_cte(selecto, join, config)
-
-    # Create CTE name for this hierarchy
     cte_name = hierarchy_cte_name(join, config)
 
-    # Build JOIN to reference the CTE in the main query
-    # Join main table to the CTE results
     cte_join_iodata = [
-      " LEFT JOIN ",
+      " left join ",
       cte_name,
       " ",
       build_join_string(selecto, join),
-      " ON ",
-      build_selector_string(selecto, config.requires_join, config.owner_key),
-      " = ",
-      build_join_string(selecto, join),
-      ".id"
+      " on ",
+      Selecto.Builder.Sql.association_on(selecto, join, config)
     ]
 
-    # Add CTE to the list and return JOIN clause with updated parameters
     new_ctes = ctes ++ [{:raw_recursive_cte, hierarchy_cte, cte_params}]
     {fc ++ [cte_join_iodata], p ++ cte_params, new_ctes}
   end
 
-  # Phase 2: Materialized Path - Full Implementation
-  defp build_materialized_path_join(selecto, join, config, fc, p, ctes) do
-    # Build materialized path query CTE
-    {path_cte, cte_params} = build_materialized_path_query(selecto, join, config)
-
-    # Create CTE name for this path query
-    cte_name = Selecto.Builder.GeneratedName.materialized_path(join, config)
-
-    # Build JOIN to reference the materialized path CTE
-    cte_join_iodata = [
-      " LEFT JOIN ",
-      cte_name,
-      " ",
-      build_join_string(selecto, join),
-      " ON ",
-      build_selector_string(selecto, config.requires_join, config.owner_key),
-      " = ",
-      build_join_string(selecto, join),
-      ".id"
-    ]
-
-    # Add CTE to the list and return JOIN clause
-    new_ctes = ctes ++ [{:raw_cte, path_cte, cte_params}]
-    {fc ++ [cte_join_iodata], p ++ cte_params, new_ctes}
-  end
-
-  # Phase 2: Closure Table - Full Implementation
-  defp build_closure_table_join(selecto, join, config, fc, p, ctes) do
-    # Build closure table query CTE
-    {closure_cte, cte_params} = build_closure_table_query(selecto, join, config)
-
-    # Create CTE name for this closure query
-    cte_name = Selecto.Builder.GeneratedName.closure(join, config)
-
-    # Build JOIN to reference the closure table CTE
-    cte_join_iodata = [
-      " LEFT JOIN ",
-      cte_name,
-      " ",
-      build_join_string(selecto, join),
-      " ON ",
-      build_selector_string(selecto, config.requires_join, config.owner_key),
-      " = ",
-      build_join_string(selecto, join),
-      ".id"
-    ]
-
-    # Add CTE to the list and return JOIN clause
-    new_ctes = ctes ++ [{:raw_cte, closure_cte, cte_params}]
-    {fc ++ [cte_join_iodata], p ++ cte_params, new_ctes}
-  end
-
-  # Fallback for basic hierarchy joins or unrecognized patterns
-  defp build_basic_hierarchy_fallback(selecto, join, config, fc, p, ctes) do
-    basic_join_iodata = build_basic_join_clause(selecto, join, config)
-    {fc ++ [basic_join_iodata], p, ctes}
-  end
-
-  # Helper: Build basic LEFT JOIN clause used by the explicit fallback path.
-  defp build_basic_join_clause(selecto, join, config) do
-    [
-      " left join ",
-      config.source,
-      " ",
-      build_join_string(selecto, join),
-      " on ",
-      build_selector_string(selecto, join, config.my_key),
-      " = ",
-      build_selector_string(selecto, config.requires_join, config.owner_key)
-    ]
-  end
-
   @doc """
-  Build recursive CTE for adjacency list pattern.
-
-  Builds a portable adjacency-list request and delegates its concrete recursive
-  CTE syntax to the configured adapter dialect.
-
-  ## Examples
-
-      # Build CTE for category hierarchy
-      {hierarchy_cte, params} = build_adjacency_list_cte(selecto, :categories, config)
-      
-  Returns: {cte_iodata, params}
+  Build the recursive CTE of an adjacency-list join: `{cte_iodata, params}`.
   """
   def build_adjacency_list_cte(selecto, join, config) do
-    # Get configuration values
-    source_table = config.source
-    depth_limit = Map.get(config, :hierarchy_depth, 5)
-    id_field = Map.get(config, :id_field, "id")
-    name_field = Map.get(config, :name_field, "name")
-    parent_field = Map.get(config, :parent_field, "parent_id")
+    quote_column = &selecto_adapter(selecto).quote_identifier(to_string(&1))
+
+    filter =
+      case Map.get(config, :hierarchy_where) do
+        policy when is_map(policy) and map_size(policy) > 0 ->
+          Selecto.Builder.Association.policy_conditions(
+            selecto,
+            "c",
+            policy,
+            Selecto.Builder.ExactCompare.relation_for_table(selecto, config.source)
+          )
+
+        _ ->
+          []
+      end
 
     fragment = %Adjacency{
       cte_name: hierarchy_cte_name(join, config),
-      source_table: source_table,
-      id_field: id_field,
-      name_field: name_field,
-      parent_field: parent_field,
-      depth_limit: depth_limit
+      source_table: relation_identifier(selecto, config.source),
+      id_field: quote_column.(Map.get(config, :id_field, config.my_key)),
+      parent_field: quote_column.(Map.get(config, :parent_field, :parent_id)),
+      depth_limit: Map.get(config, :hierarchy_depth, 5),
+      filter: filter,
+      pair_fields:
+        case Map.get(config, :hierarchy_tenant_field) do
+          nil -> []
+          field -> [quote_column.(field)]
+        end
     }
 
-    adapter_for(selecto)
+    selecto_adapter(selecto)
     |> Selecto.DialectSupport.render_hierarchy_adjacency(fragment, selecto)
     |> finalize_dialect_fragment(selecto)
   end
 
-  @doc """
-  Build materialized path query patterns.
-
-  Generates SQL for path-based hierarchy queries using LIKE patterns and depth calculations.
-
-  ## Example
-
-      # For a path like "root/electronics/computers"
-      config = %{
-        source: "categories", 
-        path_field: "path",
-        path_separator: "/",
-        root_path: "root"
-      }
-      
-      # Generates SQL that calculates depth and filters by path patterns
-
-  Returns: {query_iodata, params}
-  """
-  def build_materialized_path_query(selecto, join, config) do
-    source_table = config.source
-    path_field = Map.get(config, :path_field, "path")
-    path_separator = Map.get(config, :path_separator, "/")
-    root_path = Map.get(config, :root_path, "")
-
-    # Build path pattern for filtering descendants
-    # If root_path is provided, filter for paths starting with it
-    path_pattern =
-      case root_path do
-        # Match any path
-        "" -> "%"
-        # Match descendants of root_path
-        path -> "#{path}#{path_separator}%"
-      end
-
-    fragment = %MaterializedPath{
-      query_name: Selecto.Builder.GeneratedName.materialized_path(join, config),
-      source_table: source_table,
-      path_field: path_field,
-      path_separator: path_separator,
-      path_pattern: path_pattern
-    }
-
-    adapter_for(selecto)
-    |> Selecto.DialectSupport.render_hierarchy_materialized_path(fragment, selecto)
-    |> finalize_dialect_fragment(selecto)
-  end
-
-  @doc """
-  Build closure table join patterns.
-
-  Generates queries for closure table pattern with ancestor-descendant relationships.
-  Closure tables maintain all ancestor-descendant relationships explicitly.
-
-  ## Example
-
-      # For a closure table with ancestor_id, descendant_id, depth columns
-      config = %{
-        source: "categories",
-        closure_table: "category_closure", 
-        ancestor_field: "ancestor_id",
-        descendant_field: "descendant_id",
-        depth_field: "depth"
-      }
-      
-  Returns: {query_iodata, params}
-  """
-  def build_closure_table_query(_selecto, join, config) do
-    source_table = config.source
-    closure_table = closure_table_name(config)
-    ancestor_field = Map.get(config, :ancestor_field, "ancestor_id")
-    descendant_field = Map.get(config, :descendant_field, "descendant_id")
-    depth_field = Map.get(config, :depth_field, "depth")
-
-    # Build closure table query that includes descendant count
-    query_name = Selecto.Builder.GeneratedName.closure(join, config)
-
-    query_iodata = [
-      query_name,
-      " AS (",
-      "SELECT c.*, cl.#{depth_field}, ",
-      "(SELECT COUNT(*) FROM #{closure_table} cl2 ",
-      "WHERE cl2.#{ancestor_field} = c.id) as descendant_count ",
-      "FROM #{source_table} c ",
-      "JOIN #{closure_table} cl ON c.id = cl.#{descendant_field}",
-      ")"
-    ]
-
-    # No parameters needed for basic closure table query
-    {query_iodata, []}
-  end
-
-  @doc false
-  # The closure table a closure-table hierarchy join names.
-  def closure_table_name(config),
-    do: Map.get(config, :closure_table, "#{config.source}_closure")
-
   defp finalize_fragment(selecto, fragment) do
-    adapter = adapter_for(selecto)
-
-    {sql, params} = Params.finalize(fragment, adapter: adapter)
+    {sql, params} = Params.finalize(fragment, adapter: selecto_adapter(selecto))
     {[sql], params}
   end
 
-  defp adapter_for(%{adapter: adapter}) when not is_nil(adapter), do: adapter
-  defp adapter_for(_selecto), do: Selecto.AdapterSupport.default_adapter()
+  defp selecto_adapter(%{adapter: adapter}) when not is_nil(adapter), do: adapter
+  defp selecto_adapter(_selecto), do: Selecto.AdapterSupport.default_adapter()
 
   defp finalize_dialect_fragment({:ok, {fragment, _params}}, selecto),
     do: finalize_fragment(selecto, fragment)
@@ -289,74 +103,6 @@ defmodule Selecto.Builder.Sql.Hierarchy do
 
   defp finalize_dialect_fragment({:error, reason}, _selecto),
     do: raise(ArgumentError, "unsupported hierarchy operation: #{inspect(reason)}")
-
-  @doc """
-  Example of hierarchical join integration using Selecto-powered CTEs.
-
-  This demonstrates the integration pattern for teams wiring these CTE helpers
-  into higher-level query flows.
-
-      # Instead of raw SQL generation, we'll use Selecto queries:
-      
-      def build_adjacency_cte_with_selecto(selecto, join, config) do
-        domain = build_hierarchy_domain(selecto, join, config)
-        connection = selecto.connection
-        
-        # Base case using Selecto
-        base_case = Selecto.configure(domain, connection)
-          |> Selecto.select([
-            "id", 
-            "name", 
-            "parent_id",
-            {:literal, 0, "level"},
-            {:literal, "id", "path"}
-          ])
-          |> Selecto.filter([{"parent_id", nil}])
-        
-        # Recursive case using Selecto  
-        recursive_case = Selecto.configure(domain, connection)
-          |> Selecto.select([
-            "c.id",
-            "c.name",
-            "c.parent_id", 
-            "h.level + 1",
-            {:func, "concat", ["h.path", {:literal, "/"}, "c.id"]}
-          ])
-          |> Selecto.filter([{"h.level", {:lt, 5}}])
-          # Special handling for CTE JOIN would be added here
-        
-        # Use Selecto public recursive CTE API
-        Selecto.with_recursive_cte(
-          selecto,
-          hierarchy_name(join),
-          fn -> base_case end,
-          fn _cte_ref -> recursive_case end
-        )
-      end
-  """
-  def example_selecto_hierarchy_usage do
-    """
-    This function demonstrates the intended usage pattern:
-
-    # Users will build hierarchical CTEs using familiar Selecto syntax
-    hierarchy_domain = configure_hierarchy_domain(categories_table)
-
-    selecto_with_cte =
-      Selecto.configure(hierarchy_domain, connection)
-      |> Selecto.with_recursive_cte("category_tree",
-        base_query: fn -> base_case_selecto end,
-        recursive_query: fn cte_ref -> recursive_selecto(cte_ref) end
-      )
-
-    # Main query can then reference the CTE
-    main_selecto = Selecto.configure(main_domain, connection)
-      |> Selecto.select(["main.*", "h.level", "h.path"])
-      |> Selecto.filter([{"main.active", true}])
-
-    # CTE integration happens automatically in SQL generation
-    {final_sql, final_params} = Selecto.to_sql(selecto_with_cte)
-    """
-  end
 
   def hierarchy_cte_name(join, config), do: Selecto.Builder.GeneratedName.hierarchy(join, config)
 end

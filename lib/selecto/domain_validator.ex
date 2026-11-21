@@ -757,97 +757,44 @@ defmodule Selecto.DomainValidator do
   defp normalize_required_field(field) when is_binary(field), do: field
   defp normalize_required_field(field), do: to_string(field)
 
-  # Validate advanced join types have required keys
+  # Every join type is one Selecto renders (Selecto.Domain.JoinRules):
+  # unknown and removed types are errors, never LEFT joins.
   defp validate_advanced_join_requirements(errors, domain) do
     joins_config = Map.get(domain, :joins, %{})
     validate_advanced_joins_recursive(errors, joins_config)
   end
 
-  defp validate_advanced_joins_recursive(errors, joins_config) do
+  defp validate_advanced_joins_recursive(errors, joins_config) when is_map(joins_config) do
     Enum.reduce(joins_config, errors, fn {join_name, join_config}, acc ->
       acc = validate_advanced_join_type(acc, join_name, join_config)
 
-      # Recursively check nested joins
-      case Map.get(join_config, :joins) do
-        nil -> acc
-        nested_joins -> validate_advanced_joins_recursive(acc, nested_joins)
+      case is_map(join_config) && Map.get(join_config, :joins) do
+        nested_joins when is_map(nested_joins) ->
+          validate_advanced_joins_recursive(acc, nested_joins)
+
+        _ ->
+          acc
       end
     end)
   end
 
-  defp validate_advanced_join_type(errors, join_name, %{type: :dimension} = config) do
-    case Map.get(config, :dimension) do
-      nil ->
-        errors ++
-          [
-            {:advanced_join_missing_key,
-             {join_name, :dimension, "dimension key required for :dimension join type"}}
-          ]
+  defp validate_advanced_joins_recursive(errors, _joins_config), do: errors
 
-      _ ->
-        errors
+  defp validate_advanced_join_type(errors, join_name, %{non_assoc: true} = config) do
+    case Selecto.Domain.JoinRules.custom_type(config) do
+      {:ok, _type} -> errors
+      {:error, message} -> errors ++ [{:invalid_join_type, {join_name, :type, message}}]
     end
   end
 
-  defp validate_advanced_join_type(errors, join_name, %{type: :hierarchical} = config) do
-    hierarchy_type = Map.get(config, :hierarchy_type, :adjacency_list)
-
-    case hierarchy_type do
-      :materialized_path ->
-        case Map.get(config, :path_field) do
-          nil ->
-            errors ++
-              [
-                {:advanced_join_missing_key,
-                 {join_name, :path_field, "path_field required for materialized_path hierarchy"}}
-              ]
-
-          _ ->
-            errors
-        end
-
-      :closure_table ->
-        required_keys = [:closure_table, :ancestor_field, :descendant_field]
-        missing_keys = required_keys -- Map.keys(config)
-
-        case missing_keys do
-          [] ->
-            errors
-
-          _ ->
-            errors ++
-              [
-                {:advanced_join_missing_key,
-                 {join_name, missing_keys,
-                  "closure table hierarchy requires closure_table, ancestor_field, descendant_field"}}
-              ]
-        end
-
-      # adjacency_list has no special requirements
-      _ ->
-        errors
+  defp validate_advanced_join_type(errors, join_name, config) when is_map(config) do
+    case Selecto.Domain.JoinRules.normalize(config) do
+      {:ok, _config} -> errors
+      {:error, message} -> errors ++ [{:invalid_join_type, {join_name, :type, message}}]
     end
   end
 
-  defp validate_advanced_join_type(errors, join_name, %{type: :snowflake_dimension} = config) do
-    case Map.get(config, :normalization_joins) do
-      joins when is_list(joins) and length(joins) > 0 ->
-        errors
-
-      _ ->
-        errors ++
-          [
-            {:advanced_join_missing_key,
-             {join_name, :normalization_joins,
-              "normalization_joins list required for :snowflake_dimension"}}
-          ]
-    end
-  end
-
-  defp validate_advanced_join_type(errors, _join_name, _config) do
-    # No special requirements for other join types  
-    errors
-  end
+  defp validate_advanced_join_type(errors, _join_name, _config), do: errors
 
   defp validate_functions(errors, domain) do
     case Map.get(domain, :functions) do
@@ -1828,13 +1775,8 @@ defmodule Selecto.DomainValidator do
     "Required filter field '#{field_name}' not found in domain configuration"
   end
 
-  defp format_error({:advanced_join_missing_key, {join_name, keys, message}})
-       when is_list(keys) do
-    "Advanced join '#{join_name}' missing required keys #{inspect(keys)}: #{message}"
-  end
-
-  defp format_error({:advanced_join_missing_key, {join_name, key, message}}) do
-    "Advanced join '#{join_name}' missing required key '#{key}': #{message}"
+  defp format_error({:invalid_join_type, {join_name, _key, message}}) do
+    "Join '#{join_name}' has an invalid type: #{message}"
   end
 
   defp format_error({:query_members_invalid, {section, member_id, message}}) do

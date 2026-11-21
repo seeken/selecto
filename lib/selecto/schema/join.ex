@@ -1,74 +1,50 @@
 defmodule Selecto.Schema.Join do
   # selecto meta join can edit, add, alter this join!
 
-  # import Selecto.Types - removed to avoid circular dependency
-
   @moduledoc """
-  # Join Configuration and Patterns
+  # Join Configuration
 
-  This module handles join configuration for various database join patterns,
-  providing simplified configuration helpers for common scenarios.
+  Turns a domain's `joins` tree into the flat join index the SQL builder
+  reads. Every association join renders as one relation joined on the
+  association: its key equality, its `conditions`, its scope keys and tenant
+  pair, and its `where`, wherever it is joined (nested joins included).
 
-  ## Available Join Types
+  ## Join types
 
-  ### :dimension (Existing)
-  Basic dimension table join with ID filtering and name display.
-  - `dimension`: Field to use for display (required)
-  - `name`: Display name for the join (optional)
+  The shared types are `:left` (the default), `:inner`, `:right`, `:full`
+  and `:star_dimension`. Selecto's native spellings are the shared forms
+  under another name (`Selecto.Domain.JoinRules.normalize/1`):
 
-  ### :tagging (New)
-  Many-to-many relationship through a join table (e.g., posts <-> tags).
-  - `tag_field`: Field to display from tag table (default: :name)
-  - `name`: Display name for the join (optional)
-  Creates custom columns for tag aggregation and faceted filtering.
+    * `:dimension` - a star dimension whose `dimension` key is its display
+      field;
+    * `:snowflake_dimension` - a star dimension; its normalized tables are
+      nested `joins` (normalization lists were removed);
+    * `:self_join` - an ordinary association to the same table;
+    * `:full_outer_join` - `type: :full`;
+    * `:tagging` - an association join (through a many-to-many bridge or a
+      `through` contract) that adds a tag-list column (`<id>_list`) and a
+      tag facet filter;
+    * `:hierarchical` with `hierarchy_type: :adjacency_list` - PostgreSQL
+      only: the target joined through a recursive CTE over its own
+      `parent_field` that adds `<id>_level`, `<id>_path` and
+      `<id>_path_array`. Other adapters refuse it with `unsupported_feature`;
+      the portable way to walk a tree is a recursive query member
+      (`query_members.ctes` with `kind: :recursive`).
 
-  ### :hierarchical (New)
-  Self-referencing hierarchical relationships with multiple implementation patterns:
-  - `hierarchy_type`: :adjacency_list, :materialized_path, or :closure_table
-  - `depth_limit`: Maximum recursion depth for adjacency lists (default: 5)
-  - `path_field`: Field containing path for materialized path pattern (default: :path)
-  - `path_separator`: Separator used in path field (default: "/")
-  - `closure_table`: Name of closure table for closure table pattern
-  - `ancestor_field`, `descendant_field`, `depth_field`: Closure table field names
+  `cross_join`, the raw-SQL `lateral_join` join type, `conditional_join`
+  (with its `custom_sql` conditions) and the `materialized_path` and
+  `closure_table` hierarchies were removed; any other type refuses
+  (`invalid_domain`) rather than joining LEFT.
 
-  ### :star_dimension (New)
-  Optimized for OLAP star schema dimensions.
-  - `display_field`: Field to use for dimension display (default: :name)
-  - `name`: Display name for the dimension (optional)
-  Creates faceted filters optimized for aggregation queries.
-
-  ### :snowflake_dimension (New)
-  Normalized dimension tables requiring additional joins.
-  - `display_field`: Field to use for dimension display (default: :name)
-  - `normalization_joins`: List of additional joins needed for full context
-  - `name`: Display name for the dimension (optional)
-
-  ## Standard Join Types (Default behavior)
-  - one_to_one - Standard lookup with all columns available
-  - one_to_many - Treated like one-to-one
-  - belongs_to - Treated like one-to-one
-
-  ## Configuration Examples
+  ## Star dimensions
 
   ```elixir
-  joins: %{
-    # Many-to-many tagging
-    tags: %{type: :tagging, tag_field: :name},
-
-    # Hierarchical adjacency list
-    manager: %{type: :hierarchical, hierarchy_type: :adjacency_list, depth_limit: 5},
-
-    # Star schema dimension
-    customer: %{type: :star_dimension, display_field: :full_name},
-
-    # Snowflake dimension with normalization
-    category: %{
-      type: :snowflake_dimension,
-      display_field: :name,
-      normalization_joins: [%{table: "category_groups", alias: "cg"}]
-    }
-  }
+  joins: %{customer: %{type: :star_dimension, display_field: :full_name}}
   ```
+
+  A star dimension is a LEFT association join that adds the display column
+  `<id>_display` and a facet filter. `dimension_key`, when given, must be the
+  association's owner key.
   """
 
   alias Selecto.Domain.JoinRules
@@ -86,7 +62,6 @@ defmodule Selecto.Schema.Join do
 
     normalize_joins(source, joins, :selecto_root, domain)
     |> List.flatten()
-    |> tap(&Enum.each(&1, fn join -> validate_aliased_kind!(join) end))
     |> Selecto.Schema.JoinNamespaces.normalize()
     |> Enum.reduce(%{}, fn j, acc -> Map.put(acc, j.id, j) end)
   end
@@ -104,23 +79,8 @@ defmodule Selecto.Schema.Join do
     end
   end
 
-  # An authored alias replaces the correlation of a join Selecto renders as
-  # one relation (a direct, through or custom join). The advanced builders
-  # (dimension, tagging, hierarchy, OLAP, enhanced) generate their own
-  # correlations, so an alias there is refused rather than ignored.
-  defp validate_aliased_kind!(%{authored_alias: alias_name} = join)
-       when is_binary(alias_name) do
-    if Map.get(join, :join_type) in [nil, :custom],
-      do: :ok,
-      else:
-        raise(
-          ArgumentError,
-          "invalid_domain: join #{inspect(join.id)} of kind #{inspect(join.join_type)} " <>
-            "cannot take an alias"
-        )
-  end
-
-  defp validate_aliased_kind!(_join), do: :ok
+  defp invalid!(id, message),
+    do: raise(ArgumentError, "invalid_domain: join #{inspect(id)}: #{message}")
 
   ### source, the schema module name
   ### joins, the joins map from parent,
@@ -148,14 +108,25 @@ defmodule Selecto.Schema.Join do
             end
         end
 
-      # Standard association-based joins
+      # Association joins
       {id, config}, acc ->
-        association = source.associations[id]
+        config =
+          case JoinRules.normalize(config) do
+            {:ok, config} -> config
+            {:error, message} -> invalid!(id, message)
+          end
+
+        association =
+          case source |> Map.get(:associations, %{}) |> Map.get(id) do
+            nil -> invalid!(id, "it is not declared as an association of its parent")
+            association -> through_association!(id, association)
+          end
+
         validate_outer_join!(id, association, config)
 
         case association do
           %{through: through} = assoc when is_map(through) ->
-            queryable = domain.schemas[assoc.queryable]
+            queryable = target_relation!(id, assoc, domain)
             assoc = Map.put_new(assoc, :field, id)
 
             boundary =
@@ -173,28 +144,16 @@ defmodule Selecto.Schema.Join do
               nested -> acc ++ normalize_nested_joins(queryable, nested, id, domain)
             end
 
-          # Handle through associations by expanding the intermediate joins
-          %{through: through_path} ->
+          # Ecto has_many/has_one :through lists: the intermediate joins
+          # are added and the last one is the join's own.
+          %{through: through_path} when is_list(through_path) ->
             refuse_alias!(id, config, "a through path")
+            refuse_kind!(id, config, "a through path")
             expand_through_joins(id, through_path, config, parent, source, domain, acc)
 
-          # Handle many-to-many associations (join_through table)
-          %{join_through: _join_through} = assoc ->
-            refuse_alias!(id, config, "a join_through table")
-            queryable = domain.schemas[assoc.queryable]
-
-            acc =
-              acc ++
-                [configure_many_to_many(id, assoc, config, parent, source, queryable, domain)]
-
-            case Map.get(config, :joins) do
-              nil -> acc
-              nested_joins -> acc ++ normalize_nested_joins(queryable, nested_joins, id, domain)
-            end
-
-          # Standard association
+          # Direct association
           _ ->
-            queryable = domain.schemas[association.queryable]
+            queryable = target_relation!(id, association, domain)
 
             join =
               configure(id, association, config, parent, source, queryable)
@@ -218,12 +177,75 @@ defmodule Selecto.Schema.Join do
     end)
   end
 
+  defp target_relation!(id, association, domain) do
+    case Map.get(domain.schemas, association.queryable) do
+      nil ->
+        invalid!(
+          id,
+          "its association targets undeclared schema #{inspect(association.queryable)}"
+        )
+
+      queryable ->
+        queryable
+    end
+  end
+
+  @doc false
+  # A many-to-many `join_through` association is a `through` contract: its
+  # join table is the bridge, joined on the association's join_keys
+  # (`[{bridge_owner_fk, owner_key}, {bridge_related_fk, related_key}]`). The
+  # bridge is scoped as every `through` bridge is: `source_scope_key`,
+  # `through_scope_key` and `target_scope_key` (all three or none) pair the
+  # bridge and the target with the owner, and `through_where` confines the
+  # bridge. The association's `where` confines the target.
+  def through_association!(association_id, %{join_through: table} = association) do
+    table =
+      cond do
+        is_binary(table) -> table
+        is_atom(table) and function_exported?(table, :__schema__, 1) -> table.__schema__(:source)
+        true -> nil
+      end
+
+    case Map.get(association, :join_keys) do
+      [{owner_fk, owner_key}, {related_fk, related_key} | _] when is_binary(table) ->
+        through =
+          association
+          |> Map.take([:source_scope_key, :through_scope_key, :target_scope_key, :through_where])
+          |> Enum.reduce(
+            %{table: table, owner_key: owner_fk, related_key: related_fk},
+            fn
+              {:through_where, where}, acc -> Map.put(acc, :where, where)
+              {key, value}, acc -> Map.put(acc, key, value)
+            end
+          )
+
+        association
+        |> Map.drop([
+          :join_through,
+          :join_keys,
+          :source_scope_key,
+          :through_scope_key,
+          :target_scope_key,
+          :through_where
+        ])
+        |> Map.merge(%{owner_key: owner_key, related_key: related_key, through: through})
+
+      _ ->
+        raise ArgumentError,
+              "invalid_domain: many-to-many association #{inspect(association_id)} needs a " <>
+                "join table and join_keys [{bridge_owner_key, owner_key}, " <>
+                "{bridge_related_key, related_key}]"
+    end
+  end
+
+  def through_association!(_association_id, association), do: association
+
   # RIGHT and FULL joins keep the target's unmatched rows; only a direct
   # association can give them (Selecto.Domain.JoinRules).
   defp validate_outer_join!(id, association, config) do
     case JoinRules.outer_join_problem(association, config) do
       nil -> :ok
-      message -> raise ArgumentError, "invalid_domain: join #{inspect(id)}: #{message}"
+      message -> invalid!(id, message)
     end
   end
 
@@ -238,6 +260,16 @@ defmodule Selecto.Schema.Join do
     if JoinRules.authored_alias(config) do
       raise ArgumentError,
             "invalid_domain: join #{inspect(id)} through #{kind} cannot take an alias"
+    end
+
+    :ok
+  end
+
+  # A star dimension, tagging or hierarchy join reads one association; an
+  # Ecto through list expands into several joins, so it takes none of them.
+  defp refuse_kind!(id, config, kind) do
+    if Map.get(config, :type) in [:star_dimension, :tagging, :hierarchical] do
+      invalid!(id, "a #{Map.get(config, :type)} join cannot read #{kind}")
     end
 
     :ok
@@ -268,119 +300,84 @@ defmodule Selecto.Schema.Join do
     end
   end
 
-  # Expand has_many :through associations into intermediate joins
+  # Expand an Ecto has_many/has_one :through list into its joins: each
+  # segment is an association of the relation before it, joined (and bounded)
+  # as a direct association; the last carries the join's own id and config.
+  # A segment that is not an association refuses the domain.
   defp expand_through_joins(id, through_path, config, parent, source, domain, acc) do
-    # through_path is a list like [:posts, :tags] meaning:
-    # source -> posts -> tags
-    # We need to ensure intermediate joins exist and configure the final join
-
     case through_path do
-      [intermediate_assoc, final_assoc] ->
-        # Get the intermediate association
-        intermediate = source.associations[intermediate_assoc]
+      [final_assoc] ->
+        final = through_segment!(id, source, final_assoc)
+        final_queryable = target_relation!(id, final, domain)
 
-        if intermediate do
-          intermediate_queryable = domain.schemas[intermediate.queryable]
+        final_join =
+          configure(id, final, config, parent, source, final_queryable)
+          |> attach_association_scope!(id, final, source, final_queryable, domain)
+          |> attach_association_policy(final)
+          |> Map.put(:is_through, true)
 
-          # Check if intermediate join is already being added
-          # If not, we need to add it implicitly
-          intermediate_join =
-            configure(
-              intermediate_assoc,
-              intermediate,
-              # Mark as implicitly added for through
-              %{implicit: true},
-              parent,
-              source,
-              intermediate_queryable
-            )
-            |> attach_association_scope!(
-              intermediate_assoc,
-              intermediate,
-              source,
-              intermediate_queryable,
-              domain
-            )
+        acc = acc ++ [final_join]
 
-          # Now get the final association from the intermediate schema
-          # We need to look it up from the actual intermediate queryable associations
-          final_assoc_data = intermediate_queryable.associations[final_assoc]
-
-          if final_assoc_data do
-            final_queryable = domain.schemas[final_assoc_data.queryable]
-
-            # Configure the final join with reference to intermediate
-            final_join =
-              configure(
-                # Use the original through association name
-                id,
-                final_assoc_data,
-                config,
-                # Parent is the intermediate join
-                intermediate_assoc,
-                intermediate_queryable,
-                final_queryable
-              )
-              |> attach_association_scope!(
-                id,
-                final_assoc_data,
-                intermediate_queryable,
-                final_queryable,
-                domain
-              )
-
-            # Mark the final join as a through join for special handling
-            final_join = Map.put(final_join, :is_through, true)
-            final_join = Map.put(final_join, :through_path, through_path)
-
-            # Add both joins
-            acc = acc ++ [intermediate_join, final_join]
-
-            # Handle nested joins if any
-            case Map.get(config, :joins) do
-              nil ->
-                acc
-
-              nested_joins ->
-                acc ++ normalize_nested_joins(final_queryable, nested_joins, id, domain)
-            end
-          else
-            # Final association not found, skip
-            acc
-          end
-        else
-          # Intermediate association not found, skip
-          acc
+        case Map.get(config, :joins) do
+          nil -> acc
+          nested_joins -> acc ++ normalize_nested_joins(final_queryable, nested_joins, id, domain)
         end
 
-      # Longer through paths (rare but possible)
-      [first_assoc | rest] when length(rest) >= 2 ->
-        # Recursively expand
-        first = source.associations[first_assoc]
+      [intermediate_assoc | rest] when rest != [] ->
+        intermediate = through_segment!(id, source, intermediate_assoc)
+        intermediate_queryable = target_relation!(id, intermediate, domain)
 
-        if first do
-          first_queryable = domain.schemas[first.queryable]
+        intermediate_join =
+          configure(
+            intermediate_assoc,
+            intermediate,
+            # Implicitly added for the through path
+            %{implicit: true},
+            parent,
+            source,
+            intermediate_queryable
+          )
+          |> attach_association_scope!(
+            intermediate_assoc,
+            intermediate,
+            source,
+            intermediate_queryable,
+            domain
+          )
+          |> attach_association_policy(intermediate)
 
-          first_join =
-            configure(first_assoc, first, %{implicit: true}, parent, source, first_queryable)
-            |> attach_association_scope!(
-              first_assoc,
-              first,
-              source,
-              first_queryable,
-              domain
-            )
-
-          # Recursively expand the remaining path
-          acc = acc ++ [first_join]
-          expand_through_joins(id, rest, config, first_assoc, first_queryable, domain, acc)
-        else
-          acc
-        end
+        expand_through_joins(
+          id,
+          rest,
+          config,
+          intermediate_assoc,
+          intermediate_queryable,
+          domain,
+          acc ++ [intermediate_join]
+        )
 
       _ ->
-        # Invalid through path, skip
-        acc
+        invalid!(id, "its through path #{inspect(through_path)} names no association")
+    end
+  end
+
+  defp through_segment!(id, source, segment) do
+    case source |> Map.get(:associations, %{}) |> Map.get(segment) do
+      %{} = association ->
+        case through_association!(segment, association) do
+          %{through: through} when is_list(through) ->
+            invalid!(id, "through segment #{inspect(segment)} is itself a through path")
+
+          association ->
+            association
+        end
+
+      nil ->
+        invalid!(
+          id,
+          "through segment #{inspect(segment)} is not an association of " <>
+            "#{inspect(Map.get(source, :source_table))}"
+        )
     end
   end
 
@@ -390,6 +387,12 @@ defmodule Selecto.Schema.Join do
     source_table = Map.get(config, :source, to_string(id))
     owner_key = Map.get(config, :owner_key, :id)
     related_key = Map.get(config, :related_key, :id)
+
+    type =
+      case JoinRules.custom_type(config) do
+        {:ok, type} -> type
+        {:error, message} -> invalid!(id, message)
+      end
 
     %{
       config: config,
@@ -403,104 +406,12 @@ defmodule Selecto.Schema.Join do
       requires_join: parent,
       join_type: :custom,
       is_custom: true,
-      type: Map.get(config, :type, :left),
+      type: type,
       on: Map.get(config, :on, []),
       param_filters: Map.get(config, :param_filters, %{}),
       filters: Map.get(config, :filters, %{}),
       fields: Map.get(config, :fields, %{})
     }
-  end
-
-  # Configure many-to-many joins (with join_through table)
-  defp configure_many_to_many(id, association, config, parent, from_source, queryable, domain) do
-    name = Map.get(config, :name, id)
-    join_through = association.join_through
-
-    # For many-to-many, we need to track the join table
-    join_through_table =
-      case join_through do
-        table when is_binary(table) ->
-          table
-
-        module when is_atom(module) ->
-          if function_exported?(module, :__schema__, 1) do
-            module.__schema__(:source)
-          else
-            to_string(module) |> String.split(".") |> List.last() |> Macro.underscore()
-          end
-
-        _ ->
-          "#{id}_join"
-      end
-
-    join_keys = Map.get(association, :join_keys, [])
-
-    {derived_main_foreign_key, derived_tag_foreign_key} =
-      case join_keys do
-        [{main_fk, _owner_key}, {tag_fk, _related_key} | _] ->
-          {to_string(main_fk), to_string(tag_fk)}
-
-        _ ->
-          {
-            foreign_key_from_table(Map.get(from_source, :source_table, to_string(id))),
-            foreign_key_from_table(Map.get(queryable, :source_table, to_string(id)))
-          }
-      end
-
-    final_join_table =
-      case Map.get(config, :join_table) do
-        nil -> join_through_table
-        value when is_atom(value) -> Atom.to_string(value)
-        value -> value
-      end
-
-    final_main_foreign_key =
-      config
-      |> Map.get(:main_foreign_key, derived_main_foreign_key)
-      |> to_string()
-
-    final_tag_foreign_key =
-      config
-      |> Map.get(:tag_foreign_key, derived_tag_foreign_key)
-      |> to_string()
-
-    %{
-      config: config,
-      from_source: from_source,
-      owner_key: association.owner_key,
-      my_key: association.related_key,
-      source: queryable.source_table,
-      id: id,
-      name: name,
-      requires_join: parent,
-      join_type: :many_to_many,
-      join_table: final_join_table,
-      main_foreign_key: final_main_foreign_key,
-      tag_foreign_key: final_tag_foreign_key,
-      join_through: join_through_table,
-      join_keys: join_keys,
-      filters: Map.get(config, :filters, %{}),
-      fields:
-        Selecto.Schema.Column.configure_columns(
-          association.field,
-          queryable.fields -- Map.get(queryable, :redact_fields, []),
-          queryable,
-          config
-        )
-    }
-    |> parameterize()
-    |> attach_association_scope!(id, association, from_source, queryable, domain)
-  end
-
-  defp foreign_key_from_table(table) when is_atom(table),
-    do: table |> Atom.to_string() |> foreign_key_from_table()
-
-  defp foreign_key_from_table(table) when is_binary(table) do
-    table
-    |> String.split(".")
-    |> List.last()
-    |> String.trim_trailing("s")
-    |> Kernel.<>("_id")
   end
 
   ### id, the id of this join in the joins map on parent
@@ -509,80 +420,18 @@ defmodule Selecto.Schema.Join do
   ### parent - atom that references the parent
   ### from_source - the association from the parent or the domain if parent is root
 
-  ### Dimension table join
-  defp configure(id, association, %{type: :dimension} = config, parent, from_source, queryable) do
-    # dimension table, has one 'name-ish' value to display, and then the Local reference would provide ID filtering.
-    # So create a field for group-by that displays NAME and filters by ID
-
-    name = Map.get(config, :name, id)
-
-    from_field =
-      case parent do
-        :selecto_root -> "#{association.owner_key}"
-        _ -> "#{parent}.#{association.owner_key}"
-      end
-
-    config =
-      Map.put(
-        config,
-        :custom_columns,
-        Map.get(config, :custom_columns, %{})
-        |> Map.put(
-          ## we will use the nane of the join's association!
-          "#{id}",
-          %{
-            name: name,
-            ### concat_ws?
-            select: "#{association.field}.#{config.dimension}",
-            ### we will always get a tuple of select + group_by_filter_select here
-            group_by_format: fn {a, _id}, _def -> a end,
-            group_by_filter: from_field,
-            group_by_filter_select: ["#{association.field}.#{config.dimension}", from_field]
-          }
-        )
-      )
-
-    ### Add custom filter that has a select (or set of checkboxes or radios... filter_form_type: :checks eg) list of names, IF not existing by name of the remote ID filter and:
-    ### - the join provides a list of tuples {filterable, viewable}
-    ### - the join provides a function returning same
-    ### - the join has 'facet: true' in which case we will determine given all other filters, what are the available items & how many matches for those items
-
-    %{
-      config: config,
-      from_source: from_source,
-      owner_key: association.owner_key,
-      my_key: association.related_key,
-      source: queryable.source_table,
-      id: id,
-      name: name,
-      ## probably don't need 'where'
-      requires_join: parent,
-      filters: Map.get(config, :filters, %{}),
-      fields:
-        Selecto.Schema.Column.configure_columns(
-          association.field,
-          [config.dimension],
-          queryable,
-          config
-        )
-    }
-    |> parameterize()
-  end
-
-  ### Many-to-many tagging join (through join table)
+  ### Tagging: an association join plus a tag list column and a tag facet.
   defp configure(id, association, %{type: :tagging} = config, parent, from_source, queryable) do
-    # For tagging relationships, we need to handle the intermediate join table
-    # This assumes the association is a has_many :through relationship
-    # Example: Post has_many :tags, through: :post_tags
-
     name = Map.get(config, :name, id)
-    # Field to display from tag table
     tag_field = Map.get(config, :tag_field, :name)
 
-    # Configure custom columns for tag aggregation
+    unless declares_field?(queryable, tag_field) do
+      invalid!(id, "tag_field #{inspect(tag_field)} is not a field of the tag relation")
+    end
+
     config =
-      Map.put(
-        config,
+      config
+      |> Map.put(
         :custom_columns,
         Map.get(config, :custom_columns, %{})
         |> Map.put(
@@ -596,11 +445,7 @@ defmodule Selecto.Schema.Join do
           }
         )
       )
-
-    # Add faceted filter for individual tags
-    config =
-      Map.put(
-        config,
+      |> Map.put(
         :custom_filters,
         Map.get(config, :custom_filters, %{})
         |> Map.put(
@@ -608,7 +453,6 @@ defmodule Selecto.Schema.Join do
           %{
             name: "#{name}",
             filter_type: :multi_select,
-            # Enable faceted filtering
             facet: true,
             source_table: queryable.source_table,
             source_field: tag_field
@@ -616,61 +460,17 @@ defmodule Selecto.Schema.Join do
         )
       )
 
-    %{
-      config: config,
-      from_source: from_source,
-      owner_key: association.owner_key,
-      my_key: association.related_key,
-      source: queryable.source_table,
-      id: id,
-      name: name,
-      requires_join: parent,
-      # Special marker for SQL builder
-      join_type: :many_to_many,
-      filters: Map.get(config, :filters, %{}),
-      fields:
-        Selecto.Schema.Column.configure_columns(
-          association.field,
-          queryable.fields -- queryable.redact_fields,
-          queryable,
-          config
-        )
-    }
-    |> parameterize()
+    id
+    |> std_config(association, config, parent, from_source, queryable)
+    |> Map.merge(%{join_type: :tagging, tag_field: tag_field})
   end
 
   ### Hierarchical self-join (adjacency list pattern)
   defp configure(id, association, %{type: :hierarchical} = config, parent, from_source, queryable) do
-    # Self-referencing table with parent_id pointing to same table
-    # Supports adjacency list hierarchical pattern
-
-    name = Map.get(config, :name, id)
-    hierarchy_type = Map.get(config, :hierarchy_type, :adjacency_list)
-    # Prevent infinite recursion
-    depth_limit = Map.get(config, :depth_limit, 5)
-
-    case hierarchy_type do
-      :adjacency_list ->
-        configure_adjacency_list(
-          id,
-          association,
-          config,
-          parent,
-          from_source,
-          queryable,
-          name,
-          depth_limit
-        )
-
-      :materialized_path ->
-        configure_materialized_path(id, association, config, parent, from_source, queryable, name)
-
-      :closure_table ->
-        configure_closure_table(id, association, config, parent, from_source, queryable, name)
-    end
+    configure_adjacency_list(id, association, config, parent, from_source, queryable)
   end
 
-  ### Star schema dimension join (optimized for OLAP)
+  ### Star schema dimension: a LEFT association join plus a display column.
   defp configure(
          id,
          association,
@@ -679,16 +479,25 @@ defmodule Selecto.Schema.Join do
          from_source,
          queryable
        ) do
-    # Star schema dimensions are optimized for aggregation and analysis
-    # They typically contain descriptive attributes and are joined to fact tables
-
     name = Map.get(config, :name, id)
     display_field = Map.get(config, :display_field, :name)
 
-    # Configure dimension-specific features
+    unless declares_field?(queryable, display_field) do
+      invalid!(id, "star dimension display field #{inspect(display_field)} is not queryable")
+    end
+
+    case Map.get(config, :dimension_key) do
+      nil ->
+        :ok
+
+      key ->
+        unless to_string(key) == to_string(association.owner_key),
+          do: invalid!(id, "star dimension key must match the association owner key")
+    end
+
     config =
-      Map.put(
-        config,
+      config
+      |> Map.put(
         :custom_columns,
         Map.get(config, :custom_columns, %{})
         |> Map.put(
@@ -715,11 +524,7 @@ defmodule Selecto.Schema.Join do
           }
         )
       )
-
-    # Add aggregation-friendly filters
-    config =
-      Map.put(
-        config,
+      |> Map.put(
         :custom_filters,
         Map.get(config, :custom_filters, %{})
         |> Map.put(
@@ -727,7 +532,6 @@ defmodule Selecto.Schema.Join do
           %{
             name: "#{name} Filter",
             filter_type: :select_facet,
-            # Enable faceted filtering for dimensions
             facet: true,
             source_table: queryable.source_table,
             source_field: display_field,
@@ -736,108 +540,14 @@ defmodule Selecto.Schema.Join do
         )
       )
 
-    %{
-      config: config,
-      from_source: from_source,
-      owner_key: association.owner_key,
-      my_key: association.related_key,
-      source: queryable.source_table,
-      id: id,
-      name: name,
-      requires_join: parent,
-      # Optimized for OLAP queries
+    id
+    |> std_config(association, config, parent, from_source, queryable)
+    |> Map.merge(%{
       join_type: :star_dimension,
+      type: :left,
       display_field: display_field,
-      display_fallback: Map.get(config, :display_fallback),
-      filters: Map.get(config, :filters, %{}),
-      fields:
-        Selecto.Schema.Column.configure_columns(
-          association.field,
-          queryable.fields -- queryable.redact_fields,
-          queryable,
-          config
-        )
-    }
-    |> parameterize()
-  end
-
-  ### Snowflake schema normalized dimension join
-  defp configure(
-         id,
-         association,
-         %{type: :snowflake_dimension} = config,
-         parent,
-         from_source,
-         queryable
-       ) do
-    # Snowflake dimensions are normalized and may require multiple joins to get full context
-    # They maintain referential integrity but require more complex queries
-
-    name = Map.get(config, :name, id)
-    display_field = Map.get(config, :display_field, :name)
-    # Additional joins needed
-    normalization_joins = Map.get(config, :normalization_joins, [])
-
-    # Configure for normalized dimension access
-    config =
-      Map.put(
-        config,
-        :custom_columns,
-        Map.get(config, :custom_columns, %{})
-        |> Map.put(
-          "#{id}_normalized",
-          %{
-            name: "#{name}",
-            select: build_snowflake_select(association.field, display_field, normalization_joins),
-            group_by_format: fn {a, _id}, _def -> a end,
-            filterable: true,
-            requires_normalization_joins: normalization_joins
-          }
-        )
-      )
-
-    %{
-      config: config,
-      from_source: from_source,
-      owner_key: association.owner_key,
-      my_key: association.related_key,
-      source: queryable.source_table,
-      id: id,
-      name: name,
-      requires_join: parent,
-      join_type: :snowflake_dimension,
-      display_field: display_field,
-      # Track additional joins needed
-      normalization_joins: normalization_joins,
-      filters: Map.get(config, :filters, %{}),
-      fields:
-        Selecto.Schema.Column.configure_columns(
-          association.field,
-          queryable.fields -- queryable.redact_fields,
-          queryable,
-          config
-        )
-    }
-    |> parameterize()
-  end
-
-  ### Enhanced joins (new join types)
-  defp configure(id, association, %{type: join_type} = config, parent, from_source, queryable)
-       when join_type in [
-              :self_join,
-              :lateral_join,
-              :cross_join,
-              :full_outer_join,
-              :conditional_join
-            ] do
-    Selecto.EnhancedJoins.configure_enhanced_join(
-      id,
-      association,
-      config,
-      parent,
-      from_source,
-      queryable
-    )
+      display_fallback: Map.get(config, :display_fallback)
+    })
   end
 
   ### Regular (catch-all clause)
@@ -845,19 +555,37 @@ defmodule Selecto.Schema.Join do
     std_config(id, association, config, parent, from_source, queryable)
   end
 
-  defp configure_adjacency_list(
-         id,
-         association,
-         config,
-         parent,
-         from_source,
-         queryable,
-         name,
-         _depth_limit
-       ) do
-    # Add custom columns for hierarchy navigation
-    # These reference fields from the JOIN alias used in the main query.
+  # An adjacency list: the target relation joined through a recursive CTE
+  # that walks it from its roots (rows whose parent_field is NULL) down
+  # parent_field -> id_field, at most depth_limit levels (1..10000, default
+  # 5). The CTE keeps every target column and adds level, path and
+  # path_array; the association's `where` confines the walk (anchor and
+  # step), the walk stays inside one tenant when the target declares
+  # tenant_field, and the join's ON is the association's own (key equality,
+  # conditions, scope keys, tenant pair). PostgreSQL only.
+  defp configure_adjacency_list(id, association, config, parent, from_source, queryable) do
+    name = Map.get(config, :name, id)
     join_alias = to_string(id)
+
+    if Map.has_key?(association, :through) or Map.has_key?(association, :values) or
+         Map.has_key?(association, :join_strategy),
+       do: invalid!(id, "a hierarchical join reads a direct table association")
+
+    id_field = Map.get(config, :id_field, association.related_key)
+    parent_field = Map.get(config, :parent_field, :parent_id)
+    depth_limit = Map.get(config, :depth_limit, 5)
+
+    for {key, field} <- [id_field: id_field, parent_field: parent_field] do
+      unless declares_field?(queryable, field),
+        do:
+          invalid!(id, "hierarchy #{key} #{inspect(field)} is not a field of the target relation")
+    end
+
+    unless is_integer(depth_limit) and depth_limit in 1..10_000,
+      do: invalid!(id, "hierarchy depth_limit must be an integer from 1 to 10000")
+
+    if Enum.any?(queryable.fields, &(to_string(&1) in ["level", "path", "path_array"])),
+      do: invalid!(id, "a hierarchy target cannot declare fields named level, path or path_array")
 
     config =
       Map.put(
@@ -893,178 +621,18 @@ defmodule Selecto.Schema.Join do
         )
       )
 
-    # Get the depth limit from config for the join struct
-    depth_limit = Map.get(config, :depth_limit, 5)
-    id_field = Map.get(config, :id_field, association.related_key || :id)
-    parent_field = Map.get(config, :parent_field, association.owner_key || :parent_id)
-    name_field = Map.get(config, :name_field, :name)
-
-    %{
-      config: config,
-      from_source: from_source,
-      owner_key: association.owner_key,
-      my_key: association.related_key,
-      source: queryable.source_table,
+    id
+    |> std_config(association, config, parent, from_source, queryable)
+    |> Map.merge(%{
       source_schema: Map.get(queryable, :source_schema),
-      id: id,
-      name: name,
-      requires_join: parent,
       join_type: :hierarchical_adjacency,
+      type: :left,
       hierarchy_depth: depth_limit,
       id_field: id_field,
       parent_field: parent_field,
-      name_field: name_field,
-      filters: Map.get(config, :filters, %{}),
-      fields:
-        Selecto.Schema.Column.configure_columns(
-          association.field,
-          queryable.fields -- queryable.redact_fields,
-          queryable,
-          config
-        )
-    }
-    |> parameterize()
-  end
-
-  defp configure_materialized_path(id, association, config, parent, from_source, queryable, name) do
-    path_field = Map.get(config, :path_field, :path)
-    path_separator = Map.get(config, :path_separator, "/")
-    root_path = Map.get(config, :root_path, "")
-
-    # Add custom columns for path-based operations
-    # These reference fields from the JOIN alias used in the main query.
-    join_alias = to_string(id)
-
-    config =
-      Map.put(
-        config,
-        :custom_columns,
-        Map.get(config, :custom_columns, %{})
-        |> Map.put(
-          "#{id}_depth",
-          %{
-            name: "#{name} Depth",
-            select: "#{join_alias}.depth",
-            group_by_format: fn {a, _id}, _def -> a end,
-            filterable: true
-          }
-        )
-        |> Map.put(
-          "#{id}_path_array",
-          %{
-            name: "#{name} Path Array",
-            select: "#{join_alias}.path_array",
-            group_by_format: fn {a, _id}, _def -> a end,
-            filterable: false
-          }
-        )
-      )
-
-    %{
-      config: config,
-      from_source: from_source,
-      owner_key: association.owner_key,
-      my_key: association.related_key,
-      source: queryable.source_table,
-      source_schema: Map.get(queryable, :source_schema),
-      id: id,
-      name: name,
-      requires_join: parent,
-      join_type: :hierarchical_materialized_path,
-      path_field: path_field,
-      path_separator: path_separator,
-      root_path: root_path,
-      filters: Map.get(config, :filters, %{}),
-      fields:
-        Selecto.Schema.Column.configure_columns(
-          association.field,
-          queryable.fields -- queryable.redact_fields,
-          queryable,
-          config
-        )
-    }
-    |> parameterize()
-  end
-
-  defp configure_closure_table(id, association, config, parent, from_source, queryable, name) do
-    # Assumes a separate closure table exists for storing ancestor-descendant relationships
-    closure_table = Map.get(config, :closure_table, "#{queryable.source_table}_closure")
-    ancestor_field = Map.get(config, :ancestor_field, :ancestor_id)
-    descendant_field = Map.get(config, :descendant_field, :descendant_id)
-    depth_field = Map.get(config, :depth_field, :depth)
-
-    # Add custom columns leveraging closure table CTE
-    # These reference fields from the JOIN alias used in the main query.
-    join_alias = to_string(id)
-
-    config =
-      Map.put(
-        config,
-        :custom_columns,
-        Map.get(config, :custom_columns, %{})
-        |> Map.put(
-          "#{id}_depth",
-          %{
-            name: "#{name} Depth",
-            select: "#{join_alias}.depth",
-            group_by_format: fn {a, _id}, _def -> a end,
-            filterable: true
-          }
-        )
-        |> Map.put(
-          "#{id}_descendant_count",
-          %{
-            name: "#{name} Descendant Count",
-            select: "#{join_alias}.descendant_count",
-            group_by_format: fn {a, _id}, _def -> a end,
-            filterable: true
-          }
-        )
-      )
-
-    %{
-      config: config,
-      from_source: from_source,
-      owner_key: association.owner_key,
-      my_key: association.related_key,
-      source: queryable.source_table,
-      source_schema: Map.get(queryable, :source_schema),
-      id: id,
-      name: name,
-      requires_join: parent,
-      join_type: :hierarchical_closure_table,
-      closure_table: closure_table,
-      ancestor_field: ancestor_field,
-      descendant_field: descendant_field,
-      depth_field: depth_field,
-      filters: Map.get(config, :filters, %{}),
-      fields:
-        Selecto.Schema.Column.configure_columns(
-          association.field,
-          queryable.fields -- queryable.redact_fields,
-          queryable,
-          config
-        )
-    }
-    |> parameterize()
-  end
-
-  # Helper functions for building hierarchy SQL
-  # Note: Previously broken CTE functions have been removed and replaced with
-  # proper CTE integration in the SQL builder. Custom columns now reference
-  # CTE fields directly instead of embedding invalid subqueries.
-
-  defp build_snowflake_select(field, display_field, normalization_joins) do
-    # Build select clause that may require additional joins for normalized data
-    # This is a simplified version - real implementation would coordinate with SQL builder
-    case normalization_joins do
-      [] -> "#{field}.#{display_field}"
-      # Use the normalized table's field
-      [%{alias: alias_name} | _] -> "#{alias_name}.#{display_field}"
-      [%{table: table} | _] -> "#{table}.#{display_field}"
-      # Fallback for string joins
-      [join | _] when is_binary(join) -> "#{join}.#{display_field}"
-    end
+      hierarchy_where: Map.get(association, :where),
+      hierarchy_tenant_field: Map.get(queryable, :tenant_field)
+    })
   end
 
   defp std_config(id, association, config, parent, from_source, queryable) do
@@ -1076,11 +644,9 @@ defmodule Selecto.Schema.Join do
       source: queryable.source_table,
       id: id,
       name: Map.get(config, :name, id),
-      # An association join's authored `type: :inner` renders INNER JOIN
-      # (before, the configured join dropped the type and every association
-      # join rendered LEFT JOIN).
-      type: if(inner_join?(config), do: :inner, else: :left),
-      ## probably don't need 'where'
+      # The join's authored type (normalized by JoinRules.normalize/1):
+      # inner, right and full render as such; everything else joins LEFT.
+      type: if(Map.get(config, :type) in [:inner, :right, :full], do: config.type, else: :left),
       requires_join: parent,
       filters: make_filters(config),
       fields:
@@ -1091,33 +657,18 @@ defmodule Selecto.Schema.Join do
           config
         )
     }
-    |> put_outer_type(config)
-    |> parameterize()
+    |> put_conditions(association)
   end
 
-  defp inner_join?(config) do
-    case Map.get(config, :type) do
-      type when is_atom(type) and not is_nil(type) ->
-        String.downcase(Atom.to_string(type)) == "inner"
-
-      type when is_binary(type) ->
-        String.downcase(type) == "inner"
+  # Association `conditions` (validated by the domain contract) travel with
+  # the join; the builder ANDs them after the key equality.
+  defp put_conditions(join, association) do
+    case map_value(association, :conditions) do
+      conditions when is_list(conditions) and conditions != [] ->
+        Map.put(join, :conditions, Selecto.Domain.JoinConditions.normalize(conditions))
 
       _ ->
-        false
-    end
-  end
-
-  defp parameterize(join) do
-    join
-  end
-
-  # RIGHT and FULL are rendered from the join's :type (the SQL builder's join
-  # keyword); a standard association otherwise keeps joining LEFT as before.
-  defp put_outer_type(join, config) do
-    case JoinRules.outer_type(config) do
-      nil -> join
-      type -> Map.put(join, :type, type)
+        join
     end
   end
 

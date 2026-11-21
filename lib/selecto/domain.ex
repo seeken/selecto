@@ -353,9 +353,13 @@ defmodule Selecto.Domain do
   (`:unknown_domain_key`, `:invalid_through`, `:unsupported_join_type`).
 
   Native (atom-map) authoring keeps `validate/1`, which also admits Selecto's
-  own join families and their keys (dimension, tagging, hierarchical,
-  snowflake_dimension, self_join, lateral_join, cross_join, full_outer_join,
-  conditional_join), relation `source_schema` and Ecto-style `through` lists.
+  native join sugar and its keys (dimension and snowflake_dimension, which
+  are star dimensions; self_join, a left association join; full_outer_join, a
+  full join; tagging; the PostgreSQL adjacency-list hierarchical join),
+  relation `source_schema` and Ecto-style `through` lists. The removed types
+  (cross_join, the raw-SQL lateral_join, conditional_join, materialized_path
+  and closure_table hierarchies, snowflake `normalization_joins` lists)
+  refuse on both paths with `:unsupported_join_type`.
   A schema 2 document is validated by `validate/1` (its own rules).
   """
   @spec validate_json(term()) :: {:ok, map(), Diagnostics.t()} | {:error, Diagnostics.t()}

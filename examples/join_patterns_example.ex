@@ -1,7 +1,9 @@
 defmodule Selecto.Examples.JoinPatternsExample do
   @moduledoc """
-  Example configurations showing how to use the new simplified join patterns
-  in Selecto. These examples demonstrate the various join types and their configurations.
+  Example configurations of Selecto's native join sugar (see
+  docs/join_families.md). Every join reads an association; the sugar
+  normalises onto the shared types (left, inner, right, full,
+  star_dimension).
   """
 
   # Example domain configuration showing different join patterns
@@ -19,59 +21,41 @@ defmodule Selecto.Examples.JoinPatternsExample do
       },
       # Different join pattern examples
       joins: %{
-        # Many-to-many tagging example
+        # Many-to-many tagging example (a join_through association)
         products: %{
           type: :tagging,
           tag_field: :name,
           name: "Product Tags"
         },
-        
+
         # Star schema dimension example (typical OLAP setup)
         customer: %{
           type: :star_dimension,
           display_field: :full_name,
           name: "Customer Dimension"
         },
-        
-        # Snowflake schema dimension example
+
+        # Snowflake dimension: a star dimension; further normalised tables
+        # are nested associations joined under it
         category: %{
           type: :snowflake_dimension,
           display_field: :name,
-          normalization_joins: [
-            %{table: "category_groups", alias: "cg", local_key: :group_id, remote_key: :id}
-          ],
-          name: "Category Hierarchy"
+          name: "Category",
+          joins: %{group: %{type: :left}}
         },
-        
-        # Hierarchical adjacency list example (organizational chart)
+
+        # Hierarchical adjacency list example (organizational chart;
+        # PostgreSQL only)
         manager: %{
           type: :hierarchical,
           hierarchy_type: :adjacency_list,
+          parent_field: :manager_id,
           depth_limit: 5,
           name: "Management Chain"
         },
-        
-        # Hierarchical materialized path example (category tree)
-        parent_category: %{
-          type: :hierarchical,
-          hierarchy_type: :materialized_path,
-          path_field: :path,
-          path_separator: "/",
-          name: "Category Path"
-        },
-        
-        # Hierarchical closure table example (complex hierarchies)
-        department_hierarchy: %{
-          type: :hierarchical,
-          hierarchy_type: :closure_table,
-          closure_table: "department_closure",
-          ancestor_field: :ancestor_id,
-          descendant_field: :descendant_id,
-          depth_field: :depth,
-          name: "Department Structure"
-        },
-        
-        # Traditional dimension table example (existing functionality)
+
+        # A dimension is a star_dimension whose `dimension` key is its
+        # display field
         region: %{
           type: :dimension,
           dimension: :name,
@@ -96,8 +80,9 @@ defmodule Selecto.Examples.JoinPatternsExample do
         },
         products: %{
           field: :products,
-          owner_key: :id,
-          related_key: :order_id,  # through order_items
+          cardinality: :many,
+          join_through: "order_items",
+          join_keys: [{:order_id, :id}, {:product_id, :id}],
           queryable: SelectoExample.Store.Product
         },
         region: %{
@@ -124,8 +109,9 @@ defmodule Selecto.Examples.JoinPatternsExample do
         },
         tags: %{
           field: :tags,
-          owner_key: :id,
-          related_key: :product_id,  # through product_tags
+          cardinality: :many,
+          join_through: "product_tags",
+          join_keys: [{:product_id, :id}, {:tag_id, :id}],
           queryable: SelectoExample.Store.Tag
         }
       }
@@ -144,14 +130,14 @@ defmodule Selecto.Examples.JoinPatternsExample do
   defp category_schema do
     %{
       source_table: "categories",
-      fields: [:id, :name, :parent_id, :path, :group_id],
+      fields: [:id, :name, :parent_id, :group_id],
       redact_fields: [],
       associations: %{
-        parent_category: %{
-          field: :parent,
-          owner_key: :parent_id,
+        group: %{
+          field: :group,
+          owner_key: :group_id,
           related_key: :id,
-          queryable: SelectoExample.Store.Category
+          queryable: SelectoExample.Store.CategoryGroup
         }
       }
     }
@@ -193,20 +179,13 @@ defmodule Selecto.Examples.JoinPatternsExample do
       source_table: "departments",
       fields: [:id, :name, :parent_id],
       redact_fields: [],
-      associations: %{
-        department_hierarchy: %{
-          field: :hierarchy,
-          owner_key: :id,
-          related_key: :descendant_id,  # through closure table
-          queryable: SelectoExample.Store.Department
-        }
-      }
+      associations: %{}
     }
   end
 
   @doc """
   Example usage showing how the join configuration would be used:
-  
+
   ## Tagging Example
   ```elixir
   # Products with their tags aggregated
@@ -215,7 +194,7 @@ defmodule Selecto.Examples.JoinPatternsExample do
     |> Selecto.select([:name, :price, "tags_list"])  # Uses the custom column from tagging config
     |> Selecto.filter([{"tags_filter", ["electronics", "gadgets"]}])  # Uses the custom filter
   ```
-  
+
   ## Hierarchical Example
   ```elixir
   # Employees with their management chain
@@ -223,7 +202,7 @@ defmodule Selecto.Examples.JoinPatternsExample do
     |> Selecto.select([:name, "manager_path", "manager_level"])  # Uses hierarchical custom columns
     |> Selecto.filter([{"manager_level", {"<=", 3}}])  # Show only up to 3 levels deep
   ```
-  
+
   ## Star Schema Example
   ```elixir
   # Orders with customer dimension for OLAP analysis

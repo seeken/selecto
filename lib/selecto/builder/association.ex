@@ -31,8 +31,17 @@ defmodule Selecto.Builder.Association do
           )
       end
 
+    # The association's `conditions` follow its key equality (a through
+    # association refuses them, Selecto.Domain.JoinConditions).
     conditions =
       [key] ++
+        Selecto.Domain.JoinConditions.sql(
+          selecto,
+          value(association, :conditions),
+          source_alias,
+          target_alias,
+          relations[:target]
+        ) ++
         direct_scope(selecto, association, target_alias, source_alias, relations) ++
         tenant_scope(selecto, association, target_alias, source_alias, relations) ++
         carried(selecto, value(association, :carry_tenant_field), target_alias) ++

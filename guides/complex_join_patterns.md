@@ -117,7 +117,7 @@ sales_by_region = selecto
 ### Nested Star Dimensions
 
 ```elixir
-# Extended star schema with snowflake dimension normalization
+# Snowflake schema: each further normalised table is a nested association
 nested_star_domain = %{
   # ... base configuration ...
   schemas: %{
@@ -185,7 +185,11 @@ geographic_analysis = selecto
 
 ## Hierarchical Joins
 
-Hierarchical joins handle tree-like data structures using either adjacency lists or materialized paths, with automatic CTE generation for traversal.
+Hierarchical joins handle tree-like data with an adjacency list (each row
+names its parent): the target is joined through a recursive CTE generated for
+the join. The adjacency-list join renders on PostgreSQL only; other adapters
+refuse it with `unsupported_feature` before any SQL is sent. The portable way
+to walk a tree is a recursive query member (below).
 
 ### Adjacency List Hierarchies
 
@@ -227,7 +231,7 @@ hierarchy_domain = %{
       type: :hierarchical,
       hierarchy_type: :adjacency_list,
       depth_limit: 6,
-      path_separator: " > "
+      parent_field: :manager_id     # default :parent_id; must be a target field
     },
     # Department hierarchy  
     department: %{
@@ -245,7 +249,7 @@ management_analysis = selecto
   |> Selecto.select([
     "name",
     "position",
-    "manager_path",           # Full path to CEO: "CEO > VP > Director > Manager"
+    "manager_path",           # Path of ids from the root: "1/4/17"
     "manager_level",          # Depth in hierarchy (0 = CEO, 1 = VP, etc.)
     "manager_path_array",     # Array of manager IDs in path
     "department.name",
@@ -265,75 +269,20 @@ management_analysis = selecto
   |> Selecto.execute()
 ```
 
-### Materialized Path Hierarchies
+### Rules and Portable Tree Walks
 
-```elixir
-# Domain with materialized path hierarchy (more efficient for deep trees)
-path_hierarchy_domain = %{
-  name: "Content Categories",
-  source: %{
-    source_table: "articles",
-    primary_key: :id,
-    fields: [:id, :title, :content, :category_id],
-    columns: %{
-      id: %{type: :integer},
-      title: %{type: :string},
-      content: %{type: :text},
-      category_id: %{type: :integer}
-    },
-    associations: %{
-      category: %{queryable: :categories, field: :category, owner_key: :category_id, related_key: :id}
-    }
-  },
-  schemas: %{
-    categories: %{
-      name: "Category",
-      source_table: "categories",
-      fields: [:id, :name, :path, :parent_id],
-      columns: %{
-        id: %{type: :integer},
-        name: %{type: :string}, 
-        path: %{type: :string},    # e.g., "/technology/web-dev/frontend"
-        parent_id: %{type: :integer}
-      }
-    }
-  },
-  joins: %{
-    category: %{
-      type: :hierarchical,
-      hierarchy_type: :materialized_path,
-      path_field: :path,
-      path_separator: "/",
-      depth_limit: 8
-    }
-  }
-}
+- `parent_field` (default `:parent_id`) and `id_field` (default: the
+  association's `related_key`) must be target fields, and the target cannot
+  declare fields named `level`, `path` or `path_array`.
+- `depth_limit` is an integer from 1 to 10000 (default 5).
+- The association's `where` confines the anchor and every step, the step
+  stays inside one tenant when the target declares `tenant_field`, and the
+  join's ON is the association's own.
 
-selecto = Selecto.configure(path_hierarchy_domain, conn)
-
-# Query with path-based hierarchy
-category_analysis = selecto
-  |> Selecto.select([
-    "title",
-    "category.name",
-    "category_path",          # Full category path
-    "category_level",         # Depth (calculated from path)
-    "category_ancestors",     # Array of ancestor category names
-    {:func, "count", ["*"]}
-  ])
-  |> Selecto.filter([
-    # Find all articles in "Technology" branch (any level)
-    {"category_path", {:like, "%/technology/%"}},
-    # Or specific depth
-    {"category_level", {:eq, 3}}
-  ])
-  |> Selecto.group_by([
-    "category.name", 
-    "category_path",
-    "category_level"
-  ])
-  |> Selecto.execute()
-```
+The `materialized_path` and `closure_table` hierarchy types were removed. On
+any backend, walk a tree with a recursive query member
+(`query_members.ctes` with `kind: :recursive`), or filter a stored path
+column directly (`{"category.path", {:like, "/technology/%"}}`).
 
 ## Many-to-Many Tagging
 
@@ -341,156 +290,115 @@ Many-to-many tagging joins provide faceted filtering and tag aggregation for fle
 
 ### Basic Tagging Setup
 
+A tagging join reads a many-to-many `join_through` association. `join_keys`
+are required: `[{bridge_owner_key, owner_key}, {bridge_related_key,
+related_key}]`. The bridge is scoped like any `through` bridge:
+`source_scope_key`, `through_scope_key` and `target_scope_key` (all three or
+none) pair the bridge and the target with the owner, and `through_where`
+confines the bridge rows; the association's `where` confines the tags.
+
 ```elixir
-# Domain with many-to-many tagging
 tagging_domain = %{
   name: "Content Tagging System",
   source: %{
     source_table: "articles",
     primary_key: :id,
-    fields: [:id, :title, :content, :author_id, :published_at],
+    tenant_field: :tenant_id,
+    fields: [:id, :title, :author_id, :published_at, :tenant_id],
     columns: %{
       id: %{type: :integer},
       title: %{type: :string},
-      content: %{type: :text}, 
       author_id: %{type: :integer},
-      published_at: %{type: :utc_datetime}
+      published_at: %{type: :utc_datetime},
+      tenant_id: %{type: :integer}
     },
     associations: %{
       author: %{queryable: :users, field: :author, owner_key: :author_id, related_key: :id},
-      tags: %{queryable: :article_tags, field: :tags, owner_key: :id, related_key: :article_id}
+      tags: %{
+        queryable: :tags,
+        field: :tags,
+        cardinality: :many,
+        join_through: "article_tags",
+        join_keys: [{:article_id, :id}, {:tag_id, :id}],
+        source_scope_key: :tenant_id,
+        through_scope_key: :tenant_id,
+        target_scope_key: :tenant_id,
+        where: %{visible: true}
+      }
     }
   },
   schemas: %{
     users: %{
       name: "User",
       source_table: "users",
-      fields: [:id, :name, :email],
-      columns: %{
-        id: %{type: :integer},
-        name: %{type: :string},
-        email: %{type: :string}
-      }
+      tenant_field: :tenant_id,
+      fields: [:id, :name, :tenant_id],
+      columns: %{id: %{type: :integer}, name: %{type: :string}, tenant_id: %{type: :integer}}
     },
-    article_tags: %{
-      name: "Article Tag",
-      source_table: "article_tags",
-      fields: [:id, :name, :article_id, :weight],
+    tags: %{
+      name: "Tag",
+      source_table: "tags",
+      tenant_field: :tenant_id,
+      fields: [:id, :name, :visible, :tenant_id],
       columns: %{
         id: %{type: :integer},
         name: %{type: :string},
-        article_id: %{type: :integer},
-        weight: %{type: :integer}  # Tag relevance weight
+        visible: %{type: :boolean},
+        tenant_id: %{type: :integer}
       }
     }
   },
   joins: %{
-    author: %{type: :left, display_field: :name},
-    tags: %{
-      type: :tagging,
-      tag_field: :name,
-      weight_field: :weight,     # Optional: for weighted tagging
-      aggregation: :string_agg   # How to combine multiple tags
-    }
+    author: %{type: :left},
+    tags: %{type: :tagging, tag_field: :name}
   }
 }
 
-selecto = Selecto.configure(tagging_domain, conn)
+selecto = Selecto.configure(tagging_domain, conn) |> Selecto.with_tenant(7)
 
 # Query with tag filtering and aggregation
 tagged_content = selecto
   |> Selecto.select([
     "title",
-    "author_display",
-    "tags_list",              # Aggregated tag string: "tech,web,frontend" 
-    "tags_count",             # Number of tags
-    "tags_weight_sum",        # Sum of tag weights
+    "author.name",
+    "tags_list",              # Aggregated tag string: "tech, web, frontend"
     "published_at"
   ])
   |> Selecto.filter([
-    # Faceted tag filtering
-    {"tags_filter", "technology"},        # Has "technology" tag
-    {"tags_any", ["web", "mobile"]},      # Has any of these tags
-    {"tags_all", ["frontend", "react"]},  # Has all of these tags
-    {"tags_weight_min", 5},               # Minimum tag weight
+    {"tags_filter", "technology"},        # Has the "technology" tag
     {"published_at", {:gte, ~D[2024-01-01]}}
-  ])
-  |> Selecto.order_by([
-    {:desc, "tags_weight_sum"},  # Order by tag relevance
-    {:desc, "published_at"}
   ])
   |> Selecto.execute()
 ```
 
-### Advanced Tagging Patterns
+The join adds `tags_list` (a string aggregate of `tag_field`) and the
+`tags_filter` multi-select facet.
+
+### Several Tag Dimensions
+
+Each tag dimension is its own `join_through` association; `through_where`
+separates kinds that share one bridge table.
 
 ```elixir
-# Multi-dimensional tagging (categories + user tags)
-multi_tag_domain = %{
-  # ... base configuration ...
-  associations: %{
-    # ... existing associations ...
-    user_tags: %{queryable: :user_article_tags, field: :user_tags, owner_key: :id, related_key: :article_id},
-    system_tags: %{queryable: :system_tags, field: :system_tags, owner_key: :id, related_key: :article_id}
+associations: %{
+  user_tags: %{
+    queryable: :tags, field: :user_tags, cardinality: :many,
+    join_through: "article_tags",
+    join_keys: [{:article_id, :id}, {:tag_id, :id}],
+    through_where: %{origin: "user"}
   },
-  schemas: %{
-    # ... existing schemas ...
-    user_article_tags: %{
-      name: "User Tag",
-      source_table: "user_article_tags", 
-      fields: [:id, :name, :article_id, :user_id, :created_at],
-      columns: %{
-        id: %{type: :integer},
-        name: %{type: :string},
-        article_id: %{type: :integer},
-        user_id: %{type: :integer},
-        created_at: %{type: :utc_datetime}
-      }
-    },
-    system_tags: %{
-      name: "System Tag",
-      source_table: "system_tags",
-      fields: [:id, :name, :article_id, :confidence],
-      columns: %{
-        id: %{type: :integer},
-        name: %{type: :string},
-        article_id: %{type: :integer},
-        confidence: %{type: :float}  # AI-generated tag confidence
-      }
-    }
-  },
-  joins: %{
-    # ... existing joins ...
-    user_tags: %{
-      type: :tagging,
-      tag_field: :name,
-      aggregation: :array_agg    # Keep as array for complex filtering
-    },
-    system_tags: %{
-      type: :tagging,
-      tag_field: :name,
-      weight_field: :confidence,
-      min_weight: 0.7           # Only high-confidence system tags
-    }
+  system_tags: %{
+    queryable: :tags, field: :system_tags, cardinality: :many,
+    join_through: "article_tags",
+    join_keys: [{:article_id, :id}, {:tag_id, :id}],
+    through_where: %{origin: "system"}
   }
 }
 
-# Query with multiple tag dimensions
-multi_dimensional_tags = selecto
-  |> Selecto.select([
-    "title",
-    "user_tags_array",        # User-generated tags as array
-    "system_tags_list",       # AI tags as string (high confidence only)
-    "system_tags_avg_confidence", # Average AI confidence
-    {:func, "count", ["DISTINCT", "user_tags.user_id"]} # Unique taggers
-  ])
-  |> Selecto.filter([
-    {"user_tags_count", {:gte, 3}},           # At least 3 user tags
-    {"system_tags_filter", "programming"},    # AI detected "programming"
-    {"system_tags_avg_confidence", {:gte, 0.8}} # High AI confidence
-  ])
-  |> Selecto.group_by(["id", "title"])
-  |> Selecto.execute()
+joins: %{
+  user_tags: %{type: :tagging, tag_field: :name},
+  system_tags: %{type: :tagging, tag_field: :name}
+}
 ```
 
 ## Self-Referencing Hierarchies
@@ -526,8 +434,7 @@ comment_domain = %{
     parent: %{
       type: :hierarchical,
       hierarchy_type: :adjacency_list,
-      depth_limit: 10,  # Limit thread depth
-      self_reference: true
+      depth_limit: 10   # Limit thread depth
     },
     author: %{type: :left, display_field: :name},
     article: %{type: :left, display_field: :title}
@@ -543,7 +450,6 @@ comment_threads = selecto
     "author_display",
     "parent_path",            # Path to root comment
     "parent_level",           # Thread depth (0 = root, 1 = reply, etc.)
-    "thread_root_id",         # ID of root comment in thread
     "created_at"
   ])
   |> Selecto.filter([
@@ -551,7 +457,6 @@ comment_threads = selecto
     {"parent_level", {:lte, 5}}  # Limit thread depth for display
   ])
   |> Selecto.order_by([
-    "thread_root_id",         # Group by thread
     "parent_level",           # Order by depth
     "created_at"              # Then by time
   ])
@@ -618,7 +523,7 @@ ecommerce_mixed = %{
       # ... product schema with category and tags associations ...
     },
     categories: %{
-      # ... hierarchical categories with path field ...
+      # ... categories with parent_id (adjacency list) ...
     }
   },
   joins: %{
@@ -642,11 +547,10 @@ ecommerce_mixed = %{
             # Hierarchical category structure
             category: %{
               type: :hierarchical,
-              hierarchy_type: :materialized_path,
-              path_field: :path,
-              path_separator: "/"
+              hierarchy_type: :adjacency_list,   # PostgreSQL only
+              parent_field: :parent_id
             },
-            # Many-to-many product tags
+            # Many-to-many product tags (a join_through association)
             tags: %{type: :tagging, tag_field: :name}
           }
         }
@@ -670,7 +574,6 @@ comprehensive_analysis = selecto
     
     # Tagging analysis
     "items.product.tags_list",
-    "items.product.tags_count",
     
     # Aggregated measures
     {:func, "sum", ["total"]},
@@ -683,11 +586,10 @@ comprehensive_analysis = selecto
     
     # Hierarchical filters
     {"items.product.category_level", {:lte, 3}},
-    {"items.product.category_path", {:like, "%electronics%"}},
+    {"items.product.category.name", "Electronics"},
     
     # Tagging filters
     {"items.product.tags_filter", "premium"},
-    {"items.product.tags_count", {:gte, 2}},
     
     # Standard filters
     {"status", "completed"},

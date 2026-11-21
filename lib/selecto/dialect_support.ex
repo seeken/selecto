@@ -67,16 +67,6 @@ defmodule Selecto.DialectSupport do
     render(adapter, :render_hierarchy_adjacency, fragment, selecto, :hierarchy_adjacency)
   end
 
-  def render_hierarchy_materialized_path(adapter, fragment, selecto) do
-    render(
-      adapter,
-      :render_hierarchy_materialized_path,
-      fragment,
-      selecto,
-      :hierarchy_materialized_path
-    )
-  end
-
   def render_table_function_join(adapter, fragment, selecto) do
     render(adapter, :render_table_function_join, fragment, selecto, :table_function_join)
   end

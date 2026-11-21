@@ -320,7 +320,11 @@ end
 
 ## Snowflake Schema Patterns
 
-Snowflake schemas normalize dimension data into related tables, providing more structured but complex relationships.
+Snowflake schemas normalize dimension data into related tables. In Selecto
+each normalized table is a nested association joined under its dimension
+(`joins: %{customer: %{type: :star_dimension, joins: %{region: ...}}}`); the
+former `normalization_joins` list on a `snowflake_dimension` join was removed
+and refuses.
 
 ### Snowflake Dimension Setup
 
@@ -411,12 +415,11 @@ defmodule SnowflakeSchemaExample do
         categories: %{
           name: "Category", 
           source_table: "categories",
-          fields: [:id, :name, :parent_id, :level],
+          fields: [:id, :name, :parent_id],
           columns: %{
             id: %{type: :integer},
             name: %{type: :string},
-            parent_id: %{type: :integer},
-            level: %{type: :integer}
+            parent_id: %{type: :integer}
           }
         }
       },
@@ -443,7 +446,7 @@ defmodule SnowflakeSchemaExample do
           joins: %{
             category: %{
               type: :hierarchical,
-              hierarchy_type: :adjacency_list,
+              hierarchy_type: :adjacency_list,   # PostgreSQL only
               depth_limit: 5
             },
             brand: %{type: :star_dimension, display_field: :name},
@@ -496,17 +499,22 @@ geographic_analysis = snowflake_selecto
 
 ## Hierarchical Data Patterns
 
-### Adjacency List with Enhanced Features
+### Adjacency List (PostgreSQL)
+
+An adjacency-list hierarchy joins its target through a recursive CTE that
+walks the target from its roots (rows whose `parent_field` is NULL) down at
+most `depth_limit` levels. It renders on PostgreSQL only; every other adapter
+refuses it with `unsupported_feature` before any SQL is sent.
 
 ```elixir
-defmodule AdvancedHierarchicalPatterns do
+defmodule HierarchicalPatterns do
   def org_hierarchy_domain do
     %{
-      name: "Advanced Organizational Hierarchy",
+      name: "Organizational Hierarchy",
       source: %{
         source_table: "employees",
         primary_key: :id,
-        fields: [:id, :name, :position, :department_id, :manager_id, :salary, :hire_date, :active],
+        fields: [:id, :name, :position, :department_id, :manager_id, :salary, :active],
         columns: %{
           id: %{type: :integer},
           name: %{type: :string},
@@ -514,195 +522,100 @@ defmodule AdvancedHierarchicalPatterns do
           department_id: %{type: :integer},
           manager_id: %{type: :integer},
           salary: %{type: :decimal, precision: 10, scale: 2},
-          hire_date: %{type: :date},
           active: %{type: :boolean}
         },
         associations: %{
           manager: %{queryable: :employees, field: :manager, owner_key: :manager_id, related_key: :id},
-          department: %{queryable: :departments, field: :department, owner_key: :department_id, related_key: :id},
-          subordinates: %{queryable: :employees, field: :subordinates, owner_key: :id, related_key: :manager_id}
+          department: %{queryable: :departments, field: :department, owner_key: :department_id, related_key: :id}
         }
       },
       schemas: %{
+        employees: %{
+          name: "Employee",
+          source_table: "employees",
+          fields: [:id, :name, :manager_id],
+          columns: %{
+            id: %{type: :integer},
+            name: %{type: :string},
+            manager_id: %{type: :integer}
+          }
+        },
         departments: %{
           name: "Department",
-          source_table: "departments", 
-          fields: [:id, :name, :parent_department_id, :budget, :head_id],
+          source_table: "departments",
+          fields: [:id, :name, :parent_department_id, :budget],
           columns: %{
             id: %{type: :integer},
             name: %{type: :string},
             parent_department_id: %{type: :integer},
-            budget: %{type: :decimal, precision: 12, scale: 2},
-            head_id: %{type: :integer}
-          },
-          associations: %{
-            parent_department: %{queryable: :departments, field: :parent_department, owner_key: :parent_department_id, related_key: :id},
-            head: %{queryable: :employees, field: :head, owner_key: :head_id, related_key: :id}
+            budget: %{type: :decimal, precision: 12, scale: 2}
           }
         }
       },
       joins: %{
-        # Management hierarchy with enhanced features
         manager: %{
           type: :hierarchical,
           hierarchy_type: :adjacency_list,
-          depth_limit: 8,
-          path_separator: " → ",
-          include_self: true,              # Include self in hierarchy calculations
-          calculate_metrics: true,         # Enable automatic metric calculations
-          subordinate_aggregation: true    # Aggregate subordinate data
+          parent_field: :manager_id,
+          depth_limit: 8
         },
-        # Department hierarchy
         department: %{
           type: :hierarchical,
           hierarchy_type: :adjacency_list,
-          depth_limit: 5,
-          joins: %{
-            parent_department: %{type: :left},
-            head: %{type: :left, display_field: :name}
-          }
+          parent_field: :parent_department_id,
+          depth_limit: 5
         }
       }
     }
   end
 end
 
-# Enhanced hierarchical queries
-org_selecto = Selecto.configure(AdvancedHierarchicalPatterns.org_hierarchy_domain(), conn)
+org_selecto = Selecto.configure(HierarchicalPatterns.org_hierarchy_domain(), conn)
 
-# Management hierarchy analysis with subordinate aggregation
-management_metrics = org_selecto
+management = org_selecto
   |> Selecto.select([
     "name",
     "position",
-    
-    # Hierarchy path information
-    "manager_path",                    # Full path to CEO
-    "manager_level",                   # Management level (0 = CEO)
-    "manager_path_array",              # Array of manager IDs
-    
-    # Subordinate aggregations (calculated via CTE)
-    "subordinates_direct_count",       # Direct reports
-    "subordinates_total_count",        # All subordinates (all levels)
-    "subordinates_avg_salary",         # Average subordinate salary
-    "subordinates_total_salary",       # Total subordinate payroll
-    "subordinates_max_level",          # Deepest subordinate level
-    
-    # Department hierarchy
+    "manager_path",          # Path of ids from the root: "1/4/17"
+    "manager_level",         # Depth (0 = a root)
+    "manager_path_array",    # Array of ids from the root
     "department.name",
-    "department_path",                 # Department hierarchy path
-    "department_level",                # Department depth
-    "department.budget",
-    "department.head_display",        # Department head name
-    
-    # Individual metrics
-    "salary",
-    "hire_date",
-    
-    # Calculated fields
-    {:calc, "subordinates_total_salary", :add, "salary"},  # Total responsibility
-    {:calc, "salary", :divide, "subordinates_avg_salary"} # Salary ratio
+    "department_path",
+    "department_level",
+    "salary"
   ])
   |> Selecto.filter([
     {"active", true},
-    {"manager_level", {:between, 1, 5}},       # Skip CEO, limit depth
-    {"subordinates_direct_count", {:gte, 1}},  # Only managers
-    {"department_level", {:lte, 3}}            # Top department levels
+    {"manager_level", {:between, 1, 5}},
+    {"department_level", {:lte, 3}}
   ])
-  |> Selecto.order_by([
-    "department_level",
-    "manager_level",
-    {:desc, "subordinates_total_count"}
-  ])
+  |> Selecto.order_by(["department_level", "manager_level", "name"])
   |> Selecto.execute()
 ```
 
-### Materialized Path with Advanced Navigation
+Rules:
+
+- `parent_field` (default `:parent_id`) and `id_field` (default: the
+  association's `related_key`) must be target fields, and the target cannot
+  declare fields named `level`, `path` or `path_array`.
+- `depth_limit` is an integer from 1 to 10000 (default 5).
+- The CTE keeps every target column. The association's `where` confines the
+  anchor and every step, the step stays inside one tenant when the target
+  declares `tenant_field`, and the join's ON is the association's own (key,
+  `conditions`, scope keys, tenant pair).
+
+### Portable Tree Walks
+
+The `materialized_path` and `closure_table` hierarchy types were removed and
+refuse. On any backend, walk a tree with a recursive query member
+(`query_members.ctes` with `kind: :recursive`). A stored path column is an
+ordinary field and can be filtered directly:
 
 ```elixir
-def content_hierarchy_domain do
-  %{
-    name: "Content Category Hierarchy",
-    source: %{
-      source_table: "articles",
-      # ... article fields ...
-      associations: %{
-        category: %{queryable: :categories, field: :category, owner_key: :category_id, related_key: :id}
-      }
-    },
-    schemas: %{
-      categories: %{
-        name: "Category",
-        source_table: "categories",
-        fields: [:id, :name, :path, :level, :parent_id, :sort_order, :active],
-        columns: %{
-          id: %{type: :integer},
-          name: %{type: :string},
-          path: %{type: :string},           # /tech/web-dev/frontend
-          level: %{type: :integer},         # Calculated depth
-          parent_id: %{type: :integer},
-          sort_order: %{type: :integer},    # Manual ordering
-          active: %{type: :boolean}
-        }
-      }
-    },
-    joins: %{
-      category: %{
-        type: :hierarchical,
-        hierarchy_type: :materialized_path,
-        path_field: :path,
-        path_separator: "/",
-        depth_limit: 10,
-        enable_navigation: true,          # Enable ancestor/descendant queries
-        enable_siblings: true,            # Enable sibling queries
-        sort_field: :sort_order          # Custom sort order
-      }
-    }
-  }
-end
-
-# Advanced path-based queries
-content_selecto = Selecto.configure(content_hierarchy_domain(), conn)
-
-category_navigation = content_selecto
-  |> Selecto.select([
-    "title",
-    
-    # Category hierarchy information
-    "category.name",
-    "category_path",                    # Full category path
-    "category_level",                   # Depth in hierarchy
-    "category_ancestors",               # Array of ancestor names
-    "category_path_array",              # Array of ancestor IDs
-    
-    # Navigation helpers
-    "category_parent_name",             # Direct parent name
-    "category_root_name",               # Root category name
-    "category_siblings_count",          # Number of sibling categories
-    "category_children_count",          # Number of child categories
-    
-    # Aggregations
-    {:func, "count", ["*"]}
-  ])
-  |> Selecto.filter([
-    # Path-based filtering
-    {"category_path", {:like, "/technology/%"}},        # Technology branch
-    {"category_level", {:between, 2, 4}},               # Specific depth range
-    {"category_ancestors", {:contains, "programming"}},  # Has programming ancestor
-    
-    # Sibling and relationship filtering  
-    {"category_siblings_count", {:gte, 2}},             # Has siblings
-    {"category.active", true}
-  ])
-  |> Selecto.group_by([
-    "category.name", "category_path", "category_level"
-  ])
-  |> Selecto.order_by([
-    "category_level",
-    "category.sort_order",
-    "category.name"
-  ])
-  |> Selecto.execute()
+content_selecto
+|> Selecto.select(["title", "category.name", "category.path"])
+|> Selecto.filter([{"category.path", {:like, "/technology/%"}}])
+|> Selecto.execute()
 ```
 
 ## Slowly Changing Dimensions

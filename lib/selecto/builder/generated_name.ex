@@ -2,7 +2,7 @@ defmodule Selecto.Builder.GeneratedName do
   @moduledoc false
 
   # Names for the CTEs Selecto generates for itself (values-backed schemas,
-  # hierarchy, materialized-path and closure joins): a `__selecto_` prefix, the
+  # adjacency-list hierarchy joins): a `__selecto_` prefix, the
   # id, and a digest of what the CTE holds (a values list's rows, a hierarchy
   # join's definition), within the identifier limits of every supported
   # database (PostgreSQL keeps 63 bytes, MySQL and MariaDB 64 characters): a
@@ -56,26 +56,15 @@ defmodule Selecto.Builder.GeneratedName do
   @definition_keys [
     :source,
     :source_schema,
-    :closure_table,
-    :ancestor_field,
-    :descendant_field,
-    :depth_field,
     :id_field,
-    :name_field,
     :parent_field,
     :hierarchy_depth,
-    :depth_limit,
-    :path_field,
-    :path_separator,
-    :root_path
+    :hierarchy_where,
+    :hierarchy_tenant_field
   ]
 
   @doc false
   def hierarchy(join, config), do: name("__selecto_hierarchy_", join, definition(config))
-  @doc false
-  def materialized_path(join, config), do: name("__selecto_path_", join, definition(config))
-  @doc false
-  def closure(join, config), do: name("__selecto_closure_", join, definition(config))
 
   defp definition(config) when is_map(config),
     do: config |> Map.take(@definition_keys) |> Enum.sort()

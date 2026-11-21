@@ -1,3 +1,55 @@
+## Unreleased join families and association conditions
+
+- Association `conditions` (engine_join_conditions, domain_contract_export
+  1.5.0): up to 8 `%{left, op, right, open}` comparisons of an owner field
+  with a target field (eq, ne, lt, lte, gt, gte; one type family per pair;
+  ordering operators on numbers, dates and times only; `open` (boolean or
+  0/1) also matches a NULL right side). They are ANDed after the key
+  equality in every join (left, inner, right, full, star dimension, tagging,
+  hierarchy ON), nested joins, subselect correlations and related
+  collections; text eq/ne compare exactly on MySQL and MariaDB. Refused with
+  `:invalid_join_conditions` on through and values associations and on
+  redacted, computed or undeclared fields. `contract_json/1` exports each
+  `open` as a JSON boolean. A conditioned association, like one with a
+  non-empty `where`, is a filtered lookup: write-side foreign-key guards skip
+  it (before, an association with `where` was guarded).
+- Breaking, removed: the `cross_join`, raw-SQL `lateral_join` and
+  `conditional_join` (`custom_sql` condition) join types, snowflake
+  `normalization_joins` lists (declare nested associations), and the
+  `materialized_path` and `closure_table` hierarchies (use a recursive query
+  member). Each refuses with `:unsupported_join_type` in `validate/1`,
+  `validate_json/1` and `Selecto.configure/3` (ArgumentError
+  `invalid_domain: join ...`). `query_members.laterals` and the association
+  `join_strategy: :lateral_lookup` stay. `Selecto.EnhancedJoins`, the OLAP
+  and tagging SQL builders and the materialized-path dialect callback are
+  gone.
+- Unknown join types now refuse on the native path too (they used to render
+  as LEFT JOIN or fall into an advanced builder); a JSON `type` string is
+  never turned into a new atom.
+- Native join sugar normalises onto the shared families: `dimension` is a
+  `star_dimension` with `display_field` = `dimension`; `self_join` is an
+  ordinary left association join; `full_outer_join` is `type: :full`;
+  `snowflake_dimension` without a normalization list is a star dimension.
+- Security: star dimension, tagging and hierarchy joins used to drop the
+  association `where` and the tenant pair from ON; every join now renders
+  the association's own ON (key, `conditions`, scope keys, tenant pair,
+  carried tenant, `where`). A star dimension takes an alias, and a
+  tenant-scoped star dimension pairs tenants.
+- RIGHT and FULL joins of a tenant-paired target bind the target's tenant
+  field to the engine tenant inside the derived table (as Perl does), typed
+  like the root's tenant filter.
+- `join_through`/`join_keys` (and `tagging`) associations are `through`
+  contracts: `join_keys` are required (no table-name inference), and
+  `source_scope_key`, `through_scope_key`, `target_scope_key` (all three or
+  none) and `through_where` scope the bridge. Ecto `through` lists refuse
+  an unknown or nested-through segment.
+- The adjacency-list hierarchy stays, on PostgreSQL only (other adapters
+  refuse with `unsupported_feature` before any SQL is sent): `parent_field`
+  and `id_field` must be target fields, the recursive CTE keeps every target
+  column with quoted identifiers, the association `where` confines its anchor
+  and step, the step stays within one tenant, and the join's ON is the
+  association's.
+
 ## Unreleased domain contract export
 
 - Add `Selecto.Domain.validate_json/1`, the canonical JSON v1 parser: it is

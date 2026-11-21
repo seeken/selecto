@@ -167,13 +167,22 @@ defmodule Selecto.Domain.ContractExport do
     end)
   end
 
-  defp relation_flags(relation),
-    do:
-      update(
-        relation,
-        "columns",
-        &each_value(&1, fn column -> booleans(column, @column_flags) end)
-      )
+  defp relation_flags(relation) do
+    relation
+    |> update("columns", &each_value(&1, fn column -> booleans(column, @column_flags) end))
+    |> update(
+      "associations",
+      &each_value(&1, fn association -> association_flags(association) end)
+    )
+  end
+
+  # Each `conditions[]` entry's `open` (domain_contract_export 1.5.0).
+  defp association_flags(association) do
+    update(association, "conditions", fn
+      conditions when is_list(conditions) -> Enum.map(conditions, &booleans(&1, ["open"]))
+      conditions -> conditions
+    end)
+  end
 
   defp component_flags(components) do
     components

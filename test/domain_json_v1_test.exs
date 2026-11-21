@@ -130,8 +130,18 @@ defmodule Selecto.DomainJsonV1Test do
                refusals(put_in(base(), ["joins", "maker", "type"], type))
     end
 
-    # validate/1 (native authoring) still admits Selecto's join families.
-    assert {:ok, _, _} = Domain.validate(put_in(base(), ["joins", "maker", "type"], "dimension"))
+    # validate/1 (native authoring) still admits Selecto's join spellings (a
+    # dimension names its display field) and refuses unknown and removed ones.
+    assert {:ok, _, _} =
+             base()
+             |> put_in(["joins", "maker", "type"], "dimension")
+             |> put_in(["joins", "maker", "dimension"], "name")
+             |> Domain.validate()
+
+    for type <- ["lateral_join", "cross_join", "conditional_join", "cross", 7] do
+      assert {:error, %{errors: [%{code: :unsupported_join_type}]}} =
+               Domain.validate(put_in(base(), ["joins", "maker", "type"], type))
+    end
   end
 
   test "fts5_index on a schemas relation refuses in validate/1 and validate_json/1" do

@@ -1000,12 +1000,12 @@ defmodule Selecto.DomainValidatorTest do
       assert {:error, errors} = DomainValidator.validate_domain(dimension_domain)
 
       assert Enum.any?(errors, fn
-               {:advanced_join_missing_key, {:customer, :dimension, _message}} -> true
+               {:invalid_join_type, {:customer, :type, message}} -> message =~ "dimension key"
                _ -> false
              end)
     end
 
-    test "validates hierarchical closure table join has required keys" do
+    test "refuses the removed closure-table hierarchy" do
       hierarchical_domain = %{
         source: %{
           source_table: "categories",
@@ -1041,7 +1041,6 @@ defmodule Selecto.DomainValidatorTest do
             type: :hierarchical,
             hierarchy_type: :closure_table,
             name: "parent"
-            # Missing required keys: closure_table, ancestor_field, descendant_field
           }
         },
         name: "TestDomain"
@@ -1050,16 +1049,12 @@ defmodule Selecto.DomainValidatorTest do
       assert {:error, errors} = DomainValidator.validate_domain(hierarchical_domain)
 
       assert Enum.any?(errors, fn
-               {:advanced_join_missing_key, {:parent, missing_keys, _message}}
-               when is_list(missing_keys) ->
-                 [:closure_table, :ancestor_field, :descendant_field] -- missing_keys == []
-
-               _ ->
-                 false
+               {:invalid_join_type, {:parent, :type, message}} -> message =~ "were removed"
+               _ -> false
              end)
     end
 
-    test "validates snowflake dimension has normalization joins" do
+    test "refuses snowflake dimension normalization lists" do
       snowflake_domain = %{
         source: %{
           source_table: "sales",
@@ -1093,8 +1088,7 @@ defmodule Selecto.DomainValidatorTest do
         joins: %{
           product: %{
             type: :snowflake_dimension,
-            # Empty list should trigger validation error
-            normalization_joins: [],
+            normalization_joins: [%{table: "categories", key: :id, foreign_key: :category_id}],
             name: "product"
           }
         },
@@ -1104,8 +1098,11 @@ defmodule Selecto.DomainValidatorTest do
       assert {:error, errors} = DomainValidator.validate_domain(snowflake_domain)
 
       assert Enum.any?(errors, fn
-               {:advanced_join_missing_key, {:product, :normalization_joins, _message}} -> true
-               _ -> false
+               {:invalid_join_type, {:product, :type, message}} ->
+                 message =~ "normalization_joins were removed"
+
+               _ ->
+                 false
              end)
     end
   end

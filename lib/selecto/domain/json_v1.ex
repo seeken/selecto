@@ -2,7 +2,7 @@ defmodule Selecto.Domain.JsonV1 do
   @moduledoc false
 
   # The canonical JSON v1 parser's key tables (certification specification
-  # 4.1.0, domain_contract_export 1.4.0 DC002) and their admission check.
+  # 4.1.0, domain_contract_export 1.5.0 DC002) and their admission check.
   # `Selecto.Domain.validate_json/1` applies them; `Selecto.Domain.validate/1`
   # and native (atom-map) authoring keep Selecto's open join vocabulary.
 
@@ -17,7 +17,7 @@ defmodule Selecto.Domain.JsonV1 do
   @relation ~w(associations columns fields primary_key readonly redact_fields source_kind
                source_table tenant_field values)
   @source Enum.sort(["fts5_index" | @relation])
-  @association ~w(cardinality field join_strategy owner_key queryable related_key
+  @association ~w(cardinality conditions field join_strategy owner_key queryable related_key
                   source_scope_key target_scope_key through where)
   @join ~w(alias dimension_key display_fallback display_field fields joins name on source type)
   @through ~w(owner_key related_key source_scope_key table target_key_cast target_scope_key

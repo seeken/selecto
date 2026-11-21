@@ -67,11 +67,17 @@ defmodule Selecto.Types do
   @type basic_join_type :: :left | :right | :inner | :full
 
   @type advanced_join_type ::
-          :hierarchical | :tagging | :dimension | :star_dimension | :snowflake_dimension
+          :hierarchical
+          | :tagging
+          | :dimension
+          | :star_dimension
+          | :snowflake_dimension
+          | :self_join
+          | :full_outer_join
 
   @type join_type :: basic_join_type() | advanced_join_type()
 
-  @type hierarchy_type :: :adjacency_list | :materialized_path | :closure_table
+  @type hierarchy_type :: :adjacency_list
 
   # Selector types for SELECT clauses
   @type basic_selector :: field_name() | number() | boolean() | nil
@@ -229,9 +235,20 @@ defmodule Selecto.Types do
           required(:owner_key) => atom(),
           required(:related_key) => atom(),
           optional(:cardinality) => :one | :many,
-          optional(:through) => [atom()],
+          optional(:through) => [atom()] | map(),
           optional(:source_scope_key) => atom() | String.t(),
-          optional(:target_scope_key) => atom() | String.t()
+          optional(:target_scope_key) => atom() | String.t(),
+          optional(:where) => map(),
+          optional(:conditions) => [join_condition()]
+        }
+
+  # An association condition (Selecto.Domain.JoinConditions): an owner field
+  # compared with a target field after the key equality.
+  @type join_condition :: %{
+          required(:left) => atom() | String.t(),
+          required(:op) => :eq | :ne | :lt | :lte | :gt | :gte | String.t(),
+          required(:right) => atom() | String.t(),
+          optional(:open) => boolean() | 0 | 1
         }
 
   # Join configuration types
@@ -245,34 +262,24 @@ defmodule Selecto.Types do
   @type hierarchical_join_config :: %{
           required(:type) => :hierarchical,
           required(:hierarchy_type) => hierarchy_type(),
+          optional(:parent_field) => atom(),
+          optional(:id_field) => atom(),
           optional(:depth_limit) => pos_integer(),
-          optional(:path_field) => atom(),
-          optional(:path_separator) => String.t(),
-          optional(:root_condition) => term(),
           optional(:joins) => %{atom() => join_config()}
         }
 
   @type tagging_join_config :: %{
           required(:type) => :tagging,
-          required(:tag_field) => atom(),
-          optional(:weight_field) => atom(),
-          optional(:min_weight) => number(),
-          optional(:aggregation) => :string_agg | :array_agg | :count,
-          optional(:separator) => String.t(),
+          optional(:tag_field) => atom(),
           optional(:joins) => %{atom() => join_config()}
         }
 
   @type dimension_join_config :: %{
           required(:type) => :dimension | :star_dimension | :snowflake_dimension,
-          required(:display_field) => atom(),
+          optional(:display_field) => atom(),
+          optional(:dimension) => atom(),
           optional(:dimension_key) => atom(),
-          optional(:normalization_joins) => [
-            %{
-              required(:table) => String.t(),
-              required(:key) => atom(),
-              required(:foreign_key) => atom()
-            }
-          ],
+          optional(:display_fallback) => :dimension_key,
           optional(:joins) => %{atom() => join_config()}
         }
 
@@ -437,10 +444,7 @@ defmodule Selecto.Types do
           # Join-specific fields
           optional(:hierarchy_type) => hierarchy_type(),
           optional(:depth_limit) => pos_integer(),
-          optional(:path_field) => atom(),
-          optional(:path_separator) => String.t(),
           optional(:tag_field) => atom(),
-          optional(:weight_field) => atom(),
           optional(:display_field) => atom(),
           optional(:dimension_key) => atom(),
           optional(:source_scope_key) => atom() | String.t(),

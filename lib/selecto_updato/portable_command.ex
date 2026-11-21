@@ -2555,6 +2555,7 @@ defmodule SelectoUpdato.PortableCommand do
          %{value: value} when value != {:literal, nil} <- assignment_for(assignments, field),
          false <- is_nil(table) or not is_nil(Core.map_value(association, :through)),
          false <- values_backed?(association, target),
+         false <- filtered_lookup?(association),
          :one <- association_cardinality(association, target, related_key) do
       %{
         field: field,
@@ -2689,6 +2690,17 @@ defmodule SelectoUpdato.PortableCommand do
   defp values_backed?(association, target) do
     not is_nil(Core.map_value(association, :values)) or
       (is_map(target) and not is_nil(Core.map_value(target, :values)))
+  end
+
+  # A filtered lookup (a non-empty `where` or `conditions`) picks one of the
+  # rows matching the owner key (a customer's option in one group, the price
+  # in effect on a date) rather than the row it identifies: no guard.
+  defp filtered_lookup?(association) do
+    case {Core.map_value(association, :where), Core.map_value(association, :conditions)} do
+      {where, _conditions} when is_map(where) and map_size(where) > 0 -> true
+      {_where, [_ | _]} -> true
+      _unfiltered -> false
+    end
   end
 
   # An authored cardinality wins; otherwise an association to the target's

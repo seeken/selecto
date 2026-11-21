@@ -2,9 +2,12 @@
 
 This document outlines common patterns for joining tables based on their relationships. These patterns help model complex data structures in a relational database.
 
-## Enhanced Join Types
+## Join Families
 
-Selecto now supports advanced join types beyond basic LEFT/INNER joins. For detailed documentation on enhanced joins including self-joins, lateral joins, cross joins, full outer joins, and conditional joins, see [Enhanced Joins Guide](../docs/enhanced_joins.md).
+Selecto joins read associations: `left`, `inner`, `right`, `full` and
+`star_dimension`, plus native sugar (dimension, self_join, full_outer_join,
+tagging, the PostgreSQL adjacency-list hierarchy) and association
+`conditions`. See [Join Families](../docs/join_families.md).
 
 ## Traditional Join Patterns
 

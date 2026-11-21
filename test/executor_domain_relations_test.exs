@@ -255,8 +255,7 @@ defmodule Selecto.ExecutorDomainRelationsTest do
     for name <- [
           GeneratedName.values(long, [:id, :name], rows),
           GeneratedName.hierarchy(long, %{source: "t"}),
-          GeneratedName.materialized_path(long, %{source: "t"}),
-          GeneratedName.closure(long <> long, %{source: "t"})
+          GeneratedName.hierarchy(long <> long, %{source: "t"})
         ] do
       assert byte_size(name) <= 63
       assert String.starts_with?(name, "__selecto_")
@@ -268,22 +267,20 @@ defmodule Selecto.ExecutorDomainRelationsTest do
     refute GeneratedName.values(long, [:id, :name], rows) ==
              GeneratedName.values(long, [:id, :name], [%{id: "A", name: "Ship-A"}])
 
-    refute GeneratedName.closure(long <> long, %{}) == GeneratedName.closure(long <> other, %{})
+    refute GeneratedName.hierarchy(long <> long, %{}) ==
+             GeneratedName.hierarchy(long <> other, %{})
 
-    # A join's name follows its definition: one id over two closure tables, two names.
-    root = %{source: "cats", closure_table: "cats_closure"}
-    body = %{source: "cats", closure_table: "cc2"}
-    assert GeneratedName.closure(:catj, root) =~ ~r/^__selecto_closure_catj_[0-9a-f]{10}$/
-    refute GeneratedName.closure(:catj, root) == GeneratedName.closure(:catj, body)
+    # A join's name follows its definition: one id over two relations, two names.
+    root = %{source: "cats", parent_field: :parent_id}
+    body = %{source: "cats2", parent_field: :parent_id}
+    assert GeneratedName.hierarchy(:catj, root) =~ ~r/^__selecto_hierarchy_catj_[0-9a-f]{10}$/
+    refute GeneratedName.hierarchy(:catj, root) == GeneratedName.hierarchy(:catj, body)
 
-    assert GeneratedName.closure(:catj, root) ==
-             GeneratedName.closure(:catj, Map.put(root, :x, 1))
+    assert GeneratedName.hierarchy(:catj, root) ==
+             GeneratedName.hierarchy(:catj, Map.put(root, :x, 1))
   end
 
-  test "a closure join's own CTE never hides its closure table" do
-    cat = :cats
-    cols = %{id: %{type: :integer}, name: %{type: :string}}
-
+  test "a removed closure-table hierarchy refuses the domain" do
     domain = %{
       name: "items",
       source: %{
@@ -293,7 +290,7 @@ defmodule Selecto.ExecutorDomainRelationsTest do
         redact_fields: [],
         columns: %{id: %{type: :integer}, cat_id: %{type: :integer}},
         associations: %{
-          cat => %{queryable: :catq, field: cat, owner_key: :cat_id, related_key: :id}
+          cats: %{queryable: :catq, field: :cats, owner_key: :cat_id, related_key: :id}
         }
       },
       schemas: %{
@@ -302,29 +299,16 @@ defmodule Selecto.ExecutorDomainRelationsTest do
           primary_key: :id,
           fields: [:id, :name],
           redact_fields: [],
-          columns: cols,
+          columns: %{id: %{type: :integer}, name: %{type: :string}},
           associations: %{}
         }
       },
-      joins: %{cat => %{type: :hierarchical, name: "cat", hierarchy_type: :closure_table}}
+      joins: %{cats: %{type: :hierarchical, name: "cat", hierarchy_type: :closure_table}}
     }
 
-    query =
-      Selecto.configure(domain, nil, validate: false) |> Selecto.select(["id", "cats_depth"])
-
-    {sql, _params} = Selecto.to_sql(query)
-
-    assert sql =~ ~r/__selecto_closure_cats_[0-9a-f]{10} AS/
-    assert sql =~ "JOIN cats_closure cl"
-    assert "cats_closure" in Selecto.Executor.domain_relations(query)
-    assert {:ok, _} = Selecto.Executor.prepare_read(query)
-
-    # A user list named like the closure table the generated CTE reads refuses.
-    named = Selecto.with_values(query, [[1]], columns: ["ancestor_id"], as: "cats_closure")
-
-    assert {:error,
-            %Selecto.Error{details: %{reason: :cte_name_collision, relations: ["cats_closure"]}}} =
-             Selecto.Executor.prepare_read(named)
+    assert_raise ArgumentError, ~r/closure_table hierarchies were removed/, fn ->
+      Selecto.configure(domain, nil, validate: false)
+    end
   end
 
   defp refusal(query) do
