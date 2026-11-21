@@ -1045,10 +1045,37 @@ defmodule Selecto do
       selecto
       |> Selecto.group_by(["customer.name"])
       |> Selecto.group_by(rollup(["status"]))
+
+      # every combination of the dimensions, with the GROUPING() marker
+      selecto
+      |> Selecto.select(["region", "channel", {:count}, {:field, {:grouping, ["region", "channel"]}, "marker"}])
+      |> Selecto.group_by(cube(["region", "channel"]))
+
+      # explicit grouping sets; [] is the grand total
+      selecto |> Selecto.group_by(grouping_sets([["region"], ["channel"], []]))
+
+  A cube or grouping sets must be the query's only grouping; malformed ones
+  raise `ArgumentError`. See `Selecto.GroupingSets` for the limits and for
+  the refusals made when the query is compiled.
   """
   @spec group_by(t(), [Selecto.Types.field_name()]) :: t()
   @spec group_by(t(), Selecto.Types.field_name()) :: t()
   defdelegate group_by(selecto, groups), to: Selecto.Query
+
+  @doc """
+  The query's grouping dimensions and grouping sets, each set as positions
+  into the dimensions, for any grouping mode (no SQL is involved):
+
+      selecto |> Selecto.group_by(cube(["region", "channel"])) |> Selecto.grouping_set_positions()
+      #=> %{dimensions: ["region", "channel"], sets: [[0, 1], [0], [1], []]}
+
+      selecto |> Selecto.group_by(rollup(["region", "channel"])) |> Selecto.grouping_set_positions()
+      #=> %{dimensions: ["region", "channel"], sets: [[0, 1], [0], []]}
+
+  See `Selecto.GroupingSets.positions/1`.
+  """
+  @spec grouping_set_positions(t()) :: Selecto.GroupingSets.expansion()
+  defdelegate grouping_set_positions(selecto), to: Selecto.GroupingSets, as: :positions
 
   @doc """
   Limit the number of rows returned by the query.

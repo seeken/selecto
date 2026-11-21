@@ -498,6 +498,30 @@ defmodule Selecto.Expr do
   @spec rollup(term()) :: keyword()
   def rollup(groups), do: [rollup: normalize(groups)]
 
+  @doc """
+  Builds a `GROUP BY CUBE(...)` keyword spec: one grouping set for every
+  subset of the dimensions (1 to 8 of them). Use `{:grouping, dimensions}`
+  in the select list to tell subtotal rows apart. See `Selecto.GroupingSets`.
+
+      Selecto.group_by(selecto, cube(["region", "channel"]))
+  """
+  @spec cube(term()) :: keyword()
+  def cube(dimensions), do: [cube: normalize(dimensions)]
+
+  @doc """
+  Builds a `GROUP BY GROUPING SETS (...)` keyword spec from a list of grouping
+  sets, each a list of dimensions; `[]` is the grand total. 1 to 64 distinct
+  sets. See `Selecto.GroupingSets`.
+
+      Selecto.group_by(selecto, grouping_sets([["region"], ["channel"], []]))
+  """
+  @spec grouping_sets([list()]) :: keyword()
+  def grouping_sets(sets) when is_list(sets),
+    do: [grouping_sets: Enum.map(sets, &normalize_grouping_set/1)]
+
+  defp normalize_grouping_set(set) when is_list(set), do: Enum.map(set, &normalize/1)
+  defp normalize_grouping_set(set), do: set
+
   @doc "Builds a composite grouping element for use inside `ROLLUP(...)`."
   @spec grouping_set(term()) :: tuple()
   def grouping_set(groups), do: {:grouping_set, normalize(groups)}

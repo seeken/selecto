@@ -198,6 +198,20 @@ defmodule Selecto.DB.Adapter do
   after composition. Adapters with native ROLLUP keep using `rollup_sql/1`.
   """
   @callback render_rollup(Selecto.t(), keyword()) :: {term(), list(), list() | nil}
+  @doc """
+  Optional spelling of `CUBE(...)` and `GROUPING SETS (...)` (default: the
+  standard SQL). Selecto only asks an adapter whose `supports?/1` answers
+  `:cube` / `:grouping_sets`; any other adapter refuses those queries with
+  `unsupported_feature` before SQL is sent.
+  """
+  @callback cube_sql(iodata()) :: iodata()
+  @callback grouping_sets_sql(iodata()) :: iodata()
+  @doc """
+  Optional whole-query lowering of a CUBE or GROUPING SETS query, as
+  `render_rollup/2` is for ROLLUP (SQLite emulates both with one `UNION ALL`
+  branch per set). Orderings reach it as `{{:literal_position, n}, direction}`.
+  """
+  @callback render_grouping_sets(Selecto.t(), keyword()) :: {term(), list(), list() | nil}
   @callback rollup_literal_order(pos_integer()) :: iodata() | String.t()
   @callback rollup_sort_fix(connection()) :: boolean()
   @callback supports?(atom()) :: boolean()
@@ -235,6 +249,9 @@ defmodule Selecto.DB.Adapter do
                       format_datetime: 2,
                       rollup_sql: 1,
                       render_rollup: 2,
+                      cube_sql: 1,
+                      grouping_sets_sql: 1,
+                      render_grouping_sets: 2,
                       rollup_literal_order: 1,
                       rollup_sort_fix: 1
 end

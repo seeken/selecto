@@ -36,6 +36,24 @@ defmodule Selecto.AdapterSQL do
     end
   end
 
+  # CUBE and GROUPING SETS are standard SQL; an adapter may spell them itself.
+  # Selecto.GroupingSets.check!/1 has refused an adapter without the feature.
+  def cube_sql(selecto, grouped_clauses) do
+    adapter = adapter(selecto)
+
+    if AdapterSupport.callback_available?(adapter, :cube_sql, 1),
+      do: adapter.cube_sql(grouped_clauses),
+      else: ["CUBE(", grouped_clauses, ")"]
+  end
+
+  def grouping_sets_sql(selecto, sets) do
+    adapter = adapter(selecto)
+
+    if AdapterSupport.callback_available?(adapter, :grouping_sets_sql, 1),
+      do: adapter.grouping_sets_sql(sets),
+      else: ["GROUPING SETS (", sets, ")"]
+  end
+
   # A shape the adapter cannot render refuses typed through every execute
   # entry point (Selecto.Builder.ScopeRefusal).
   defp unsupported!(message, feature) do

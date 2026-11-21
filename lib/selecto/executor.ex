@@ -662,6 +662,9 @@ defmodule Selecto.Executor do
   # before the adapter runs only when they are needed then
   # (put_emitted_names/2).
   defp prepare_read(selecto, execution?) do
+    # A CUBE / GROUPING SETS refusal comes before the adapter's prepare_read/2,
+    # which may read the catalog: a refused query sends no SQL.
+    :ok = Selecto.GroupingSets.check!(selecto)
     scopes = scopes(selecto, [], [], [], [], :query, [])
     named = put_emitted_names(selecto, scopes)
     emitted = scanned_names(named)

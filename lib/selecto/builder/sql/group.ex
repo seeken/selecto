@@ -3,7 +3,8 @@ defmodule Selecto.Builder.Sql.Group do
   GROUP BY clause builder for Selecto queries.
 
   Group expressions are compiled through `Selecto.Builder.Sql.Select` and can be
-  emitted either as standard grouped columns or wrapped in SQL `ROLLUP(...)`.
+  emitted either as standard grouped columns or wrapped in SQL `ROLLUP(...)`,
+  `CUBE(...)` or `GROUPING SETS (...)`.
   """
 
   alias Selecto.AdapterSQL
@@ -12,6 +13,29 @@ defmodule Selecto.Builder.Sql.Group do
     {joins, clauses_iodata, params} = group(selecto, groups)
 
     {joins, AdapterSQL.rollup_sql(selecto, clauses_iodata), params}
+  end
+
+  def group(selecto, cube: groups) do
+    {joins, clauses_iodata, params} = group(selecto, groups)
+
+    {joins, AdapterSQL.cube_sql(selecto, clauses_iodata), params}
+  end
+
+  # Each set is compiled on its own; `[]` is the grand total, `()`.
+  def group(selecto, grouping_sets: sets) do
+    {joins, clauses, params} =
+      Enum.reduce(sets, {[], [], []}, fn
+        [], {joins, clauses, params} ->
+          {joins, ["()" | clauses], params}
+
+        set, {joins, clauses, params} ->
+          {j, c, p} = group(selecto, set)
+          {[j | joins], [["(", c, ")"] | clauses], Enum.reverse(p, params)}
+      end)
+
+    {Enum.reverse(joins),
+     AdapterSQL.grouping_sets_sql(selecto, Enum.intersperse(Enum.reverse(clauses), ", ")),
+     Enum.reverse(params)}
   end
 
   def group(selecto, {:grouping_set, groups}) do

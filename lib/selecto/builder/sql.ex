@@ -468,6 +468,19 @@ defmodule Selecto.Builder.Sql do
     rollup? = Enum.any?(selecto.set.group_by, &match?({:rollup, _}, &1))
 
     cond do
+      # CUBE / GROUPING SETS: refused here when the adapter lacks the mode or
+      # an ordering names no selected output; orderings become positions.
+      Selecto.GroupingSets.mode(selecto) in [:cube, :grouping_sets] ->
+        selecto = Selecto.GroupingSets.with_position_orders!(selecto)
+
+        if Selecto.AdapterSupport.callback_available?(
+             selecto.adapter,
+             :render_grouping_sets,
+             2
+           ),
+           do: selecto.adapter.render_grouping_sets(selecto, opts),
+           else: build_standard_query_iodata_with_joins(selecto, opts)
+
       rollup? and
           Selecto.AdapterSupport.callback_available?(selecto.adapter, :render_rollup, 2) ->
         selecto.adapter.render_rollup(selecto, opts)

@@ -624,6 +624,18 @@ defmodule Selecto.ExprCompiler do
     end
   end
 
+  defp compile_group_expr!({:cube, _, [groups_ast]}) do
+    quote do
+      Selecto.Expr.cube(unquote(compile_group_items!(groups_ast)))
+    end
+  end
+
+  defp compile_group_expr!({:grouping_sets, _, [sets_ast]}) when is_list(sets_ast) do
+    quote do
+      Selecto.Expr.grouping_sets(unquote(Enum.map(sets_ast, &compile_group_items!/1)))
+    end
+  end
+
   defp compile_group_expr!({:grouping_set, _, [groups_ast]}) do
     quote do
       Selecto.Expr.grouping_set(unquote(compile_group_items!(groups_ast)))

@@ -9,7 +9,7 @@ defmodule Selecto.QueryValidator do
 
   @skip_function_args ["*", "DISTINCT", "ALL"]
   @skip_function_arg_atoms [:*, :distinct, :all]
-  @group_wrapper_keys [:rollup]
+  @group_wrapper_keys [:rollup, :cube, :grouping_sets]
   @bucket_kinds BucketExpression.kinds()
   @order_directions [
     :asc,
@@ -65,6 +65,7 @@ defmodule Selecto.QueryValidator do
     if keyword_group_specs?(group_specs) do
       Enum.each(group_specs, fn
         {:rollup, groups} -> validate_group_specs!(selecto, groups)
+        {:grouping_sets, sets} -> validate_grouping_sets!(selecto, sets)
         {_key, groups} -> validate_group_specs!(selecto, groups)
       end)
     else
@@ -76,6 +77,11 @@ defmodule Selecto.QueryValidator do
     Selecto.Policy.ensure_query_term_allowed!(selecto, group_spec, [:group_by])
     validate_group_spec!(selecto, group_spec)
   end
+
+  defp validate_grouping_sets!(selecto, sets) when is_list(sets),
+    do: Enum.each(sets, &validate_group_specs!(selecto, List.wrap(&1)))
+
+  defp validate_grouping_sets!(_selecto, _sets), do: :ok
 
   @spec validate_window_spec!(Selecto.Types.t(), WindowSpec.t()) :: :ok
   def validate_window_spec!(selecto, %WindowSpec{} = window_spec) do

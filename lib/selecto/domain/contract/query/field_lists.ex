@@ -13,7 +13,7 @@ defmodule Selecto.Domain.Contract.Query.FieldLists do
     :desc_nulls_first,
     :desc_nulls_last
   ]
-  @query_group_wrappers [:rollup, :grouping_set]
+  @query_group_wrappers [:rollup, :grouping_set, :cube]
 
   def validate_query_field_lists(errors, query, field_index) do
     functions = Core.map_value(query, :functions)
@@ -326,6 +326,30 @@ defmodule Selecto.Domain.Contract.Query.FieldLists do
       field_index,
       functions
     )
+  end
+
+  # GROUPING SETS: a list of sets, each a list of group entries.
+  def validate_query_group_entry(
+        errors,
+        section,
+        {:grouping_sets, sets},
+        path,
+        field_index,
+        functions
+      )
+      when is_list(sets) do
+    sets
+    |> Enum.with_index()
+    |> Enum.reduce(errors, fn {set, index}, acc ->
+      validate_query_group_entry(
+        acc,
+        section,
+        {:grouping_set, set},
+        path ++ [:grouping_sets, index],
+        field_index,
+        functions
+      )
+    end)
   end
 
   def validate_query_group_entry(

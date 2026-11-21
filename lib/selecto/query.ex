@@ -342,11 +342,19 @@ defmodule Selecto.Query do
       selecto
       |> Selecto.Query.group_by(["category", "region"])
       |> Selecto.Query.group_by(rollup(["status"]))
+
+      # CUBE and GROUPING SETS must be the query's only grouping
+      selecto |> Selecto.Query.group_by(cube(["region", "channel"]))
+      selecto |> Selecto.Query.group_by(grouping_sets([["region"], ["channel"], []]))
+
+  Raises `ArgumentError` for a malformed cube or grouping-set list (see
+  `Selecto.GroupingSets`).
   """
   @spec group_by(Selecto.Types.t(), [Selecto.Types.field_name()]) :: Selecto.Types.t()
   def group_by(selecto, groups) when is_list(groups) do
     :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :group_by)
     normalized_groups = Selecto.Expr.normalize(groups)
+    :ok = Selecto.GroupingSets.validate_group_by!(selecto.set.group_by, normalized_groups)
     Selecto.QueryValidator.validate_group_specs!(selecto, normalized_groups)
     put_in(selecto.set.group_by, selecto.set.group_by ++ normalized_groups)
   end
@@ -355,6 +363,7 @@ defmodule Selecto.Query do
   def group_by(selecto, groups) do
     :ok = Selecto.SetOperations.ensure_query_mutation_allowed!(selecto, :group_by)
     normalized_group = Selecto.Expr.normalize(groups)
+    :ok = Selecto.GroupingSets.validate_group_by!(selecto.set.group_by, [normalized_group])
     Selecto.QueryValidator.validate_group_specs!(selecto, normalized_group)
     put_in(selecto.set.group_by, selecto.set.group_by ++ [normalized_group])
   end
