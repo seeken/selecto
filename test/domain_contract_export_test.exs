@@ -301,20 +301,15 @@ defmodule Selecto.DomainContractExportTest do
     assert {:error, _diagnostics} = Domain.contract_json(:not_a_domain)
   end
 
-  test "contract_keys: the recognised top-level sections; the other levels admit any key" do
+  test "contract_keys: the JSON v1 tables; the top level is every recognised section" do
     keys = Domain.contract_keys()
 
     assert keys.top_level ==
              Selecto.Domain.Sections.sections() |> Map.values() |> List.flatten() |> Enum.sort()
 
-    assert keys.top_level == Enum.sort(keys.top_level)
-
     for key <- ~w(associations jsonb_schemas require_tenant tenant_required domain_data events
                   json_schemas source writes),
         do: assert(key in keys.top_level)
-
-    assert Map.take(keys, [:relation, :association, :join, :through, :join_types]) ==
-             %{relation: :any, association: :any, join: :any, through: :any, join_types: :any}
 
     # Every recognised section parses without an unknown-section warning.
     {:ok, _normalized, diagnostics} = Domain.normalize(Map.new(keys.top_level, &{&1, nil}))

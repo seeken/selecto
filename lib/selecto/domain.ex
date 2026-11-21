@@ -341,6 +341,42 @@ defmodule Selecto.Domain do
     %{code: code, path: path, message: "domain schema 2 rule #{code} failed at #{inspect(path)}"}
   end
 
+  @doc """
+  Validates a schema-v1 JSON domain document: the canonical JSON v1 parser.
+
+  `document` is the domain as decoded from JSON (string keys). It is
+  `validate/1` with the key tables of `contract_keys/0` closed: any other key
+  at the top level, on the root `source`, on a `schemas` relation, on an
+  association, its `through` or a join, a `through` that is not an object, and
+  a join type outside `left`, `inner`, `star_dimension`, `right` and `full`
+  (case-insensitive) refuse with code `:invalid_domain` and a `reason`
+  (`:unknown_domain_key`, `:invalid_through`, `:unsupported_join_type`).
+
+  Native (atom-map) authoring keeps `validate/1`, which also admits Selecto's
+  own join families and their keys (dimension, tagging, hierarchical,
+  snowflake_dimension, self_join, lateral_join, cross_join, full_outer_join,
+  conditional_join), relation `source_schema` and Ecto-style `through` lists.
+  A schema 2 document is validated by `validate/1` (its own rules).
+  """
+  @spec validate_json(term()) :: {:ok, map(), Diagnostics.t()} | {:error, Diagnostics.t()}
+  def validate_json(document) do
+    key_errors =
+      if is_map(document) and not SchemaV2.version_2?(document),
+        do: Selecto.Domain.JsonV1.errors(document),
+        else: []
+
+    case validate(document) do
+      {:ok, normalized, diagnostics} when key_errors == [] ->
+        {:ok, normalized, diagnostics}
+
+      {:ok, _normalized, diagnostics} ->
+        {:error, %{diagnostics | errors: key_errors}}
+
+      {:error, diagnostics} ->
+        {:error, %{diagnostics | errors: key_errors ++ diagnostics.errors}}
+    end
+  end
+
   defp validate_version_1(domain) do
     with {:ok, normalized, diagnostics} <- normalize(domain) do
       case Selecto.Domain.Contract.errors(normalized) do
@@ -401,23 +437,23 @@ defmodule Selecto.Domain do
   defdelegate contract_json(domain), to: Selecto.Domain.ContractExport
 
   @doc """
-  Returns the key tables the schema 1 parser uses, so a host can tell which
-  keys a domain may carry without parsing one.
-
-  `top_level` lists the top-level sections `Selecto.Domain.Sections`
-  recognises (canonical, projection and proposed), sorted; any other
-  top-level key still parses, with an `:unknown_sections` warning. The parser
-  keeps no key table for relations, associations, joins or `through` maps, nor
-  a closed set of join types: those levels are `:any`, meaning every key (or
-  join type) is admitted there.
+  Returns the key tables of the canonical JSON v1 parser (`validate_json/1`),
+  so a host can tell which keys a domain may carry without parsing one:
+  `top_level`, `source` (the root source: the `relation` keys and
+  `fts5_index`), `relation` (each `schemas` entry), `association`, `join` and
+  `through` (sorted key names) and `join_types` (`left`, `inner`,
+  `star_dimension`, `right`, `full`, in that order). These are the shared
+  tables of certification specification 4.1.0. Column metadata is open.
+  Native authoring (`validate/1`) also admits Selecto's own join families.
   """
   @spec contract_keys() :: %{
           top_level: [String.t()],
-          relation: :any,
-          association: :any,
-          join: :any,
-          through: :any,
-          join_types: :any
+          source: [String.t()],
+          relation: [String.t()],
+          association: [String.t()],
+          join: [String.t()],
+          through: [String.t()],
+          join_types: [String.t()]
         }
   defdelegate contract_keys(), to: Selecto.Domain.ContractExport
 

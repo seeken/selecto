@@ -7,7 +7,6 @@ defmodule Selecto.Domain.ContractExport do
 
   alias Selecto.Domain
   alias Selecto.Domain.Diagnostics
-  alias Selecto.Domain.Sections
 
   @column_flags ~w(hidden internal redacted nullable selectable filterable sortable groupable
                    detail_selectable query_filterable aggregatable)
@@ -17,30 +16,8 @@ defmodule Selecto.Domain.ContractExport do
   @write_relationship_flags ~w(writable delete_missing required cascade_delete cascade_update)
   @editor_field_flags ~w(required nullable readonly)
 
-  @spec contract_keys() :: %{
-          top_level: [String.t()],
-          relation: :any,
-          association: :any,
-          join: :any,
-          through: :any,
-          join_types: :any
-        }
-  def contract_keys do
-    top_level =
-      Sections.sections()
-      |> Map.values()
-      |> List.flatten()
-      |> Enum.sort()
-
-    %{
-      top_level: top_level,
-      relation: :any,
-      association: :any,
-      join: :any,
-      through: :any,
-      join_types: :any
-    }
-  end
+  @spec contract_keys() :: %{atom() => [String.t()]}
+  def contract_keys, do: Selecto.Domain.JsonV1.tables()
 
   @spec contract_json(map()) :: {:ok, map()} | {:error, Diagnostics.t()}
   def contract_json(%Selecto{domain: domain}) when is_map(domain), do: contract_json(domain)

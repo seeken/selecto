@@ -1010,6 +1010,10 @@ defmodule Selecto.Schema.Join do
       source: queryable.source_table,
       id: id,
       name: Map.get(config, :name, id),
+      # An association join's authored `type: :inner` renders INNER JOIN
+      # (before, the configured join dropped the type and every association
+      # join rendered LEFT JOIN).
+      type: if(inner_join?(config), do: :inner, else: :left),
       ## probably don't need 'where'
       requires_join: parent,
       filters: make_filters(config),
@@ -1022,6 +1026,19 @@ defmodule Selecto.Schema.Join do
         )
     }
     |> parameterize()
+  end
+
+  defp inner_join?(config) do
+    case Map.get(config, :type) do
+      type when is_atom(type) and not is_nil(type) ->
+        String.downcase(Atom.to_string(type)) == "inner"
+
+      type when is_binary(type) ->
+        String.downcase(type) == "inner"
+
+      _ ->
+        false
+    end
   end
 
   defp parameterize(join) do

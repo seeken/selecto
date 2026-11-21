@@ -1,5 +1,21 @@
 ## Unreleased domain contract export
 
+- Add `Selecto.Domain.validate_json/1`, the canonical JSON v1 parser: it is
+  `validate/1` with the seven key tables of specification 4.1.0
+  (domain_contract_export 1.4.0) closed. Any other key at the top level, on
+  the root source, a schemas relation, an association, its `through` or a
+  join, a non-object `through`, and a join type outside left, inner,
+  star_dimension, right and full refuse with code `:invalid_domain` and a
+  `reason`. `contract_keys/0` now returns those seven tables (top_level,
+  source, relation, association, join, through, join_types) instead of
+  `:any`. `validate/1` and native atom-map authoring keep Selecto's own join
+  families and keys.
+- `fts5_index` on a schemas relation refuses in `validate/1` and
+  `validate_json/1` with `:invalid_domain`, reason `:fts5_index_not_root`
+  (before: `:invalid_fts5_index`).
+- An ordinary association join's `type: :inner` (or `"inner"`) now renders
+  INNER JOIN; the configured join used to drop the type and render LEFT JOIN.
+
 - Add `Selecto.Domain.contract_json/1`: a domain's (or configured query's)
   string-keyed canonical contract with JSON booleans at its flag positions
   (portable truth test: `false`, `nil`, `0`, `""`, `"0"` are false), data

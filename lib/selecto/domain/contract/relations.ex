@@ -97,6 +97,25 @@ defmodule Selecto.Domain.Contract.Relations do
 
   defp validate_join_strategy(errors, _association, _path), do: errors
 
+  # fts5_index names the root relation's external FTS5 index; a schemas
+  # relation never takes one, whether or not an association names it.
+  defp validate_fts5_index(errors, relation_id, relation, path)
+       when relation_id != :source do
+    if Core.has_key?(relation, :fts5_index) do
+      [
+        Core.error(
+          :invalid_domain,
+          path ++ [:fts5_index],
+          "fts5_index is allowed only on the root source",
+          reason: :fts5_index_not_root
+        )
+        | errors
+      ]
+    else
+      errors
+    end
+  end
+
   defp validate_fts5_index(errors, relation_id, relation, path) do
     if Core.has_key?(relation, :fts5_index) do
       index = Core.map_value(relation, :fts5_index)
