@@ -77,16 +77,44 @@ defmodule Selecto.Builder.Provenance do
   name: every builder that reads such configuration interpolates it.
   """
   def config_text?(%{domain: domain} = selecto) when is_map(domain) do
-    schemas = domain |> Map.get(:schemas, %{}) |> map_values()
     set = Map.get(selecto, :set) || %{}
 
-    Enum.any?(schemas, &(not name?(Map.get(&1, :source_table, "t")))) or
-      unnamed?(Map.get(domain, :joins, %{})) or
+    domain_text?(selecto) or
       unnamed?(selecto |> Map.get(:config) |> joins()) or
       unnamed?(Map.get(set, :dynamic_joins, %{}))
   end
 
   def config_text?(_selecto), do: false
+
+  @doc """
+  Whether a schema or join of `domain` itself carries text that is not a
+  plain name: the part of config_text?/1 that depends on the domain alone,
+  answered once by `Selecto.configure/3` (kept at `config.domain_text`).
+  `nil` when it cannot be answered: the read then finds out as before.
+  """
+  def domain_text(domain) when is_map(domain) do
+    read_domain_text(domain)
+  rescue
+    _exception -> nil
+  end
+
+  def domain_text(_domain), do: nil
+
+  # The answer configure kept, when the query's domain is the one it
+  # configured (Selecto.Domain.Relations.indexed?/1); else the domain is read.
+  defp domain_text?(%{domain: domain, config: %{domain_text: text?}} = selecto)
+       when is_boolean(text?) do
+    if Selecto.Domain.Relations.indexed?(selecto), do: text?, else: read_domain_text(domain)
+  end
+
+  defp domain_text?(%{domain: domain}), do: read_domain_text(domain)
+
+  defp read_domain_text(domain) do
+    schemas = domain |> Map.get(:schemas, %{}) |> map_values()
+
+    Enum.any?(schemas, &(not name?(Map.get(&1, :source_table, "t")))) or
+      unnamed?(Map.get(domain, :joins, %{}))
+  end
 
   defp joins(%{joins: joins}), do: joins
   defp joins(_config), do: %{}

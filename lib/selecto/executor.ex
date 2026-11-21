@@ -66,9 +66,9 @@ defmodule Selecto.Executor do
     query_id = query_id()
 
     with :ok <- Selecto.Tenant.validate_scope(selecto, opts),
-         {:ok, selecto} <- prepare_read(selecto) do
+         {:ok, selecto, compile} <- prepare_read(selecto, execution_compile?(opts)) do
       try do
-        execute_safe(selecto, opts, query_id, start_time)
+        execute_safe(selecto, opts, query_id, start_time, compile)
       rescue
         refusal in Selecto.Builder.ScopeRefusal -> {:error, Selecto.Error.from_reason(refusal)}
       end
@@ -129,16 +129,18 @@ defmodule Selecto.Executor do
     end
   end
 
+  defp compile_provenance(selecto), do: selecto |> compile_read(false) |> provenance(selecto)
+
+  # What a compile of `selecto` says about its text (Selecto.Builder.Provenance).
   # A statement that cannot compile counts as marked; its compile raises where
   # it always did.
-  defp compile_provenance(selecto) do
-    {_sql, marked?, nodes} =
-      Selecto.Builder.Provenance.capture(fn -> Selecto.Builder.Sql.build(selecto, []) end)
-
+  defp provenance({:ok, _compiled, _joins, marked?, nodes}, selecto) do
     {marked? or Selecto.Builder.Provenance.config_text?(selecto), nodes}
   rescue
     _exception -> {true, 0}
   end
+
+  defp provenance({:raised, _exception, _stacktrace}, _selecto), do: {true, 0}
 
   defp put_declared_functions(opts, []), do: Keyword.delete(opts, :selecto_declared_functions)
 
@@ -196,7 +198,7 @@ defmodule Selecto.Executor do
   # position are taken out: its domain's tables, those its joins generate, its
   # ad-hoc sources.
   def own_relations(query) do
-    collect_relations(Map.get(query, :domain), []) ++
+    Selecto.Domain.Relations.tables(query) ++
       generated_relations(query) ++ declared_sources(query) ++ dynamic_sources(query)
   end
 
@@ -209,7 +211,7 @@ defmodule Selecto.Executor do
   def scope_relations(%{set_result: true}), do: []
 
   def scope_relations(%{query: query, visible: visible} = scope) do
-    (List.delete(collect_relations(Map.get(query, :domain), []), list_root(scope)) ++
+    (List.delete(Selecto.Domain.Relations.tables(query), list_root(scope)) ++
        Enum.reject(dynamic_sources(query), &(&1 in visible)) ++
        declared_sources(query) ++ generated_relations(query))
     |> Enum.filter(&emitted?(&1, Map.get(scope, :emitted, :all)))
@@ -217,7 +219,8 @@ defmodule Selecto.Executor do
 
   @doc false
   # The queries one statement compiles, in read_scopes/1's order.
-  def read_queries(selecto), do: selecto |> read_scopes() |> Enum.map(& &1.query)
+  def read_queries(selecto),
+    do: selecto |> scopes([], [], [], [], :query, []) |> Enum.map(& &1.query)
 
   @doc false
   # One entry per query the statement compiles: the read, its set operands, the
@@ -620,28 +623,6 @@ defmodule Selecto.Executor do
     end)
   end
 
-  defp collect_relations(map, acc) when is_map(map) and not is_struct(map) do
-    Enum.reduce(map, acc, fn
-      {key, value}, acc
-      when key in [:source_table, "source_table"] and
-             (is_binary(value) or (is_atom(value) and not is_nil(value))) ->
-        [to_string(value) | acc]
-
-      {key, %{} = through}, acc when key in [:through, "through"] ->
-        table = Map.get(through, :table) || Map.get(through, "table")
-        acc = if is_binary(table), do: [table | acc], else: acc
-        collect_relations(through, acc)
-
-      {_key, value}, acc ->
-        collect_relations(value, acc)
-    end)
-  end
-
-  defp collect_relations(list, acc) when is_list(list),
-    do: Enum.reduce(list, acc, &collect_relations/2)
-
-  defp collect_relations(_value, acc), do: acc
-
   @doc false
   # Every query compiled into this one: set operation operands and a
   # retarget origin, recursively.
@@ -670,12 +651,26 @@ defmodule Selecto.Executor do
   # zone-independently (Selecto.Builder.ExactCompare.storage_kind/4).
   @doc false
   def prepare_read(selecto) do
-    selecto = put_emitted_names(selecto)
+    with {:ok, prepared, _compile} <- prepare_read(selecto, false), do: {:ok, prepared}
+  end
 
-    with :ok <- no_scope_collision(selecto),
-         {:ok, prepared} <- prepare_adapter_read(selecto) do
+  # A read is compiled, after the adapter's `prepare_read/2`, for what the
+  # compile says of its text (provenance/2). With `execution?`, that compile
+  # is also the statement the read runs, compiled inside its compile span
+  # (compile_read/2): it is returned for compile_and_check/5 to reuse, so a
+  # read compiles once. The relation names its text holds are compiled for
+  # before the adapter runs only when they are needed then
+  # (put_emitted_names/2).
+  defp prepare_read(selecto, execution?) do
+    scopes = scopes(selecto, [], [], [], [], :query, [])
+    named = put_emitted_names(selecto, scopes)
+    emitted = scanned_names(named)
+
+    with :ok <- no_scope_collision(Enum.map(scopes, &Map.put(&1, :emitted, emitted))),
+         {:ok, prepared} <- prepare_adapter_read(named) do
       prepared = drop_emitted_names(prepared)
-      {marked?, nodes} = compile_provenance(prepared)
+      compile = compile_read(prepared, execution?)
+      {marked?, nodes} = provenance(compile, prepared)
 
       if nodes > @max_filter_nodes do
         {:error,
@@ -684,14 +679,50 @@ defmodule Selecto.Executor do
            limit: @max_filter_nodes
          })}
       else
-        {:ok, record_mark(prepared, marked?)}
+        {:ok, record_mark(prepared, marked?), if(execution?, do: compile)}
       end
     end
   end
 
-  defp no_scope_collision(selecto) do
-    scopes = read_scopes(selecto)
+  # Whether execute/2 runs the statement prepare_read/2 compiles: its options
+  # reach the compiler empty, and the complexity check, which compiles before
+  # the performance hooks run, is on.
+  defp execution_compile?(opts),
+    do: opts[:analyze_complexity] != false and gen_sql_opts(opts) == []
 
+  # One compile of `selecto` with no options, as
+  # `{:ok, compiled, joins_in_order, marked?, filter_nodes}`, or
+  # `{:raised, exception, stacktrace}`. The compile of the statement a read
+  # runs (`execution?`) is the one compile/2 would run: inside the compile
+  # span, with the tenant check (Selecto.gen_sql_with_joins/2).
+  defp compile_read(selecto, execution?) do
+    started_at = System.monotonic_time(:millisecond)
+
+    {{sql, aliases, params, joins_in_order}, marked?, nodes} =
+      if execution? do
+        Selecto.Telemetry.span([:compile], %{}, fn ->
+          Selecto.Builder.Provenance.capture(fn -> Selecto.gen_sql_with_joins(selecto, []) end)
+        end)
+      else
+        Selecto.Builder.Provenance.capture(fn ->
+          Selecto.Builder.Sql.build_with_joins(selecto, [])
+        end)
+      end
+
+    compiled = %{
+      sql: sql,
+      aliases: aliases,
+      params: params,
+      started_at: started_at,
+      built_at: System.monotonic_time(:millisecond)
+    }
+
+    {:ok, compiled, joins_in_order, marked?, nodes}
+  rescue
+    exception -> {:raised, exception, __STACKTRACE__}
+  end
+
+  defp no_scope_collision(scopes) do
     with :ok <- raw_ctes_parse(scopes),
          :ok <- raw_ctes_params_bind(scopes),
          :ok <- list_roots_quotable(scopes),
@@ -819,9 +850,13 @@ defmodule Selecto.Executor do
   # subquery and LATERAL joins, set members, recursive bases and steps, a
   # retarget origin, and the relations a join's generated CTE reads.
   defp no_name_collision(scopes) do
-    names = scopes |> Enum.flat_map(&scope_definitions/1) |> Enum.map(&elem(&1, 0))
-    folded = MapSet.new(names, &String.downcase/1)
+    case scopes |> Enum.flat_map(&scope_definitions/1) |> Enum.map(&elem(&1, 0)) do
+      [] -> :ok
+      names -> no_name_collision(scopes, MapSet.new(names, &String.downcase/1))
+    end
+  end
 
+  defp no_name_collision(scopes, folded) do
     scopes
     |> Enum.flat_map(&read_relations/1)
     |> Enum.filter(&MapSet.member?(folded, String.downcase(&1)))
@@ -959,7 +994,7 @@ defmodule Selecto.Executor do
   def read_relations(%{query: query, visible: visible, forbidden: forbidden} = scope) do
     references = visible -- forbidden
 
-    (List.delete(collect_relations(Map.get(query, :domain), []), list_root(scope)) ++
+    (List.delete(Selecto.Domain.Relations.tables(query), list_root(scope)) ++
        Enum.reject(dynamic_sources(query), &(&1 in references)) ++
        declared_sources(query) ++ generated_relations(query))
     |> Enum.filter(&emitted?(&1, Map.get(scope, :emitted, :all)))
@@ -1074,22 +1109,33 @@ defmodule Selecto.Executor do
   # case, is kept. Text holding a name it does not read (a column, an alias, a
   # literal, a reference to a list) only keeps the relation in. A statement that
   # does not compile keeps every relation.
-  defp put_emitted_names(%{set: set} = selecto) when is_map(set) do
-    scopes = scopes(selecto, [], [], [], [], :query, [])
-
+  #
+  # A statement that defines no list is not checked for a name collision, so
+  # it is compiled for its names only when something asks which relations it
+  # names (read_scopes/1, for an adapter that resolves them).
+  defp put_emitted_names(%{set: set} = selecto, scopes) when is_map(set) do
     # A statement whose queries name no relation but their roots has nothing
-    # to leave out: it is not compiled twice.
-    if Enum.all?(scopes, &only_root?/1) do
-      selecto
+    # to leave out: it is not compiled for its names.
+    with false <- Enum.all?(scopes, &only_root?/1),
+         {:ok, lists} <- list_names(scopes),
+         names when names != :all <-
+           if(lists == [], do: :unscanned, else: text_names(selecto, lists)) do
+      %{selecto | set: Map.put(set, @emitted_names, names)}
     else
-      case compiled_names(selecto, scopes) do
-        :all -> selecto
-        names -> %{selecto | set: Map.put(set, @emitted_names, names)}
-      end
+      _all -> selecto
     end
   end
 
-  defp put_emitted_names(selecto), do: selecto
+  defp put_emitted_names(selecto, _scopes), do: selecto
+
+  defp text_names(selecto, lists) do
+    case compile_read(selecto, false) do
+      {:ok, %{sql: sql}, _joins, _marked?, _nodes} -> compiled_names(sql, lists)
+      {:raised, _exception, _stacktrace} -> :all
+    end
+  catch
+    _kind, _reason -> :all
+  end
 
   defp drop_emitted_names(%{set: set} = selecto) when is_map(set),
     do: %{selecto | set: Map.delete(set, @emitted_names)}
@@ -1097,6 +1143,17 @@ defmodule Selecto.Executor do
   defp drop_emitted_names(selecto), do: selecto
 
   defp emitted_names(selecto) do
+    case selecto |> Map.get(:set) |> Kernel.||(%{}) |> Map.get(@emitted_names) do
+      {:names, %MapSet{}, text} = names when is_binary(text) -> names
+      :unscanned -> selecto |> drop_emitted_names() |> text_names([])
+      _none -> :all
+    end
+  end
+
+  # emitted_names/1 without scanning text not scanned yet: for
+  # no_scope_collision/1, which reads the names only of a statement that
+  # defines a list, and that one is scanned when it is compiled.
+  defp scanned_names(selecto) do
     case selecto |> Map.get(:set) |> Kernel.||(%{}) |> Map.get(@emitted_names) do
       {:names, %MapSet{}, text} = names when is_binary(text) -> names
       _none -> :all
@@ -1115,18 +1172,15 @@ defmodule Selecto.Executor do
     source = (domain || %{}) |> Map.get(:source) || %{}
     root = Map.get(source, :source_table) || Map.get(source, "source_table")
 
-    (collect_relations(domain, []) ++
+    (Selecto.Domain.Relations.tables(query) ++
        dynamic_sources(query) ++ declared_sources(query) ++ generated_relations(query))
     |> Enum.uniq()
     |> Kernel.--([to_string(root)])
     |> Enum.empty?()
   end
 
-  defp compiled_names(selecto, scopes) do
-    {{sql, _aliases, _params}, _marked?, _nodes} =
-      Selecto.Builder.Provenance.capture(fn -> Selecto.Builder.Sql.build(selecto, []) end)
-
-    text = without_definitions(String.downcase(sql), list_names(scopes))
+  defp compiled_names(sql, lists) do
+    text = without_definitions(String.downcase(sql), lists)
 
     quoted =
       for {pattern, doubled, quote} <- @quoted,
@@ -1141,11 +1195,17 @@ defmodule Selecto.Executor do
     _kind, _reason -> :all
   end
 
+  # The names of the lists the statement defines, lower case.
   defp list_names(scopes) do
-    scopes
-    |> Enum.flat_map(&statement_names(&1.query))
-    |> Enum.map(&String.downcase/1)
-    |> Enum.uniq()
+    {:ok,
+     scopes
+     |> Enum.flat_map(&statement_names(&1.query))
+     |> Enum.map(&String.downcase/1)
+     |> Enum.uniq()}
+  rescue
+    _exception -> :all
+  catch
+    _kind, _reason -> :all
   end
 
   defp without_definitions(text, []), do: text
@@ -1232,11 +1292,11 @@ defmodule Selecto.Executor do
     end
   end
 
-  defp execute_safe(selecto, opts, query_id, start_time) do
+  defp execute_safe(selecto, opts, query_id, start_time, compile) do
     hook_options = hook_options(opts)
     hook_snapshot = Selecto.Performance.Hooks.snapshot_hooks()
 
-    with {:ok, compiled} <- compile_and_check(selecto, opts, query_id, hook_options) do
+    with {:ok, compiled} <- compile_and_check(selecto, opts, query_id, hook_options, compile) do
       hook_options =
         if compiled, do: Keyword.put(hook_options, :compiled, compiled), else: hook_options
 
@@ -1287,13 +1347,15 @@ defmodule Selecto.Executor do
   # The complexity check needs the joins the query resolves, which compiling
   # the query resolves anyway. So the query is compiled once, here, and the
   # check reads the compile's joins; execution reuses the compiled SQL rather
-  # than compiling again. Without the check (`analyze_complexity: false`)
-  # nothing is compiled here and execution compiles as before.
-  defp compile_and_check(selecto, opts, query_id, hook_options) do
+  # than compiling again. The compile is prepare_read/2's when that compiled
+  # the statement to run (`prepared`). Without the check
+  # (`analyze_complexity: false`) nothing is compiled here and execution
+  # compiles as before.
+  defp compile_and_check(selecto, opts, query_id, hook_options, prepared) do
     if opts[:analyze_complexity] == false do
       {:ok, nil}
     else
-      case compile(selecto, Keyword.fetch!(hook_options, :gen_sql_opts)) do
+      case compile(selecto, Keyword.fetch!(hook_options, :gen_sql_opts), prepared) do
         {:ok, compiled, nil} ->
           # Set operations do not resolve joins while compiling.
           with :ok <- analyze_query_complexity(selecto, opts, query_id, compiled.sql) do
@@ -1328,7 +1390,13 @@ defmodule Selecto.Executor do
     end
   end
 
-  defp compile(selecto, gen_sql_opts) do
+  # The compile prepare_read/2 ran, in its span (compile_read/2).
+  defp compile(_selecto, [], {:ok, compiled, joins_in_order, _marked?, _nodes}),
+    do: {:ok, compiled, joins_in_order}
+
+  defp compile(_selecto, [], {:raised, _exception, _stacktrace} = raised), do: raised
+
+  defp compile(selecto, gen_sql_opts, nil) do
     started_at = System.monotonic_time(:millisecond)
 
     {sql, aliases, params, joins_in_order} =
@@ -2138,17 +2206,21 @@ defmodule Selecto.Executor do
       cache_ttl: Keyword.get(opts, :cache_ttl),
       cache_namespace: Keyword.get(opts, :cache_namespace),
       include_aliases: true,
-      gen_sql_opts:
-        Keyword.drop(opts, [
-          :timeout,
-          :analyze_complexity,
-          :format,
-          :format_options,
-          :cache,
-          :cache_ttl,
-          :cache_namespace
-        ])
+      gen_sql_opts: gen_sql_opts(opts)
     ]
+  end
+
+  # The execute options that reach the compiler.
+  defp gen_sql_opts(opts) do
+    Keyword.drop(opts, [
+      :timeout,
+      :analyze_complexity,
+      :format,
+      :format_options,
+      :cache,
+      :cache_ttl,
+      :cache_namespace
+    ])
   end
 
   defp execute_for_context(selecto, query, params, aliases, adapter_opts \\ []) do

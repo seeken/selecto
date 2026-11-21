@@ -118,6 +118,8 @@ defmodule Selecto.Configuration do
     config =
       configure_domain(domain, extension_specs)
       |> Map.put(:rollup_sort_fix, rollup_sort_fix)
+      |> Map.put(:domain_relations, Selecto.Domain.Relations.index(domain))
+      |> Map.put(:domain_text, Selecto.Builder.Provenance.domain_text(domain))
 
     policy = Selecto.Policy.new!(domain, config, opts)
 

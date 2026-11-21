@@ -18,6 +18,27 @@
 
 ## Unreleased
 
+- `Selecto.execute/2` compiles a read once; it compiled it three times (for
+  the relation names its text holds, for what the compile says of that text,
+  and to run it). The statement is compiled after the adapter's
+  `prepare_read/2`, inside the compile span as before, and that compile
+  serves what the compile says of the text and the statement that runs when
+  the options that reach the compiler are empty and the complexity check is
+  on; with compiler options, or `analyze_complexity: false`, a read compiles
+  twice. A read is compiled for the relation names its text holds only when
+  they are needed before the adapter has prepared it: when it defines a CTE or
+  VALUES list, or an adapter asks (`Selecto.Executor.read_scopes/1`, as the
+  PostgreSQL adapter does for a domain that declares schemas); such a read
+  compiles twice. Preparing a read no longer walks the domain:
+  `Selecto.configure/3` indexes the domain's relation names and declared
+  schemas (`Selecto.Domain.Relations`, at `config.domain_relations`) and
+  whether the domain carries text that is not a plain name
+  (`config.domain_text`); a query whose domain is no longer the one indexed is
+  walked as before. Refusals, the generated/raw mark, the options an adapter
+  receives and the compile span's events and measurements are unchanged, but
+  for a read refused for the size of its filters after it compiled, which now
+  emits the compile span of that compile. One PostgreSQL point read:
+  11,089 function calls to 4,676, three compiles to one.
 - An adapter that enforces the read deadline itself (`supports?(:execute_timeout)`)
   now also receives `selecto_default_timeout: true` when the caller gave no
   `:timeout` and the remaining time is Selecto's 30 second default. Nothing
