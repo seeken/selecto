@@ -1,3 +1,14 @@
+## Unreleased domain contract export
+
+- Add `Selecto.Domain.contract_json/1`: a domain's (or configured query's)
+  string-keyed canonical contract with JSON booleans at its flag positions
+  (portable truth test: `false`, `nil`, `0`, `""`, `"0"` are false), data
+  untouched, never a host's required filters; idempotent through RFC 8785
+  encoding and validation. Add `Selecto.Domain.contract_keys/0` (the parser's
+  recognised top-level sections; `:any` where it keeps no key table).
+  Parsing, validation and fingerprints are unchanged (specification 4.1.0,
+  `domain_contract_export`).
+
 
 
 ## Unreleased SQL Server extraction

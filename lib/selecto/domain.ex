@@ -357,6 +357,70 @@ defmodule Selecto.Domain do
   end
 
   @doc """
+  Returns the domain's canonical contract as JSON data, with JSON booleans at
+  its flag positions.
+
+  `domain` is an authored domain map (atom- or string-keyed, schema 1 or 2) or
+  a configured `%Selecto{}`. The result is the string-keyed canonical form
+  `validate/1` normalizes to (a schema 2 document exports its schema 1 form),
+  ready to encode, for example with `Selecto.Domain.SchemaV2.jcs/1`. Atoms
+  become strings and tuples arrays.
+
+  Flag positions hold `true`/`false`: a flag written as `0`/`1` (or any value)
+  is exported by the portable truth test, where `false`, `nil`, `0`, `""` and
+  `"0"` are false and every other value is true. The positions are the
+  domain's `tenant_required` and `require_tenant` (a null alias beside a
+  present one takes that one's value); each column's `hidden`, `internal`,
+  `redacted`, `nullable`, `selectable`, `filterable`, `sortable`, `groupable`,
+  `detail_selectable`, `query_filterable` and `aggregatable` (on `source`,
+  each `schemas` relation and top-level `columns`); `components.query_params`
+  and each filter choice's `picker_hidden`; each co-domain's `search.rank`;
+  each action's `prerequisite_column` and its inputs' `required`; each detail
+  action's `payload.navigation_enabled`; each editor field's `required`,
+  `nullable` and `readonly`; `writes.operations.*` `enabled`, `bulk` and
+  `require_filter`; `writes.fields.*` `insertable`, `updatable`, `required`
+  and `write_once`; `writes.scope.tenant.required`; and
+  `writes.relationships.*` `writable`, `delete_missing`, `required`,
+  `cascade_delete` and `cascade_update`, recursively through each
+  relationship's `domain`. Everything else is data and keeps its JSON type
+  (a column's `options`, literals, choice values, inline rows).
+
+  The contract is validated (`validate/1`) after its flags are read. A
+  configured `%Selecto{}` exports its domain only: required filters a host
+  attached to the query (`Selecto.require_tenant_filter/2`, a tenant scope)
+  are trusted scope, not contract. Encoding the export canonically, validating
+  it again and exporting gives the same bytes. Parsing, validation and
+  fingerprints are unchanged by this function.
+
+  Returns `{:error, diagnostics}` when the domain does not validate, names a
+  key both as an atom and as a string, or holds a value that is not JSON data
+  (a function, a pid).
+  """
+  @spec contract_json(map() | Selecto.t()) :: {:ok, map()} | {:error, Diagnostics.t()}
+  defdelegate contract_json(domain), to: Selecto.Domain.ContractExport
+
+  @doc """
+  Returns the key tables the schema 1 parser uses, so a host can tell which
+  keys a domain may carry without parsing one.
+
+  `top_level` lists the top-level sections `Selecto.Domain.Sections`
+  recognises (canonical, projection and proposed), sorted; any other
+  top-level key still parses, with an `:unknown_sections` warning. The parser
+  keeps no key table for relations, associations, joins or `through` maps, nor
+  a closed set of join types: those levels are `:any`, meaning every key (or
+  join type) is admitted there.
+  """
+  @spec contract_keys() :: %{
+          top_level: [String.t()],
+          relation: :any,
+          association: :any,
+          join: :any,
+          through: :any,
+          join_types: :any
+        }
+  defdelegate contract_keys(), to: Selecto.Domain.ContractExport
+
+  @doc """
   Composes an authored domain with one or more domain overlays.
 
   This is the Stage 2 composition boundary. It is opt-in and does not participate
