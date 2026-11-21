@@ -308,8 +308,10 @@ defmodule Selecto.DomainContractExportTest do
              Selecto.Domain.Sections.sections() |> Map.values() |> List.flatten() |> Enum.sort()
 
     assert keys.top_level == Enum.sort(keys.top_level)
-    assert "source" in keys.top_level
-    assert "writes" in keys.top_level
+
+    for key <- ~w(associations jsonb_schemas require_tenant tenant_required domain_data events
+                  json_schemas source writes),
+        do: assert(key in keys.top_level)
 
     assert Map.take(keys, [:relation, :association, :join, :through, :join_types]) ==
              %{relation: :any, association: :any, join: :any, through: :any, join_types: :any}

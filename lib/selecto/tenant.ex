@@ -292,6 +292,23 @@ defmodule Selecto.Tenant do
     require_tenant_filter(selecto, {normalize_field(tenant_field), tenant_id})
   end
 
+  @doc false
+  # A domain's `tenant_required` / `require_tenant`: a boolean, or 0/1 (a
+  # number or a "0"/"1" string), as every runtime reads it.
+  @spec requirement_value(term()) :: {:ok, boolean()} | :error
+  def requirement_value(value) when is_boolean(value), do: {:ok, value}
+  def requirement_value(value) when value in [0, "0"], do: {:ok, false}
+  def requirement_value(value) when value in [1, "1"], do: {:ok, true}
+  def requirement_value(_value), do: :error
+
+  @doc false
+  # The domain's requirement: `tenant_required`, else its alias.
+  @spec domain_requirement(map()) :: {:ok, boolean()} | :error
+  def domain_requirement(domain) do
+    with :error <- requirement_value(map_get(domain, :tenant_required)),
+         do: requirement_value(map_get(domain, :require_tenant))
+  end
+
   @doc """
   Return whether tenant scope is required for this query.
 
@@ -306,6 +323,7 @@ defmodule Selecto.Tenant do
   def tenant_required?(selecto, opts \\ []) do
     context = tenant(selecto) || %{}
     domain = Map.get(selecto, :domain, %{})
+    domain_required = domain_requirement(domain)
 
     cond do
       is_boolean(Keyword.get(opts, :require_tenant)) ->
@@ -317,11 +335,8 @@ defmodule Selecto.Tenant do
       is_boolean(map_get(context, :require_tenant)) ->
         map_get(context, :require_tenant)
 
-      is_boolean(map_get(domain, :tenant_required)) ->
-        map_get(domain, :tenant_required)
-
-      is_boolean(map_get(domain, :require_tenant)) ->
-        map_get(domain, :require_tenant)
+      match?({:ok, _}, domain_required) ->
+        elem(domain_required, 1)
 
       true ->
         tenant_mode_requires_scope?(map_get(context, :tenant_mode))

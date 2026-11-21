@@ -194,7 +194,7 @@ defmodule Selecto.Schema.Column do
           base_col
       end
 
-    base_col = Map.put(base_col, :internal, Map.get(source_col, :internal, false))
+    base_col = Map.put(base_col, :internal, Selecto.Domain.flag(source_col, :internal, false))
 
     {
       colid,

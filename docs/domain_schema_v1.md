@@ -172,6 +172,15 @@ Canonical sections are part of the current domain contract:
 - `domain_data`
 - `extensions`
 - `co_domains`
+- `associations`
+- `tenant_required`
+- `require_tenant`
+
+`tenant_required` and `require_tenant` are aliases for the domain's tenant
+requirement (see `Selecto.Tenant.tenant_required?/2`). A top-level
+`associations` map is the parser vocabulary of other runtimes' simple domain
+form; this runtime recognizes the key (it is in `Selecto.Domain.contract_keys/0`)
+but reads root associations from `source.associations`.
 
 ### Projection
 
@@ -182,6 +191,7 @@ because portable consumers SHOULD obtain them from a named projection:
 - `columns`
 - `custom_columns`
 - `json_schemas`
+- `jsonb_schemas`
 - `subfilters`
 - `window_functions`
 - `pagination`

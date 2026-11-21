@@ -241,6 +241,7 @@ defmodule SelectoUpdato.Tenant do
   def tenant_required?(%Operation{} = operation, opts \\ []) do
     context = tenant(operation) || %{}
     canonical_scope = canonical_tenant_scope(operation)
+    domain_required = Selecto.Tenant.domain_requirement(operation.domain || %{})
 
     cond do
       is_boolean(Keyword.get(opts, :require_tenant)) ->
@@ -255,11 +256,8 @@ defmodule SelectoUpdato.Tenant do
       is_boolean(map_get(context, :require_tenant)) ->
         map_get(context, :require_tenant)
 
-      is_boolean(map_get(operation.domain, :tenant_required)) ->
-        map_get(operation.domain, :tenant_required)
-
-      is_boolean(map_get(operation.domain, :require_tenant)) ->
-        map_get(operation.domain, :require_tenant)
+      match?({:ok, _}, domain_required) ->
+        elem(domain_required, 1)
 
       true ->
         false

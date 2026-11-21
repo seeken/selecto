@@ -395,7 +395,7 @@ defmodule Selecto.Domain.Contract.Editors do
   defp public_field(errors, field, source, schemas, path) do
     column = resolve_column(field, source, schemas)
 
-    if is_map(column) and get(column, :internal) != true do
+    if is_map(column) and not Selecto.Domain.flag?(get(column, :internal)) do
       errors
     else
       [

@@ -81,6 +81,7 @@ defmodule Selecto.Domain.Contract do
 
     []
     |> validate_required_sections(authored_domain)
+    |> validate_tenant_requirement(authored_domain)
     |> Relations.validate(source, schemas)
     |> Kernel.++(Selecto.Domain.Values.validate(normalized_domain))
     |> Joins.validate(joins, source, schemas)
@@ -115,6 +116,43 @@ defmodule Selecto.Domain.Contract do
         "expected a normalized Selecto domain from Selecto.Domain.normalize/1"
       )
     ]
+  end
+
+  # `tenant_required` and its alias `require_tenant` are booleans, or 0/1 (a
+  # number or a "0"/"1" string); when both are present they must agree.
+  defp validate_tenant_requirement(errors, authored_domain) do
+    values =
+      for key <- [:tenant_required, :require_tenant],
+          not is_nil(Core.map_value(authored_domain, key)) do
+        {key, Selecto.Tenant.requirement_value(Core.map_value(authored_domain, key))}
+      end
+
+    errors =
+      Enum.reduce(values, errors, fn
+        {key, :error}, errors ->
+          [
+            Core.error(:invalid_tenant_requirement, [key], "domain #{key} must be boolean")
+            | errors
+          ]
+
+        _value, errors ->
+          errors
+      end)
+
+    case values do
+      [{_, {:ok, left}}, {_, {:ok, right}}] when left != right ->
+        [
+          Core.error(
+            :invalid_tenant_requirement,
+            [:require_tenant],
+            "domain requirement aliases conflict"
+          )
+          | errors
+        ]
+
+      _ ->
+        errors
+    end
   end
 
   defp validate_required_sections(errors, authored_domain) do

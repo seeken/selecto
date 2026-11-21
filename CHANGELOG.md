@@ -8,6 +8,26 @@
   recognised top-level sections; `:any` where it keeps no key table).
   Parsing, validation and fingerprints are unchanged (specification 4.1.0,
   `domain_contract_export`).
+- Column-level `redacted` (DC004): a column whose `redacted` flag holds, on the
+  root source or a schema, is withheld exactly like a `redact_fields` entry
+  (`Selecto.configure/3` folds it into the relation's withheld list; the
+  authored domain and its contract keep the flag). New
+  `Selecto.Domain.redacted_fields/1`.
+- Behaviour change: domain flags follow the portable truth test everywhere
+  core reads them (`Selecto.Domain.flag?/1`, `flag/3`): `internal: 1`,
+  `hidden: 1`, `redacted: 1` withhold, `filterable: 0`/`sortable: 0`/... refuse
+  that use, `nullable: 1` is nullable, `readonly: 1` is read-only (field
+  policy). Before, non-boolean values were read as false (or ignored).
+- `Selecto.configure/3` no longer raises `KeyError` when a source or schema
+  leaves out `redact_fields` (it defaults to `[]`).
+- New recognised top-level keys (Perl's): `associations` and `jsonb_schemas`
+  (opaque metadata, any JSON value, kept in the contract), `tenant_required`
+  and `require_tenant` (validated: a boolean or 0/1, and the two must agree;
+  0/1 is now read as a boolean by `Selecto.tenant_required?/2` and
+  `SelectoUpdato.tenant_required?/2`). An association's `join_strategy` is
+  validated (`lateral_lookup` on a direct association, else
+  `:invalid_association_join_strategy`); it is a plan hint and the ordinary
+  join is planned.
 
 
 

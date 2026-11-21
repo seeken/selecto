@@ -37,13 +37,17 @@ defmodule Selecto.Domain.Sections do
     "components",
     "imports",
     "domain_data",
-    "extensions"
+    "extensions",
+    "associations",
+    "tenant_required",
+    "require_tenant"
   ]
 
   @projection_sections [
     "columns",
     "custom_columns",
     "json_schemas",
+    "jsonb_schemas",
     "subfilters",
     "window_functions",
     "pagination",

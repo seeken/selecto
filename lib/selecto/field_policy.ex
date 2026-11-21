@@ -157,7 +157,10 @@ defmodule Selecto.FieldPolicy do
     public? = not definition.internal?
 
     requested_mode =
-      id(get(entry, :mode) || if(get(entry, :readonly) == true, do: :read_only, else: :auto))
+      id(
+        get(entry, :mode) ||
+          if(Selecto.Domain.flag?(get(entry, :readonly)), do: :read_only, else: :auto)
+      )
 
     root? = definition.root?
     writes = domain.writes || %{}
@@ -218,7 +221,7 @@ defmodule Selecto.FieldPolicy do
         get(entry, :control) ||
           if(is_list(options) and options != [], do: "select", else: control_for(type)),
       required: required?,
-      nullable: get(entry, :nullable) == true,
+      nullable: Selecto.Domain.flag?(get(entry, :nullable)),
       writable: writable?,
       value: fetch(snapshot, field)
     }
@@ -303,7 +306,7 @@ defmodule Selecto.FieldPolicy do
          type: id(get(column, :type) || :string),
          label: get(column, :label),
          options: get(column, :options),
-         internal?: get(column, :internal) == true
+         internal?: Selecto.Domain.flag?(get(column, :internal))
        }}
     else
       invalid("field policy references an unknown field", %{field: name})

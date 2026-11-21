@@ -28,6 +28,7 @@ defmodule Selecto.Domain.Contract.Relations do
     |> validate_relation_source_kind(relation_id, relation, path)
     |> validate_relation_readonly(relation_id, relation, path)
     |> validate_fts5_index(relation_id, relation, path)
+    |> validate_join_strategies(relation, path)
   end
 
   def validate_relation(errors, relation_id, relation, path) do
@@ -42,6 +43,59 @@ defmodule Selecto.Domain.Contract.Relations do
       | errors
     ]
   end
+
+  # An association's `join_strategy` is a plan hint other runtimes act on
+  # (`lateral_lookup`: a PostgreSQL lateral lookup of a direct table
+  # association). It never changes results, so this runtime validates it and
+  # plans the ordinary join.
+  defp validate_join_strategies(errors, relation, path) do
+    case Core.map_value(relation, :associations) do
+      associations when is_map(associations) ->
+        Enum.reduce(associations, errors, fn {name, association}, errors ->
+          validate_join_strategy(errors, association, path ++ [:associations, name])
+        end)
+
+      _ ->
+        errors
+    end
+  end
+
+  defp validate_join_strategy(errors, association, path) when is_map(association) do
+    if Core.has_key?(association, :join_strategy) do
+      strategy = Core.map_value(association, :join_strategy)
+
+      cond do
+        not ((is_binary(strategy) or (is_atom(strategy) and not is_nil(strategy))) and
+                 String.downcase(to_string(strategy)) == "lateral_lookup") ->
+          [
+            Core.error(
+              :invalid_association_join_strategy,
+              path ++ [:join_strategy],
+              "unsupported association join strategy; expected lateral_lookup"
+            )
+            | errors
+          ]
+
+        Core.has_key?(association, :through) or
+            not is_nil(Core.map_value(association, :values)) ->
+          [
+            Core.error(
+              :invalid_association_join_strategy,
+              path ++ [:join_strategy],
+              "lateral lookup requires a direct table association"
+            )
+            | errors
+          ]
+
+        true ->
+          errors
+      end
+    else
+      errors
+    end
+  end
+
+  defp validate_join_strategy(errors, _association, _path), do: errors
 
   defp validate_fts5_index(errors, relation_id, relation, path) do
     if Core.has_key?(relation, :fts5_index) do
@@ -63,7 +117,8 @@ defmodule Selecto.Domain.Contract.Relations do
           Core.field_ref?(Core.map_value(relation, :primary_key)) and
           to_string(key) == to_string(Core.map_value(relation, :primary_key)) and
           Core.enum_value?(Core.map_value(column, :type), [:integer]) and
-          not Core.has_key?(column, :computed) and Core.map_value(column, :internal) != true
+          not Core.has_key?(column, :computed) and
+          not Selecto.Domain.flag?(Core.map_value(column, :internal))
 
       if valid?,
         do: errors,

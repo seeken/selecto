@@ -623,7 +623,7 @@ defmodule Selecto.Domain.Projector do
 
     # A hidden field is unavailable to public query consumers even when its
     # authored role flags or operator lists explicitly enable it.
-    if query_contract_default(column, :hidden) == true do
+    if Selecto.Domain.flag?(query_contract_default(column, :hidden)) do
       Map.merge(surface, %{
         detail_selectable: false,
         filterable: false,
@@ -647,7 +647,7 @@ defmodule Selecto.Domain.Projector do
   defp query_contract_default(_column, _key), do: nil
 
   def query_contract_detail_selectable?(column) do
-    query_contract_default(column, :internal) != true and
+    not Selecto.Domain.flag?(query_contract_default(column, :internal)) and
       query_contract_bool(
         column,
         [:detail_selectable, :detail_selectable?, :selectable, :selectable?],
@@ -660,7 +660,8 @@ defmodule Selecto.Domain.Projector do
   def query_contract_filterable?(column, id, source_kind, filterable_fields) do
     default =
       MapSet.member?(filterable_fields, id) or
-        (source_kind in [:source, :schema] and query_contract_default(column, :internal) != true)
+        (source_kind in [:source, :schema] and
+           not Selecto.Domain.flag?(query_contract_default(column, :internal)))
 
     query_contract_bool(
       column,
@@ -742,9 +743,10 @@ defmodule Selecto.Domain.Projector do
 
   def query_contract_bool_override(map, keys) when is_map(map) do
     Enum.reduce_while(keys, :error, fn key, _acc ->
+      # Flags follow the portable truth test (`filterable: 0` is false).
       case MapHelpers.map_value(map, key) do
-        value when is_boolean(value) -> {:halt, {:ok, value}}
-        _value -> {:cont, :error}
+        nil -> {:cont, :error}
+        value -> {:halt, {:ok, Selecto.Domain.flag?(value)}}
       end
     end)
   end

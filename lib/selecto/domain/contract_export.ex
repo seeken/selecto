@@ -260,6 +260,40 @@ defmodule Selecto.Domain.ContractExport do
   def truthy?("0"), do: false
   def truthy?(_value), do: true
 
+  @doc false
+  @spec flag(term(), atom(), boolean()) :: boolean()
+  def flag(map, key, default) when is_map(map) and is_atom(key) do
+    case Map.get(map, key, Map.get(map, Atom.to_string(key))) do
+      nil -> default
+      value -> truthy?(value)
+    end
+  end
+
+  def flag(_map, _key, default), do: default
+
+  @doc false
+  def redacted_fields(relation) when is_map(relation) do
+    listed = List.wrap(field(relation, :redact_fields) || [])
+    fields = List.wrap(field(relation, :fields) || [])
+    columns = field(relation, :columns)
+
+    flagged =
+      if is_map(columns) do
+        for {name, column} <- columns, is_map(column), flag(column, :redacted, false) do
+          Enum.find(fields, name, &(to_string(&1) == to_string(name)))
+        end
+        |> Enum.sort_by(&to_string/1)
+      else
+        []
+      end
+
+    Enum.uniq(listed ++ flagged)
+  end
+
+  def redacted_fields(_relation), do: []
+
+  defp field(map, key), do: Map.get(map, key, Map.get(map, Atom.to_string(key)))
+
   defp update(object, key, fun) when is_map(object) do
     case Map.fetch(object, key) do
       {:ok, value} -> Map.put(object, key, fun.(value))

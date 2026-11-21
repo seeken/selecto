@@ -317,9 +317,9 @@ defmodule Selecto.Advanced.LateralJoin do
     conf = Selecto.field(child, field)
 
     if is_map(conf) and conf[:requires_join] == :selecto_root and
-         conf[:internal] != true and not Map.has_key?(conf, :select) and
+         not Selecto.Domain.flag?(conf[:internal]) and not Map.has_key?(conf, :select) and
          not Map.has_key?(conf, :computed) and
-         DomainMap.map_value(authored, :internal) != true and
+         not Selecto.Domain.flag?(DomainMap.map_value(authored, :internal)) and
          not Map.has_key?(authored, :computed) and not Map.has_key?(authored, "computed") and
          not Map.has_key?(authored, :select) and not Map.has_key?(authored, "select") and
          map_size(authored) > 0 and (is_binary(name) or is_atom(name)) do

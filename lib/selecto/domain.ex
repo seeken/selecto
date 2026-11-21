@@ -307,6 +307,7 @@ defmodule Selecto.Domain do
   version 1 form and the diagnostics report `schema_version: 2`. A schema 1
   domain validates exactly as before: `Selecto.Domain.SchemaV2.migrate/1`
   reports `:domain_schema_deprecated` with its schema 2 form.
+
   """
   @spec validate(term()) :: {:ok, map(), Diagnostics.t()} | {:error, Diagnostics.t()}
   def validate(domain) do
@@ -419,6 +420,36 @@ defmodule Selecto.Domain do
           join_types: :any
         }
   defdelegate contract_keys(), to: Selecto.Domain.ContractExport
+
+  @doc """
+  The truth test of a domain flag (`hidden`, `internal`, `redacted`,
+  `nullable`, `selectable`, `filterable`, `sortable`, `groupable`,
+  `aggregatable` and the other boolean positions): `false`, `nil`, `0`, `0.0`,
+  `""` and `"0"` are false and every other value is true, so `internal: 1`
+  withholds a column exactly as `internal: true` does. Every runtime reads
+  flags this way.
+  """
+  @spec flag?(term()) :: boolean()
+  defdelegate flag?(value), to: Selecto.Domain.ContractExport, as: :truthy?
+
+  @doc """
+  Reads the flag `key` (an atom; the string spelling is read too) of a column
+  or other domain map by `flag?/1`, or returns `default` when the map does not
+  carry it or carries `nil`.
+  """
+  @spec flag(term(), atom(), boolean()) :: boolean()
+  defdelegate flag(map, key, default), to: Selecto.Domain.ContractExport
+
+  @doc """
+  The fields a relation (the root source or a schema) withholds: the names in
+  its `redact_fields` and every column whose `redacted` flag holds by
+  `flag?/1`. A withheld field is never selected, filtered, ordered, listed or
+  replaced by a host property; `redacted: false` withholds nothing. A name a
+  column map keys differently from the relation's `fields` (a string beside
+  atom fields) takes the spelling of `fields`.
+  """
+  @spec redacted_fields(map()) :: [atom() | String.t()]
+  defdelegate redacted_fields(relation), to: Selecto.Domain.ContractExport
 
   @doc """
   Composes an authored domain with one or more domain overlays.

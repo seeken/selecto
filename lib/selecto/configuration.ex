@@ -387,13 +387,17 @@ defmodule Selecto.Configuration do
   # builder also reads that name as `field`. When a portable domain omits
   # `field`, derive it from the association key. An explicit `field` is kept,
   # because existing domains may name the join differently from the key.
+  #
+  # Each relation's `redact_fields` also becomes the full withheld list: a
+  # column marked `redacted` is withheld like a listed field, and a relation
+  # that leaves `redact_fields` out withholds nothing else.
   defp default_association_fields(domain) do
     domain
-    |> Map.update!(:source, &default_relation_association_fields/1)
+    |> Map.update!(:source, &(&1 |> default_relation_association_fields() |> withhold()))
     |> Map.update(:schemas, %{}, fn
       schemas when is_map(schemas) ->
         Map.new(schemas, fn {name, schema} ->
-          {name, default_relation_association_fields(schema)}
+          {name, schema |> default_relation_association_fields() |> withhold()}
         end)
 
       other ->
@@ -417,6 +421,11 @@ defmodule Selecto.Configuration do
   end
 
   defp default_relation_association_fields(relation), do: relation
+
+  defp withhold(relation) when is_map(relation),
+    do: Map.put(relation, :redact_fields, Selecto.Domain.redacted_fields(relation))
+
+  defp withhold(relation), do: relation
 
   defp prepare_values_schemas(domain) do
     {schemas, values_relations} =
