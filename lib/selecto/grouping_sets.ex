@@ -288,7 +288,7 @@ defmodule Selecto.GroupingSets do
 
     Enum.map(Map.get(selecto.set, :order_by, []), fn order ->
       {target, direction} = order_parts(order)
-      {{:literal_position, position!(target, selected)}, direction}
+      {{:literal_position, position!(selecto, target, selected)}, direction}
     end)
   end
 
@@ -296,19 +296,23 @@ defmodule Selecto.GroupingSets do
   defp order_parts({target, direction}) when direction in @directions, do: {target, direction}
   defp order_parts(target), do: {target, :asc_nulls_first}
 
-  defp position!({:literal_position, position}, selected)
-       when is_integer(position) and position > 0 do
-    if position <= length(selected),
+  defp position!(_selecto, {:literal_position, position} = target, selected)
+       when is_integer(position) do
+    if position > 0 and position <= length(selected),
       do: position,
-      else: not_selected!({:literal_position, position})
+      else: not_selected!(target)
   end
 
-  defp position!(target, selected) do
+  # The selected item the ordering names: the same term, the expression of an
+  # aliased item, its alias, or an expression compiling to the same SQL
+  # (`{:sum, "amount"}` and `Selecto.Expr.sum("amount")`).
+  defp position!(selecto, target, selected) do
     index =
       Enum.find_index(selected, fn item ->
         same?(target, item) or same?(target, unalias(item)) or
           (is_binary(target) and alias_of(item) == target)
-      end)
+      end) ||
+        Enum.find_index(selected, &(compiled(selecto, target) == compiled(selecto, unalias(&1))))
 
     if index, do: index + 1, else: not_selected!(target)
   end
@@ -320,6 +324,18 @@ defmodule Selecto.GroupingSets do
 
   defp alias_of({:field, _expression, alias_name}), do: to_string(alias_name)
   defp alias_of(_item), do: nil
+
+  defp compiled(selecto, expression) do
+    {sql, _joins, params, _alias} = Selecto.Builder.Sql.Select.build(selecto, expression)
+    parts = List.flatten([sql])
+
+    # SQL keywords and function names compare case-insensitively.
+    if Enum.all?(parts, &is_binary/1),
+      do: {parts |> Enum.join() |> String.downcase(), params},
+      else: {parts, params}
+  rescue
+    _ -> make_ref()
+  end
 
   defp not_selected!(target) do
     ScopeRefusal.unsupported!(

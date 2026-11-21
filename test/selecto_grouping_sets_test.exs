@@ -245,6 +245,17 @@ defmodule Selecto.GroupingSetsTest do
       assert sql =~ ~r/order by\s+5 asc, 4 desc, 1 asc/
     end
 
+    test "an ordering matches a selected expression of another spelling or its position" do
+      {sql, _aliases, []} =
+        query()
+        |> measures(["region"])
+        |> Selecto.group_by(grouping_sets([["region"], []]))
+        |> Selecto.order_by([{Selecto.Expr.sum("amount"), :desc}, {{:literal_position, 1}, :asc}])
+        |> Selecto.gen_sql([])
+
+      assert sql =~ ~r/order by\s+3 desc, 1 asc/
+    end
+
     test "an ordering that names no selected output refuses before SQL" do
       selecto =
         query()
