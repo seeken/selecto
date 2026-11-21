@@ -11,8 +11,13 @@ defmodule Selecto.Dialect.ComputedValue do
   this finite port to promote operands before division, preserving fractions
   when NUMERIC affinity stores both values as integers.
 
+  `:days_between` carries the two compiled operands of the `days_between` value
+  node, start then end, with type `"integer"`: the whole calendar days from the
+  start's date to the end's date (negative when the end is earlier, NULL when
+  either is NULL). Each dialect writes its own date arithmetic.
+
   The optional `c:Selecto.DB.Dialect.render_computed_value/2` callback is required
-  only when an expression uses a cast or JSON text extraction. Field references,
+  only when an expression uses a cast, JSON text extraction or `days_between`. Field references,
   arithmetic without casts, case expressions, coalesce, lower and upper continue
   to use generic SQL composition.
   """
@@ -21,7 +26,7 @@ defmodule Selecto.Dialect.ComputedValue do
   defstruct [:operation, :expression, :type, path: []]
 
   @type t :: %__MODULE__{
-          operation: :cast | :json_text | :divide,
+          operation: :cast | :json_text | :divide | :days_between,
           expression: term(),
           type: String.t() | nil,
           path: [{:param, String.t()}]

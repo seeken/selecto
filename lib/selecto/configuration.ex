@@ -151,6 +151,30 @@ defmodule Selecto.Configuration do
   @doc false
   @spec runtime_domain!(term()) :: term()
   def runtime_domain!(domain) do
+    domain
+    |> runtime_form!()
+    |> expand_computed_shorthand!()
+  end
+
+  # temporal_delta and bucket computed columns run as the expression columns
+  # they stand for; a declaration that does not expand refuses the domain,
+  # whatever :validate says.
+  defp expand_computed_shorthand!(domain) when is_map(domain) do
+    case Selecto.Domain.Shorthand.Computed.expand(domain) do
+      {domain, []} ->
+        domain
+
+      {_domain, errors} ->
+        raise Selecto.DomainValidator.ValidationError,
+          message:
+            "Domain validation failed:\n" <>
+              Enum.map_join(errors, "\n", fn %{message: message} -> "  - #{message}" end)
+    end
+  end
+
+  defp expand_computed_shorthand!(domain), do: domain
+
+  defp runtime_form!(domain) do
     if Selecto.Domain.SchemaV2.document?(domain) do
       case Selecto.Domain.SchemaV2.validate(domain) do
         [] ->

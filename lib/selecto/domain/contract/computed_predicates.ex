@@ -6,7 +6,9 @@ defmodule Selecto.Domain.Contract.ComputedPredicates do
 
   @comparison ~w(eq ne neq gt gte lt lte)
 
-  def validate(errors, source) when is_map(source) do
+  def validate(errors, source, schemas \\ %{})
+
+  def validate(errors, source, schemas) when is_map(source) do
     columns = Core.map_value(source, :columns) || %{}
     # Relations reports the registry shape error; do not enumerate malformed
     # columns while collecting additional computed-predicate diagnostics.
@@ -20,18 +22,31 @@ defmodule Selecto.Domain.Contract.ComputedPredicates do
             {acc, graph}
 
           computed ->
-            validate_column(acc, graph, Core.field_id(field), column, computed, fields, columns)
+            validate_column(
+              acc,
+              graph,
+              Core.field_id(field),
+              column,
+              computed,
+              fields,
+              {source, schemas}
+            )
         end
       end)
 
     validate_cycles(errors, graph)
   end
 
-  def validate(errors, _source), do: errors
+  def validate(errors, _source, _schemas), do: errors
 
   def to_filter(expression) when is_tuple(expression), do: expression
 
   def to_filter([op, operands]) when op in [:and, :or, "and", "or"] and is_list(operands),
+    do: {op_atom(op), Enum.map(operands, &to_filter/1)}
+
+  # The variadic spelling, ["and", filter, filter, ...], as computed-column
+  # shorthand (bucket ranges) writes it.
+  def to_filter([op | [_, _ | _] = operands]) when op in [:and, :or, "and", "or"],
     do: {op_atom(op), Enum.map(operands, &to_filter/1)}
 
   def to_filter([op, operand]) when op in [:not, "not"], do: {:not, to_filter(operand)}
@@ -54,14 +69,20 @@ defmodule Selecto.Domain.Contract.ComputedPredicates do
     end
   end
 
-  defp validate_column(errors, graph, field, column, computed, fields, columns)
+  defp validate_column(errors, graph, field, column, computed, fields, relations)
        when is_map(computed) do
     kind = Core.map_value(computed, :kind)
 
-    if kind in [:expression, "expression"] do
-      validate_value_column(errors, graph, field, column, computed, fields, columns)
-    else
-      validate_predicate_column(errors, graph, field, column, computed, fields, kind)
+    cond do
+      kind in [:expression, "expression"] ->
+        validate_value_column(errors, graph, field, column, computed, fields, relations)
+
+      # A shorthand left unexpanded was refused by Selecto.Domain.Shorthand.Computed.
+      Selecto.Domain.Shorthand.Computed.shorthand?(computed) ->
+        {errors, graph}
+
+      true ->
+        validate_predicate_column(errors, graph, field, column, computed, fields, kind)
     end
   end
 
@@ -72,33 +93,86 @@ defmodule Selecto.Domain.Contract.ComputedPredicates do
          | errors
        ], graph}
 
-  # Governed computed values (kind: :expression). Root fields are type-checked
-  # here; paths across associations are typed when the query builder resolves them.
-  defp validate_value_column(errors, graph, field, column, computed, fields, columns) do
+  # Governed computed values (kind: :expression). Root fields and fields one
+  # association away are type-checked here; deeper paths are typed when the
+  # query builder resolves them.
+  defp validate_value_column(errors, graph, field, column, computed, fields, relations) do
     errors =
       if Enum.all?(Map.keys(computed), &(to_string(&1) in ["kind", "expression"])),
         do: errors,
         else: [error(:invalid_computed_value, field, "unknown computed value key") | errors]
 
-    resolve = fn path ->
-      if MapSet.member?(fields, path) do
-        Enum.find_value(columns, :unknown, fn {name, spec} ->
-          if to_string(name) == path, do: Core.map_value(spec, :type) || :unknown
-        end)
-      else
-        :unknown
-      end
-    end
+    resolve = &resolve_type(&1, fields, relations)
 
     with {:ok, normalized, dependencies} <-
            ComputedValues.validate(Core.map_value(computed, :expression)),
          :ok <- root_dependencies_known(dependencies, fields),
+         :ok <- association_dependencies_known(dependencies, relations),
          {:ok, category} <- ComputedValues.infer(normalized, resolve),
          :ok <- declared_type(Core.map_value(column, :type), category) do
       {errors, Map.put(graph, field, Enum.reject(dependencies, &String.contains?(&1, ".")))}
     else
       {:error, message} -> {[error(:invalid_computed_value, field, message) | errors], graph}
     end
+  end
+
+  defp resolve_type(path, fields, {source, schemas}) do
+    case String.split(path, ".") do
+      [name] ->
+        if MapSet.member?(fields, name), do: column_type(source, name), else: :unknown
+
+      [association, name] ->
+        case association_relation(source, schemas, association) do
+          nil -> :unknown
+          relation -> column_type(relation, name)
+        end
+
+      _deeper ->
+        :unknown
+    end
+  end
+
+  defp column_type(relation, name) do
+    with columns when is_map(columns) <- Core.map_value(relation, :columns),
+         {:ok, spec} when is_map(spec) <- Core.fetch_key(columns, name) do
+      Core.map_value(spec, :type) || :unknown
+    else
+      _ -> :unknown
+    end
+  end
+
+  # The schema a direct association of the root reads, when the domain names it.
+  defp association_relation(source, schemas, association) do
+    with associations when is_map(associations) <- Core.map_value(source, :associations),
+         {:ok, spec} when is_map(spec) <- Core.fetch_key(associations, association),
+         queryable when not is_nil(queryable) <- Core.map_value(spec, :queryable),
+         true <- is_map(schemas),
+         {:ok, relation} when is_map(relation) <- Core.fetch_key(schemas, queryable) do
+      relation
+    else
+      _ -> nil
+    end
+  end
+
+  # A path one association away must name a field of the schema it reads.
+  defp association_dependencies_known(dependencies, {source, schemas}) do
+    unknown =
+      Enum.find(dependencies, fn path ->
+        case String.split(path, ".") do
+          [association, name] ->
+            case association_relation(source, schemas, association) do
+              nil -> false
+              relation -> name not in Enum.map(Core.relation_fields(relation), &Core.field_id/1)
+            end
+
+          _ ->
+            false
+        end
+      end)
+
+    if unknown,
+      do: {:error, "computed value references unknown field #{inspect(unknown)}"},
+      else: :ok
   end
 
   defp root_dependencies_known(dependencies, fields) do
@@ -159,6 +233,10 @@ defmodule Selecto.Domain.Contract.ComputedPredicates do
        when op in [:and, :or, "and", "or"] and is_list(operands) and operands != [] do
     collect(operands, fields, owner)
   end
+
+  defp validate_expression([op | [_, _ | _] = operands], fields, owner)
+       when op in [:and, :or, "and", "or"],
+       do: collect(operands, fields, owner)
 
   defp validate_expression([op, operand], fields, owner) when op in [:not, "not"],
     do: validate_expression(operand, fields, owner)

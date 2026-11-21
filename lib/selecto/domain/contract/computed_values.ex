@@ -13,6 +13,12 @@ defmodule Selecto.Domain.Contract.ComputedValues do
       ["json_text", field_path, [segment, ...]]
       ["lower" | "upper", value]
       ["concat", value, value, ...]
+      ["days_between", start, end]
+
+  `days_between` is the number of whole calendar days from `start` to `end`:
+  the difference of their dates whatever the times of day, negative when `end`
+  is the earlier date, and null when either is null. Both operands are dates
+  or datetimes; the result is an integer.
 
   `filter` is the portable filter AST used by computed predicates. The AST never
   carries SQL text; the SQL builder binds literals and JSON path segments.
@@ -81,6 +87,12 @@ defmodule Selecto.Domain.Contract.ComputedValues do
 
   defp normalize_node(op, _arguments) when op in @arithmetic,
     do: {:error, "#{op} requires exactly two values"}
+
+  defp normalize_node("days_between", [_start, _end] = arguments),
+    do: normalize_all("days_between", arguments)
+
+  defp normalize_node("days_between", _arguments),
+    do: {:error, "days_between requires a start and an end value"}
 
   defp normalize_node(op, [argument]) when op in @case_functions do
     with {:ok, value} <- normalize(argument), do: {:ok, [op, value]}
@@ -200,6 +212,9 @@ defmodule Selecto.Domain.Contract.ComputedValues do
   defp filter_fields([op, operands]) when op in [:and, :or, "and", "or"] and is_list(operands),
     do: Enum.flat_map(operands, &filter_fields/1)
 
+  defp filter_fields([op | [_, _ | _] = operands]) when op in [:and, :or, "and", "or"],
+    do: Enum.flat_map(operands, &filter_fields/1)
+
   defp filter_fields([op, operand]) when op in [:not, "not"], do: filter_fields(operand)
 
   defp filter_fields([_op, field | rest]) when is_atom(field) or is_binary(field) do
@@ -255,6 +270,20 @@ defmodule Selecto.Domain.Contract.ComputedValues do
   defp infer!(["concat" | values], resolve) do
     Enum.each(values, &infer!(&1, resolve))
     :string
+  end
+
+  defp infer!(["days_between" | operands], resolve) do
+    Enum.each(operands, fn operand ->
+      category = infer!(operand, resolve)
+
+      unless category in [:date, :datetime, :unknown],
+        do:
+          throw(
+            {:type_error, "days_between requires date or datetime operands, found #{category}"}
+          )
+    end)
+
+    :integer
   end
 
   defp infer!(["cast", value, type], resolve) do

@@ -2,15 +2,34 @@ defmodule Selecto.Domain.Shorthand do
   @moduledoc false
 
   alias Selecto.Domain.Shared.Map, as: MapHelpers
+  alias Selecto.Domain.Shorthand.Computed
 
   def normalize_authoring_shorthand(domain) do
     domain
+    |> normalize_computed_shorthand()
     |> normalize_choice_source_shorthand()
     |> normalize_write_authoring_shorthand()
   end
 
+  # temporal_delta and bucket computed columns become the expression columns
+  # they stand for; a declaration that does not expand stays as written and
+  # authoring_errors/1 reports it.
+  defp normalize_computed_shorthand(domain) when is_map(domain) do
+    {domain, _errors} = Computed.expand(domain)
+    domain
+  end
+
+  defp normalize_computed_shorthand(domain), do: domain
+
   @doc false
   def authoring_errors(domain) when is_map(domain) do
+    {_domain, computed_errors} = Computed.expand(domain)
+    computed_errors ++ write_authoring_errors(domain)
+  end
+
+  def authoring_errors(_domain), do: []
+
+  defp write_authoring_errors(domain) do
     writes = MapHelpers.section(domain, :writes, %{})
     source = MapHelpers.section(domain, :source, %{})
 
@@ -36,8 +55,6 @@ defmodule Selecto.Domain.Shorthand do
       []
     end
   end
-
-  def authoring_errors(_domain), do: []
 
   defp normalize_choice_source_shorthand(domain) do
     choice_sources = MapHelpers.section(domain, :choice_sources, %{})

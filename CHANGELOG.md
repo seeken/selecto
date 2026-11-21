@@ -18,6 +18,22 @@
 
 ## Unreleased
 
+- Computed-column shorthand (`Selecto.Domain.Shorthand.Computed`): a root
+  column's `computed` may be `%{kind: :temporal_delta, from:, to:}` (whole
+  calendar days between two date or datetime fields; `unit` may only be
+  `day`) or `%{kind: :bucket, field:, buckets: [%{label:, min:, max:}],
+  otherwise:}` (labelled inclusive numeric ranges that may not overlap, at
+  most 50). `Selecto.Domain.normalize/1` and `Selecto.configure/3` replace
+  each with the `expression` column it stands for, so the normalized domain
+  carries the expansion; an invalid declaration is an `:invalid_computed_value`
+  domain error, and `configure/3` refuses it even with `validate: false`.
+  Value expressions gain `["days_between", start, end]` (integer; the
+  `:days_between` `Selecto.Dialect.ComputedValue` fragment each dialect
+  renders) and case conditions accept the variadic `["and", f, f, ...]` /
+  `["or", ...]` spelling. Computed values now type-check fields one
+  association away and refuse an association field the schema does not have.
+- Bucket kind `:month_ranges`: calendar months ago (0 is the current month),
+  with the same inclusive range rules as the other range kinds.
 - `Selecto.execute/2` compiles a read once; it compiled it three times (for
   the relation names its text holds, for what the compile says of that text,
   and to run it). The statement is compiled after the adapter's

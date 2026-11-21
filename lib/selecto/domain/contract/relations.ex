@@ -12,7 +12,7 @@ defmodule Selecto.Domain.Contract.Relations do
   def validate(errors, source, schemas) do
     errors
     |> validate_relation(:source, source, [:source])
-    |> ComputedPredicates.validate(source)
+    |> ComputedPredicates.validate(source, schemas)
     |> validate_schemas(schemas)
   end
 

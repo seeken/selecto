@@ -1956,6 +1956,18 @@ defmodule Selecto.Builder.Sql.Select do
     {["(", l, symbol, r, ")"], joins, params}
   end
 
+  # Whole calendar days from the first operand to the second; the date
+  # arithmetic is the dialect's.
+  defp compile_value(selecto, ["days_between", start, finish], retarget_aliases) do
+    {operands, joins, params} = compile_values(selecto, [start, finish], retarget_aliases)
+
+    {render_computed_value!(selecto, %Selecto.Dialect.ComputedValue{
+       operation: :days_between,
+       expression: operands,
+       type: "integer"
+     }), joins, params}
+  end
+
   defp compile_value(selecto, [op, value], retarget_aliases) when op in ["lower", "upper"] do
     {sql, joins, params} = compile_value(selecto, value, retarget_aliases)
     {[String.upcase(op), "(", sql, ")"], joins, params}

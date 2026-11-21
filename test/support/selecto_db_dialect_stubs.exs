@@ -26,6 +26,12 @@ defmodule Selecto.TestDialect.PostgreSQL do
   end
 
   def render_computed_value(
+        %Selecto.Dialect.ComputedValue{operation: :days_between, expression: [start, finish]},
+        _selecto
+      ),
+      do: {:ok, ["(CAST(", finish, " AS DATE) - CAST(", start, " AS DATE))"]}
+
+  def render_computed_value(
         %Selecto.Dialect.ComputedValue{operation: :json_text} = fragment,
         _selecto
       ) do

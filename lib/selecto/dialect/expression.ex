@@ -30,7 +30,17 @@ defmodule Selecto.Dialect.Predicate.Comparison do
 end
 
 defmodule Selecto.Dialect.Bucket.Expression do
-  @moduledoc "Finite portable bucket expression presented to an adapter dialect."
+  @moduledoc """
+  Finite portable bucket expression presented to an adapter dialect.
+
+  Range kinds label a number derived from the field: `:numeric_ranges` the
+  value itself, `:year_ranges` its year, `:elapsed_days_ranges` the days since
+  its date, `:month_ranges` the calendar months ago of its month (0 is the
+  current month, 1 the month before, so `{3, 5, label}` covers the three
+  months from five to three months ago) and `:date_relative_ranges` days
+  relative to today. Bounds are inclusive; a value outside every range is
+  `Other`.
+  """
 
   @kinds [
     :numeric_ranges,
@@ -39,6 +49,7 @@ defmodule Selecto.Dialect.Bucket.Expression do
     :elapsed_days_ranges,
     :year_increment,
     :year_ranges,
+    :month_ranges,
     :text_prefix
   ]
 

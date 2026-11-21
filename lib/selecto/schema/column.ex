@@ -291,6 +291,9 @@ defmodule Selecto.Schema.Column do
       when op in [:and, :or, "and", "or"] and is_list(operands),
       do: [op, Enum.map(operands, &qualify_predicate(&1, prefix))]
 
+  def qualify_predicate([op | [_, _ | _] = operands], prefix) when op in [:and, :or, "and", "or"],
+    do: [op | Enum.map(operands, &qualify_predicate(&1, prefix))]
+
   def qualify_predicate([op, operand], prefix) when op in [:not, "not"],
     do: [op, qualify_predicate(operand, prefix)]
 
