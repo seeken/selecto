@@ -27,6 +27,11 @@ defmodule Selecto.Schema.JoinNamespaces do
     Enum.map(joins, &normalize_join(&1, aliases))
   end
 
+  # An authored alias (joins.*.alias, checked by Selecto.Domain.JoinRules)
+  # is the join's correlation.
+  defp alias_for(%{authored_alias: alias_name}, _, reserved) when is_binary(alias_name),
+    do: {alias_name, MapSet.put(reserved, alias_name)}
+
   defp alias_for(%{join_path: [_]} = join, _, reserved), do: {join.id, reserved}
 
   defp alias_for(join, repeated, reserved) do

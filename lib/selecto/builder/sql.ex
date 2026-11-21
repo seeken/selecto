@@ -1083,17 +1083,7 @@ defmodule Selecto.Builder.Sql do
                 build_enhanced_join(selecto, join, config, join_type, fc, p, ctes)
 
               :basic ->
-                # Existing basic join logic
-                join_iodata = [
-                  sql_join_keyword(config),
-                  relation_identifier(selecto, config.source),
-                  " ",
-                  build_join_string(selecto, join),
-                  " on ",
-                  build_join_on_clause(selecto, join, config)
-                ]
-
-                {fc ++ [join_iodata], p, ctes}
+                {fc ++ [basic_join_iodata(selecto, join, config)], p, ctes}
             end
           end
         end
@@ -1119,16 +1109,7 @@ defmodule Selecto.Builder.Sql do
 
           config ->
             if detect_advanced_join_pattern(config) == :basic do
-              join_iodata = [
-                sql_join_keyword(config),
-                relation_identifier(selecto, config.source),
-                " ",
-                build_join_string(selecto, join),
-                " on ",
-                build_join_on_clause(selecto, join, config)
-              ]
-
-              {:cont, [join_iodata | acc]}
+              {:cont, [basic_join_iodata(selecto, join, config) | acc]}
             else
               {:halt, :generic}
             end
@@ -1139,6 +1120,175 @@ defmodule Selecto.Builder.Sql do
       from_clauses -> {:ok, {Enum.reverse(from_clauses), [], []}}
     end
   end
+
+  # A join Selecto renders as one relation: `<keyword> <relation> <alias> on
+  # <conditions>`.
+  #
+  # RIGHT and FULL joins keep the target rows their ON clause rejects, so the
+  # target's own restrictions (its association `where`, and a tenant bound
+  # reached across an untenanted hop that is not paired with the root row)
+  # filter the target first, in a derived table, and ON keeps only the
+  # conditions that pair the two sides. The root's required predicate, tenant
+  # scope and filters stay in WHERE, after the join. An adapter without the
+  # join refuses before any SQL is sent (see check_outer_joins!/1).
+  defp basic_join_iodata(selecto, join, config) do
+    case Selecto.Domain.JoinRules.outer_type(config) do
+      nil ->
+        [
+          sql_join_keyword(config),
+          relation_identifier(selecto, config.source),
+          " ",
+          build_join_string(selecto, join),
+          " on ",
+          build_join_on_clause(selecto, join, config)
+        ]
+
+      type ->
+        require_outer_join!(selecto, join, type)
+        {on_config, target_only} = preserved_target(selecto, join, config)
+
+        relation =
+          case target_only do
+            [] ->
+              relation_identifier(selecto, config.source)
+
+            conditions ->
+              [
+                "(select * from ",
+                relation_identifier(selecto, config.source),
+                " ",
+                build_join_string(selecto, join),
+                " where ",
+                Enum.intersperse(conditions, " and "),
+                ")"
+              ]
+          end
+
+        [
+          sql_join_keyword(config),
+          relation,
+          " ",
+          build_join_string(selecto, join),
+          " on ",
+          build_join_on_clause(selecto, join, on_config)
+        ]
+    end
+  end
+
+  # The join config whose ON clause keeps only the pairing conditions, and the
+  # conditions that confine the target alone.
+  defp preserved_target(selecto, join, config) do
+    target_alias = to_string(join)
+
+    {config, policy} =
+      case Map.get(config, :portable_association) do
+        %{} = association ->
+          policy = Map.get(association, :where, Map.get(association, "where"))
+
+          if is_map(policy) and map_size(policy) > 0 do
+            conditions =
+              Selecto.Builder.Association.policy_conditions(
+                selecto,
+                target_alias,
+                policy,
+                join_relations(selecto, config).target
+              )
+
+            {Map.put(config, :portable_association, drop_policy(association)), conditions}
+          else
+            {config, []}
+          end
+
+        _ ->
+          {config, []}
+      end
+
+    case Map.get(config, :carry_tenant_field) do
+      nil ->
+        {config, policy}
+
+      field ->
+        if Selecto.Tenant.source_tenant_column(selecto, to_string(field)) do
+          # Paired with the root row: it stays in ON, and the root's tenant
+          # scope in WHERE removes the unmatched target rows.
+          {config, policy}
+        else
+          case Selecto.Builder.Association.carried_tenant(selecto, target_alias, field) do
+            [] ->
+              {config, policy}
+
+            bound ->
+              {config
+               |> Map.delete(:carry_tenant_field)
+               |> Map.update(:portable_association, nil, &drop_carried/1), policy ++ [bound]}
+          end
+        end
+    end
+  end
+
+  defp drop_policy(association),
+    do: association |> Map.delete(:where) |> Map.delete("where")
+
+  defp drop_carried(nil), do: nil
+  defp drop_carried(association), do: Map.delete(association, :carry_tenant_field)
+
+  defp require_outer_join!(selecto, join, type) do
+    feature = if type == :right, do: :right_join, else: :full_join
+    adapter = Selecto.AdapterSQL.adapter(selecto)
+
+    unless Selecto.AdapterSupport.supports_feature?(adapter, feature) do
+      Selecto.Builder.ScopeRefusal.unsupported!(
+        Selecto.Error.validation_error(
+          "#{String.upcase(to_string(type))} JOIN is not supported by adapter #{inspect(adapter)}",
+          %{unsupported_feature: feature, join: to_string(join)}
+        )
+      )
+    end
+
+    :ok
+  end
+
+  @doc false
+  # Refuses, before any SQL is sent, a query whose compile reaches a RIGHT or
+  # FULL join its adapter does not have. Only a domain declaring such a join
+  # is compiled here; any other compile failure is left to the read itself.
+  def check_outer_joins!(selecto) do
+    adapter = Selecto.AdapterSQL.adapter(selecto)
+
+    absent? =
+      selecto
+      |> Selecto.joins()
+      |> Enum.any?(fn {_id, config} ->
+        case Selecto.Domain.JoinRules.outer_type(config) do
+          nil ->
+            false
+
+          type ->
+            feature = if type == :right, do: :right_join, else: :full_join
+            not Selecto.AdapterSupport.supports_feature?(adapter, feature)
+        end
+      end)
+
+    if absent? do
+      try do
+        _ = build_iodata_with_joins(selecto, [])
+        :ok
+      rescue
+        refusal in Selecto.Builder.ScopeRefusal ->
+          if outer_join_refusal?(refusal), do: reraise(refusal, __STACKTRACE__), else: :ok
+
+        _other ->
+          :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  defp outer_join_refusal?(%{error: %Selecto.Error{details: %{unsupported_feature: feature}}}),
+    do: feature in [:right_join, :full_join]
+
+  defp outer_join_refusal?(_refusal), do: false
 
   # Dynamic subquery joins registered by Selecto.DynamicJoin.join_subquery/4.
   # `config.subquery` is finalized SQL and `config.subquery_params` carries its

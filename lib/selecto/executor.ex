@@ -665,6 +665,8 @@ defmodule Selecto.Executor do
     # A CUBE / GROUPING SETS refusal comes before the adapter's prepare_read/2,
     # which may read the catalog: a refused query sends no SQL.
     :ok = Selecto.GroupingSets.check!(selecto)
+    # So does a RIGHT or FULL join the adapter does not have.
+    :ok = Selecto.Builder.Sql.check_outer_joins!(selecto)
     scopes = scopes(selecto, [], [], [], [], :query, [])
     named = put_emitted_names(selecto, scopes)
     emitted = scanned_names(named)

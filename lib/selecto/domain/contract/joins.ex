@@ -2,9 +2,23 @@ defmodule Selecto.Domain.Contract.Joins do
   @moduledoc false
 
   alias Selecto.Domain.Contract.Shared.Core
+  alias Selecto.Domain.JoinRules
 
   def validate(errors, joins, source, schemas) do
-    validate_joins(errors, joins, source, schemas)
+    errors
+    |> validate_joins(joins, source, schemas)
+    |> validate_join_aliases(joins)
+  end
+
+  # joins.*.alias names a join's SQL correlation: an identifier outside
+  # Selecto's generated names, unique across the join tree ignoring case
+  # (Selecto.Domain.JoinRules).
+  defp validate_join_aliases(errors, joins) do
+    joins
+    |> JoinRules.alias_problems()
+    |> Enum.reduce(errors, fn {path, code, message}, acc ->
+      [Core.error(code, [:joins | path] ++ [:alias], message) | acc]
+    end)
   end
 
   def validate_joins(errors, joins, source, schemas) when is_map(joins) do
@@ -103,6 +117,7 @@ defmodule Selecto.Domain.Contract.Joins do
     case Core.fetch_key(associations, join_id) do
       {:ok, association} ->
         errors
+        |> validate_outer_join(join_config, association, path)
         |> validate_display_fallback(join_config, association, parent_relation, schemas, path)
         |> validate_join_target(join_id, join_config, association, schemas, path)
 
@@ -117,6 +132,18 @@ defmodule Selecto.Domain.Contract.Joins do
           )
           | errors
         ]
+    end
+  end
+
+  # A right or full join keeps the target's unmatched rows, which only a
+  # direct association can give (Selecto.Domain.JoinRules).
+  defp validate_outer_join(errors, join_config, association, path) do
+    case JoinRules.outer_join_problem(association, join_config) do
+      nil ->
+        errors
+
+      message ->
+        [Core.error(:outer_join_requires_direct_association, path ++ [:type], message) | errors]
     end
   end
 

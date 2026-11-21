@@ -71,6 +71,8 @@ defmodule Selecto.Schema.Join do
   ```
   """
 
+  alias Selecto.Domain.JoinRules
+
   ### source - a schema name such as SelectoTest.Store.Film
   ### joins - the joins map from this join structure
 
@@ -80,12 +82,45 @@ defmodule Selecto.Schema.Join do
         }
   def recurse_joins(source, domain) do
     joins = Map.get(domain, :joins, %{})
+    validate_join_aliases!(joins)
 
     normalize_joins(source, joins, :selecto_root, domain)
     |> List.flatten()
+    |> tap(&Enum.each(&1, fn join -> validate_aliased_kind!(join) end))
     |> Selecto.Schema.JoinNamespaces.normalize()
     |> Enum.reduce(%{}, fn j, acc -> Map.put(acc, j.id, j) end)
   end
+
+  # joins.*.alias (Selecto.Domain.JoinRules): an identifier outside
+  # Selecto's generated names, unique across the join tree ignoring case.
+  defp validate_join_aliases!(joins) do
+    case JoinRules.alias_problems(joins) do
+      [] ->
+        :ok
+
+      [{path, _code, message} | _] ->
+        raise ArgumentError,
+              "invalid_domain: join #{Enum.map_join(path, ".", &to_string/1)}: #{message}"
+    end
+  end
+
+  # An authored alias replaces the correlation of a join Selecto renders as
+  # one relation (a direct, through or custom join). The advanced builders
+  # (dimension, tagging, hierarchy, OLAP, enhanced) generate their own
+  # correlations, so an alias there is refused rather than ignored.
+  defp validate_aliased_kind!(%{authored_alias: alias_name} = join)
+       when is_binary(alias_name) do
+    if Map.get(join, :join_type) in [nil, :custom],
+      do: :ok,
+      else:
+        raise(
+          ArgumentError,
+          "invalid_domain: join #{inspect(join.id)} of kind #{inspect(join.join_type)} " <>
+            "cannot take an alias"
+        )
+  end
+
+  defp validate_aliased_kind!(_join), do: :ok
 
   ### source, the schema module name
   ### joins, the joins map from parent,
@@ -95,7 +130,8 @@ defmodule Selecto.Schema.Join do
     Enum.reduce(joins, [], fn
       # Non-association (custom) joins - explicitly configured without an Ecto association
       {id, %{non_assoc: true} = config}, acc ->
-        acc = acc ++ [configure_non_assoc(id, config, parent, source, domain)]
+        acc =
+          acc ++ [id |> configure_non_assoc(config, parent, source, domain) |> put_alias(config)]
 
         case Map.get(config, :joins) do
           nil ->
@@ -115,6 +151,7 @@ defmodule Selecto.Schema.Join do
       # Standard association-based joins
       {id, config}, acc ->
         association = source.associations[id]
+        validate_outer_join!(id, association, config)
 
         case association do
           %{through: through} = assoc when is_map(through) ->
@@ -127,6 +164,7 @@ defmodule Selecto.Schema.Join do
             join =
               configure(id, assoc, config, parent, source, queryable)
               |> Map.put(:portable_association, Map.merge(assoc, boundary))
+              |> put_alias(config)
 
             acc = acc ++ [join]
 
@@ -137,10 +175,12 @@ defmodule Selecto.Schema.Join do
 
           # Handle through associations by expanding the intermediate joins
           %{through: through_path} ->
+            refuse_alias!(id, config, "a through path")
             expand_through_joins(id, through_path, config, parent, source, domain, acc)
 
           # Handle many-to-many associations (join_through table)
           %{join_through: _join_through} = assoc ->
+            refuse_alias!(id, config, "a join_through table")
             queryable = domain.schemas[assoc.queryable]
 
             acc =
@@ -166,6 +206,7 @@ defmodule Selecto.Schema.Join do
                 domain
               )
               |> attach_association_policy(association)
+              |> put_alias(config)
 
             acc = acc ++ [join]
 
@@ -175,6 +216,31 @@ defmodule Selecto.Schema.Join do
             end
         end
     end)
+  end
+
+  # RIGHT and FULL joins keep the target's unmatched rows; only a direct
+  # association can give them (Selecto.Domain.JoinRules).
+  defp validate_outer_join!(id, association, config) do
+    case JoinRules.outer_join_problem(association, config) do
+      nil -> :ok
+      message -> raise ArgumentError, "invalid_domain: join #{inspect(id)}: #{message}"
+    end
+  end
+
+  defp put_alias(join, config) do
+    case JoinRules.authored_alias(config) do
+      nil -> join
+      alias_name -> Map.put(join, :authored_alias, alias_name)
+    end
+  end
+
+  defp refuse_alias!(id, config, kind) do
+    if JoinRules.authored_alias(config) do
+      raise ArgumentError,
+            "invalid_domain: join #{inspect(id)} through #{kind} cannot take an alias"
+    end
+
+    :ok
   end
 
   defp normalize_nested_joins(source, joins, parent, domain) do
@@ -1025,6 +1091,7 @@ defmodule Selecto.Schema.Join do
           config
         )
     }
+    |> put_outer_type(config)
     |> parameterize()
   end
 
@@ -1043,6 +1110,15 @@ defmodule Selecto.Schema.Join do
 
   defp parameterize(join) do
     join
+  end
+
+  # RIGHT and FULL are rendered from the join's :type (the SQL builder's join
+  # keyword); a standard association otherwise keeps joining LEFT as before.
+  defp put_outer_type(join, config) do
+    case JoinRules.outer_type(config) do
+      nil -> join
+      type -> Map.put(join, :type, type)
+    end
   end
 
   defp attach_association_scope!(join, association_id, association, source, target, domain) do
