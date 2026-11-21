@@ -63,7 +63,23 @@ defmodule Selecto.Builder.Sql.Group do
     {joins, clause_parts, params}
   end
 
-  def group(selecto, group_by) do
+  # A dialect without positional GROUP BY (`group_by_position: :expression`)
+  # would read the number as a constant, so it groups by the selected
+  # expression at that position instead.
+  def group(selecto, {:literal_position, position} = group_by) when is_integer(position) do
+    case Selecto.DialectSupport.query_strategy(selecto.adapter, :group_by_position, selecto) do
+      :expression -> group(selecto, selected_at!(selecto, position))
+      _ -> group_expression(selecto, group_by)
+    end
+  end
+
+  def group(selecto, group_by), do: group_expression(selecto, group_by)
+
+  def build(selecto) do
+    group(selecto, selecto.set.group_by)
+  end
+
+  defp group_expression(selecto, group_by) do
     {c, j, p, _a} = Selecto.Builder.Sql.Select.build(selecto, group_by)
 
     case Selecto.Builder.Sql.Select.selected_position(selecto, group_by, p) do
@@ -72,7 +88,11 @@ defmodule Selecto.Builder.Sql.Group do
     end
   end
 
-  def build(selecto) do
-    group(selecto, selecto.set.group_by)
+  defp selected_at!(selecto, position) do
+    selected = List.wrap(get_in(selecto, [Access.key(:set), :selected]))
+
+    if position >= 1 and position <= length(selected),
+      do: Enum.at(selected, position - 1),
+      else: raise(ArgumentError, "GROUP BY position #{position} is not a selected column")
   end
 end
