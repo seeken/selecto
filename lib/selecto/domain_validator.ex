@@ -66,7 +66,9 @@ defmodule Selecto.DomainValidator do
         :ok
 
       {:error, errors} ->
-        raise Selecto.DomainValidator.ValidationError, message: format_errors(errors)
+        raise Selecto.DomainValidator.ValidationError,
+          message: format_errors(errors),
+          errors: errors
     end
   end
 
@@ -203,7 +205,7 @@ defmodule Selecto.DomainValidator do
   end
 
   defp validate_query_library(errors, domain) do
-    case Selecto.QueryLibrary.structure_errors(map_value(domain, :query_library) || %{}) do
+    case Selecto.QueryLibrary.runtime_errors(map_value(domain, :query_library) || %{}) do
       [] -> errors
       query_library_errors -> errors ++ query_library_errors
     end
@@ -1931,10 +1933,10 @@ defmodule Selecto.DomainValidator.ValidationError do
   @moduledoc """
   Exception raised when domain validation fails.
   """
-  defexception [:message]
+  defexception [:message, errors: []]
 
   def exception(opts) do
     message = Keyword.get(opts, :message, "Domain validation failed")
-    %__MODULE__{message: message}
+    %__MODULE__{message: message, errors: Keyword.get(opts, :errors, [])}
   end
 end

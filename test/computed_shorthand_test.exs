@@ -224,7 +224,6 @@ defmodule Selecto.ComputedShorthandTest do
       open_end_overlap: {[%{label: "a", min: 3}, %{label: "b", min: 7, max: 9}], %{}},
       written_out_of_order_overlap: {[%{label: "b", min: 7, max: 9}, %{label: "a", min: 3}], %{}},
       non_numeric_bound: {[%{label: "a", min: "x"}], %{}},
-      numeric_string_bound: {[%{label: "a", min: "5"}], %{}},
       otherwise_repeats_label: {[%{label: "a", min: 0}], %{otherwise: "a"}},
       unknown_key: {[%{label: "a", min: 0}], %{ranges: []}},
       unknown_bucket_key: {[%{label: "a", min: 0, step: 1}], %{}},

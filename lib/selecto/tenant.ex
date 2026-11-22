@@ -1085,7 +1085,11 @@ defmodule Selecto.Tenant do
     tenant_context = tenant(selecto) || %{}
 
     opts
-    |> Keyword.get(:tenant_field, map_get(tenant_context, :tenant_field) || @default_tenant_field)
+    |> Keyword.get(
+      :tenant_field,
+      map_get(tenant_context, :tenant_field) || domain_tenant_field(selecto) ||
+        @default_tenant_field
+    )
     |> normalize_field()
   end
 

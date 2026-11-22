@@ -121,6 +121,9 @@ defmodule Selecto.Domain.Contract do
 
   # `tenant_required` and its alias `require_tenant` are booleans, or 0/1 (a
   # number or a "0"/"1" string); when both are present they must agree.
+  @doc false
+  def tenant_requirement_errors(domain), do: validate_tenant_requirement([], domain)
+
   defp validate_tenant_requirement(errors, authored_domain) do
     values =
       for key <- [:tenant_required, :require_tenant],

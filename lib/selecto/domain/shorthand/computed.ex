@@ -208,6 +208,22 @@ defmodule Selecto.Domain.Shorthand.Computed do
 
   defp bound(nil, _key), do: {:ok, nil}
   defp bound(value, _key) when is_integer(value) or is_float(value), do: {:ok, value}
+
+  defp bound(value, key) when is_binary(value) do
+    if Regex.match?(~r/\A-?[0-9]+(?:\.[0-9]+)?\z/, value) do
+      if String.contains?(value, ".") do
+        case Float.parse(value) do
+          {number, ""} -> {:ok, number}
+          _ -> {:error, "bucket #{key} must be a number"}
+        end
+      else
+        {:ok, String.to_integer(value)}
+      end
+    else
+      {:error, "bucket #{key} must be a number"}
+    end
+  end
+
   defp bound(_value, key), do: {:error, "bucket #{key} must be a number"}
 
   # Both bounds are inclusive, so two buckets may not share a value: a row has

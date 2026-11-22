@@ -153,8 +153,25 @@ defmodule Selecto.Configuration do
   def runtime_domain!(domain) do
     domain
     |> runtime_form!()
+    |> validate_tenant_requirement!()
     |> expand_computed_shorthand!()
   end
+
+  # Invalid requirement shapes cannot silently disable a scope obligation,
+  # even when legacy structural validation is disabled.
+  defp validate_tenant_requirement!(domain) when is_map(domain) do
+    case Selecto.Domain.Contract.tenant_requirement_errors(domain) do
+      [] ->
+        domain
+
+      errors ->
+        raise Selecto.DomainValidator.ValidationError,
+          message: Enum.map_join(errors, "; ", & &1.message),
+          errors: errors
+    end
+  end
+
+  defp validate_tenant_requirement!(domain), do: domain
 
   # temporal_delta and bucket computed columns run as the expression columns
   # they stand for; a declaration that does not expand refuses the domain,

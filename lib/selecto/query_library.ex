@@ -129,7 +129,7 @@ defmodule Selecto.QueryLibrary do
   @doc false
   @spec validate_library!(term()) :: :ok
   def validate_library!(library) do
-    case structure_errors(library) do
+    case runtime_errors(library) do
       [] -> :ok
       errors -> raise ArgumentError, Enum.map_join(errors, "; ", & &1.message)
     end
@@ -805,6 +805,41 @@ defmodule Selecto.QueryLibrary do
       |> validate_list_key(:ordering, id, spec, :order_by)
     end)
   end
+
+  @doc false
+  def runtime_errors(library) do
+    normalized = if is_map(library), do: normalize_library(library), else: empty_library()
+
+    Enum.reduce(normalized.orderings, structure_errors(library), fn {id, spec}, errors ->
+      validate_ordering_entries(errors, id, spec)
+    end)
+  end
+
+  # Named orderings must state their direction. Bare fields remain valid in
+  # ordinary query order_by, but are not complete library declarations.
+  defp validate_ordering_entries(errors, id, spec) when is_map(spec) do
+    spec
+    |> map_value(:order_by)
+    |> List.wrap()
+    |> Enum.with_index()
+    |> Enum.reduce(errors, fn {entry, index}, acc ->
+      if is_binary(entry) or is_atom(entry) do
+        [
+          error(
+            :invalid_query_library,
+            [:query_library, :orderings, id, :order_by, index],
+            "query-library ordering entries must include a direction",
+            entry
+          )
+          | acc
+        ]
+      else
+        acc
+      end
+    end)
+  end
+
+  defp validate_ordering_entries(errors, _id, _spec), do: errors
 
   defp validate_views(errors, library) do
     Enum.reduce(library.views, errors, fn {id, spec}, acc ->
