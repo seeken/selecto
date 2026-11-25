@@ -397,7 +397,7 @@ defmodule Selecto.Executor do
   end
 
   defp drop_subquery_read(%{} = join) when not is_struct(join),
-    do: Map.delete(join, :subquery_read)
+    do: Map.drop(join, [:subquery_read, :subquery_query])
 
   defp drop_subquery_read(join), do: join
 
@@ -443,6 +443,7 @@ defmodule Selecto.Executor do
     query
     |> dynamic_joins()
     |> Enum.flat_map(fn
+      {_id, %{subquery_query: %{} = subquery}} -> [subquery]
       {_id, %{subquery_read: %{} = subquery}} -> [subquery]
       _join -> []
     end)

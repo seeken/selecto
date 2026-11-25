@@ -57,8 +57,10 @@ defmodule Selecto.Builder.Sql do
   def build_iodata_with_joins(selecto, opts) do
     # Storage types loaded for the read reach every nested compile (query
     # members, set operands) through the compile's storage context.
-    Selecto.Builder.ExactCompare.with_storage_context(selecto, fn ->
-      build_iodata_with_joins_in_context(selecto, opts)
+    Selecto.ReadClock.with_context(selecto, fn ->
+      Selecto.Builder.ExactCompare.with_storage_context(selecto, fn ->
+        build_iodata_with_joins_in_context(selecto, opts)
+      end)
     end)
   end
 
@@ -1346,11 +1348,17 @@ defmodule Selecto.Builder.Sql do
   defp build_subquery_join(selecto, join, config, fc, p, ctes) do
     Selecto.Builder.Provenance.mark()
 
-    subquery_sql =
-      Map.get(config, :subquery) ||
-        raise ArgumentError, "Subquery join #{inspect(join)} is missing :subquery SQL"
+    {subquery_sql, subquery_params} =
+      case Map.get(config, :subquery_query) do
+        %Selecto{} = query ->
+          {sql, _aliases, params} = Selecto.gen_sql(query, [])
+          root_alias = Map.fetch!(config, :subquery_root_alias)
+          {Regex.replace(~r/\bselecto_root\b/u, sql, root_alias), params}
 
-    subquery_params = Map.get(config, :subquery_params, [])
+        nil ->
+          {Map.fetch!(config, :subquery), Map.get(config, :subquery_params, [])}
+      end
+
     subquery_adapter = Map.get(config, :subquery_adapter, selecto.adapter)
 
     subquery_iodata =

@@ -244,6 +244,7 @@ defmodule Selecto.DynamicJoin do
         name: to_string(join_id),
         join_type: :subquery,
         subquery: rewritten_subquery_sql,
+        subquery_query: join_selecto,
         subquery_params: subquery_params,
         subquery_adapter: join_selecto.adapter,
         subquery_root_alias: subquery_root_alias,

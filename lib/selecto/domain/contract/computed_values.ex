@@ -88,8 +88,15 @@ defmodule Selecto.Domain.Contract.ComputedValues do
   defp normalize_node(op, _arguments) when op in @arithmetic,
     do: {:error, "#{op} requires exactly two values"}
 
-  defp normalize_node("days_between", [_start, _end] = arguments),
-    do: normalize_all("days_between", arguments)
+  defp normalize_node("now", []), do: {:ok, ["now"]}
+  defp normalize_node("clamp_zero", [value]), do: normalize_all("clamp_zero", [value])
+
+  defp normalize_node("temporal_coalesce", [left, right]),
+    do: normalize_all("temporal_coalesce", [left, right])
+
+  defp normalize_node(op, [_start, _end] = arguments)
+       when op in ~w(days_between hours_between fractional_days_between),
+       do: normalize_all(op, arguments)
 
   defp normalize_node("days_between", _arguments),
     do: {:error, "days_between requires a start and an end value"}
@@ -272,7 +279,28 @@ defmodule Selecto.Domain.Contract.ComputedValues do
     :string
   end
 
-  defp infer!(["days_between" | operands], resolve) do
+  defp infer!(["now"], _resolve), do: :datetime
+
+  defp infer!(["clamp_zero", value], resolve) do
+    type = infer!(value, resolve)
+
+    if type not in [:integer, :decimal, :unknown],
+      do: throw({:type_error, "clamp_zero requires a number"})
+
+    type
+  end
+
+  defp infer!(["temporal_coalesce" | values], resolve) do
+    Enum.each(values, fn value ->
+      if infer!(value, resolve) not in [:date, :datetime, :unknown],
+        do: throw({:type_error, "temporal_coalesce requires temporal values"})
+    end)
+
+    :datetime
+  end
+
+  defp infer!([op | operands], resolve)
+       when op in ~w(days_between hours_between fractional_days_between) do
     Enum.each(operands, fn operand ->
       category = infer!(operand, resolve)
 
@@ -283,7 +311,7 @@ defmodule Selecto.Domain.Contract.ComputedValues do
           )
     end)
 
-    :integer
+    if op == "days_between", do: :integer, else: :decimal
   end
 
   defp infer!(["cast", value, type], resolve) do
@@ -345,14 +373,29 @@ defmodule Selecto.Domain.Contract.ComputedValues do
 
   def category(type) do
     case type |> to_string() |> String.downcase() do
-      t when t in ~w(string text varchar char citext uuid) -> :string
-      t when t in ~w(integer int bigint smallint) -> :integer
-      t when t in ~w(decimal numeric float double real money) -> :decimal
-      "boolean" -> :boolean
-      "date" -> :date
-      t when t in ~w(utc_datetime datetime naive_datetime timestamp timestamptz) -> :datetime
-      t when t in ~w(jsonb json) -> :json
-      _ -> :other
+      t when t in ~w(string text varchar char citext uuid) ->
+        :string
+
+      t when t in ~w(integer int bigint smallint) ->
+        :integer
+
+      t when t in ~w(decimal numeric float double real money) ->
+        :decimal
+
+      "boolean" ->
+        :boolean
+
+      "date" ->
+        :date
+
+      t when t in ~w(utc_datetime datetime naive_datetime timestamp timestamptz epoch_datetime) ->
+        :datetime
+
+      t when t in ~w(jsonb json) ->
+        :json
+
+      _ ->
+        :other
     end
   end
 

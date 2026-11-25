@@ -68,6 +68,12 @@ defmodule Selecto.Builder.Sql.Where do
     do_build(selecto, filter)
   end
 
+  defp do_build(selecto, {field, {:on, period}}),
+    do: Selecto.TemporalPeriod.compile(selecto, field, period)
+
+  defp do_build(selecto, {field, {:date_shortcut, shortcut}}),
+    do: Selecto.DateShortcut.compile(selecto, field, shortcut)
+
   # Handle CASE expressions in WHERE clause
   defp do_build(selecto, {field, {:instant_compare, operation, decimal}}) do
     # Revalidate manually constructed tuples as well as Expr helpers. The

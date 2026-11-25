@@ -123,6 +123,7 @@ defmodule Selecto.MixProject do
       {:exqlite, "~> 0.35", only: :test},
       {:myxql, "~> 0.6", only: :test},
       {:jason, "~> 1.2"},
+      {:tzdata, "~> 1.2"},
       {:nimble_options, "~> 1.1"},
       {:uuid, "~> 1.1"},
       {:telemetry, "~> 1.4"},

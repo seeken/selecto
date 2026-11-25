@@ -20,6 +20,11 @@ defmodule Selecto.Expr do
   @typedoc "A helper expression that normalizes into Selecto's existing AST."
   @type expr :: term()
 
+  @doc "Filter a temporal field by an absolute half-open calendar period."
+  def on(field, period), do: {field, {:on, period}}
+  @doc "Filter a temporal field by a relative calendar shortcut."
+  def date_shortcut(field, shortcut), do: {field, {:date_shortcut, shortcut}}
+
   @doc "Normalizes helper-friendly expression forms into Selecto AST."
   @spec normalize(expr()) :: term()
   def normalize(expr) when is_list(expr) do

@@ -15,6 +15,12 @@ defmodule Selecto do
     :policy
   ]
 
+  @doc "Bind a validated ISO date or offset timestamp to all relative reads in this query."
+  def as_of(query, value), do: Selecto.ReadClock.bind(query, value)
+
+  @doc "Set the IANA timezone used by calendar periods and relative reads."
+  def timezone(query, zone), do: Selecto.ReadClock.timezone(query, zone)
+
   alias Selecto.QueryMembers
 
   # import Selecto.Types - removed to avoid circular dependency

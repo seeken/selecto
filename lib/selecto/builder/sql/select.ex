@@ -851,6 +851,9 @@ defmodule Selecto.Builder.Sql.Select do
       raise ArgumentError, "unsupported bucket kind: #{inspect(kind)}"
     end
 
+    {kind, expression, temporal_options} =
+      bound_bucket(selecto, kind, expression, Map.get(spec, :temporal_options, %{}))
+
     fragment = %BucketExpression{
       kind: kind,
       expression: expression,
@@ -859,7 +862,7 @@ defmodule Selecto.Builder.Sql.Select do
       prefix_length: Map.get(spec, :prefix_length, 2),
       exclude_articles: Map.get(spec, :exclude_articles, []),
       ignore_case: Map.get(spec, :ignore_case, true),
-      temporal_options: Map.get(spec, :temporal_options, %{})
+      temporal_options: temporal_options
     }
 
     render_selector_fragment!(
@@ -1958,13 +1961,35 @@ defmodule Selecto.Builder.Sql.Select do
 
   # Whole calendar days from the first operand to the second; the date
   # arithmetic is the dialect's.
-  defp compile_value(selecto, ["days_between", start, finish], retarget_aliases) do
-    {operands, joins, params} = compile_values(selecto, [start, finish], retarget_aliases)
+  defp compile_value(selecto, ["now"], _retarget_aliases) do
+    {Selecto.ReadClock.now_sql(selecto), [], []}
+  end
+
+  defp compile_value(selecto, ["clamp_zero", value], aliases) do
+    {sql, joins, params} = compile_value(selecto, value, aliases)
+    {["CASE WHEN ", sql, " < 0 THEN 0 ELSE ", sql, " END"], joins, params ++ params}
+  end
+
+  defp compile_value(selecto, ["temporal_coalesce" | operands], aliases) do
+    {parts, joins, params} = compile_temporal_values(selecto, operands, aliases)
+    {["COALESCE(", Enum.intersperse(parts, ", "), ")"], joins, params}
+  end
+
+  defp compile_value(selecto, [op, start, finish], aliases)
+       when op in ~w(days_between hours_between fractional_days_between) do
+    {operands, joins, params} = compile_temporal_values(selecto, [start, finish], aliases)
+
+    operation =
+      %{
+        "days_between" => :days_between,
+        "hours_between" => :hours_between,
+        "fractional_days_between" => :fractional_days_between
+      }[op]
 
     {render_computed_value!(selecto, %Selecto.Dialect.ComputedValue{
-       operation: :days_between,
+       operation: operation,
        expression: operands,
-       type: "integer"
+       type: if(op == "days_between", do: "integer", else: "decimal")
      }), joins, params}
   end
 
@@ -2047,6 +2072,55 @@ defmodule Selecto.Builder.Sql.Select do
       expression: expression,
       type: type
     })
+  end
+
+  defp bound_bucket(selecto, kind, expression, options) do
+    if kind in [:elapsed_days_ranges, :month_ranges] and
+         Map.get(Selecto.ReadClock.context(selecto), :as_of) do
+      if Selecto.AdapterSupport.adapter_name(selecto.adapter) == :duckdb,
+        do: Selecto.ReadClock.invalid!("DuckDB does not support relative bucket kinds")
+
+      operation = if kind == :month_ranges, do: :months_between, else: :days_between
+
+      value =
+        render_computed_value!(selecto, %Selecto.Dialect.ComputedValue{
+          operation: operation,
+          expression: [expression, Selecto.ReadClock.now_sql(selecto)],
+          type: "integer"
+        })
+
+      {:numeric_ranges, value, %{}}
+    else
+      {kind, expression, options}
+    end
+  end
+
+  defp compile_temporal_values(selecto, values, aliases) do
+    Enum.reduce(values, {[], [], []}, fn value, {parts, joins, params} ->
+      {sql, dependencies, binds} = compile_value(selecto, value, aliases)
+
+      sql =
+        case value do
+          ["field", path] ->
+            conf = Selecto.field(selecto, path)
+            storage = Selecto.Temporal.epoch_storage(conf)
+
+            if to_string(Map.get(conf, :type)) == "epoch_datetime" or not is_nil(storage) do
+              render_computed_value!(selecto, %Selecto.Dialect.ComputedValue{
+                operation: :epoch_datetime,
+                expression: sql,
+                type: if(storage == :unix_milliseconds, do: "milliseconds", else: "seconds")
+              })
+            else
+              sql
+            end
+
+          _ ->
+            sql
+        end
+
+      {parts ++ [sql], joins ++ List.wrap(dependencies), params ++ binds}
+    end)
   end
 
   defp render_computed_value!(selecto, fragment) do

@@ -119,17 +119,49 @@ defmodule Selecto.Domain.Shorthand.Computed do
   end
 
   defp temporal_delta(computed) do
-    with :ok <- only(computed, ~w(kind from to unit)),
-         :ok <- unit(MapHelpers.map_value(computed, :unit)),
-         {:ok, from} <- path(MapHelpers.map_value(computed, :from), "temporal_delta from"),
-         {:ok, to} <- path(MapHelpers.map_value(computed, :to), "temporal_delta to") do
-      {:ok, ["days_between", ["field", from], ["field", to]]}
+    unit = MapHelpers.map_value(computed, :unit) || :day
+    otherwise = MapHelpers.map_value(computed, :otherwise)
+    minimum = MapHelpers.map_value(computed, :minimum)
+
+    with :ok <- only(computed, ~w(kind from to unit otherwise minimum)),
+         :ok <- duration_options(unit, otherwise, minimum),
+         {:ok, from} <- temporal_endpoint(MapHelpers.map_value(computed, :from)),
+         {:ok, to} <- temporal_endpoint(MapHelpers.map_value(computed, :to)) do
+      to = if otherwise in [:now, "now"], do: ["temporal_coalesce", to, ["now"]], else: to
+
+      op =
+        %{
+          "day" => "days_between",
+          "hour" => "hours_between",
+          "fractional_day" => "fractional_days_between"
+        }[to_string(unit)]
+
+      expression = [op, from, to]
+      {:ok, if(minimum == 0, do: ["clamp_zero", expression], else: expression)}
     end
   end
 
-  defp unit(nil), do: :ok
-  defp unit(unit) when unit in [:day, "day"], do: :ok
-  defp unit(_unit), do: {:error, "temporal_delta unit must be day"}
+  defp duration_options(unit, otherwise, minimum) do
+    cond do
+      to_string(unit) not in ~w(day hour fractional_day) ->
+        {:error, "temporal_delta unit must be day, hour or fractional_day"}
+
+      otherwise not in [nil, :now, "now"] ->
+        {:error, "temporal_delta otherwise must be now"}
+
+      minimum not in [nil, 0] ->
+        {:error, "temporal_delta minimum must be zero"}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp temporal_endpoint(value) when value in [:now, "now"], do: {:ok, ["now"]}
+
+  defp temporal_endpoint(value) do
+    with {:ok, field} <- path(value, "temporal_delta endpoint"), do: {:ok, ["field", field]}
+  end
 
   defp bucket(computed, type_of) do
     with :ok <- only(computed, ~w(kind field buckets otherwise)),
@@ -294,6 +326,16 @@ defmodule Selecto.Domain.Shorthand.Computed do
       if Map.has_key?(computed, :kind),
         do: %{kind: :expression, expression: expression},
         else: %{"kind" => "expression", "expression" => expression}
+
+    column =
+      if kind(computed) == "temporal_delta" and is_nil(MapHelpers.map_value(column, :unit)) do
+        code =
+          if MapHelpers.map_value(computed, :unit) in [:hour, "hour"], do: "hour", else: "day"
+
+        MapHelpers.put_map_value(column, :unit, %{kind: :duration, code: code})
+      else
+        column
+      end
 
     MapHelpers.put_map_value(column, :computed, expanded)
   end

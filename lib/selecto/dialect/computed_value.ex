@@ -26,7 +26,14 @@ defmodule Selecto.Dialect.ComputedValue do
   defstruct [:operation, :expression, :type, path: []]
 
   @type t :: %__MODULE__{
-          operation: :cast | :json_text | :divide | :days_between,
+          operation:
+            :cast
+            | :json_text
+            | :divide
+            | :days_between
+            | :hours_between
+            | :fractional_days_between
+            | :epoch_datetime,
           expression: term(),
           type: String.t() | nil,
           path: [{:param, String.t()}]
