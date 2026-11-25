@@ -77,7 +77,7 @@ defmodule Selecto.Domain.Compose do
 
       composed_domain = apply_composed_extensions(composed_domain)
 
-      with {:ok, normalized, diagnostics} <- Selecto.Domain.validate(composed_domain),
+      with {:ok, normalized, diagnostics} <- normalize_fun.(composed_domain),
            :ok <- ensure_no_authoring_errors(diagnostics) do
         {:ok, normalized, %{diagnostics | warnings: composition_warnings ++ diagnostics.warnings}}
       end

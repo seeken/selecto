@@ -510,7 +510,7 @@ defmodule Selecto.Domain do
   """
   @spec compose(term(), term()) :: {:ok, map(), Diagnostics.t()} | {:error, Diagnostics.t()}
   def compose(domain, overlays \\ []) do
-    Compose.compose(domain, overlays, &normalize/1)
+    Compose.compose(domain, overlays, &validate/1)
   end
 
   @doc """

@@ -37,7 +37,7 @@ defmodule Selecto.ReadClock do
     Process.put(@context_key, context)
 
     try do
-      fun.()
+      Selecto.Builder.OwnerKey.with_context(fun)
     after
       if previous, do: Process.put(@context_key, previous), else: Process.delete(@context_key)
     end
