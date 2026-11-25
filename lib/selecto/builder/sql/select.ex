@@ -1152,10 +1152,10 @@ defmodule Selecto.Builder.Sql.Select do
   defp prep_internal_selector(_, _, _), do: raise(ArgumentError, "unknown internal selector")
 
   defp elapsed_days_expression!(selecto, field_iodata) do
-    if Map.get(Selecto.ReadClock.context(selecto), :as_of) do
+    if Selecto.ReadClock.calendar_context?(selecto) do
       render_computed_value!(selecto, %Selecto.Dialect.ComputedValue{
         operation: :days_between,
-        expression: [field_iodata, Selecto.ReadClock.now_sql(selecto)],
+        expression: [field_iodata, Selecto.ReadClock.date_sql(selecto)],
         type: "integer"
       })
     else
@@ -2052,7 +2052,8 @@ defmodule Selecto.Builder.Sql.Select do
 
   defp compile_value(selecto, [op, start, finish], aliases)
        when op in ~w(days_between hours_between fractional_days_between) do
-    {operands, joins, params} = compile_temporal_values(selecto, [start, finish], aliases)
+    {operands, joins, params} =
+      compile_temporal_values(selecto, [start, finish], aliases, op != "days_between")
 
     operation =
       %{
@@ -2150,7 +2151,7 @@ defmodule Selecto.Builder.Sql.Select do
   end
 
   defp bound_ranges(selecto, :date_relative_ranges, ranges) do
-    if Map.get(Selecto.ReadClock.context(selecto), :as_of) do
+    if Selecto.ReadClock.calendar_context?(selecto) do
       Enum.map(ranges, fn
         {"today", "today", _} -> {0, 0, "Today"}
         {"yesterday", "yesterday", _} -> {1, 1, "Yesterday"}
@@ -2166,7 +2167,7 @@ defmodule Selecto.Builder.Sql.Select do
 
   defp bound_bucket(selecto, kind, expression, options) do
     if kind in [:elapsed_days_ranges, :date_relative_ranges, :month_ranges] and
-         Map.get(Selecto.ReadClock.context(selecto), :as_of) do
+         Selecto.ReadClock.calendar_context?(selecto) do
       if Selecto.AdapterSupport.adapter_name(selecto.adapter) == :duckdb,
         do: Selecto.ReadClock.invalid!("DuckDB does not support relative bucket kinds")
 
@@ -2175,7 +2176,7 @@ defmodule Selecto.Builder.Sql.Select do
       value =
         render_computed_value!(selecto, %Selecto.Dialect.ComputedValue{
           operation: operation,
-          expression: [expression, Selecto.ReadClock.now_sql(selecto)],
+          expression: [expression, Selecto.ReadClock.date_sql(selecto)],
           type: "integer"
         })
 
@@ -2185,9 +2186,25 @@ defmodule Selecto.Builder.Sql.Select do
     end
   end
 
-  defp compile_temporal_values(selecto, values, aliases) do
+  defp compile_temporal_values(selecto, values, aliases, elapsed? \\ false) do
     Enum.reduce(values, {[], [], []}, fn value, {parts, joins, params} ->
-      {sql, dependencies, binds} = compile_value(selecto, value, aliases)
+      {sql, dependencies, binds} =
+        case value do
+          ["now"] ->
+            clock =
+              if elapsed?,
+                do: Selecto.ReadClock.now_sql(selecto, false),
+                else: Selecto.ReadClock.date_sql(selecto)
+
+            {clock, [], []}
+
+          ["temporal_coalesce" | operands] ->
+            {parts, joins, params} = compile_temporal_values(selecto, operands, aliases, elapsed?)
+            {["COALESCE(", Enum.intersperse(parts, ", "), ")"], joins, params}
+
+          _ ->
+            compile_value(selecto, value, aliases)
+        end
 
       sql =
         case value do

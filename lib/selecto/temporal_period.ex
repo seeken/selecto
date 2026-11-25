@@ -57,6 +57,16 @@ defmodule Selecto.TemporalPeriod do
     ranges =
       if instant?, do: instant_ranges(lower, upper, ReadClock.zone(query)), else: [{lower, upper}]
 
+    # A wholly skipped local period remains an empty comparison on the column,
+    # so SQL three-valued logic also holds under NOT for NULL values.
+    ranges =
+      if ranges == [] do
+        point = ReadClock.instant(lower |> NaiveDateTime.to_iso8601(), ReadClock.zone(query))
+        [{point, point}]
+      else
+        ranges
+      end
+
     {column, joins, params} = Select.prep_selector(query, field)
 
     clauses =
@@ -74,8 +84,64 @@ defmodule Selecto.TemporalPeriod do
         ]
       end)
 
-    sql = if clauses == [], do: "(1 = 0)", else: ["(", Enum.intersperse(clauses, " OR "), ")"]
+    sql = ["(", Enum.intersperse(clauses, " OR "), ")"]
     {List.wrap(joins), sql, params}
+  end
+
+  # Database-clock shortcuts use SQL calendar bounds. Convert only the bound,
+  # keeping the indexed storage column untouched (including naive UTC/epochs).
+  def compile_sql_bounds(query, field, lower, upper) do
+    conf = Selecto.field(query, field)
+    type = to_string(Map.get(conf, :type))
+
+    unless Selecto.Temporal.date_like?(conf) or
+             type in ~w(date datetime timestamp utc_datetime utc_datetime_usec naive_datetime timestamptz epoch_datetime),
+           do: ReadClock.invalid!("date shortcut requires a temporal field")
+
+    epoch = Selecto.Temporal.epoch_storage(conf)
+
+    kind =
+      cond do
+        epoch == :unix_milliseconds ->
+          "epoch_ms"
+
+        type == "epoch_datetime" or epoch != nil ->
+          "epoch_seconds"
+
+        type == "date" ->
+          "date"
+
+        type in ~w(utc_datetime utc_datetime_usec timestamptz) ->
+          if Map.get(conf, :storage) in [:naive_utc, "naive_utc"],
+            do: "naive_utc",
+            else: "instant"
+
+        true ->
+          "datetime"
+      end
+
+    zone = Map.get(ReadClock.context(query), :timezone)
+
+    bounds =
+      Enum.map([lower, upper], fn value ->
+        fragment = %Selecto.Dialect.ComputedValue{
+          operation: :calendar_bound,
+          expression: value,
+          type: kind,
+          path: if(zone, do: [{:param, zone}], else: [])
+        }
+
+        case Selecto.DialectSupport.render_computed_value(query.adapter, fragment, query) do
+          {:ok, sql} -> sql
+          {:error, error} -> Selecto.Builder.ScopeRefusal.unsupported!(error)
+        end
+      end)
+
+    [lower, upper] = bounds
+    {column, joins, params} = Select.prep_selector(query, field)
+
+    {List.wrap(joins), ["(", column, " >= ", lower, " AND ", column, " < ", upper, ")"],
+     params ++ params}
   end
 
   defp bound(query, conf, type, value) do
@@ -99,12 +165,15 @@ defmodule Selecto.TemporalPeriod do
         text = value |> NaiveDateTime.to_iso8601() |> String.replace("T", " ")
 
         instant =
-          is_struct(value, DateTime) or type in ~w(utc_datetime utc_datetime_usec timestamptz)
+          type in ~w(utc_datetime utc_datetime_usec timestamptz) and
+            Map.get(conf, :storage) not in [:naive_utc, "naive_utc"]
+
+        offset? = instant and ReadClock.database_clock?(query)
 
         ReadClock.render!(
           query,
           :period_bound,
-          {:param, text <> if(instant, do: "+00:00", else: "")},
+          {:param, text <> if(offset?, do: "+00:00", else: "")},
           if(instant, do: "instant", else: "datetime")
         )
     end

@@ -12,21 +12,25 @@ defmodule Selecto.ReadClock do
 
   def validate!(value) when is_binary(value) do
     valid =
-      cond do
-        Regex.match?(~r/\A\d{4}-\d{2}-\d{2}\z/, value) ->
+      byte_size(value) <= 45 and
+        Regex.match?(
+          ~r/\A(?!0000)\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})?)?\z/,
+          value
+        ) and
+        if byte_size(value) == 10 do
           match?({:ok, _}, Date.from_iso8601(value))
+        else
+          match?({:ok, _, _}, DateTime.from_iso8601(with_offset(value)))
+        end
 
-        Regex.match?(~r/\A\d{4}-\d{2}-\d{2}T/, value) ->
-          match?({:ok, _, _}, DateTime.from_iso8601(value))
-
-        true ->
-          false
-      end
-
-    if valid, do: value, else: invalid!("as_of must be a valid ISO date or offset timestamp")
+    if valid, do: value, else: invalid!("as_of must be a valid ISO date or timestamp")
   end
 
-  def validate!(_), do: invalid!("as_of must be a valid ISO date or offset timestamp")
+  def validate!(_), do: invalid!("as_of must be a valid ISO date or timestamp")
+
+  defp with_offset(value) do
+    if Regex.match?(~r/(?:Z|[+-]\d{2}:\d{2})\z/, value), do: value, else: value <> "Z"
+  end
 
   def with_context(query, fun) do
     previous = Process.get(@context_key)
@@ -47,8 +51,8 @@ defmodule Selecto.ReadClock do
 
   def zone(query) do
     case Map.get(context(query), :timezone) do
-      nil -> session_zone(query)
-      zone -> zone
+      nil -> validate_zone!(session_zone(query))
+      zone -> validate_zone!(zone)
     end
   end
 
@@ -67,23 +71,79 @@ defmodule Selecto.ReadClock do
     end
   end
 
-  def timezone(query, zone) when is_binary(zone) do
+  defp validate_zone!(zone) do
     case DateTime.now(zone, Tzdata.TimeZoneDatabase) do
-      {:ok, _} -> put_in(query.set[:timezone], zone)
-      _ -> invalid!("unknown query timezone")
+      {:ok, _} -> zone
+      _ -> invalid!("unknown query or session timezone")
     end
   end
 
+  def timezone(query, zone) when is_binary(zone),
+    do: put_in(query.set[:timezone], validate_zone!(zone))
+
   def timezone(_, _), do: invalid!("timezone must be an IANA zone")
 
-  def now_sql(query) do
+  def calendar_context?(query),
+    do:
+      not is_nil(Map.get(context(query), :as_of)) or
+        not is_nil(Map.get(context(query), :timezone))
+
+  def database_clock?(query),
+    do: Selecto.AdapterSupport.adapter_name(query.adapter) in [:postgresql, :duckdb]
+
+  # Calendar computations consume a zone-derived DATE, never the UTC date of
+  # the bound instant. Unbound database clocks stay dynamic when SQL is reused.
+  def date_sql(query) do
+    if is_nil(Map.get(context(query), :as_of)) and database_clock?(query) do
+      if Map.get(context(query), :timezone),
+        do: render!(query, :cast, now_sql(query), "date"),
+        else: "CURRENT_DATE"
+    else
+      render!(query, :period_bound, {:param, Date.to_iso8601(date(query))}, "date")
+    end
+  end
+
+  def now_sql(query, local? \\ true) do
     case Map.get(context(query), :as_of) do
       nil ->
-        "CURRENT_TIMESTAMP"
+        zone = Map.get(context(query), :timezone)
+
+        if local? and zone do
+          if database_clock?(query) do
+            local_clock_sql(query, "CURRENT_TIMESTAMP", zone)
+          else
+            local = DateTime.now!(zone, Tzdata.TimeZoneDatabase) |> DateTime.to_naive()
+            render!(query, :period_bound, {:param, NaiveDateTime.to_iso8601(local)}, "datetime")
+          end
+        else
+          "CURRENT_TIMESTAMP"
+        end
 
       value ->
         instant = instant(value, zone(query))
-        render!(query, :read_clock, {:param, DateTime.to_iso8601(instant)}, "datetime")
+
+        if local? do
+          local =
+            DateTime.shift_zone!(instant, zone(query), Tzdata.TimeZoneDatabase)
+            |> DateTime.to_naive()
+
+          render!(query, :period_bound, {:param, NaiveDateTime.to_iso8601(local)}, "datetime")
+        else
+          render!(query, :read_clock, {:param, DateTime.to_iso8601(instant)}, "datetime")
+        end
+    end
+  end
+
+  defp local_clock_sql(query, expression, zone) do
+    fragment = %Selecto.Dialect.ComputedValue{
+      operation: :local_clock,
+      expression: expression,
+      path: [{:param, zone}]
+    }
+
+    case Selecto.DialectSupport.render_computed_value(query.adapter, fragment, query) do
+      {:ok, sql} -> sql
+      {:error, error} -> Selecto.Builder.ScopeRefusal.unsupported!(error)
     end
   end
 
@@ -116,7 +176,7 @@ defmodule Selecto.ReadClock do
   end
 
   def instant(value, _zone) do
-    {:ok, dt, _} = DateTime.from_iso8601(value)
+    {:ok, dt, _} = DateTime.from_iso8601(with_offset(value))
     dt
   end
 

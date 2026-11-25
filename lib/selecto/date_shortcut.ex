@@ -32,6 +32,12 @@ defmodule Selecto.DateShortcut do
     "this_and_last_year" => {{:year, -12, 0}, {:year, 12, 0}}
   }
   def compile(query, field, shortcut) do
+    if is_nil(Map.get(ReadClock.context(query), :as_of)) and ReadClock.database_clock?(query),
+      do: dynamic(query, field, to_string(shortcut)),
+      else: bound(query, field, shortcut)
+  end
+
+  defp bound(query, field, shortcut) do
     today = ReadClock.date(query)
 
     case Map.get(@plans, to_string(shortcut)) do
@@ -42,6 +48,48 @@ defmodule Selecto.DateShortcut do
 
       nil ->
         recurring(query, field, to_string(shortcut), today)
+    end
+  end
+
+  defp dynamic(query, field, shortcut) do
+    case Map.get(@plans, shortcut) do
+      {start, finish} ->
+        Selecto.TemporalPeriod.compile_sql_bounds(
+          query,
+          field,
+          sql_anchor(query, start),
+          sql_anchor(query, finish)
+        )
+
+      nil when shortcut in ~w(mtd_all_years qtd_all_years ytd_all_years) ->
+        kind =
+          %{"mtd_all_years" => :month, "qtd_all_years" => :quarter, "ytd_all_years" => :year}[
+            shortcut
+          ]
+
+        {column, joins, params} = Selecto.Builder.Sql.Select.prep_selector(query, field)
+        value = ReadClock.render!(query, :month_day, column, "integer")
+        lower = ReadClock.render!(query, :month_day, sql_anchor(query, {kind, 0, 0}), "integer")
+        upper = ReadClock.render!(query, :month_day, ReadClock.date_sql(query), "integer")
+
+        {List.wrap(joins), ["(", value, " >= ", lower, " AND ", value, " <= ", upper, ")"],
+         params ++ params}
+
+      _ ->
+        ReadClock.invalid!("unsupported date shortcut")
+    end
+  end
+
+  defp sql_anchor(query, {kind, months, days}) do
+    fragment = %Selecto.Dialect.ComputedValue{
+      operation: :date_anchor,
+      expression: ReadClock.date_sql(query),
+      path: [kind, months, days]
+    }
+
+    case Selecto.DialectSupport.render_computed_value(query.adapter, fragment, query) do
+      {:ok, sql} -> sql
+      {:error, error} -> Selecto.Builder.ScopeRefusal.unsupported!(error)
     end
   end
 

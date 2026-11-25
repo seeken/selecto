@@ -165,7 +165,13 @@ defmodule Selecto.Fields do
       case Selecto.FieldResolver.resolve_field(selecto, field_name) do
         {:ok, field_info} ->
           # Return complete field info with compatibility mappings
+          storage =
+            selecto.config.columns
+            |> Map.get(field_str, %{})
+            |> Map.take([:storage, :datetime_storage, :epoch_storage])
+
           field_info
+          |> Map.merge(storage)
           |> Map.put(:requires_join, field_info[:source_join])
           |> Map.put(:field, field_info[:field] || field_info[:name])
 
