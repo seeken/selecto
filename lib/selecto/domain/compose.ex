@@ -76,7 +76,7 @@ defmodule Selecto.Domain.Compose do
 
       composed_domain = apply_composed_extensions(composed_domain)
 
-      with {:ok, normalized, diagnostics} <- normalize_fun.(composed_domain),
+      with {:ok, normalized, diagnostics} <- Selecto.Domain.validate(composed_domain),
            :ok <- ensure_no_authoring_errors(diagnostics) do
         {:ok, normalized, %{diagnostics | warnings: composition_warnings ++ diagnostics.warnings}}
       end
@@ -182,8 +182,18 @@ defmodule Selecto.Domain.Compose do
   def merge_section_value(_section, _base, overlay, _path), do: overlay
 
   def deep_merge_domain_maps(base, overlay, path) do
-    Map.merge(base, overlay, fn key, base_value, overlay_value ->
-      merge_nested_value(path ++ [canonical_section_key(key)], base_value, overlay_value)
+    Enum.reduce(overlay, base, fn {key, value}, acc ->
+      base_key = equivalent_map_key(acc, key) || key
+
+      if is_nil(value) do
+        Map.delete(acc, base_key)
+      else
+        Map.put(
+          acc,
+          base_key,
+          merge_nested_value(path ++ [canonical_section_key(key)], Map.get(acc, base_key), value)
+        )
+      end
     end)
   end
 
@@ -199,11 +209,17 @@ defmodule Selecto.Domain.Compose do
 
   def merge_registry_maps(base, overlay, path) do
     Enum.reduce(overlay, base, fn {overlay_key, overlay_value}, acc ->
-      case equivalent_map_key(acc, overlay_key) do
-        nil ->
+      case {overlay_value, equivalent_map_key(acc, overlay_key)} do
+        {nil, nil} ->
+          acc
+
+        {nil, base_key} ->
+          Map.delete(acc, base_key)
+
+        {_, nil} ->
           Map.put(acc, overlay_key, overlay_value)
 
-        base_key ->
+        {_, base_key} ->
           merged_value =
             merge_nested_value(path ++ [base_key], Map.fetch!(acc, base_key), overlay_value)
 

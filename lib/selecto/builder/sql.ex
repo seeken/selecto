@@ -338,7 +338,7 @@ defmodule Selecto.Builder.Sql do
           # If so, the order_by_iodata should already be correct
           # Otherwise convert to use positions
           case selecto.set.order_by do
-            [{:literal_position, _} | _] ->
+            [{{:literal_position, _}, _} | _] ->
               # Already using literal positions, finalize normally
               {order_by_sql, order_by_sql_params} =
                 Params.finalize(order_by_iodata,
@@ -466,6 +466,7 @@ defmodule Selecto.Builder.Sql do
 
   defp build_query_iodata_with_joins(selecto, opts) do
     rollup? = Enum.any?(selecto.set.group_by, &match?({:rollup, _}, &1))
+    selecto = rollup_null_tie_order(selecto)
 
     cond do
       # CUBE / GROUPING SETS: refused here when the adapter lacks the mode or
@@ -498,6 +499,29 @@ defmodule Selecto.Builder.Sql do
     end
   end
 
+  # A selected GROUPING marker distinguishes real NULL dimensions from subtotals.
+  # Apply the same ordering before native and adapter-emulated rollups dispatch.
+  defp rollup_null_tie_order(selecto) do
+    with [rollup: dimensions] when length(dimensions) > 1 <- selecto.set.group_by,
+         orders when orders != [] <- selecto.set.order_by,
+         index when not is_nil(index) <-
+           Enum.find_index(selecto.set.selected, fn item ->
+             expression =
+               case item do
+                 {:field, expression, _alias} -> expression
+                 expression -> expression
+               end
+
+             expression == {:grouping, dimensions}
+           end) do
+      selecto = Selecto.GroupingSets.with_position_orders!(selecto)
+      marker = {{:literal_position, index + 1}, :desc}
+      put_in(selecto.set.order_by, selecto.set.order_by ++ [marker])
+    else
+      _ -> selecto
+    end
+  end
+
   defp finalize_section(iodata, _adapter, _type) when iodata in [[], [""], ["()"], "", "()"],
     do: {"", []}
 
@@ -512,7 +536,7 @@ defmodule Selecto.Builder.Sql do
 
       is_rollup_query ->
         case selecto.set.order_by do
-          [{:literal_position, _} | _] ->
+          [{{:literal_position, _}, _} | _] ->
             Params.finalize(order_by_iodata, adapter: adapter)
 
           _ ->

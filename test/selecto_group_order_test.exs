@@ -324,4 +324,20 @@ defmodule Selecto.GroupOrderTest do
       end
     end
   end
+
+  test "multi-dimensional rollup NULL ties use the selected marker descending" do
+    query =
+      orders_selecto()
+      |> Selecto.select([
+        "state",
+        "person_id",
+        {:field, {:count, "*"}, "n"},
+        {:field, {:grouping, ["state", "person_id"]}, "marker"}
+      ])
+      |> Selecto.group_by(rollup: ["state", "person_id"])
+      |> Selecto.order_by(["state", "person_id"])
+
+    {sql, _, []} = Selecto.gen_sql(query, [])
+    assert String.downcase(sql) =~ ~r/order by.*1.*2.*4 desc/s
+  end
 end

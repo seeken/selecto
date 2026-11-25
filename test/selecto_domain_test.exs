@@ -613,6 +613,20 @@ defmodule Selecto.DomainTest do
   end
 
   describe "compose/2" do
+    test "null overlay entries delete nested keys before validation" do
+      base =
+        minimal_query_domain()
+        |> put_in([:source, :columns, :total, :label], "Old")
+        |> Map.put(:filters, %{"old" => %{field: :total, label: "Old"}})
+
+      overlay = %{source: %{columns: %{total: %{label: nil}}}, filters: %{"old" => nil}}
+      assert {:ok, normalized, _} = Domain.compose(base, overlay)
+      refute Map.has_key?(normalized.source.columns.total, :label)
+      assert normalized.query.filters == %{}
+      assert base.source.columns.total.label == "Old"
+      assert {:error, _} = Domain.compose(base, %{source: %{columns: %{total: nil}}})
+    end
+
     test "deep-merges overlays with explicit list semantics" do
       base =
         minimal_query_domain()
@@ -679,16 +693,26 @@ defmodule Selecto.DomainTest do
       base =
         minimal_query_domain()
         |> Map.put(:extensions, %{reporting: %{enabled: true, color: "blue"}})
-        |> Map.put(:editors, %{order: %{fields: %{status: %{help: "Original"}}}})
+        |> Map.put(:writes, %{
+          operations: %{update: %{enabled: true}},
+          fields: %{status: %{updatable: true}}
+        })
+        |> Map.put(:editors, %{order: %{fields: [:status], description: "Original"}})
 
       overlay = %{
         extensions: %{reporting: %{color: "green", size: "wide"}},
-        editors: %{order: %{fields: %{status: %{section: "Details"}}}}
+        editors: %{order: %{label: "Details"}}
       }
 
       assert {:ok, normalized, _} = Domain.compose(base, overlay)
       assert normalized.extensions == %{reporting: %{enabled: true, color: "green", size: "wide"}}
-      assert normalized.editors.order.fields.status == %{help: "Original", section: "Details"}
+      assert normalized.editors.order.fields == [%{field: :status}]
+      assert normalized.editors.order.description == "Original"
+      assert normalized.editors.order.label == "Details"
+
+      assert {:error, _} =
+               Domain.compose(base, %{editors: %{order: %{fields: %{status: %{help: "invalid"}}}}})
+
       assert Selecto.Extensions.from_domain(normalized.domain) == []
     end
 
