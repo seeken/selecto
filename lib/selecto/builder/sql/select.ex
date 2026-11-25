@@ -1011,6 +1011,33 @@ defmodule Selecto.Builder.Sql.Select do
 
   # Governed computed values (computed.kind: :expression). The AST is closed and
   # typed; literals and JSON path segments are bound, never interpolated.
+  def prep_selector(selecto, {:ratio_of_sums, name}, aliases) do
+    definition =
+      Enum.find_value(Selecto.RatioMeasures.definitions(selecto), fn {id, spec} ->
+        if to_string(id) == to_string(name), do: spec
+      end) || raise ArgumentError, "unknown ratio measure"
+
+    get = &Selecto.Domain.Contract.Shared.Core.map_value/2
+    numerator = get.(get.(definition, :numerator), :field)
+    denominator = get.(get.(definition, :denominator), :field)
+    {n, nj, np} = prep_selector(selecto, {:sum, numerator}, aliases)
+    {d, dj, dp} = prep_selector(selecto, {:sum, denominator}, aliases)
+    safe = ["NULLIF(", d, ", 0)"]
+
+    value =
+      if Selecto.AdapterSupport.adapter_name(selecto.adapter) == :sqlite do
+        render_computed_value!(selecto, %Selecto.Dialect.ComputedValue{
+          operation: :divide,
+          expression: [n, safe],
+          type: "decimal"
+        })
+      else
+        ["(", computed_cast!(selecto, n, "decimal"), " / ", safe, ")"]
+      end
+
+    {value, List.wrap(nj) ++ List.wrap(dj), np ++ dp}
+  end
+
   def prep_selector(selecto, {:computed_value, expression}, retarget_aliases) do
     {:ok, normalized} = Selecto.Domain.Contract.ComputedValues.normalize(expression)
     {iodata, joins, params} = compile_value(selecto, normalized, retarget_aliases)

@@ -20,6 +20,9 @@ defmodule Selecto.Expr do
   @typedoc "A helper expression that normalizes into Selecto's existing AST."
   @type expr :: term()
 
+  @doc "Select a declared ratio of sums, recomputed at each grouping level."
+  def ratio_of_sums(name), do: {:ratio_of_sums, name}
+
   @doc "Filter a temporal field by an absolute half-open calendar period."
   def on(field, period), do: {field, {:on, period}}
   @doc "Filter a temporal field by a relative calendar shortcut."

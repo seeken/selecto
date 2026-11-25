@@ -220,6 +220,7 @@ defmodule Selecto.Builder.Sql.Order do
 
   @aggregates ~w(count count_distinct sum avg min max stddev variance string_agg array_agg json_agg jsonb_agg bool_and bool_or every)
 
+  defp aggregate?({:ratio_of_sums, _}), do: true
   defp aggregate?({:field, inner, _alias}), do: aggregate?(inner)
   defp aggregate?({:as, inner, _alias}), do: aggregate?(inner)
   defp aggregate?({name, _args}) when is_atom(name), do: Atom.to_string(name) in @aggregates

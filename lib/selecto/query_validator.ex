@@ -312,6 +312,25 @@ defmodule Selecto.QueryValidator do
 
   defp validate_selector!(_selecto, {func}) when is_atom(func), do: :ok
 
+  defp validate_selector!(selecto, {:ratio_of_sums, name}) do
+    definitions = Selecto.RatioMeasures.definitions(selecto)
+
+    definition =
+      Enum.find_value(definitions, fn {id, spec} ->
+        if to_string(id) == to_string(name), do: spec
+      end) || raise ArgumentError, "unknown ratio measure"
+
+    for side <- [:numerator, :denominator] do
+      field =
+        Selecto.Domain.Contract.Shared.Core.map_value(
+          Selecto.Domain.Contract.Shared.Core.map_value(definition, side),
+          :field
+        )
+
+      validate_selector!(selecto, field)
+    end
+  end
+
   defp validate_selector!(selecto, {func, selector}) when is_atom(func) do
     validate_selector!(selecto, selector)
   end

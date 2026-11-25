@@ -33,6 +33,7 @@ defmodule Selecto.Domain do
     :functions,
     :query_members,
     :query_library,
+    :ratio_measures,
     :rules,
     :operations,
     :experiences,
@@ -171,6 +172,7 @@ defmodule Selecto.Domain do
       |> Shorthand.normalize_authoring_shorthand()
       |> Selecto.Domain.EditorNormalization.normalize()
       |> Unit.normalize_domain_columns()
+      |> Selecto.RatioMeasures.decorate()
       |> Values.decorate()
 
     {:ok,

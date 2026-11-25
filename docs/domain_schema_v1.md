@@ -160,6 +160,7 @@ Canonical sections are part of the current domain contract:
 - `functions`
 - `query_members`
 - `query_library`
+- `ratio_measures`
 - `rules`
 - `domain_dependencies`
 - `operations`

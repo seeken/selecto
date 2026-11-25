@@ -13,6 +13,7 @@ defmodule Selecto.Domain.Compose do
     :functions,
     :query_members,
     :query_library,
+    :ratio_measures,
     :rules,
     :published_views,
     :detail_actions,

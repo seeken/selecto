@@ -68,6 +68,16 @@ defmodule Selecto.Analytics.Unit do
   def normalize_column(_column), do: {:error, "column must be a map"}
 
   @spec normalize_unit(map()) :: {:ok, map()} | {:error, String.t()}
+  def normalize_unit(%{kind: kind, numerator: numerator, denominator: denominator} = unit)
+      when kind in [:ratio, "ratio"] do
+    composite_unit(unit, numerator, denominator)
+  end
+
+  def normalize_unit(
+        %{"kind" => "ratio", "numerator" => numerator, "denominator" => denominator} = unit
+      ),
+      do: composite_unit(unit, numerator, denominator)
+
   def normalize_unit(unit) when is_map(unit) do
     unknown =
       Map.keys(unit) |> Enum.map(&to_string/1) |> Enum.reject(&(&1 in ~w(kind code scale)))
@@ -119,6 +129,16 @@ defmodule Selecto.Analytics.Unit do
   end
 
   def normalize_unit(_unit), do: {:error, "unit must be a map"}
+
+  defp composite_unit(unit, numerator, denominator) do
+    with true <- Enum.all?(Map.keys(unit), &(to_string(&1) in ~w(kind numerator denominator))),
+         {:ok, numerator} <- normalize_unit(numerator),
+         {:ok, denominator} <- normalize_unit(denominator) do
+      {:ok, %{kind: :ratio, numerator: numerator, denominator: denominator}}
+    else
+      _ -> {:error, "composite ratios require valid numerator and denominator units"}
+    end
+  end
 
   @spec normalize_behavior(term()) :: {:ok, atom()} | {:error, String.t()}
   def normalize_behavior(behavior) do

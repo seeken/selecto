@@ -26,6 +26,7 @@ defmodule Selecto.Domain.Sections do
     "functions",
     "query_members",
     "query_library",
+    "ratio_measures",
     "rules",
     "co_domains",
     "domain_dependencies",

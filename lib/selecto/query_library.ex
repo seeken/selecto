@@ -35,6 +35,15 @@ defmodule Selecto.QueryLibrary do
     end
   end
 
+  @doc "Resolve one choice per picker group, retaining explicit empty-string Off choices."
+  def resolve_segment_choices(selecto_or_domain, segments, choices \\ %{}, view \\ :detail) do
+    Selecto.SegmentPicker.resolve(library(selecto_or_domain), segments, choices, view)
+  end
+
+  @doc "Return the authored, validated picker group registry."
+  def segment_picker_groups(selecto_or_domain),
+    do: Map.get(library(selecto_or_domain), :segment_picker_groups, %{})
+
   @doc "Returns definitions from one named registry."
   @spec definitions(Selecto.t() | map(), atom()) :: map()
   def definitions(selecto_or_domain, kind) when kind in @registries do
@@ -141,6 +150,7 @@ defmodule Selecto.QueryLibrary do
     normalized = normalize_library(library)
 
     []
+    |> Kernel.++(Selecto.SegmentPicker.errors(library))
     |> validate_registries(library)
     |> validate_segments(normalized)
     |> validate_projections(normalized)
@@ -740,7 +750,13 @@ defmodule Selecto.QueryLibrary do
   end
 
   defp normalize_library(library) do
-    Enum.reduce(@registries, empty_library(), fn registry, acc ->
+    initial =
+      case map_value(library, :segment_picker_groups) do
+        groups when is_map(groups) -> Map.put(empty_library(), :segment_picker_groups, groups)
+        _ -> empty_library()
+      end
+
+    Enum.reduce(@registries, initial, fn registry, acc ->
       value = map_value(library, registry)
       Map.put(acc, registry, if(is_map(value), do: value, else: %{}))
     end)

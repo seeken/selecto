@@ -10,7 +10,7 @@ defmodule Selecto.Domain.JsonV1 do
                 custom_columns default_selected detail_actions domain_data domain_dependencies
                 domain_fingerprint domain_version editors events experiences extensions filters
                 functions imports joins json_schemas jsonb_schemas name operations pagination
-                published_views query_library query_members redact_fields require_tenant
+                published_views query_library query_members ratio_measures redact_fields require_tenant
                 required_filters required_group_by required_order_by required_selected retarget
                 rules schema_version schemas source source_relationships subfilters
                 tenant_required window_functions writes)

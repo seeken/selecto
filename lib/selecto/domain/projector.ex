@@ -1146,6 +1146,12 @@ defmodule Selecto.Domain.Projector do
       query_library: MapHelpers.section(domain, :query_library, %{}),
       published_views: MapHelpers.section(domain, :published_views, %{})
     }
+    |> then(fn query ->
+      case MapHelpers.section(domain, :ratio_measures) do
+        nil -> query
+        ratios -> Map.put(query, :ratio_measures, ratios)
+      end
+    end)
   end
 
   def projection_sections(domain) do
