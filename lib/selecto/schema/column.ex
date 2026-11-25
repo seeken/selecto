@@ -186,6 +186,13 @@ defmodule Selecto.Schema.Column do
                 {:computed_value, qualify_value(expression, join_prefix(join))}
               )
 
+            kind when kind in [:association_aggregate, "association_aggregate"] ->
+              Map.put(
+                base_col,
+                :select,
+                {:association_aggregate, computed, join || :selecto_root}
+              )
+
             _ ->
               base_col
           end

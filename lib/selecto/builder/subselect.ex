@@ -79,6 +79,13 @@ defmodule Selecto.Builder.Subselect do
     {field_with_alias, subselect_params}
   end
 
+  @doc false
+  def build_collection_value(selecto, config) do
+    {sql, params} = build_aggregated_subselect(selecto, config, "selecto_root")
+    {empty, empty_params} = render_empty_json_array!(selecto)
+    {["COALESCE((", sql, "), ", empty, ")"], params ++ empty_params}
+  end
+
   defp build_aggregated_subselect(selecto, subselect_config, source_alias) do
     target_table = get_target_table(selecto, subselect_config.target_schema)
     target_alias = generate_subquery_alias(subselect_config.target_schema)

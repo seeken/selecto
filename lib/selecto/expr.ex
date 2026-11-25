@@ -20,6 +20,9 @@ defmodule Selecto.Expr do
   @typedoc "A helper expression that normalizes into Selecto's existing AST."
   @type expr :: term()
 
+  @doc "Select related rows as JSON objects; no matches produce an empty array."
+  def related_rows(association, fields), do: {:related_rows, association, fields}
+
   @doc "Select a declared ratio of sums, recomputed at each grouping level."
   def ratio_of_sums(name), do: {:ratio_of_sums, name}
 

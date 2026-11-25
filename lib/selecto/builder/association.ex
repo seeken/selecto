@@ -27,7 +27,8 @@ defmodule Selecto.Builder.Association do
             target_alias,
             value(association, :related_key),
             source_alias,
-            value(association, :owner_key)
+            value(association, :owner_key),
+            relations[:source]
           )
       end
 
@@ -67,21 +68,55 @@ defmodule Selecto.Builder.Association do
     unless is_binary(table) and Regex.match?(~r/\A[A-Za-z_][A-Za-z0-9_]*\z/, table),
       do: raise(ArgumentError, "association through table must be a declared relation name")
 
-    conditions =
-      [
+    keys = value(association, :aggregate_owner_keys) || [value(through, :owner_key)]
+
+    correlations =
+      Enum.map(keys, fn key ->
         equality(
           selecto,
           bridge_alias,
-          value(through, :owner_key),
+          key,
           source_alias,
-          value(association, :owner_key)
-        ),
-        ExactCompare.eq(
-          column(selecto, bridge_alias, value(through, :related_key)),
-          target_key,
-          false
+          value(association, :owner_key),
+          relations[:source]
         )
-      ] ++
+      end)
+
+    exclude =
+      case value(association, :aggregate_exclude_owner_field) do
+        nil ->
+          []
+
+        field ->
+          [
+            [
+              column(selecto, bridge_alias, field),
+              " <> ",
+              Selecto.Builder.OwnerKey.sql(
+                selecto,
+                source_alias,
+                value(association, :owner_key),
+                relations[:source]
+              )
+            ]
+          ]
+      end
+
+    correlation =
+      case correlations do
+        [single] -> single
+        _ -> ["(", Enum.intersperse(correlations, " OR "), ")"]
+      end
+
+    conditions =
+      [correlation | exclude] ++
+        [
+          ExactCompare.eq(
+            column(selecto, bridge_alias, value(through, :related_key)),
+            target_key,
+            false
+          )
+        ] ++
         bridge_scope(
           selecto,
           through,
@@ -350,12 +385,12 @@ defmodule Selecto.Builder.Association do
 
   # Tenant/site columns pair exactly on MySQL and MariaDB
   # (Selecto.Builder.ExactCompare); other columns and adapters as before.
-  defp equality(selecto, left_alias, left, right_alias, right),
+  defp equality(selecto, left_alias, left, right_alias, right, relation),
     do:
       Selecto.Builder.TypedOperator.eq_aliases(
         selecto,
         {left_alias, left, column(selecto, left_alias, left)},
-        {right_alias, right, column(selecto, right_alias, right)},
+        {right_alias, right, Selecto.Builder.OwnerKey.sql(selecto, right_alias, right, relation)},
         ExactCompare.strongest([
           ExactCompare.column?(selecto, left),
           ExactCompare.column?(selecto, right),

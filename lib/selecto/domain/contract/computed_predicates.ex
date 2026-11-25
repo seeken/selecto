@@ -77,6 +77,12 @@ defmodule Selecto.Domain.Contract.ComputedPredicates do
       kind in [:expression, "expression"] ->
         validate_value_column(errors, graph, field, column, computed, fields, relations)
 
+      kind in [:association_aggregate, "association_aggregate"] ->
+        {source, schemas} = relations
+
+        {errors ++ Selecto.AssociationAggregate.errors(source, schemas, field, column, computed),
+         graph}
+
       # A shorthand left unexpanded was refused by Selecto.Domain.Shorthand.Computed.
       Selecto.Domain.Shorthand.Computed.shorthand?(computed) ->
         {errors, graph}

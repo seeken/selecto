@@ -85,6 +85,11 @@ defmodule Selecto.Retarget do
       |> Selecto.configure(selecto.runtime, configure_options(selecto))
       |> carry_tenant_scope!(selecto, plan)
 
+    retargeted = %{
+      retargeted
+      | set: Map.merge(retargeted.set, Map.take(selecto.set, [:as_of, :timezone]))
+    }
+
     put_in(retargeted.set[:retarget_state], %{
       path: plan.path,
       join: plan.join,
@@ -96,6 +101,118 @@ defmodule Selecto.Retarget do
       origin: selecto
     })
   end
+
+  @doc "Reroot existing target-prefixed output intent while preserving the original filters as context."
+  def reroot_query(%Selecto{} = query, target, opts \\ []) do
+    output = retarget(query, target, opts)
+    path = get_retarget_config(output).path
+    selected = Enum.map(query.set.selected, &reroot_expression(&1, path))
+    grouped = Enum.map(query.set.group_by, &reroot_group(&1, path))
+    ordered = Enum.map(query.set.order_by, &reroot_order(&1, path))
+
+    output
+    |> Selecto.replace_select(selected)
+    |> Selecto.group_by(grouped)
+    |> Selecto.order_by(ordered)
+  end
+
+  defp reroot_field("*", _path), do: "*"
+
+  defp reroot_field(field, path) when is_atom(field),
+    do: reroot_field(Atom.to_string(field), path)
+
+  defp reroot_field(field, path) when is_binary(field) do
+    prefix = path <> "."
+
+    if String.starts_with?(field, prefix),
+      do: String.replace_prefix(field, prefix, ""),
+      else: fail!(:invalid_query, "field is outside the retarget target")
+  end
+
+  defp reroot_expression({tag, value}, _path) when tag in [:literal, :param], do: {tag, value}
+  defp reroot_expression({:literal_position, position}, _path), do: {:literal_position, position}
+
+  defp reroot_expression({:field, expression, name}, path),
+    do: {:field, reroot_expression(expression, path), name}
+
+  defp reroot_expression({:field, expression}, path),
+    do: {:field, reroot_expression(expression, path)}
+
+  defp reroot_expression({:func, name, args}, path),
+    do: {:func, name, Enum.map(args, &reroot_expression(&1, path))}
+
+  defp reroot_expression({:func, name, args, opts}, path),
+    do: {:func, name, Enum.map(args, &reroot_expression(&1, path)), opts}
+
+  defp reroot_expression({:grouping, fields}, path),
+    do: {:grouping, Enum.map(fields, &reroot_expression(&1, path))}
+
+  defp reroot_expression({:case, branches, fallback}, path),
+    do:
+      {:case,
+       Enum.map(branches, fn {filter, value} ->
+         {reroot_filter(filter, path), reroot_expression(value, path)}
+       end), reroot_expression(fallback, path)}
+
+  defp reroot_expression({function, field}, path)
+       when function in [:count, :count_distinct, :sum, :avg, :min, :max, :lower, :upper],
+       do: {function, reroot_expression(field, path)}
+
+  defp reroot_expression({function, field, filter}, path)
+       when function in [:count, :sum, :avg, :min, :max],
+       do: {function, reroot_expression(field, path), reroot_filter(filter, path)}
+
+  defp reroot_expression({:count}, _path), do: {:count}
+
+  defp reroot_expression(value, path) when is_binary(value) or is_atom(value),
+    do: reroot_field(value, path)
+
+  defp reroot_expression(value, _path) when is_number(value) or is_nil(value), do: value
+
+  defp reroot_expression(_, _),
+    do: fail!(:invalid_query, "unsupported retarget output expression")
+
+  defp reroot_group({mode, fields}, path) when mode in [:rollup, :cube],
+    do: {mode, Enum.map(fields, &reroot_expression(&1, path))}
+
+  defp reroot_group({:grouping_sets, sets}, path),
+    do:
+      {:grouping_sets,
+       Enum.map(sets, fn fields -> Enum.map(fields, &reroot_expression(&1, path)) end)}
+
+  defp reroot_group(expression, path), do: reroot_expression(expression, path)
+
+  @reroot_directions [
+    :asc,
+    :desc,
+    :asc_nulls_first,
+    :asc_nulls_last,
+    :desc_nulls_first,
+    :desc_nulls_last
+  ]
+  defp reroot_order({field, direction}, path) when direction in @reroot_directions,
+    do: {reroot_expression(field, path), direction}
+
+  defp reroot_order({direction, field}, path) when direction in @reroot_directions,
+    do: {direction, reroot_expression(field, path)}
+
+  defp reroot_order(expression, path), do: reroot_expression(expression, path)
+
+  defp reroot_filter(filters, path) when is_list(filters),
+    do: Enum.map(filters, &reroot_filter(&1, path))
+
+  defp reroot_filter({op, filters}, path) when op in [:and, :or],
+    do: {op, reroot_filter(filters, path)}
+
+  defp reroot_filter({:not, filter}, path), do: {:not, reroot_filter(filter, path)}
+
+  defp reroot_filter({field, value}, path),
+    do: {reroot_field(field, path), reroot_operand(value, path)}
+
+  defp reroot_operand({tag, field}, path) when tag in [:ref, :field],
+    do: {tag, reroot_field(field, path)}
+
+  defp reroot_operand(value, _path), do: value
 
   @doc "Whether `selecto` is a retargeted query."
   @spec has_retarget?(Types.t()) :: boolean()

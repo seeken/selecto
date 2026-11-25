@@ -873,6 +873,20 @@ defmodule Selecto.Builder.Sql.Select do
     )
   end
 
+  def prep_selector(selecto, {:association_aggregate, spec, owner_alias}, _aliases),
+    do: Selecto.AssociationAggregate.compile(selecto, spec, owner_alias)
+
+  def prep_selector(selecto, {:association_count, field}, aliases) do
+    {value, joins, params} = prep_selector(selecto, field, aliases)
+    {["CASE WHEN COUNT(*) = 0 THEN NULL ELSE COUNT(", value, ") END"], joins, params}
+  end
+
+  def prep_selector(selecto, {:related_rows, association, fields}, _aliases) do
+    config = Selecto.RelatedRows.config(selecto, association, fields)
+    {sql, params} = Selecto.Builder.Subselect.build_collection_value(selecto, config)
+    {sql, [:selecto_root], params}
+  end
+
   def prep_selector(selecto, {func, field, filter}, retarget_aliases) when is_atom(func) do
     {sel_iodata, join, param} = prep_selector(selecto, field, retarget_aliases)
 

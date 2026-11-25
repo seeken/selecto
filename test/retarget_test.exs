@@ -80,6 +80,30 @@ defmodule Selecto.RetargetTest do
     error in Retarget.Error -> error.code
   end
 
+  test "reroot_query translates existing output intent and carries the read clock" do
+    original =
+      configure()
+      |> Selecto.as_of("2026-03-15")
+      |> Selecto.filter({"region", "west"})
+      |> Selecto.select([
+        "attendees.orders.product_id",
+        {:field, {:sum, "attendees.orders.total"}, "total"}
+      ])
+      |> Selecto.group_by(["attendees.orders.product_id"])
+      |> Selecto.order_by([{"attendees.orders.product_id", :asc}])
+
+    result = Retarget.reroot_query(original, "attendees.orders")
+    assert result.set.selected == ["product_id", {:field, {:sum, "total"}, "total"}]
+    assert result.set.group_by == ["product_id"]
+    assert result.set.order_by == [{"product_id", :asc}]
+    assert result.set.as_of == "2026-03-15"
+    assert Retarget.get_retarget_config(result).origin == original
+
+    assert_raise Retarget.Error, fn ->
+      configure() |> Selecto.select(["region"]) |> Retarget.reroot_query("attendees.orders")
+    end
+  end
+
   describe "retarget/3" do
     test "roots the query at the target relation and keeps the origin as context" do
       origin = configure() |> Selecto.filter({"region", "west"})

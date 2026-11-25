@@ -1471,7 +1471,25 @@ defmodule Selecto.Builder.Sql do
           build_on_conditions(selecto, join, requires_join, on_conditions)
 
         _ ->
-          owner_sql = build_selector_string(selecto, config.requires_join, config.owner_key)
+          relation =
+            Map.get(config, :from_source) ||
+              Selecto.Builder.OwnerKey.relation(selecto, config.requires_join)
+
+          computed =
+            relation
+            |> Selecto.ComputedOwnerKeys.column(config.owner_key)
+            |> Selecto.Domain.Contract.Shared.Core.map_value(:computed)
+
+          owner_sql =
+            if is_map(computed),
+              do:
+                Selecto.Builder.OwnerKey.sql(
+                  selecto,
+                  config.requires_join,
+                  config.owner_key,
+                  relation
+                ),
+              else: build_selector_string(selecto, config.requires_join, config.owner_key)
 
           owner_sql =
             if Map.has_key?(config, :values_relation),
