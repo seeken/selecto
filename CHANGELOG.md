@@ -1,5 +1,12 @@
 ## Unreleased join families and association conditions
 
+- Fixed: a write against a Selecto with an engine tenant was refused with
+  `tenant_mismatch` (`:conflicting_trusted_tenant_context`) when the
+  execution context carried the same tenant nested under `:tenant` with a
+  non-default `tenant_field`. The engine check now reads the context tenant
+  as the trusted-context resolver does, and an injected engine tenant carries
+  the operation tenant's field, so agreeing tenants no longer conflict on the
+  field alone. Disagreeing tenant ids are still refused, now before compile.
 - Association `conditions` (engine_join_conditions, domain_contract_export
   1.5.0): up to 8 `%{left, op, right, open}` comparisons of an owner field
   with a target field (eq, ne, lt, lte, gt, gte; one type family per pair;

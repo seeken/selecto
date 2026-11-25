@@ -201,6 +201,15 @@ defmodule SelectoUpdato.Tenant do
   def resolve_trusted_context(%Operation{} = operation, _execution_context),
     do: resolve_trusted_context(operation, %{})
 
+  @doc false
+  # The tenant an execution context carries, nested under :tenant or given
+  # directly, normalized as resolve_trusted_context/2 reads it.
+  @spec execution_context_tenant(term()) :: map() | nil
+  def execution_context_tenant(context) when is_map(context),
+    do: tenant_context_from_map(context)
+
+  def execution_context_tenant(_context), do: nil
+
   @spec require_tenant_filter(Operation.t(), tuple()) :: Operation.t()
   def require_tenant_filter(%Operation{} = operation, filter)
       when is_tuple(filter) and tuple_size(filter) in [2, 3] do

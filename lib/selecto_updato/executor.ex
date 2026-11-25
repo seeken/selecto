@@ -40,7 +40,13 @@ defmodule SelectoUpdato.Executor do
     tenant_id = Map.get(engine, :tenant_id)
     declared = declared_tenant_field(operation)
     context = Keyword.get(opts, :context, %{})
-    context_tenant = Map.get(context, :tenant_id, Map.get(context, "tenant_id"))
+    # Read the context tenant the way the trusted-context resolver does, so a
+    # tenant nested under :tenant counts as present and is not injected twice.
+    context_tenant =
+      case SelectoUpdato.Tenant.execution_context_tenant(context) do
+        %{} = tenant -> Map.get(tenant, :tenant_id)
+        nil -> nil
+      end
 
     cond do
       is_nil(tenant_id) or is_nil(declared) ->
@@ -53,7 +59,12 @@ defmodule SelectoUpdato.Executor do
          )}
 
       is_nil(context_tenant) ->
-        {:ok, Keyword.put(opts, :context, Map.put(context, :tenant_id, tenant_id))}
+        {:ok,
+         Keyword.put(
+           opts,
+           :context,
+           inject_engine_tenant(context, tenant_id, declared, operation)
+         )}
 
       context_tenant == tenant_id ->
         {:ok, opts}
@@ -64,6 +75,24 @@ defmodule SelectoUpdato.Executor do
            details: %{code: :conflicting_trusted_tenant_context}
          )}
     end
+  end
+
+  # The injected tenant carries the operation tenant's field (the declared field
+  # when the operation has no tenant), so injection never makes two agreeing
+  # tenants conflict on the field alone. The engine's own field was checked
+  # against the declared one above; the tenant ids are still compared exactly.
+  defp inject_engine_tenant(context, tenant_id, declared, operation) do
+    field =
+      case operation
+           |> SelectoUpdato.Tenant.tenant()
+           |> SelectoUpdato.Tenant.normalize_context() do
+        %{tenant_field: field} when not is_nil(field) -> field
+        _tenant -> declared
+      end
+
+    context
+    |> Map.put(:tenant_id, tenant_id)
+    |> Map.put(:tenant_field, field)
   end
 
   defp declared_tenant_field(%Operation{domain: %{} = domain}) do
