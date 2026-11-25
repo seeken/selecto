@@ -2053,7 +2053,12 @@ defmodule Selecto.Builder.Sql.Select do
   defp compile_value(selecto, [op, start, finish], aliases)
        when op in ~w(days_between hours_between fractional_days_between) do
     {operands, joins, params} =
-      compile_temporal_values(selecto, [start, finish], aliases, op != "days_between")
+      compile_temporal_values(
+        selecto,
+        [start, finish],
+        aliases,
+        if(op == "days_between", do: :calendar, else: :elapsed)
+      )
 
     operation =
       %{
@@ -2186,20 +2191,22 @@ defmodule Selecto.Builder.Sql.Select do
     end
   end
 
-  defp compile_temporal_values(selecto, values, aliases, elapsed? \\ false) do
+  defp compile_temporal_values(selecto, values, aliases, mode \\ :local) do
     Enum.reduce(values, {[], [], []}, fn value, {parts, joins, params} ->
       {sql, dependencies, binds} =
         case value do
           ["now"] ->
             clock =
-              if elapsed?,
-                do: Selecto.ReadClock.now_sql(selecto, false),
-                else: Selecto.ReadClock.date_sql(selecto)
+              case mode do
+                :calendar -> Selecto.ReadClock.date_sql(selecto)
+                :elapsed -> Selecto.ReadClock.now_sql(selecto, false)
+                :local -> Selecto.ReadClock.now_sql(selecto)
+              end
 
             {clock, [], []}
 
           ["temporal_coalesce" | operands] ->
-            {parts, joins, params} = compile_temporal_values(selecto, operands, aliases, elapsed?)
+            {parts, joins, params} = compile_temporal_values(selecto, operands, aliases, mode)
             {["COALESCE(", Enum.intersperse(parts, ", "), ")"], joins, params}
 
           _ ->
