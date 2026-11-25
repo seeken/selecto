@@ -873,23 +873,17 @@ defmodule Selecto.Builder.Sql.Select do
     )
   end
 
-  # Only the revision metadata reader adds these directly to the private set;
-  # public selector validation still checks ordinary field visibility.
-  def prep_selector(selecto, {:revision_storage, field}, _aliases) do
-    {[
-       selecto.adapter.quote_identifier("selecto_root"),
-       ".",
-       selecto.adapter.quote_identifier(field)
-     ], [:selecto_root], []}
+  def prep_selector(selecto, {:selecto_internal, tag, selector}, aliases) do
+    unless Selecto.Builder.Provenance.generated_tag?(tag),
+      do: raise(ArgumentError, "invalid internal selector provenance")
+
+    prep_internal_selector(selecto, selector, aliases)
   end
 
-  def prep_selector(selecto, {:association_aggregate, spec, owner_alias}, _aliases),
-    do: Selecto.AssociationAggregate.compile(selecto, spec, owner_alias)
-
-  def prep_selector(selecto, {:association_count, field}, aliases) do
-    {value, joins, params} = prep_selector(selecto, field, aliases)
-    {["CASE WHEN COUNT(*) = 0 THEN NULL ELSE COUNT(", value, ") END"], joins, params}
-  end
+  def prep_selector(_selecto, selector, _aliases)
+      when is_tuple(selector) and tuple_size(selector) > 0 and
+             elem(selector, 0) in [:revision_storage, :association_aggregate, :association_count],
+      do: raise(ArgumentError, "unmarked internal selector")
 
   def prep_selector(selecto, {:related_rows, association, fields}, _aliases) do
     config = Selecto.RelatedRows.config(selecto, association, fields)
@@ -1138,6 +1132,24 @@ defmodule Selecto.Builder.Sql.Select do
         result
     end
   end
+
+  defp prep_internal_selector(selecto, {:revision_storage, field}, _aliases) do
+    {[
+       selecto.adapter.quote_identifier("selecto_root"),
+       ".",
+       selecto.adapter.quote_identifier(field)
+     ], [:selecto_root], []}
+  end
+
+  defp prep_internal_selector(selecto, {:association_aggregate, spec, owner_alias}, _aliases),
+    do: Selecto.AssociationAggregate.compile(selecto, spec, owner_alias)
+
+  defp prep_internal_selector(selecto, {:association_count, field}, aliases) do
+    {value, joins, params} = prep_selector(selecto, field, aliases)
+    {["CASE WHEN COUNT(*) = 0 THEN NULL ELSE COUNT(", value, ") END"], joins, params}
+  end
+
+  defp prep_internal_selector(_, _, _), do: raise(ArgumentError, "unknown internal selector")
 
   defp elapsed_days_expression!(selecto, field_iodata) do
     if Map.get(Selecto.ReadClock.context(selecto), :as_of) do

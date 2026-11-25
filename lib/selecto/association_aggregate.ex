@@ -109,6 +109,27 @@ defmodule Selecto.AssociationAggregate do
     end
 
     source = OwnerKey.relation(query, owner_alias)
+
+    declared =
+      Enum.find(M.map_value(source, :columns) || %{}, fn {_field, column} ->
+        M.map_value(column, :computed) == spec
+      end)
+
+    valid? =
+      case declared do
+        {field, column} -> errors(source, query.domain.schemas, field, column, spec) == []
+        nil -> false
+      end
+
+    unless valid?,
+      do:
+        Selecto.Builder.ScopeRefusal.unsupported!(
+          Selecto.Error.validation_error("invalid declared association aggregate", %{
+            code: :invalid_computed_value
+          }),
+          :invalid_computed_value
+        )
+
     name = M.map_value(spec, :association)
     association = get(M.map_value(source, :associations), name)
     target = get(query.domain.schemas, M.map_value(association, :queryable))
@@ -123,7 +144,6 @@ defmodule Selecto.AssociationAggregate do
       Map.put(association, :aggregate_owner_keys, M.map_value(spec, :through_owner_keys))
       |> Map.put(:aggregate_exclude_owner_field, M.map_value(spec, :through_exclude_owner_field))
 
-    config = get(Map.get(query.config, :joins, %{}), name) || %{}
     authored = get(M.map_value(query.domain, :joins), name) || %{}
     nested = M.map_value(authored, :joins) || %{}
 
@@ -144,9 +164,12 @@ defmodule Selecto.AssociationAggregate do
     field = M.map_value(spec, :field)
 
     selector =
-      if function == "count",
-        do: {:association_count, field},
-        else: {String.to_existing_atom(function), field}
+      case function do
+        "count" -> Selecto.Builder.Provenance.internal_selector({:association_count, field})
+        "sum" -> {:sum, field}
+        "min" -> {:min, field}
+        "max" -> {:max, field}
+      end
 
     inner = Selecto.select(inner, [selector])
 
@@ -191,7 +214,6 @@ defmodule Selecto.AssociationAggregate do
         :error -> value
       end
 
-    _ = config
     {value, [owner_alias], []}
   end
 

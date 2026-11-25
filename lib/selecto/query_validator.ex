@@ -118,6 +118,23 @@ defmodule Selecto.QueryValidator do
     validate_field_reference!(selecto, source)
   end
 
+  defp validate_selector!(selecto, {:selecto_internal, tag, selector}) do
+    unless Selecto.Builder.Provenance.generated_tag?(tag),
+      do: raise(ArgumentError, "invalid internal selector provenance")
+
+    case selector do
+      {:revision_storage, _field} -> :ok
+      {:association_aggregate, _spec, _alias} -> :ok
+      {:association_count, field} -> validate_selector!(selecto, field)
+      _ -> raise ArgumentError, "unknown internal selector"
+    end
+  end
+
+  defp validate_selector!(_selecto, selector)
+       when is_tuple(selector) and tuple_size(selector) > 0 and
+              elem(selector, 0) in [:revision_storage, :association_aggregate, :association_count],
+       do: raise(ArgumentError, "unmarked internal selector")
+
   defp validate_selector!(selecto, selector) when is_binary(selector) or is_atom(selector) do
     validate_field_reference!(selecto, selector)
   end

@@ -349,6 +349,19 @@ defmodule Selecto.Policy do
 
   defp valid_member_origin?(_selecto, _origin), do: false
 
+  defp find_unsafe_query_term({:selecto_internal, tag, _selector}, path, _selecto) do
+    if Selecto.Builder.Provenance.generated_tag?(tag),
+      do: nil,
+      else: {:internal_selector_forbidden, path, "invalid internal selector provenance"}
+  end
+
+  defp find_unsafe_query_term(term, path, _selecto)
+       when is_tuple(term) and tuple_size(term) > 0 and
+              elem(term, 0) in [:revision_storage, :association_aggregate, :association_count],
+       do:
+         {:internal_selector_forbidden, path,
+          "strict mode prohibits query-authored internal selectors"}
+
   defp find_unsafe_query_term(%Selecto{} = nested, path, _root) do
     validate_query!(nested)
     find_nested_policy_mismatch(nested, path)

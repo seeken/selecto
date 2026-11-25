@@ -141,6 +141,9 @@ defmodule Selecto.Builder.Provenance do
   A filter Selecto built itself. The wrapper carries this VM's secret, so a
   filter that reaches the public API as data cannot claim it.
   """
+  # Internal selectors use the same unforgeable VM tag as generated filters.
+  def internal_selector(selector), do: {:selecto_internal, secret(), selector}
+
   def generated_filter(filter), do: {:selecto_generated, secret(), filter}
 
   @doc """

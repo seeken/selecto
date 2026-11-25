@@ -190,7 +190,9 @@ defmodule Selecto.Schema.Column do
               Map.put(
                 base_col,
                 :select,
-                {:association_aggregate, computed, join || :selecto_root}
+                Selecto.Builder.Provenance.internal_selector(
+                  {:association_aggregate, computed, join || :selecto_root}
+                )
               )
 
             _ ->

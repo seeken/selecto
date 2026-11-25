@@ -30,7 +30,8 @@ defmodule Selecto.RowRevision do
 
         additions =
           Enum.with_index(stored, fn field, index ->
-            {:field, {:revision_storage, field}, "__selecto_revision_#{index}"}
+            {:field, Selecto.Builder.Provenance.internal_selector({:revision_storage, field}),
+             "__selecto_revision_#{index}"}
           end)
 
         augmented = put_in(query.set.selected, query.set.selected ++ additions)
@@ -109,6 +110,12 @@ defmodule Selecto.RowRevision do
     required = is_map(spec) and M.map_value(spec, :required) in [true, 1, "1"]
 
     cond do
+      not is_nil(revision) and (not is_map(spec) or operation.type not in [:update, :delete]) ->
+        SharedContract.error(
+          :invalid_row_revision,
+          "row revisions require a declared update or delete"
+        )
+
       not is_map(spec) or operation.type not in [:update, :delete] ->
         {:ok, predicate}
 
