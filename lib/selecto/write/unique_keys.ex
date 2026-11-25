@@ -11,11 +11,21 @@ defmodule Selecto.Write.UniqueKeys do
       constraint = M.map_value(details, :constraint)
       fields = M.map_value(details, :fields) || parse_fields(M.map_value(details, :column))
 
-      match =
-        Enum.find(keys, fn {key, columns} ->
-          to_string(key) == constraint or
-            (fields != [] and Enum.sort(Enum.map(columns, &to_string/1)) == Enum.sort(fields))
+      # Prefer the database's declared constraint name over inferred field
+      # matches. Field-only evidence can name a key only when it is unique.
+      named = Enum.find(keys, fn {key, _columns} -> to_string(key) == constraint end)
+
+      candidates =
+        Enum.filter(keys, fn {_key, columns} ->
+          fields != [] and Enum.sort(Enum.map(columns, &to_string/1)) == Enum.sort(fields)
         end)
+
+      match =
+        named ||
+          case candidates do
+            [candidate] -> candidate
+            _ -> nil
+          end
 
       {key, fields} =
         case match do
