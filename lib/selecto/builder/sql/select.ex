@@ -858,7 +858,7 @@ defmodule Selecto.Builder.Sql.Select do
       kind: kind,
       expression: expression,
       increment: Map.get(spec, :increment),
-      ranges: Map.get(spec, :ranges, []),
+      ranges: bound_ranges(selecto, Map.fetch!(spec, :kind), Map.get(spec, :ranges, [])),
       prefix_length: Map.get(spec, :prefix_length, 2),
       exclude_articles: Map.get(spec, :exclude_articles, []),
       ignore_case: Map.get(spec, :ignore_case, true),
@@ -871,6 +871,16 @@ defmodule Selecto.Builder.Sql.Select do
       params,
       :bucket_expression
     )
+  end
+
+  # Only the revision metadata reader adds these directly to the private set;
+  # public selector validation still checks ordinary field visibility.
+  def prep_selector(selecto, {:revision_storage, field}, _aliases) do
+    {[
+       selecto.adapter.quote_identifier("selecto_root"),
+       ".",
+       selecto.adapter.quote_identifier(field)
+     ], [:selecto_root], []}
   end
 
   def prep_selector(selecto, {:association_aggregate, spec, owner_alias}, _aliases),
@@ -1130,6 +1140,18 @@ defmodule Selecto.Builder.Sql.Select do
   end
 
   defp elapsed_days_expression!(selecto, field_iodata) do
+    if Map.get(Selecto.ReadClock.context(selecto), :as_of) do
+      render_computed_value!(selecto, %Selecto.Dialect.ComputedValue{
+        operation: :days_between,
+        expression: [field_iodata, Selecto.ReadClock.now_sql(selecto)],
+        type: "integer"
+      })
+    else
+      unbound_elapsed_days_expression!(selecto, field_iodata)
+    end
+  end
+
+  defp unbound_elapsed_days_expression!(selecto, field_iodata) do
     fragment = %DateTimeOperation{
       operation: :elapsed_days,
       clause: :select,
@@ -2115,8 +2137,23 @@ defmodule Selecto.Builder.Sql.Select do
     })
   end
 
+  defp bound_ranges(selecto, :date_relative_ranges, ranges) do
+    if Map.get(Selecto.ReadClock.context(selecto), :as_of) do
+      Enum.map(ranges, fn
+        {"today", "today", _} -> {0, 0, "Today"}
+        {"yesterday", "yesterday", _} -> {1, 1, "Yesterday"}
+        {"tomorrow", "tomorrow", _} -> {-1, -1, "Tomorrow"}
+        range -> range
+      end)
+    else
+      ranges
+    end
+  end
+
+  defp bound_ranges(_, _, ranges), do: ranges
+
   defp bound_bucket(selecto, kind, expression, options) do
-    if kind in [:elapsed_days_ranges, :month_ranges] and
+    if kind in [:elapsed_days_ranges, :date_relative_ranges, :month_ranges] and
          Map.get(Selecto.ReadClock.context(selecto), :as_of) do
       if Selecto.AdapterSupport.adapter_name(selecto.adapter) == :duckdb,
         do: Selecto.ReadClock.invalid!("DuckDB does not support relative bucket kinds")

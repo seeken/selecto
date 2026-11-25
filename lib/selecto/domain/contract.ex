@@ -84,6 +84,7 @@ defmodule Selecto.Domain.Contract do
     |> validate_tenant_requirement(authored_domain)
     |> Kernel.++(Selecto.RatioMeasures.errors(normalized_domain.domain))
     |> Kernel.++(Selecto.ComputedOwnerKeys.errors(normalized_domain.domain))
+    |> Kernel.++(Selecto.Write.SharedContract.errors(normalized_domain.domain))
     |> Relations.validate(source, schemas)
     |> Kernel.++(Selecto.Domain.Values.validate(normalized_domain))
     |> Kernel.++(Selecto.Domain.JoinConditions.errors(normalized_domain))

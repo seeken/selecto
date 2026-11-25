@@ -1672,6 +1672,10 @@ defmodule Selecto.Executor do
   end
 
   defp do_execute_with_metadata(selecto, opts) do
+    Selecto.RowRevision.read(selecto, opts, &do_execute_with_metadata_without_revisions/2)
+  end
+
+  defp do_execute_with_metadata_without_revisions(selecto, opts) do
     with :ok <- Selecto.Tenant.validate_scope(selecto, opts),
          {:ok, selecto} <- prepare_read(selecto) do
       guarded(selecto, opts, fn -> execute_with_metadata_work(selecto, opts) end)

@@ -1014,7 +1014,8 @@ defmodule Selecto.Domain.Projector do
     %{
       schema_version: Map.fetch!(normalized, :schema_version),
       name: MapHelpers.map_section(authored_domain, :name),
-      source: Map.get(normalized, :source),
+      source:
+        Selecto.HostBindings.discovery_source(Map.get(normalized, :source), authored_domain),
       schemas: Map.get(normalized, :schemas, %{}),
       joins: Map.get(normalized, :joins, %{}),
       domain_data: Map.get(normalized, :domain_data, %{}),

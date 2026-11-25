@@ -11,9 +11,15 @@ defmodule SelectoUpdato.Executor do
   def execute(operation, selecto, opts \\ [])
 
   def execute(%Operation{} = operation, %Selecto{} = selecto, opts) do
-    case engine_tenant_opts(operation, selecto, opts) do
-      {:ok, opts} -> do_execute(operation, selecto, opts)
-      {:error, _error} = error -> error
+    with :ok <-
+           Selecto.Write.SharedContract.preflight(
+             operation,
+             Selecto.AdapterSupport.adapter_name(selecto.adapter)
+           ) do
+      case engine_tenant_opts(operation, selecto, opts) do
+        {:ok, opts} -> do_execute(operation, selecto, opts)
+        {:error, _error} = error -> error
+      end
     end
   end
 
@@ -90,8 +96,11 @@ defmodule SelectoUpdato.Executor do
          {:ok, result} <- execute_write(operation, selecto, capabilities, compile_opts, opts) do
       {:ok, envelope(result, operation, opts)}
     else
-      {:error, %Selecto.Write.Error{} = error} -> {:error, from_write_error(error)}
-      {:error, %Error{} = error} -> {:error, error}
+      {:error, %Selecto.Write.Error{} = error} ->
+        {:error, from_write_error(Selecto.Write.UniqueKeys.normalize(error, operation.domain))}
+
+      {:error, %Error{} = error} ->
+        {:error, error}
     end
   end
 

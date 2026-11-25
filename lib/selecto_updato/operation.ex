@@ -18,6 +18,7 @@ defmodule SelectoUpdato.Operation do
     :conflict_target,
     :returning,
     :expected_cardinality,
+    :row_revision,
     :action_policy,
     :query_enforcement,
     :opts,
@@ -47,6 +48,9 @@ defmodule SelectoUpdato.Operation do
           opts: keyword() | nil,
           extensions: [{module(), keyword()}] | nil
         }
+
+  @doc "Attach an opaque revision token to an identity-bound update or delete."
+  def row_revision(%__MODULE__{} = operation, token), do: %{operation | row_revision: token}
 
   @doc """
   Create a new operation for the given domain.

@@ -171,7 +171,11 @@ defmodule Selecto.FieldPolicy do
 
     write_spec = if root?, do: fetch(get(writes, :fields), field) || %{}, else: %{}
     permission = if operation in ~w(insert upsert), do: :insertable, else: :updatable
-    writable? = operation_enabled? and root? and get(write_spec, permission) == true
+
+    writable? =
+      operation_enabled? and root? and get(write_spec, permission) == true and
+        not Selecto.HostBindings.readonly?(domain.domain, field)
+
     eligible? = not present?(entry, :eligible) or get(entry, :eligible) == true
 
     {state, reason, reason_code} =
@@ -184,6 +188,9 @@ defmodule Selecto.FieldPolicy do
 
         status(view) != :enabled ->
           {:hidden, get(view, :reason), get(view, :reason_code) || "view_denied"}
+
+        Selecto.HostBindings.readonly?(domain.domain, field) ->
+          {:read_only, "Host-bound field", "host_bound_field"}
 
         requested_mode == "action" or present?(entry, :action) ->
           action_state(entry, edit, eligible?)

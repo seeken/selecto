@@ -170,6 +170,7 @@ defmodule SelectoUpdato do
   defdelegate enforce_query(operation, selecto, opts \\ []), to: Operation
   defdelegate returning(operation, fields), to: Operation
   defdelegate expected_cardinality(operation, expected), to: Operation
+  defdelegate row_revision(operation, token), to: Operation
   defdelegate with_tenant(operation, tenant_context), to: SelectoUpdato.Tenant
   defdelegate tenant(operation), to: SelectoUpdato.Tenant
   defdelegate apply_tenant_scope(operation, opts \\ []), to: SelectoUpdato.Tenant

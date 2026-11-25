@@ -26,20 +26,32 @@ defmodule SelectoUpdato.PortableCommand do
 
   def compile(%Operation{} = operation, opts) when is_list(opts) do
     result =
-      case NestedGraph.detect_nested(operation) do
-        {:ok, _contract, true} ->
-          NestedGraph.compile(operation, opts)
+      with :ok <-
+             Selecto.Write.SharedContract.preflight(
+               operation,
+               Keyword.get(opts, :storage_backend)
+             ) do
+        case NestedGraph.detect_nested(operation) do
+          {:ok, _contract, true} ->
+            if map_size(Selecto.HostBindings.fields(operation.domain)) > 0,
+              do:
+                Selecto.Write.SharedContract.error(
+                  :unsupported_feature,
+                  "nested host-bound writes are unsupported"
+                ),
+              else: NestedGraph.compile(operation, opts)
 
-        {:ok, contract, false} ->
-          # Contract was compiled from this operation's own domain within this
-          # call, so it is safe to reuse; the shared pipeline stays private so
-          # callers can never inject a foreign contract.
-          do_compile_flat(operation, contract, opts)
+          {:ok, contract, false} ->
+            # Contract was compiled from this operation's own domain within this
+            # call, so it is safe to reuse; the shared pipeline stays private so
+            # callers can never inject a foreign contract.
+            do_compile_flat(operation, contract, opts)
 
-        :error ->
-          # Nested detection could not even compile the contract; let the flat
-          # path surface the precise contract error.
-          compile_flat(operation, opts)
+          :error ->
+            # Nested detection could not even compile the contract; let the flat
+            # path surface the precise contract error.
+            compile_flat(operation, opts)
+        end
       end
 
     invalidate_rejected_action(operation, result)
@@ -54,6 +66,9 @@ defmodule SelectoUpdato.PortableCommand do
 
   @doc false
   @spec requires_prepared_record_state?(Operation.t()) :: boolean()
+  def requires_prepared_record_state?(%Operation{type: type} = operation)
+      when type in [:update, :delete] and not is_nil(operation.row_revision), do: true
+
   def requires_prepared_record_state?(%Operation{type: operation, domain: domain})
       when operation in [:update, :upsert] do
     with {:ok, contract} <- WriteContract.compile(domain) do
@@ -96,7 +111,9 @@ defmodule SelectoUpdato.PortableCommand do
   defp do_compile_flat(%Operation{} = operation, contract, opts) when is_list(opts) do
     native_constraints = RuleValidation.native_constraints(operation.type, contract)
 
-    with :ok <- ensure_trusted_filters_applied(operation, opts),
+    with :ok <-
+           Selecto.Write.SharedContract.preflight(operation, Keyword.get(opts, :storage_backend)),
+         :ok <- ensure_trusted_filters_applied(operation, opts),
          :ok <- ensure_write_policy(contract, operation.type),
          :ok <- ensure_supported_operation(contract, operation.type),
          {:ok, operation} <- Upsert.apply_domain_conflict_policy(operation),
@@ -106,6 +123,7 @@ defmodule SelectoUpdato.PortableCommand do
          :ok <- validate_action_authorization(operation, context, opts),
          :ok <- validate_authorization_context(operation, context, opts),
          :ok <- consume_action_authorization(operation, context, opts),
+         {:ok, operation, contract} <- Selecto.HostBindings.prepare(operation, contract, context),
          :ok <- validate_operation_identifiers(operation, contract),
          {:ok, operation} <- normalize_input_operation(operation, contract),
          :ok <- validate_tenant_conflicts(operation, contract, context),
@@ -124,6 +142,8 @@ defmodule SelectoUpdato.PortableCommand do
          {:ok, foreign_key_guards} <-
            foreign_key_guards(operation, contract, assignments, context),
          {:ok, predicate} <- predicate(operation, contract, context, query_predicate),
+         {:ok, predicate} <-
+           Selecto.RowRevision.check(operation, contract, predicate, context, opts),
          {:ok, record_state_opts} <-
            record_state_options(
              operation,
@@ -204,7 +224,8 @@ defmodule SelectoUpdato.PortableCommand do
              opts
            ),
          {:ok, command} <- put_post_image(command, operation, contract, context, query_predicate),
-         {:ok, command} <- SelectoUpdato.DocumentAction.compile(operation, command, context) do
+         {:ok, command} <- SelectoUpdato.DocumentAction.compile(operation, command, context),
+         {:ok, command} <- Selecto.HostBindings.augment(command, operation, contract) do
       {:ok, command, context}
     else
       {:error, %Error{} = error} ->

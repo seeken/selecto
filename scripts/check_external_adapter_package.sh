@@ -4,6 +4,8 @@ set -eu
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 fixture_dir="$repo_dir/integration/external_adapter_fixture"
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/selecto-external-adapter.XXXXXX")
+# Mix computes relative priv links; use one physical spelling on macOS (/var is a symlink).
+work_dir=$(CDPATH= cd -- "$work_dir" && pwd -P)
 
 cleanup() {
   rm -rf -- "$work_dir"

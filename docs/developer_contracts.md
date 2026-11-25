@@ -389,3 +389,33 @@ Before shipping a domain contract:
 - Action variants have unambiguous discriminator conditions.
 - Generated forms can render every declared input type.
 - Updato can plan each action and reject invalid intents.
+
+## Shared governed write declarations
+
+`writes.row_revision` declares `column: "version"` or `columns: ["name", "version"]`,
+with optional `required: true`. For plain root detail selections,
+`Selecto.execute_with_metadata/2` returns `metadata.row_revisions` in row order;
+identity/revision storage columns come from the same statement and do not enter
+public projections. Pass a token with `SelectoUpdato.row_revision(operation, token)`
+for an identity-bound update or delete. Tokens are opaque and local to the declared
+domain and backend. They do not represent a database snapshot. PostgreSQL and
+SQLite compare under their existing prepared-write transaction; adapters without
+protected record state refuse revision writes.
+
+`writes.host_bound_fields` maps physical fields to `mode: :owner`, `:created_by`,
+`:modified_by`, `:created_at` or `:modified_at`. Context modes declare
+`source: ["context", "user_id"]` and consume trusted execution `context:` only.
+Owner bindings constrain both target rows and post-images. Clock modes use the
+database's real current timestamp, including bulk updates; read `as_of` does not
+change write time. Caller assignments to any bound field refuse even when equal
+to trusted context. Missing context, upserts, nested host-binding graphs and
+pending literal validators fail closed. Discovery derives read-only fields without
+rewriting the authored contract.
+
+`writes.unique_keys` maps safe public key names to physical field lists. Recognized
+native uniqueness failures return `:database_unique_violation` with `:key` and
+`:fields`; conflicting values and database message text are withheld. Unknown
+native keys remain unnamed. MySQL/MariaDB revision writes and SQL Server's shared
+governed writes refuse with `:unsupported_feature`. DuckDB refuses declarations of
+row revisions or host bindings with `:write_capability_missing` before materializing
+or sending DML, including an explicitly empty binding map.

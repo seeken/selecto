@@ -49,6 +49,9 @@ defmodule Selecto.Domain.WriteContract do
             transitions: %{},
             rules: nil,
             fingerprint: nil,
+            row_revision: nil,
+            host_bound_fields: %{},
+            unique_keys: %{},
             fields_declared?: false
 
   @doc """
@@ -83,6 +86,9 @@ defmodule Selecto.Domain.WriteContract do
          transitions: map_section(writes, :transitions),
          rules: rules,
          fingerprint: Map.get(normalized, :domain_fingerprint),
+         row_revision: Core.map_value(writes, :row_revision),
+         host_bound_fields: map_section(writes, :host_bound_fields),
+         unique_keys: map_section(writes, :unique_keys),
          fields_declared?: map_size(fields) > 0
        }}
     end
