@@ -1154,7 +1154,12 @@ defmodule Selecto.Executor do
   end
 
   @word ~r/[a-z_\x80-\xff][a-z0-9_$\x80-\xff]*/
-  @quoted [{~r/"((?:[^"]|"")*)"/, ~s(""), ~s(")}, {~r/`((?:[^`]|``)*)`/, "``", "`"}]
+
+  # A function, not an attribute: Elixir 1.18 on OTP 28 cannot escape a regex
+  # nested inside an attribute's list or tuple.
+  defp quoted_patterns do
+    [{~r/"((?:[^"]|"")*)"/, ~s(""), ~s(")}, {~r/`((?:[^`]|``)*)`/, "``", "`"}]
+  end
 
   # The compiled text, its list definitions taken out, and its words and
   # quoted identifiers, lower case.
@@ -1176,7 +1181,7 @@ defmodule Selecto.Executor do
     text = without_definitions(String.downcase(sql), lists)
 
     quoted =
-      for {pattern, doubled, quote} <- @quoted,
+      for {pattern, doubled, quote} <- quoted_patterns(),
           [_all, name] <- Regex.scan(pattern, text),
           do: String.replace(name, doubled, quote)
 

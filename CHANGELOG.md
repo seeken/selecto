@@ -1,5 +1,9 @@
 ## Unreleased join families and association conditions
 
+- Fixed: `Selecto.Executor` failed to compile on Elixir 1.18 with OTP 28
+  (`cannot escape #Reference`), because a module attribute held compiled
+  regexes inside a list of tuples. The quoted-identifier patterns are now
+  built by a function.
 - Fixed: a write against a Selecto with an engine tenant was refused with
   `tenant_mismatch` (`:conflicting_trusted_tenant_context`) when the
   execution context carried the same tenant nested under `:tenant` with a
